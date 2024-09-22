@@ -1,0 +1,40 @@
+<form method="POST" name="pagination-purge" action="{toolsPurgeFormActionLink}">
+    <input type="hidden" name="action" value="purgeRedirects">
+    <p>
+        <strong><label for="purgetype">{Purge Type}:</label></strong>
+        <select name="purgetype" id="purgetype">
+            <option value="abj404_redirects">{Redirects}</option>
+        </select>
+        <BR/>
+        <BR/><strong>{Redirect Types}:</strong>
+        <BR/>
+    </p>
+    <ul style="margin-left: 40px;">
+        <li>
+            <input type="checkbox" id="auto" name="types[]" value="{ABJ404_STATUS_AUTO}">
+            <label for="auto">{Automatic Redirects}</label>
+        </li>
+        <li>
+            <input type="checkbox" id="manual" name="types[]" value="{ABJ404_STATUS_MANUAL}">
+            <label for="manual">{Manual Redirects}</label>
+        </li>
+        <li>
+            <input type="checkbox" id="captured" name="types[]" value="{ABJ404_STATUS_CAPTURED}">
+            <label for="captured">{Captured URLs}</label>
+        </li>
+        <li>
+            <input type="checkbox" id="ignored" name="types[]" value="{ABJ404_STATUS_IGNORED}">
+            <label for="ignored">{Ignored URLs}</label>
+        </li>
+    </ul>
+    <strong>{Sanity Check}</strong>
+    <BR/>{Using the purge options will move all selected redirects to the trash. You must then empty the trash to delete them.}
+    <BR/>
+    <BR/>
+    <input type="checkbox" id="sanity_purge" name="sanity_purge" value="1">
+    <label for="sanity_purge">{I understand the above statement, I know what I am doing... blah blah blah. Just delete the records!}</label>
+    <BR/>
+    <BR/>
+    <input type="submit" value="{Purge Entries!}" class="button-secondary">
+    <p></p>
+</form><!-- end pagination-purge -->
