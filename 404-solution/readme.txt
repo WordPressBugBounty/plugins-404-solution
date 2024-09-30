@@ -4,7 +4,9 @@ Website: https://www.ajexperience.com/404-solution/
 Tags: 404, redirect, 301, 302
 Requires at least: 3.9
 Tested up to: 6.6
-Stable tag: 2.35.14
+Stable tag: 2.35.15
+License: GPLv3
+License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
 Smart 404 handling: redirect to matching slug, similar name, or default page.
 
@@ -87,6 +89,9 @@ Please try this website for studying flashcards.
 3. Create New Redirect
 
 == Changelog ==
+
+= Version 2.35.15 (September 30, 2024) =
+* FIX: Try to fix a table collation issue for atlet.
 
 = Version 2.35.14 (September 27, 2024) =
 * Improvement: Include WooCommerce categories also.
