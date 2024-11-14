@@ -7,10 +7,10 @@
 	Author:      Aaron J
 	Author URI:  https://www.ajexperience.com/404-solution/
 
-	Version: 2.35.17
+	Version: 2.35.18
 
-	License:     GPL2
-	License URI: https://www.gnu.org/licenses/gpl-2.0.html
+	License: GPL-3.0-or-later
+	License URI: https://www.gnu.org/licenses/gpl-3.0.html
 	Domain Path: /languages
 	Text Domain: 404-solution
 
@@ -178,16 +178,19 @@ function abj404_getUploadsDir() {
 
 /** This only runs after WordPress is done enqueuing scripts. */
 function abj404_loadSomethingWhenWordPressIsReady() {	
+	$abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
+
 	// make debugging easier on localhost etc	
 	$serverName = array_key_exists('SERVER_NAME', $_SERVER) ? $_SERVER['SERVER_NAME'] : (array_key_exists('HTTP_HOST', $_SERVER) ? $_SERVER['HTTP_HOST'] : '(not found)');
 	$serverNameIsInTheWhiteList = in_array($serverName, $GLOBALS['abj404_whitelist']);
 	
 	if ($serverNameIsInTheWhiteList && function_exists('wp_get_current_user')) {
 	    require_once(plugin_dir_path( __FILE__ ) . "includes/Loader.php");
-	    $abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
 		if ($abj404logic->userIsPluginAdmin()) {
 			$GLOBALS['abj404_display_errors'] = true;
 		}
 	}
+
+	$abj404logic->handleActionExport();
 }
 add_action('init', 'abj404_loadSomethingWhenWordPressIsReady');
