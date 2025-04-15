@@ -638,6 +638,8 @@ class ABJ_404_Solution_PluginLogic {
             'folders_files_ignore' => implode("\n", array("wp-content/plugins/*", "wp-content/themes/*", 
                 ".well-known/acme-challenge/*")),
             'folders_files_ignore_usable' => "",
+            'suggest_regex_exclusions' => "",
+            'suggest_regex_exclusions_usable' => "",
         	'plugin_admin_users' => "",
         	'debug_mode' => 0,
             'days_wait_before_major_update' => 30,
@@ -1910,6 +1912,28 @@ class ABJ_404_Solution_PluginLogic {
 	            }
 	            $options['folders_files_ignore_usable'] = $usableFilePatterns;
 	        }
+            if ( isset( $_POST['suggest_regex_exclusions'] ) ) {
+                // 1. Sanitize the raw input using the appropriate function for multi-line text without HTML.
+                $sanitized_exclusions = sanitize_textarea_field( wp_unslash( $_POST['suggest_regex_exclusions'] ) );
+                $options['suggest_regex_exclusions'] = $sanitized_exclusions;
+
+                // 2. Generate the usable regex patterns *from the sanitized input*.
+                $patternsToIgnore = $f->explodeNewline( $sanitized_exclusions );
+                $usableFilePatterns = array();
+                foreach ( $patternsToIgnore as $patternToIgnore ) {
+                    $trimmedPattern = trim( $patternToIgnore );
+                    // Only process non-empty lines
+                    if ( ! empty( $trimmedPattern ) ) {
+                        // Escape regex special characters, then convert literal '*' into '.*' for wildcard matching.
+                        $newPattern = '^' . preg_quote( $trimmedPattern, '/' ) . '$';
+                        // Use standard str_replace; $f->str_replace is likely unnecessary here unless it provides specific multibyte handling not needed for '\*'.
+                        $newPattern = str_replace( '\*', '.*', $newPattern );
+                        $usableFilePatterns[] = $newPattern;
+                    }
+                }
+                $options['suggest_regex_exclusions_usable'] = $usableFilePatterns;
+            }
+
 	        if (array_key_exists('plugin_admin_users', $_POST) && isset($_POST['plugin_admin_users'])) {
 	        	$pluginAdminUsers = $_POST['plugin_admin_users'];
 	        	if (is_array($pluginAdminUsers)) {
@@ -1919,7 +1943,7 @@ class ABJ_404_Solution_PluginLogic {
 	        	
 	        	$options['plugin_admin_users'] = $pluginAdminUsers;
 	        }
-	        
+            
 	        if (is_array($options['excludePages[]'])) {
 	            $abj404logging->warn("Exclude pages settings lost.");
 	            $options['excludePages[]'] = '';

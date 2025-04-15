@@ -88,6 +88,13 @@ Please try this website for studying Japanese flashcards.
 
 ## Changelog ##
 
+## Version 2.36.6 (April 15, 2025) ##
+* Improvement: Page suggestions: when an admin user clicks the score after a suggestion link it gives them some more information about the link like author, post date, etc.
+* Improvement: Page suggestions: add an option to exclude certain URLs from the list of suggested pages on a custom 404 page based on user defined regex patterns.
+
+## Version 2.36.5 (February 3, 2025) ##
+* FIX: Use SHOW CREATE TABLE instead of select from information_schema to get collation data.
+
 ## Version 2.36.4 (December 13, 2024) ##
 * FIX: Ensure parent classes are loaded before their children to possibly resolve inheritance issues with autoloading. (thanks debug file participants)
 
