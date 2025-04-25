@@ -245,6 +245,20 @@ class ABJ_404_Solution_DataAccess {
                     "@@character_set_database as character_set_database";
             	$someMySQLVariables = $wpdb->get_results($extraDataQuery, ARRAY_A);
             	$variables = print_r($someMySQLVariables, true);
+
+                if (is_wp_error($query) && $query instanceof WP_Error) {
+                    /** @var WP_Error $query */
+                    $query = "((" . ABJ_404_Solution_WPUtils::stringify_wp_error($query) . "))";
+                }
+                if (is_wp_error($variables) && $variables instanceof WP_Error) {
+                    /** @var WP_Error $variables */
+                    $variables = "((" . ABJ_404_Solution_WPUtils::stringify_wp_error($variables) . "))";
+                }
+                if (is_wp_error($stripped_query) && $stripped_query instanceof WP_Error) {
+                    /** @var WP_Error $stripped_query */
+                    $stripped_query = "((" . ABJ_404_Solution_WPUtils::stringify_wp_error($stripped_query) . "))";
+                }
+
             	$abj404logging->errorMessage("Ugh. SQL query error: " . $result['last_error'] . 
 					", SQL: " . $query . 
 	            	", Execution time: " . round($timer->getElapsedTime(), 2) . 
@@ -306,10 +320,10 @@ class ABJ_404_Solution_DataAccess {
         $f = ABJ_404_Solution_Functions::getInstance();
         
         $re = "Table '(.*\/)?(.+)' is marked as crashed and ";
-        $matches = null;
+        $matches = array();
 
         $f->regexMatch($re, $errorMessage, $matches);
-        if ($matches != null && count($matches) > 2 && $f->strlen($matches[2]) > 0) {
+        if (!empty($matches) && count($matches) > 2 && $f->strlen($matches[2]) > 0) {
             $tableToRepair = $matches[2];
             if ($f->strpos($tableToRepair, "abj404") !== false) {
                 $query = "repair table " . $tableToRepair;
@@ -341,7 +355,7 @@ class ABJ_404_Solution_DataAccess {
                 
             } else {
                 // tell someone the table $tableToRepair is broken.
-            	$abj404logging->warnMessage("The table " . $tableToRepair . " needs to be " . 
+            	$abj404logging->warn("The table " . $tableToRepair . " needs to be " . 
             		"repaired with something like: repair table " . $tableToRepair);
             }
         }
@@ -609,11 +623,9 @@ class ABJ_404_Solution_DataAccess {
        }
        return intval($captured[0]);
    }
-   
+    
    /** Get all of the post types from the wp_posts table.
-    * @global type $wpdb
-    * @return string
-    */
+    * @return array An array of post type names. */
    function getAllPostTypes() {
        $query = "SELECT DISTINCT post_type FROM {wp_posts} order by post_type";
        $results = $this->queryAndGetResults($query);
@@ -2083,11 +2095,10 @@ class ABJ_404_Solution_DataAccess {
         return intval($results[0]);
     }
     
-    /** 
-     * Look at $_POST and $_GET for the specified option and return the default value if it's not set.
-     * @param string $name
-     * @param string $defaultValue
-     * @return string
+    /** Look at $_POST and $_GET for the specified option and return the default value if it's not set.
+     * @param string $name The key to retrieve the value for.
+     * @param string $defaultValue The value to return if the value is not set.
+     * @return string The sanitized value.
      */
     function getPostOrGetSanitize($name, $defaultValue = null) {
         $returnValue = isset($_GET[$name]) ? $_GET[$name] : (isset($_POST[$name]) ? $_POST[$name] : null);

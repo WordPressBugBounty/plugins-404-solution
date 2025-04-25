@@ -58,6 +58,113 @@ class ABJ_404_Solution_WPUtils {
 		
 		return strcmp($str1, $str2);
 	}
+
+	/**
+	 * Return a string representation of the given WP_Error object.
+	 *
+	 * If the argument is not a WP_Error object, return a string indicating that.
+	 *
+	 * Otherwise, return a string that includes the following information:
+	 *
+	 * - code: the error code
+	 * - message: the error message
+	 * - data: the error data (using var_export)
+	 * - all error codes: each code and its associated messages
+	 * - backtrace: the backtrace at the time of calling (using print_r on debug_backtrace)
+	 *
+	 * If any of the above information cannot be retrieved, include an error message
+	 * indicating that.
+	 *
+	 * @param WP_Error $error The object to stringify.
+	 * @return string A string representation of the object.
+	 */
+	static function stringify_wp_error($error) {
+		if (!is_wp_error($error)) {
+			return 'Not a WP_Error object.';
+		}
+	
+		$output = "WP_Error object:\n";
+	
+		try {
+			$output .= "Code: " . $error->get_error_code() . "\n";
+		} catch (Throwable $e) {
+			$output .= "Code: [error getting code: " . $e->getMessage() . "]\n";
+		}
+	
+		try {
+			$output .= "Message: " . $error->get_error_message() . "\n";
+		} catch (Throwable $e) {
+			$output .= "Message: [error getting message: " . $e->getMessage() . "]\n";
+		}
+	
+		try {
+			$data = $error->get_error_data();
+			if (is_array($data) || is_object($data)) {
+				$output .= "Data: " . print_r($data, true) . "\n";
+			} else {
+				$output .= "Data: " . var_export($data, true) . "\n";
+			}
+		} catch (Throwable $e) {
+			$output .= "Data: [error getting data: " . $e->getMessage() . "]\n";
+		}
+	
+		try {
+			$codes = $error->get_error_codes();
+			$output .= "All error codes:\n";
+			foreach ($codes as $code) {
+				try {
+					$messages = $error->get_error_messages($code);
+					$output .= "- $code: " . implode("; ", $messages) . "\n";
+				} catch (Throwable $e) {
+					$output .= "- $code: [error getting messages: " . $e->getMessage() . "]\n";
+				}
+			}
+		} catch (Throwable $e) {
+			$output .= "All error codes: [error fetching codes: " . $e->getMessage() . "]\n";
+		}
+	
+		try {
+			$output .= "Backtrace:\n" . print_r(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS), true) . "\n";
+		} catch (Throwable $e) {
+			$output .= "Backtrace: [error generating backtrace: " . $e->getMessage() . "]\n";
+		}
+	
+		return $output;
+	}
+	
+	/**
+     * Gets a string representation of a callable for comparison.
+     *
+     * @param mixed $callable The callable (string function name, array [object/class, method], Closure).
+     * @return string A string representation.
+     */
+    private static function getValueOrObjectClass($callable) {
+        if (is_string($callable)) {
+            // Simple function name
+            return trim($callable);
+        } elseif (is_array($callable) && count($callable) === 2) {
+            // Array callable: [object/class, method]
+            $classOrObject = $callable[0];
+            $method = $callable[1];
+            if (is_object($classOrObject)) {
+                // Instance method: [new ClassName(), 'methodName']
+                return get_class($classOrObject) . '::' . trim($method);
+            } elseif (is_string($classOrObject)) {
+                // Static method: ['ClassName', 'methodName']
+                return trim($classOrObject) . '::' . trim($method);
+            }
+        } elseif ($callable instanceof \Closure) {
+            // It's a Closure (anonymous function). Comparing these reliably is tricky.
+            // Returning a generic placeholder might be sufficient if you don't expect
+            // multiple different closures on the same hook tag.
+            // Alternatively, use spl_object_hash for a unique ID per instance,
+            // but note this hash can change between requests.
+            return 'Closure#' . spl_object_hash($callable);
+        }
+
+        // Fallback for unexpected types - you might want to log or throw an error here
+        return serialize($callable);
+    }
 	
 	/** Set the version to the file date/time.
 	 * @param $handle
