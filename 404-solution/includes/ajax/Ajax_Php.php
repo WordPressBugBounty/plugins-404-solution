@@ -10,14 +10,67 @@ class ABJ_404_Solution_Ajax_Php {
 		if (self::$instance == null) {
 			self::$instance = new ABJ_404_Solution_Ajax_Php();
 		}
-		
+
 		return self::$instance;
 	}
-	
-	/** Find logs to display. */
+
+	/** Rate limiting helper to prevent abuse of AJAX endpoints.
+	 * @param string $action The action being rate limited
+	 * @param int $max_requests Maximum requests allowed per time window
+	 * @param int $time_window Time window in seconds (default 60)
+	 * @return bool True if rate limit exceeded, false otherwise
+	 */
+	static function checkRateLimit($action, $max_requests = 100, $time_window = 60) {
+		// Get user identifier (prefer user ID, fallback to IP)
+		$user_id = get_current_user_id();
+		if ($user_id) {
+			$identifier = 'user_' . $user_id;
+		} else {
+			$identifier = 'ip_' . md5($_SERVER['REMOTE_ADDR']);
+		}
+
+		$transient_key = 'abj404_rate_limit_' . $action . '_' . $identifier;
+		$request_count = get_transient($transient_key);
+
+		if ($request_count === false) {
+			// First request in this time window
+			set_transient($transient_key, 1, $time_window);
+			return false;
+		} elseif ($request_count >= $max_requests) {
+			// Rate limit exceeded
+			return true;
+		} else {
+			// Increment counter
+			set_transient($transient_key, $request_count + 1, $time_window);
+			return false;
+		}
+	}
+
+	/** Update plugin options via AJAX. */
 	static function updateOptions() {
 		$abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
-		
+
+		// Verify user has appropriate capabilities (respects plugin admin users)
+		if (!$abj404logic->userIsPluginAdmin()) {
+			wp_send_json_error(array('message' => 'Unauthorized'));
+			return;
+		}
+
+		// Verify nonce for CSRF protection
+		// The nonce is sent as part of the form data which is JSON-encoded in 'encodedData'
+		if (isset($_POST['encodedData'])) {
+			$f = ABJ_404_Solution_Functions::getInstance();
+			$postData = $f->decodeComplicatedData($_POST['encodedData']);
+			$nonce = isset($postData['nonce']) ? $postData['nonce'] : '';
+			if (!wp_verify_nonce($nonce, 'abj404UpdateOptions')) {
+				wp_send_json_error(array('message' => 'Invalid security token'));
+				return;
+			}
+		} else {
+			wp_send_json_error(array('message' => 'Missing form data'));
+			return;
+		}
+
 		$abj404logic->updateOptionsFromPOST();
 	}
 	
@@ -26,8 +79,29 @@ class ABJ_404_Solution_Ajax_Php {
     	$abj404AjaxPhp = ABJ_404_Solution_Ajax_Php::getInstance();;
         $abj404dao = ABJ_404_Solution_DataAccess::getInstance();
         $f = ABJ_404_Solution_Functions::getInstance();
-        
+
+        // Verify nonce for CSRF protection
+        if (!isset($_GET['nonce']) || !wp_verify_nonce($_GET['nonce'], 'abj404_ajax')) {
+            echo json_encode(array('error' => 'Invalid security token'));
+            exit();
+        }
+
+        // Verify user has appropriate capabilities (respects plugin admin users)
+        $abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
+        if (!$abj404logic->userIsPluginAdmin()) {
+            echo json_encode(array('error' => 'Unauthorized'));
+            exit();
+        }
+
+        // Rate limiting to prevent abuse (100 requests per minute)
+        if (self::checkRateLimit('view_logs', 100, 60)) {
+            echo json_encode(array('error' => 'Rate limit exceeded. Please try again later.'));
+            exit();
+        }
+
+        // Limit search term length to prevent DoS
         $term = $f->strtolower(sanitize_text_field($_GET['term']));
+        $term = substr($term, 0, 100);
         $suggestions = array();
 
         $suggestion = array();
@@ -37,7 +111,8 @@ class ABJ_404_Solution_Ajax_Php {
         $specialSuggestion = array();
         $specialSuggestion[] = $suggestion;
         
-        $rows = $abj404dao->getLogsIDandURLLike('%' . $term . '%', ABJ404_MAX_AJAX_DROPDOWN_SIZE);
+        // Pass the raw term; getLogsIDandURLLike() builds the LIKE pattern safely.
+        $rows = $abj404dao->getLogsIDandURLLike($term, ABJ404_MAX_AJAX_DROPDOWN_SIZE);
         $results = $abj404AjaxPhp->formatLogResults($rows);
         
         // limit search results
@@ -56,51 +131,71 @@ class ABJ_404_Solution_Ajax_Php {
         $abj404AjaxPhp = ABJ_404_Solution_Ajax_Php::getInstance();
         $abj404dao = ABJ_404_Solution_DataAccess::getInstance();
         $f = ABJ_404_Solution_Functions::getInstance();
-        
+
+        // Verify nonce for CSRF protection
+        if (!isset($_GET['nonce']) || !wp_verify_nonce($_GET['nonce'], 'abj404_ajax')) {
+            echo json_encode(array('error' => 'Invalid security token'));
+            exit();
+        }
+
+        // Verify user has appropriate capabilities (respects plugin admin users)
+        if (!$abj404logic->userIsPluginAdmin()) {
+            echo json_encode(array('error' => 'Unauthorized'));
+            exit();
+        }
+
+        // Rate limiting to prevent abuse (100 requests per minute)
+        if (self::checkRateLimit('redirect_pages', 100, 60)) {
+            echo json_encode(array('error' => 'Rate limit exceeded. Please try again later.'));
+            exit();
+        }
+
+        // Limit search term length to prevent DoS
         $term = $f->strtolower(sanitize_text_field($_GET['term']));
+        $term = substr($term, 0, 100);
         $includeDefault404Page = $_GET['includeDefault404Page'] == "true";
-        $includeSpecial = array_key_exists('includeSpecial', $_GET) && 
+        $includeSpecial = array_key_exists('includeSpecial', $_GET) &&
         	$_GET['includeSpecial'] == "true";
         $suggestions = array();
-        
+
         // add the "Home Page" destination.
-        $specialPages = $abj404AjaxPhp->getDefaultRedirectDestinations($includeDefault404Page, 
+        $specialPages = $abj404AjaxPhp->getDefaultRedirectDestinations($includeDefault404Page,
         	$includeSpecial);
-        
-        // query to get the posts and pages.
+
+        // Query to get the posts and pages matching the search term
         $rowsOtherTypes = $abj404dao->getPublishedPagesAndPostsIDs('', $term, ABJ404_MAX_AJAX_DROPDOWN_SIZE);
         // order the results. this also sets the page depth (for child pages).
         $rowsOtherTypes = $abj404logic->orderPageResults($rowsOtherTypes, true);
         $publishedPosts = $abj404AjaxPhp->formatRedirectDestinations($rowsOtherTypes);
-        
-        $cats = $abj404dao->getPublishedCategories();
+
+        $cats = $abj404dao->getPublishedCategories(null, null, ABJ404_MAX_AJAX_DROPDOWN_SIZE);
         $categoryOptions = $abj404AjaxPhp->formatCategoryDestinations($cats);
-        
-        $tags = $abj404dao->getPublishedTags();
+
+        $tags = $abj404dao->getPublishedTags(null, ABJ404_MAX_AJAX_DROPDOWN_SIZE);
         $tagOptions = $abj404AjaxPhp->formatTagDestinations($tags);
-        
+
         $customCategoriesMap = $abj404logic->getMapOfCustomCategories($cats);
         $customCategoryOptions = $abj404AjaxPhp->formatCustomCategoryDestinations($customCategoriesMap);
-        
-        // --------------------------------------- 
+
+        // ---------------------------------------
         // now we filter the results based on the search term.
         $specialPages = $abj404AjaxPhp->filterPages($specialPages, $term);
         $categoryOptions = $abj404AjaxPhp->filterPages($categoryOptions, $term);
         $tagOptions = $abj404AjaxPhp->filterPages($tagOptions, $term);
         $customCategoryOptions = $abj404AjaxPhp->filterPages($customCategoryOptions, $term);
-        
+
         // combine and display the search results.
-        $suggestions = array_merge($specialPages, $publishedPosts, $categoryOptions, $tagOptions, 
+        $suggestions = array_merge($specialPages, $publishedPosts, $categoryOptions, $tagOptions,
                 $customCategoryOptions);
 
         // limit search results
         $suggestions = $abj404AjaxPhp->provideSearchFeedback($suggestions, $term);
-                
+
         echo json_encode($suggestions);
-        
+
     	exit();
     }
-    
+
     /** Add a message about whether there are too many results or none at all.
      * @param array $suggestions
      * @param string $suggestions

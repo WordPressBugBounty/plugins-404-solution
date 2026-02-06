@@ -2,9 +2,7 @@
 select wp_terms.term_id,
        wp_terms.name,
        wp_terms.slug,
-       wp_term_taxonomy.taxonomy,
-       wp_term_taxonomy.count,
-       'in code' as url
+       wp_term_taxonomy.taxonomy
 
 from {wp_terms} wp_terms
 
@@ -20,3 +18,5 @@ where ( wp_term_taxonomy.taxonomy = 'post_tag' )
 /*  */
 
 order by wp_terms.name
+
+{limit}

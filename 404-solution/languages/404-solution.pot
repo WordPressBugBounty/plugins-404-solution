@@ -378,6 +378,10 @@ msgstr ""
 msgid "DB Version Number"
 msgstr ""
 
+#: includes/View.php:2060
+msgid "Default"
+msgstr ""
+
 #: includes/admin.php:1354
 msgid "Default redirect type"
 msgstr ""
@@ -452,10 +456,6 @@ msgstr ""
 
 #: includes/admin.php:1410
 msgid "Allow tag suggestions"
-msgstr ""
-
-#: includes/admin.php:1412
-msgid "Minimum score of suggestions to display"
 msgstr ""
 
 #: includes/admin.php:1414
@@ -738,10 +738,565 @@ msgstr ""
 msgid "Error: You didn't check the I understand checkbox. No purging of records for you!"
 msgstr ""
 
+#: includes/PluginLogic.php:2305
+msgid "Error: The time to wait before an automatic update must be a number between 0 and something around %d."
+msgstr ""
+
 #: includes/functions.php:74
 msgid "Suggested Alternatives"
 msgstr ""
 
 #: includes/functions.php:79
 msgid "No Results To Display."
+msgstr ""
+#: includes/DatabaseUpgradesEtc.php:119
+msgid "404 Solution: N-gram spell check cache is being built in the background to optimize performance. This may take a few minutes on large sites."
+msgstr ""
+
+#: includes/DatabaseUpgradesEtc.php:123
+msgid "404 Solution: Built N-gram cache for %d pages to optimize spell checking performance."
+msgstr ""
+
+#: includes/DatabaseUpgradesEtc.php:140
+msgid "404 Solution: Migrated %d redirects to subdirectory-independent format."
+msgstr ""
+
+
+#: includes/UninstallModal.php
+msgid "Before deactivating:"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Choose what should happen to your data. These preferences will be saved for later if you decide to delete the plugin."
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "What should happen to your data?"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Keep my redirects (%d redirects)"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Check this if you plan to reinstall the plugin later. Your redirect configurations will be preserved."
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Keep 404 logs"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Historical 404 data and logs will be preserved if checked."
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Note: Cache tables will always be deleted as they can be rebuilt."
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Why are you deactivating? (Optional)"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Temporary deactivation for debugging"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "The plugin is not working as expected"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "I found a better plugin"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "I no longer need this functionality"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Too complicated to configure"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Performance issues"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Other reason"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Help us improve (Optional)"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Send feedback to help improve the plugin"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Your email (optional):"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "your@email.com (optional)"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Additional details:"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Please share any additional feedback..."
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Your feedback helps us improve. We respect your privacy and will not share your information."
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Insufficient permissions"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Could not save preferences. Your choices may not be preserved."
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Preferences saved successfully"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Failed to save preferences"
+msgstr ""
+
+#: includes/html/adminOptionsGeneral.html
+msgid "Disable automatic dark mode detection"
+msgstr ""
+
+#: includes/html/adminOptionsGeneral.html
+msgid "When unchecked and theme is set to \"Default\", the plugin will automatically switch to a dark theme if your WordPress admin color scheme is dark (Midnight, Ectoplasm, Coffee), if you have a dark mode plugin enabled, or if your browser/OS prefers dark mode."
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Your feedback helps us improve. System information (WordPress version, PHP version, installed plugins) will be included. We respect your privacy and will not share your information."
+msgstr ""
+#: includes/PluginLogic.php
+msgid "N-gram cache rebuild is already scheduled or in progress. Please wait for it to complete."
+msgstr ""
+
+#: includes/PluginLogic.php
+msgid "N-gram cache rebuild has been scheduled and will run in the background. This may take several minutes on large sites. You can continue using the plugin normally."
+msgstr ""
+
+#: includes/PluginLogic.php
+msgid "Failed to schedule N-gram cache rebuild. Please try again or check your WordPress cron configuration."
+msgstr ""
+
+#: includes/html/adminOptionsGeneral.html
+msgid "When an error is detected by the plugin, email the entire log file to the developer. This is not required for the plugin to function, but it is helpful for the developer and for future versions of the plugin. This reveals: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when an issue is reported). Log files are checked daily when maintenance is run."
+msgstr ""
+
+#: includes/html/viewSuggestions.html
+msgid "Display the closest matching pages by using the shortcode [abj404_solution_page_suggestions]."
+msgstr ""
+
+#: includes/html/viewSuggestions.html
+msgid "This shortcode can be used on the 404 page and will display a list of suggested pages. This is for when a user requests a page that doesn't exist and they are not automatically redirected to a matching page."
+msgstr ""
+
+#: includes/html/viewSuggestions.html
+msgid "Require minimum match quality"
+msgstr ""
+
+#: includes/html/viewSuggestions.html
+msgid "Only show suggestions that closely match the requested URL. This filters out weak matches that may confuse visitors."
+msgstr ""
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedLogging.html
+msgid "This is best for search engine bots that do need to be redirected when the slug structure changes. Use one line per user agent. If the text is found anywhere in the user agent string then it applies."
+msgstr ""
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedLogging.html
+msgid "This is best for internal processes that don't need to be redirected when the slug structure changes. Search engine user agents should not go here so that they will be redirected when the slug structure changes."
+msgstr ""
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedContent.html
+msgid "Pages listed here will not be redirected to (unless a redirect to the page already exists)."
+msgstr ""
+
+#: includes/html/settingsAdvancedContent.html
+msgid "* Use an asterisk (*) to match \"any pattern.\""
+msgstr ""
+
+#: includes/html/settingsAdvancedContent.html
+msgid "* These patterns match the path of a URL, not a title.\""
+msgstr ""
+
+#: includes/html/settingsAdvanced.html
+msgid "The plugin will only redirect the post types specified here. Default WordPress post types are \"post\" and \"page.\" The \"product\" type is for WooCommerce users."
+msgstr ""
+
+#: includes/html/adminOptionsGeneral.html
+msgid "When the number of captured 404s would cause an admin notification, an email will be sent to the addresses specified here. Multiple email addresses can be separated by commas (,). The \"from\" email address is always the default WordPress admin email:"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "404 Solution - Deactivation Options"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Cancel"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Deactivate without feedback"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Email Feedback & Deactivate"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Processing..."
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Deactivating"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Before deactivating, choose what happens to your data:"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Keep my redirects (%d)"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "— saves them for later if you reinstall"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Keep 404 logs"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "— historical data preserved"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Cache tables are always deleted (can be rebuilt)"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Help us improve (Optional)"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Temporary deactivation for debugging"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "The plugin is not working as expected"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "I found a better plugin"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "I no longer need this functionality"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Too complicated to configure"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Performance issues"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Other reason"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "What specifically isn't working?"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Redirects not triggering/working"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Settings not saving"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Admin pages showing errors"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Suggestions not appearing"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Conflicts with other plugins"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Other issue (please specify below)"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "What type of performance issue?"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Slow admin dashboard"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Slow frontend page loads"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "High database usage"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Memory issues"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Other (please specify below)"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "What was confusing?"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Settings are confusing"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Too many options"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Unclear documentation"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Other (please specify below)"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Which plugin are you switching to?"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Plugin name (optional)"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Please tell us more (optional):"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "What's your reason for deactivating?"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Additional details (optional):"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Any other information about the issue..."
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Your email (optional):"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "For follow-up if needed"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Include technical details (system info + sanitized log excerpt) to help diagnose the issue"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Insufficient permissions"
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Feedback sent successfully."
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Feedback could not be sent."
+msgstr ""
+
+#: includes/WordPress_Connector.php
+msgid "second"
+msgstr ""
+
+#: includes/WordPress_Connector.php
+msgid "seconds"
+msgstr ""
+
+#: includes/WordPress_Connector.php
+msgid "minute"
+msgstr ""
+
+#: includes/WordPress_Connector.php
+msgid "minutes"
+msgstr ""
+
+#: includes/WordPress_Connector.php
+msgid "hour"
+msgstr ""
+
+#: includes/WordPress_Connector.php
+msgid "hours"
+msgstr ""
+
+#: includes/WordPress_Connector.php
+msgid "day"
+msgstr ""
+
+#: includes/WordPress_Connector.php
+msgid "days"
+msgstr ""
+
+#: includes/WordPress_Connector.php
+msgid "ago"
+msgstr ""
+
+#: includes/DataAccess.php
+msgid "Just now"
+msgstr ""
+
+#: includes/View.php
+msgid "Data may not be immediately updated. Refresh to see latest changes."
+msgstr ""
+
+#: includes/View.php
+msgid "Last updated: %s"
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Security check failed. Please try again."
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Error"
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "You do not have permission to access this page."
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Welcome to 404 Solution"
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Close"
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "404 Solution helps you automatically handle 404 errors and broken links on your site."
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Let's configure how it handles missing pages. You can always change these settings later."
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "When a page is not found, what should happen?"
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Automatically redirect to similar page (recommended)"
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "When a match is found, redirect visitors automatically"
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Just show the default 404 page"
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Use WordPress's standard \"Page not found\" screen. Manual redirects still work."
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Log 404 errors for review?"
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Yes, log 404 errors"
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Track missing pages so you can create redirects later"
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "No, don't log 404s"
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Only handle manually created redirects"
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Skip Setup"
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Save & Get Started"
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Saving..."
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Could not save settings - missing security token. The wizard may appear again on next visit."
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Could not save dismissal. The wizard may appear again on next visit."
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Could not save dismissal: "
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid " The wizard may appear again on next visit."
+msgstr ""
+
+#: includes/SetupWizard.php
+msgid "Network error - could not save dismissal. The wizard may appear again on next visit."
+msgstr ""
+
+#: includes/html/tableRowPageRedirects.html
+msgid "url-is-normal"
+msgstr ""
+
+#: includes/html/tableRowPageRedirects.html
+msgid "url-looks-like-regex"
+msgstr ""
+
+#: includes/html/tableRowPageRedirects.html
+msgid "This URL looks like a regular expression but is not marked as one. Edit the redirect and check \"Treat this URL as a regular expression\"."
 msgstr ""

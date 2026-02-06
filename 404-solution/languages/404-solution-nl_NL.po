@@ -1,0 +1,2228 @@
+# Vertaalbestand voor 404 Solution WordPress Plugin
+# Copyright (C) 2025 Aaron J
+# Dit bestand wordt gedistribueerd onder dezelfde licentie als de 404 Solution plugin.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: 404 Solution\n"
+"Report-Msgid-Bugs-To: https://github.com/aaron13100/404solution/issues\n"
+"POT-Creation-Date: 2025-11-11 07:26+0000\n"
+"PO-Revision-Date: 2025-11-11 07:26+0000\n"
+"Last-Translator: Auto-Generated\n"
+"Language-Team: Dutch\n"
+"Language: nl_NL\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: 404 Solution Translation Generator v2\n"
+"X-Poedit-KeywordsList: __;_e;_n:1,2;_x:1,2c;_ex:1,2c;_nx:4c,1,2;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c;_n_noop:1,2;_nx_noop:3c,1,2;__ngettext_noop:1,2\n"
+"X-Poedit-Basepath: ..\n"
+"X-Poedit-SearchPath-0: .\n"
+
+
+msgid "404 Solution - Deactivation Options"
+msgstr "404 Solution - Deactiveringsopties"
+
+msgid "Cancel"
+msgstr "Annuleren"
+
+msgid "Deactivate Plugin"
+msgstr "Plugin deactiveren"
+
+msgid "Deactivating"
+msgstr "Deactiveren"
+
+msgid "Saving..."
+msgstr "Opslaan..."
+
+#, fuzzy
+msgid "Could not save settings - missing security token. The wizard may appear again on next visit."
+msgstr "Could not save settings - missing security token. The wizard may appear again on next visit."
+
+#, fuzzy
+msgid "Could not save dismissal. The wizard may appear again on next visit."
+msgstr "Could not save dismissal. The wizard may appear again on next visit."
+
+#, fuzzy
+msgid "Could not save dismissal: "
+msgstr "Could not save dismissal: "
+
+#, fuzzy
+msgid " The wizard may appear again on next visit."
+msgstr " The wizard may appear again on next visit."
+
+#, fuzzy
+msgid "Network error - could not save dismissal. The wizard may appear again on next visit."
+msgstr "Network error - could not save dismissal. The wizard may appear again on next visit."
+
+msgid "Settings"
+msgstr "Instellingen"
+
+msgid "404 Solution: Migrated %d redirects to subdirectory-independent format."
+msgstr "404 Solution: %d omleidingen gemigreerd naar submapsonafhankelijk formaat."
+msgid "%1$s - %2$s of %3$s"
+msgstr "%1$s - %2$s van %3$s"
+
+msgid "(A custom string has been entered.)"
+msgstr "(Een aangepaste tekenreeks is ingevoerd.)"
+
+msgid "(A page has been selected.)"
+msgstr "(Een pagina is geselecteerd.)"
+
+msgid "(All results displayed for \"%s.\")"
+msgstr "(Alle resultaten weergegeven voor \"%s.\")"
+
+msgid "(All results displayed.)"
+msgstr "(Alle resultaten weergegeven.)"
+
+msgid "(An external URL will be used.)"
+msgstr "(Een externe URL wordt gebruikt.)"
+
+msgid "(Begin typing a URL)"
+msgstr "(Begin met het typen van een URL)"
+
+msgid "(Data truncated. Too many results for \"%s!\".)"
+msgstr "(Gegevens afgekapt. Te veel resultaten voor \"%s!\".)"
+
+msgid "(Data truncated. Too many results!)"
+msgstr "(Gegevens afgekapt. Te veel resultaten!)"
+
+msgid "(Default 404 Page)"
+msgstr "(Standaard 404-pagina)"
+
+msgid "(Explain)"
+msgstr "(Uitleg)"
+
+msgid "(Hide Info)"
+msgstr "(Verberg info)"
+
+msgid "(Home Page)"
+msgstr "(Startpagina)"
+
+msgid "(No matching results found for \"%s.\")"
+msgstr "(Geen overeenkomende resultaten gevonden voor \"%s.\")"
+
+msgid "(No matching results found.)"
+msgstr "(Geen overeenkomende resultaten gevonden.)"
+
+msgid "(Please choose from the dropdown list instead of typing your own URL.)"
+msgstr "(Kies graag uit de keuzelijst in plaats van uw eigen URL in te typen.)"
+
+msgid "(Required)"
+msgstr "(Verplicht)"
+
+msgid "(Show All Logs)"
+msgstr "(Toon alle logs)"
+
+msgid "(Special)"
+msgstr "(Speciaal)"
+
+msgid "(The log file does not exist.)"
+msgstr "(Het logbestand bestaat niet.)"
+
+msgid "(The specified page doesn't exist. Please update this setting.)"
+msgstr "(De opgegeven pagina bestaat niet. Werk deze instelling bij.)"
+
+msgid "(Type a page name or an external URL)"
+msgstr "(Typ een paginanaam of een externe URL)"
+
+msgid "(Type a page name)"
+msgstr "(Typ een paginanaam)"
+
+msgid "(Type to filter)"
+msgstr "(Typ om te filteren)"
+
+msgid "(don't suggest .jpg files)"
+msgstr "(stel geen .jpg-bestanden voor)"
+
+msgid "(don't suggest .pdf files)"
+msgstr "(stel geen .pdf-bestanden voor)"
+
+msgid "(don't suggest pages within any directory named /private/)"
+msgstr "(stel geen pagina's voor binnen een map met de naam /private/)"
+
+msgid "(don't suggest pages within the /members/ directory)"
+msgstr "(stel geen pagina's voor binnen de map /members/)"
+
+msgid "(don't suggest the specific page with slug 'old-contact-page')"
+msgstr "(stel de specifieke pagina met slug 'old-contact-page' niet voor)"
+
+msgid "(ignore all .jpg files)"
+msgstr "(negeer alle .jpg-bestanden)"
+
+msgid "(ignore all .js files)"
+msgstr "(negeer alle .js-bestanden)"
+
+msgid "(ignore all .php files)"
+msgstr "(negeer alle .php-bestanden)"
+
+msgid "(ignore everything in the cache directory)"
+msgstr "(negeer alles in de cache-map)"
+
+msgid "(ignore everything in this directory)"
+msgstr "(negeer alles in deze map)"
+
+msgid "(unless a redirect to the page already exists)."
+msgstr "(tenzij er al een omleiding naar de pagina bestaat)."
+
+msgid "* 404s are still redirected when possible."
+msgstr "* 404's worden nog steeds omgeleid wanneer mogelijk."
+
+msgid "* Do not capture 404 URLs."
+msgstr "* Leg geen 404-URL's vast."
+
+msgid "* Do not redirect 404s for the patterns listed here."
+msgstr "* Leid geen 404's om voor de hier vermelde patronen."
+
+msgid "* Do not redirect 404s from the user agents listed here."
+msgstr "* Leid geen 404's om van de hier vermelde user agents."
+
+msgid "* If the string appears anywhere within the user agent string then it's a match."
+msgstr "* Als de tekenreeks ergens in de user agent string voorkomt, is het een match."
+
+msgid "* One pattern per line."
+msgstr "* Eén patroon per regel."
+
+msgid "* One string per line."
+msgstr "* Eén tekenreeks per regel."
+
+msgid "* One type per line."
+msgstr "* Eén type per regel."
+
+msgid "* Strings are case insensitive."
+msgstr "* Tekenreeksen zijn hoofdletterongevoelig."
+
+msgid "* Strings are case sensitive."
+msgstr "* Tekenreeksen zijn hoofdlettergevoelig."
+
+msgid "* These patterns match the path of a URL, not a title.\""
+msgstr "* Deze patronen komen overeen met het pad van een URL, niet met een titel.\""
+
+msgid "* Use an asterisk (*) to match \"any pattern.\""
+msgstr "* Gebruik een sterretje (*) om overeen te komen met \"elk patroon.\""
+
+msgid "404 Page Suggestions"
+msgstr "404-paginasuggesties"
+
+msgid "404 URL marked as %s successfully!"
+msgstr "404-URL succesvol gemarkeerd als %s!"
+
+msgid "<a>View</a> the debug file."
+msgstr "<a>Bekijk</a> het debug-bestand."
+
+msgid "Action Taken"
+msgstr "Actie"
+
+msgid "Add Redirect"
+msgstr "Omleiding toevoegen"
+
+msgid "Add a Manual Redirect"
+msgstr "Handmatige omleiding toevoegen"
+
+msgid "Add a Redirect"
+msgstr "Een omleiding toevoegen"
+
+msgid "Admin notification email(s)"
+msgstr "E-mail(s) voor beheerdermeldingen"
+
+msgid "Admin notification level"
+msgstr "Meldingsniveau voor beheerders"
+
+msgid "Admin theme"
+msgstr "Beheerdersthema"
+
+msgid "Advanced"
+msgstr "Geavanceerd"
+
+#: includes/View.php - Inline mode toggle
+msgid "Simple"
+msgstr "Eenvoudig"
+
+#: includes/View.php - Quick links / Sticky save bar / Toast notification
+msgid "View Stats"
+msgstr "Statistieken bekijken"
+
+msgid "Captured 404s"
+msgstr "Gevangen 404's"
+
+msgid "Documentation"
+msgstr "Documentatie"
+
+msgid "Plugin v%s"
+msgstr "Plugin v%s"
+
+msgid "Settings saved successfully!"
+msgstr "Instellingen succesvol opgeslagen!"
+
+msgid "Smart Matching"
+msgstr "Slimme matching"
+
+msgid "Advanced Settings (Etc)"
+msgstr "Geavanceerde Instellingen (etc.)"
+
+msgid "Content & URL Filtering"
+msgstr "Inhoud- en URL-filtering"
+
+msgid "Logging & Privacy"
+msgstr "Loggen & Privacy"
+
+msgid "Advanced Configuration"
+msgstr "Geavanceerde Configuratie"
+
+msgid "Expand All"
+msgstr "Alles uitklappen"
+
+msgid "Collapse All"
+msgstr "Alles inklappen"
+
+msgid "Feedback sent successfully."
+msgstr "Feedback succesvol verzonden."
+
+msgid "Note: Feedback email could not be sent."
+msgstr "Opmerking: Feedback e-mail kon niet worden verzonden."
+
+msgid "All"
+msgstr "Alle"
+
+msgid "All other redirects must be deleted and only one regex redirect for all URLs must be created for this to work."
+msgstr "Alle andere omleidingen moeten worden verwijderd en er moet slechts één regex-omleiding voor alle URL's worden aangemaakt om dit te laten werken."
+
+msgid "All trashed URLs have been deleted!"
+msgstr "Alle verwijderde URL's zijn gewist!"
+
+msgid "Allow category suggestions"
+msgstr "Categoriesuggesties toestaan"
+
+msgid "Allow tag suggestions"
+msgstr "Tagsuggesties toestaan"
+
+msgid "An unknown error has occurred."
+msgstr "Er is een onbekende fout opgetreden."
+
+msgid "Apply"
+msgstr "Toepassen"
+
+msgid "At the same level as the Settings and Tools menu"
+msgstr "Op hetzelfde niveau als het menu Instellingen en Extra"
+
+msgid "Auto"
+msgstr "Auto"
+
+msgid "Delete automatic redirects after"
+msgstr "Automatische omleidingen verwijderen na"
+
+msgid "Auto Redirects"
+msgstr "Automatische omleidingen"
+
+
+msgid "Automatic 301 Redirects"
+msgstr "Automatische 301-omleidingen"
+
+msgid "Automatic 302 Redirects"
+msgstr "Automatische 302-omleidingen"
+
+msgid "Automatic Redirects"
+msgstr "Automatische omleidingen"
+
+msgid "Automatically created"
+msgstr "Automatisch aangemaakt"
+
+msgid "Automatically creates redirects based on best possible suggested page."
+msgstr "Maakt automatisch omleidingen aan op basis van de best passende voorgestelde pagina."
+
+msgid "Removes captured 404 URLs if they haven't been used for the specified amount of time."
+msgstr "Verwijdert vastgelegde 404-URL's als ze gedurende de opgegeven tijd niet zijn gebruikt."
+
+msgid "Removes manually created redirects if they haven't been used for the specified amount of time. Does not affect automatically created redirects."
+msgstr "Verwijdert handmatig aangemaakte omleidingen als ze gedurende de opgegeven tijd niet zijn gebruikt. Heeft geen invloed op automatisch aangemaakte omleidingen."
+
+msgid "Captured 404 URLs"
+msgstr "Vastgelegde 404-URL's"
+
+msgid "Captured URLs"
+msgstr "Vastgelegde URL's"
+
+msgid "Captured URLs (0 Disables Notification)"
+msgstr "Vastgelegde URL's (0 schakelt melding uit)"
+
+msgid "Categories"
+msgstr "Categorieën"
+
+msgid "Category"
+msgstr "Categorie"
+
+msgid "Category:"
+msgstr "Categorie:"
+
+msgid "Changes may not be updated immediately when ordering by this column"
+msgstr "Wijzigingen worden mogelijk niet onmiddellijk bijgewerkt bij sorteren op deze kolom"
+
+msgid "Checks each redirect for a new matching permalink before the user is redirected. If a new page permalink is found matching the redirected URL then the redirect will be deleted."
+msgstr "Controleert elke omleiding op een nieuwe overeenkomende permalink voordat de gebruiker wordt omgeleid. Als een nieuwe pagina-permalink wordt gevonden die overeenkomt met de omgeleide URL, wordt de omleiding verwijderd."
+
+msgid "Choose at least one URL"
+msgstr "Kies ten minste één URL"
+
+msgid "Choose whether the 404 Settings link appears under the \"Settings\" menu or elsewhere."
+msgstr "Kies of de link naar 404-instellingen onder het menu \"Instellingen\" of ergens anders verschijnt."
+
+msgid "Choose the color theme for the admin pages. The theme changes immediately for preview, and will be saved when you click \"Save Settings\"."
+msgstr "Kies het kleurthema voor de beheerderspagina's. Het thema verandert onmiddellijk voor de preview en wordt opgeslagen wanneer u op \"Instellingen opslaan\" klikt."
+
+msgid "Cleanup is done daily."
+msgstr "Opschoning gebeurt dagelijks."
+
+msgid "Click to view debug data for all suggestions"
+msgstr "Klik om debug-gegevens voor alle suggesties te bekijken"
+
+msgid "Delete captured 404 URLs after"
+msgstr "Vastgelegde 404-URL's verwijderen na"
+
+msgid "Create a CSV file with the redirects and captured 404s."
+msgstr "Maak een CSV-bestand aan met de omleidingen en vastgelegde 404's."
+
+msgid "Create and Download"
+msgstr "Aanmaken en downloaden"
+
+msgid "Create automatic redirects"
+msgstr "Automatische omleidingen aanmaken"
+
+msgid "Create redirects on slug change"
+msgstr "Omleidingen aanmaken bij slug-wijziging"
+
+msgid "Create automatic redirects for categories"
+msgstr "Automatische omleidingen voor categorieën aanmaken"
+
+msgid "Create automatic redirects for tags"
+msgstr "Automatische omleidingen voor tags aanmaken"
+
+msgid "Created"
+msgstr "Aangemaakt"
+
+msgid "Credits"
+msgstr "Credits"
+
+msgid "Current approximate log disk usage"
+msgstr "Huidig geschat schijfgebruik van logs"
+
+msgid "Custom"
+msgstr "Aangepast"
+
+msgid "Custom Taxonomies"
+msgstr "Aangepaste taxonomieën"
+
+msgid "DATABASE_VERSION"
+msgstr "DATABASE_VERSION"
+
+msgid "DB version"
+msgstr "DB-versie"
+
+msgid "Date"
+msgstr "Datum"
+
+msgid "days without use (0 to disable)"
+msgstr "dagen zonder gebruik (0 om uit te schakelen)"
+
+msgid "Debug Log"
+msgstr "Debug-log"
+
+msgid "Debug file not found. (%s)"
+msgstr "Debug-bestand niet gevonden. (%s)"
+
+msgid "Debug file size: %1$s KB (%2$s MB)."
+msgstr "Debug-bestandsgrootte: %1$s KB (%2$s MB)."
+
+msgid "Debug file size: %s KB."
+msgstr "Debug-bestandsgrootte: %s KB."
+
+msgid "Debug file(s) deleted. (%s)"
+msgstr "Debug-bestand(en) verwijderd. (%s)"
+
+msgid "Debug logging"
+msgstr "Debug-logging"
+
+msgid "Default"
+msgstr "Default"
+
+msgid "Default WordPress post types are \"post\" and \"page.\""
+msgstr "Standaard WordPress-berichttypen zijn \"post\" en \"page.\""
+
+msgid "Default redirect type"
+msgstr "Standaard omleidingstype"
+
+msgid "Delete the Debug File"
+msgstr "Debug-bestand verwijderen"
+
+msgid "Destination"
+msgstr "Bestemming"
+
+msgid "Display Before/After each suggested page"
+msgstr "Weergave voor/na elke voorgestelde pagina"
+
+msgid "Display Before/After page suggestions"
+msgstr "Weergave voor/na paginasuggesties"
+
+msgid "Display a WordPress admin notification when the number of captured URLs goes above this number"
+msgstr "Toon een WordPress-beheerdersmelding wanneer het aantal vastgelegde URL's boven dit aantal komt"
+
+msgid "Display if no suggestion results"
+msgstr "Weergave als er geen suggestieresultaten zijn"
+
+msgid "Display the closest matching pages by using the shortcode <span style=\"font-weight: bold;\">[abj404_solution_page_suggestions]</span>."
+msgstr "Toon de best passende pagina's met behulp van de shortcode <span style=\"font-weight: bold;\">[abj404_solution_page_suggestions]</span>."
+
+msgid "Displayed 404 Page"
+msgstr "Weergegeven 404-pagina"
+
+msgid "Earliest log date"
+msgstr "Vroegste logdatum"
+
+msgid "Edit Redirect"
+msgstr "Omleiding bewerken"
+
+msgid "Edit Redirect Details"
+msgstr "Omleidingsdetails bewerken"
+
+msgid "Empty Trash"
+msgstr "Prullenbak legen"
+
+msgid "Error: An invalid purge type was selected. Exiting."
+msgstr "Fout: Er is een ongeldig opschoningstype geselecteerd."
+
+msgid "Error: Auto match score value must be a number between 0 and 99"
+msgstr "Fout: Automatische match-scorewaarde moet een getal tussen 0 en 99 zijn"
+
+msgid "Error: Bad %s operation specified."
+msgstr "Fout: Ongeldige %s-bewerking opgegeven."
+
+msgid "Error: Bad data passed for update redirect request."
+msgstr "Fout: Onjuiste gegevens doorgegeven voor updateomleidingsverzoek."
+
+msgid "Error: Bad trash operation specified."
+msgstr "Fout: Ongeldige prullenbakbewerking opgegeven."
+
+msgid "Error: Data not formatted properly."
+msgstr "Fout: Gegevens niet correct opgemaakt."
+
+msgid "Error: External URL doesn't contain ://"
+msgstr "Fout: Externe URL bevat geen ://"
+
+msgid "Error: External URL is too short."
+msgstr "Fout: Externe URL is te kort."
+
+msgid "Error: External redirect URL failed validation."
+msgstr "Fout: Externe omleidings-URL heeft validatie niet doorstaan."
+
+msgid "Error: External URL must use http:// or https:// protocol only."
+msgstr "Fout: Externe URL moet alleen het http:// of https:// protocol gebruiken."
+
+msgid "Error: Invalid theme selected"
+msgstr "Fout: Ongeldig thema geselecteerd"
+
+msgid "Error: Invalid value specified for default redirect type"
+msgstr "Fout: Ongeldige waarde opgegeven voor standaard omleidingstype"
+
+msgid "Error: Maximum number of suggest value must be a number greater than or equal to 1"
+msgstr "Fout: Maximaal aantal suggestiewaarde moet een getal groter dan of gelijk aan 1 zijn"
+
+msgid "Error: No ID(s) found for edit request."
+msgstr "Fout: Geen ID('s) gevonden voor bewerkingsverzoek."
+
+msgid "Error: No ID(s) specified for bulk action. (%s)"
+msgstr "Fout: Geen ID('s) opgegeven voor bulkactie. (%s)"
+
+msgid "Error: No records were imported. SQL result: %s"
+msgstr "Fout: Geen records geïmporteerd. SQL-resultaat: %s"
+
+msgid "Error: No redirect types were selected. No purges will be done."
+msgstr "Fout: Geen omleidingstypen geselecteerd. Er worden geen opschoningen uitgevoerd."
+
+msgid "Error: No valid redirect types were selected. Exiting."
+msgstr "Fout: Geen geldige omleidingstypen geselecteerd."
+
+msgid "Error: Suggestion minimum score value must be a number between 1 and 99"
+msgstr "Fout: Minimale suggestiescorewaarde moet een getal tussen 1 en 99 zijn"
+
+msgid "Error: Template redirect priority value must be a number between 0 and 999"
+msgstr "Fout: Template-omleidingsprioriteitswaarde moet een getal tussen 0 en 999 zijn"
+
+msgid "Error: URL is a required field."
+msgstr "Fout: URL is een verplicht veld."
+
+msgid "Error: URL must start with /"
+msgstr "Fout: URL moet beginnen met /"
+
+msgid "Error: Redirect destination is required."
+msgstr "Fout: Omleidingsbestemming is verplicht."
+
+msgid "Error: Unable to move redirect from trash."
+msgstr "Fout: Kan omleiding niet uit prullenbak halen."
+
+msgid "Error: Unable to move redirect to trash."
+msgstr "Fout: Kan omleiding niet naar prullenbak verplaatsen."
+
+msgid "Error: Unable to update redirect data."
+msgstr "Fout: Kan omleidingsgegevens niet bijwerken."
+
+msgid "Error: Unknown Database Error!"
+msgstr "Fout: Onbekende databasefout!"
+
+msgid "Error: Unrecognized bulk action. (%s)"
+msgstr "Fout: Onbekende bulkactie. (%s)"
+
+msgid "Error: You didn't check the I understand checkbox. No importing for you!"
+msgstr "Fout: U heeft het selectievakje 'Ik begrijp het' niet aangevinkt. Geen import voor u!"
+
+msgid "Error: You didn't check the I understand checkbox. No purging of records for you!"
+msgstr "Fout: U heeft het selectievakje 'Ik begrijp het' niet aangevinkt. Geen opschoning van records voor u!"
+
+msgid "Error: The time to wait before an automatic update must be a number between 0 and something around %d."
+msgstr "Fout: De wachttijd vóór een automatische update moet een getal zijn tussen 0 en ongeveer %d."
+
+msgid "Error: You selected external URL but did not enter a URL."
+msgstr "Fout: U heeft externe URL geselecteerd maar geen URL ingevoerd."
+
+msgid "Error: unable to add new redirect."
+msgstr "Fout: Kan nieuwe omleiding niet toevoegen."
+
+msgid "Error: unable to mark URL as %s"
+msgstr "Fout: Kan URL niet markeren als %s"
+
+msgid "Error: unable to remove URL from %s list"
+msgstr "Fout: Kan URL niet verwijderen uit %s-lijst"
+
+msgid "Etcetera"
+msgstr "Etcetera"
+
+msgid "Even if more pages could be suggested, show at most this many (default: 5)"
+msgstr "Zelfs als er meer pagina's kunnen worden voorgesteld, toon maximaal dit aantal (standaard: 5)"
+
+msgid "Example"
+msgstr "Voorbeeld"
+
+msgid "Examples:"
+msgstr "Voorbeelden:"
+
+msgid "Exclude Specific Pages, Posts, Categories, Etc"
+msgstr "Specifieke pagina's, berichten, categorieën, etc. uitsluiten"
+
+msgid "Exclude Suggestion URLs (Regex)"
+msgstr "Suggestie-URL's uitsluiten (Regex)"
+
+msgid "Exclude potential suggestions if their final URL matches one of these patterns."
+msgstr "Sluit potentiële suggesties uit als hun uiteindelijke URL overeenkomt met een van deze patronen."
+
+msgid "Export"
+msgstr "Exporteren"
+
+msgid "External"
+msgstr "Extern"
+
+msgid "External Page"
+msgstr "Externe pagina"
+
+msgid "External User Agents - Do Not Log"
+msgstr "Externe user agents - niet loggen"
+
+msgid "Files and Folders Ignore Strings - Do Not Process"
+msgstr "Bestanden en mappen negeertekenreeksen - niet verwerken"
+
+msgid "Files and folders listed here will be ignored."
+msgstr "Bestanden en mappen die hier worden vermeld, worden genegeerd."
+
+msgid "First, all of the normal \"exact match\" URLs are checked, then all of the regular expression URLs are checked."
+msgstr "Eerst worden alle normale \"exacte overeenkomst\" URL's gecontroleerd, daarna worden alle reguliere expressie URL's gecontroleerd."
+
+msgid "General"
+msgstr "Algemeen"
+
+msgid "General Settings"
+msgstr "Algemene instellingen"
+
+msgid "Go to first page"
+msgstr "Ga naar eerste pagina"
+
+msgid "Go to last page"
+msgstr "Ga naar laatste pagina"
+
+msgid "Go to next page"
+msgstr "Ga naar volgende pagina"
+
+msgid "Go to previous page"
+msgstr "Ga naar vorige pagina"
+
+msgid "Help the developer by sending error logs"
+msgstr "Help de ontwikkelaar door foutlogs te verzenden"
+
+msgid "Here are some other great pages"
+msgstr "Hier zijn enkele andere geweldige pagina's"
+
+msgid "Hide %s"
+msgstr "Verberg %s"
+
+msgid "Hits"
+msgstr "Hits"
+
+msgid "Hits Redirected"
+msgstr "Hits omgeleid"
+
+msgid "Home Page"
+msgstr "Startpagina"
+
+msgid "Home Page:"
+msgstr "Startpagina:"
+
+msgid "I understand the above statement, I know what I am doing... blah blah blah. Just delete the records!"
+msgstr "Ik begrijp bovenstaande verklaring, ik weet wat ik doe... enzovoort. Verwijder de records gewoon!"
+
+msgid "I understand the above statement."
+msgstr "Ik begrijp bovenstaande verklaring."
+
+msgid "IP Address"
+msgstr "IP-adres"
+
+#, fuzzy
+msgid "If no suggested pages are found, then this text will be displayed.  (default: &lt;p&gt;No suggestions. :/ &lt;/p&gt;)"
+msgstr "Als geen enkele pagina de minimale matchscore haalt, wordt deze tekst weergegeven.  (standaard: &lt;p&gt;Geen suggesties. :/ &lt;/p&gt;)"
+
+msgid "If you've created custom post types and would like to redirect users to them, you'll have to enter them here."
+msgstr "Als u aangepaste berichttypen heeft gemaakt en gebruikers daarnaar wilt omleiden, moet u ze hier invoeren."
+
+msgid "If you've created custom taxonomies and would like to redirect users to them, you'll have to enter them here."
+msgstr "Als u aangepaste taxonomieën heeft gemaakt en gebruikers daarnaar wilt omleiden, moet u ze hier invoeren."
+
+msgid "Ignore 404 Error"
+msgstr "404-fout negeren"
+
+msgid "Ignored 404 URLs"
+msgstr "Genegeerde 404-URL's"
+
+msgid "Ignored URLs"
+msgstr "Genegeerde URL's"
+
+msgid "Import"
+msgstr "Importeren"
+
+msgid "Import 404 Redirected Data"
+msgstr "404-omleidingsgegevens importeren"
+
+msgid "Import a CSV file with the redirects and captured 404s."
+msgstr "Importeer een CSV-bestand met de omleidingen en vastgelegde 404's."
+
+msgid "Including breaking the site by creating bad redirects, entering a bad regular expression, deleting existing redirects, and giving other users admin access to the plugin."
+msgstr "Inclusief het breken van de site door slechte omleidingen aan te maken, een slechte reguliere expressie in te voeren, bestaande omleidingen te verwijderen en andere gebruikers beheerderstoegang tot de plugin te geven."
+
+msgid "Internal Process User Agents - Do Not Log"
+msgstr "Interne proces-user agents - niet loggen"
+
+msgid "Issue deleting debug file. (%s)"
+msgstr "Probleem bij het verwijderen van debug-bestand. (%s)"
+
+msgid "JAPANESE_FLASHCARDS_URL"
+msgstr "JAPANESE_FLASHCARDS_URL"
+
+msgid "Keeps the most recent (and deletes the oldest) log records when the disk usage reaches this limit."
+msgstr "Behoudt de meest recente (en verwijdert de oudste) logrecords wanneer het schijfgebruik deze limiet bereikt."
+
+msgid "LINK_FIRST_PAGE"
+msgstr "LINK_FIRST_PAGE"
+
+msgid "LINK_LAST_PAGE"
+msgstr "LINK_LAST_PAGE"
+
+msgid "LINK_NEXT_PAGE"
+msgstr "LINK_NEXT_PAGE"
+
+msgid "LINK_PREVIOUS_PAGE"
+msgstr "LINK_PREVIOUS_PAGE"
+
+msgid "Last Used"
+msgstr "Laatst gebruikt"
+
+msgid "List one user name per line."
+msgstr "Vermeld één gebruikersnaam per regel."
+
+msgid "Log files are checked daily when maintenance is run."
+msgstr "Logbestanden worden dagelijks gecontroleerd wanneer onderhoud wordt uitgevoerd."
+
+msgid "Log raw IPs"
+msgstr "Onbewerkte IP's loggen"
+
+msgid "Logging raw IP addresses may not meet the EU General Data Protection Regulation (GDPR) guidelines."
+msgstr "Het loggen van onbewerkte IP-adressen voldoet mogelijk niet aan de richtlijnen van de EU Algemene Verordening Gegevensbescherming (AVG)."
+
+msgid "Logs"
+msgstr "Logs"
+
+msgid "MB"
+msgstr "MB"
+
+msgid "Maintenance"
+msgstr "Onderhoud"
+
+msgid "Major version auto update delay"
+msgstr "Vertraging auto-update hoofdversie"
+
+msgid "Man"
+msgstr "Man"
+
+msgid "Manual 301 Redirects"
+msgstr "Handmatige 301-omleidingen"
+
+msgid "Manual 302 Redirects"
+msgstr "Handmatige 302-omleidingen"
+
+msgid "Manual Redirects"
+msgstr "Handmatige omleidingen"
+
+msgid "Delete manual redirects after"
+msgstr "Handmatige omleidingen verwijderen na"
+
+msgid "Manually created"
+msgstr "Handmatig aangemaakt"
+
+msgid "Maximum log disk usage (MB)"
+msgstr "Maximaal schijfgebruik logs (MB)"
+
+msgid "Maximum number of suggestions to display"
+msgstr "Maximaal aantal weer te geven suggesties"
+
+msgid "Minimum match score"
+msgstr "Minimale matchscore"
+
+#~ msgid "Minimum score of suggestions to display"
+#~ msgstr "Minimale score van weer te geven suggesties"
+
+msgid "Multiple email addresses can be separated by commas (,). The \"from\" email address is always the default WordPress admin email:"
+msgstr "Meerdere e-mailadressen kunnen worden gescheiden door komma's (,). Het \"van\" e-mailadres is altijd het standaard WordPress-beheerders-e-mailadres:"
+
+msgid "Never Used"
+msgstr "Nooit gebruikt"
+
+msgid "New Redirect Added Successfully!"
+msgstr "Nieuwe omleiding succesvol toegevoegd!"
+
+msgid "New major version => wait this many days. New minor version => automatically update about 3 days after the release date."
+msgstr "Nieuwe hoofdversie => wacht zoveel dagen. Nieuwe kleine versie => automatisch bijwerken ongeveer 3 dagen na de releasedatum."
+
+msgid "No Captured 404 Records To Display"
+msgstr "Geen vastgelegde 404-records om weer te geven"
+
+msgid "No Redirect Records To Display"
+msgstr "Geen omleidingsrecords om weer te geven"
+
+msgid "No Results To Display"
+msgstr "Geen resultaten om weer te geven"
+
+msgid "No suggestions. :/"
+msgstr "Geen suggesties. :/"
+
+msgid "No suggestions. :/ "
+msgstr "Geen suggesties. :/ "
+
+msgid "Note that including a bad regular expression or one that takes too long will break your website."
+msgstr "Houd er rekening mee dat het toevoegen van een slechte reguliere expressie of een die te lang duurt, uw website zal breken."
+
+msgid "Note: Do not include the parenthesis or explanations shown in the examples above."
+msgstr "Opmerking: neem de haakjes of uitleg uit de bovenstaande voorbeelden niet over."
+
+msgid "Note: Here is a list of all post types in the database:"
+msgstr "Opmerking: hier is een lijst van alle berichttypen in de database:"
+
+msgid "Note: The \"scores\" that appear in the format of \"(75.7576)\" after the page links are only displayed for admin users."
+msgstr "Opmerking: de \"scores\" die in het formaat \"(75.7576)\" na de paginakoppelingen verschijnen, worden alleen weergegeven voor beheerders."
+
+msgid "OPTION_MIN_AUTO_SCORE"
+msgstr "OPTION_MIN_AUTO_SCORE"
+
+msgid "OPTION_TEMPLATE_REDIRECT_PRIORITY"
+msgstr "OPTION_TEMPLATE_REDIRECT_PRIORITY"
+
+msgid "One email will be sent per day (when maintenance is run) until the number of captured 404s goes below the number specified in the alert settings."
+msgstr "Er wordt één e-mail per dag verzonden (wanneer onderhoud wordt uitgevoerd) totdat het aantal vastgelegde 404's onder het in de waarschuwingsinstellingen opgegeven aantal komt."
+
+msgid "Only create an automatic redirect if the suggested page has a score above the specified number (default 90)"
+msgstr "Maak alleen een automatische omleiding aan als de voorgestelde pagina een score heeft boven het opgegeven aantal (standaard 90)"
+
+msgid "Options"
+msgstr "Opties"
+
+msgid "Options Saved Successfully!"
+msgstr "Opties succesvol opgeslagen!"
+
+msgid "Organize Later"
+msgstr "Later organiseren"
+
+msgid "Page"
+msgstr "Pagina"
+
+msgid "Page Not Found Displayed"
+msgstr "Pagina niet gevonden weergegeven"
+
+msgid "Page Redirects"
+msgstr "Pagina-omleidingen"
+
+msgid "Page suggestions title"
+msgstr "Titel paginasuggesties"
+
+msgid "Pages listed here will not be redirected to"
+msgstr "Pagina's die hier worden vermeld, worden niet naar omgeleid"
+
+msgid "Permanent 301"
+msgstr "Permanent 301"
+
+msgid "Plugin Admin Users"
+msgstr "Plugin-beheerders"
+
+msgid "Plugin version"
+msgstr "Plugin-versie"
+
+msgid "Purge Entries!"
+msgstr "Gegevens opschonen"
+
+msgid "Purge Options"
+msgstr "Opschoningsopties"
+
+msgid "Purge Type"
+msgstr "Opschoningstype"
+
+msgid "REDIRECT_TO_USER_FIELD_WARNING"
+msgstr "REDIRECT_TO_USER_FIELD_WARNING"
+
+msgid "Recognized Post Types"
+msgstr "Herkende berichttypen"
+
+msgid "Records imported: %s"
+msgstr "Records geïmporteerd: %s"
+
+msgid "Redirect"
+msgstr "Omleiding"
+
+msgid "Redirect & Capture Logs"
+msgstr "Omleidings- en vastleggingslogs"
+
+msgid "Redirect Details"
+msgstr "Omleidingsdetails"
+
+msgid "Redirect Information Updated Successfully!"
+msgstr "Omleidingsinformatie succesvol bijgewerkt!"
+
+msgid "Redirect Removed Successfully!"
+msgstr "Omleiding succesvol verwijderd!"
+
+msgid "Redirect Type"
+msgstr "Omleidingstype"
+
+msgid "Redirect Types"
+msgstr "Omleidingstypen"
+
+msgid "Redirect all requests"
+msgstr "Alle verzoeken omleiden"
+
+msgid "Redirect all unhandled 404s to"
+msgstr "Alle onafgehandelde 404's omleiden naar"
+
+msgid "Redirect moved to trash successfully!"
+msgstr "Omleiding is naar de prullenbak verplaatst."
+
+msgid "Redirect restored from trash successfully!"
+msgstr "Omleiding is hersteld uit de prullenbak."
+
+msgid "Redirect to"
+msgstr "Omleiden naar"
+
+msgid "Redirected to"
+msgstr "Omgeleid naar"
+
+msgid "Redirects"
+msgstr "Omleidingen"
+
+msgid "Referrer"
+msgstr "Verwijzer"
+
+msgid "RegEx"
+msgstr "RegEx"
+
+msgid "Regular Expression (Manually Created)"
+msgstr "Reguliere expressie (handmatig aangemaakt)"
+
+msgid "Remove Ignore Status"
+msgstr "Negeer-status verwijderen"
+
+msgid "Remove Later Status"
+msgstr "Later-status verwijderen"
+
+msgid "Remove redirect upon matching permalink"
+msgstr "Omleiding verwijderen wanneer permalink overeenkomt"
+
+msgid "Removed 404 URL from %s list successfully!"
+msgstr "404-URL succesvol verwijderd uit %s-lijst!"
+
+msgid "Removes automatically created redirects if they haven't been used for the specified amount of time. Does not affect manually created redirects."
+msgstr "Verwijdert automatisch aangemaakte omleidingen als ze gedurende de opgegeven tijd niet zijn gebruikt. Heeft geen invloed op handmatig aangemaakte omleidingen."
+
+msgid "Required"
+msgstr "Verplicht"
+
+msgid "Restore"
+msgstr "Herstellen"
+
+msgid "Rows per page:"
+msgstr "Rijen per pagina:"
+
+msgid "Run Maintenance"
+msgstr "Onderhoud uitvoeren"
+
+msgid "Run maintenance to delete old data (etc).&nbsp;&nbsp;It is not necessary to run this manually, as it's done automatically on a daily basis."
+msgstr "Voer onderhoud uit om oude gegevens te verwijderen (etc).&nbsp;&nbsp;Het is niet nodig om dit handmatig uit te voeren, omdat dit automatisch dagelijks gebeurt."
+
+msgid "SELECTED_SUGGEST_CATS"
+msgstr "SELECTED_SUGGEST_CATS"
+
+msgid "SELECTED_SUGGEST_TAGS"
+msgstr "SELECTED_SUGGEST_TAGS"
+
+msgid "SELECTED_SUGGEST_URL"
+msgstr "SELECTED_SUGGEST_URL"
+
+msgid "SUGGEST_MAX_SUGGESTIONS"
+msgstr "SUGGEST_MAX_SUGGESTIONS"
+
+msgid "SUGGEST_MIN_SCORE"
+msgstr "SUGGEST_MIN_SCORE"
+
+msgid "SUGGEST_USER_AFTER"
+msgstr "SUGGEST_USER_AFTER"
+
+msgid "SUGGEST_USER_BEFORE"
+msgstr "SUGGEST_USER_BEFORE"
+
+msgid "SUGGEST_USER_ENTRY_AFTER"
+msgstr "SUGGEST_USER_ENTRY_AFTER"
+
+msgid "SUGGEST_USER_ENTRY_BEFORE"
+msgstr "SUGGEST_USER_ENTRY_BEFORE"
+
+msgid "SUGGEST_USER_NO_RESULTS"
+msgstr "SUGGEST_USER_NO_RESULTS"
+
+msgid "SUGGEST_USER_TITLE"
+msgstr "SUGGEST_USER_TITLE"
+
+msgid "Sanity Check"
+msgstr "Gezondheidscontrole"
+
+msgid "Save Settings"
+msgstr "Instellingen opslaan"
+
+msgid "Saving settings..."
+msgstr "Instellingen opslaan..."
+
+msgid "Section filters"
+msgstr "Sectiefilters"
+
+
+msgid "Search engine user agents should not go here so that they will be redirected when the slug structure changes."
+msgstr "Zoekmachine-user agents horen hier niet thuis, zodat ze worden omgeleid wanneer de slug-structuur verandert."
+
+msgid "Since a capture group is used, you can use a $1 replacement in the destination string of an external URL."
+msgstr "Omdat er een capture-groep wordt gebruikt, kunt u een $1-vervanging gebruiken in de bestemmingsstring van een externe URL."
+
+msgid "So please use caution and test them elsewhere before trying them here. If you don't know what you're doing please don't use this option (as it's not necessary for the functioning of the plugin)."
+msgstr "Wees dus voorzichtig en test ze elders voordat u ze hier probeert. Als u niet weet wat u doet, gebruik deze optie dan graag niet (omdat het niet nodig is voor de werking van de plugin)."
+
+msgid "Some options were not saved successfully."
+msgstr "Sommige opties zijn niet succesvol opgeslagen."
+
+msgid "Special"
+msgstr "Speciaal"
+
+msgid "Stats"
+msgstr "Statistieken"
+
+msgid "Status"
+msgstr "Status"
+
+msgid "Suggestions"
+msgstr "Suggesties"
+
+
+msgid "Supported formats are: <B>from_url,status,type,to_url,wp_type</B>"
+msgstr "Ondersteunde formaten zijn: <B>from_url,status,type,to_url,wp_type</B>"
+
+msgid "TEXT_BEFORE_LINKS"
+msgstr "TEXT_BEFORE_LINKS"
+
+msgid "TEXT_CURRENT_PAGE"
+msgstr "TEXT_CURRENT_PAGE"
+
+msgid "TEXT_SHOW_ROWS"
+msgstr "TEXT_SHOW_ROWS"
+
+msgid "TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING"
+msgstr "TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING"
+
+msgid "TOOLTIP_POPUP_EXPLANATION_EMPTY"
+msgstr "TOOLTIP_POPUP_EXPLANATION_EMPTY"
+
+msgid "TOOLTIP_POPUP_EXPLANATION_EMTPY"
+msgstr "TOOLTIP_POPUP_EXPLANATION_EMTPY"
+
+msgid "TOOLTIP_POPUP_EXPLANATION_PAGE"
+msgstr "TOOLTIP_POPUP_EXPLANATION_PAGE"
+
+msgid "TOOLTIP_POPUP_EXPLANATION_URL"
+msgstr "TOOLTIP_POPUP_EXPLANATION_URL"
+
+msgid "Tag"
+msgstr "Tag"
+
+msgid "Tag:"
+msgstr "Tag:"
+
+msgid "Tags"
+msgstr "Tags"
+
+msgid "Template Redirect Priority"
+msgstr "Template-omleidingsprioriteit"
+
+msgid "Temporary 302"
+msgstr "Tijdelijk 302"
+
+msgid "The \"product\" type is for WooCommerce users."
+msgstr "Het type \"product\" is voor WooCommerce-gebruikers."
+
+msgid "The 404 Solution menu should appear"
+msgstr "Het 404 Solution-menu moet verschijnen"
+
+msgid "The file seems to have loaded okay. Please check the redirects page."
+msgstr "Het bestand lijkt correct te zijn geladen. Controleer de omleidingspagina."
+
+msgid "The plugin will only redirect the post types specified here."
+msgstr "De plugin leidt alleen de hier opgegeven berichttypen om."
+
+msgid "The plugin will redirect to normal taxonomies (categories and tags) and the ones listed here."
+msgstr "De plugin leidt om naar normale taxonomieën (categorieën en tags) en de hier vermelde."
+
+#~ msgid "The suggested page must \"score\" at least this much to be shown as a suggestion (min: 10, max: 90, default: 25)"
+#~ msgstr "De voorgestelde pagina moet minimaal deze score halen om als suggestie te worden getoond (min: 10, max: 90, standaard: 25)"
+
+msgid "The user specified 404 page wasn't found. Please update the user-specified 404 page on the Options page."
+msgstr "De door de gebruiker opgegeven 404-pagina is niet gevonden. Werk de door de gebruiker opgegeven 404-pagina bij op de pagina Opties."
+
+msgid "This cannot be undone. All redirects for URLs that do not already exist will be imported."
+msgstr "Dit kan niet ongedaan worden gemaakt. Alle omleidingen voor URL's die nog niet bestaan, worden geïmporteerd."
+
+msgid "This creates the list. For example, use &lt;ol style=\"list-style-type: none;\"&gt; to hide the numbers in the list. (defaults: &lt;ol&gt; / &lt;/ol&gt;)"
+msgstr "Dit maakt de lijst aan. Gebruik bijvoorbeeld &lt;ol style=\"list-style-type: none;\"&gt; om de nummers in de lijst te verbergen. (standaard: &lt;ol&gt; / &lt;/ol&gt;)"
+
+msgid "This is best for internal processes that don't need to be redirected when the slug structure changes."
+msgstr "Dit is het beste voor interne processen die niet hoeven te worden omgeleid wanneer de slug-structuur verandert."
+
+msgid "This is best for search engine bots that do need to be redirected when the slug structure changes."
+msgstr "Dit is het beste voor zoekmachine-bots die wel moeten worden omgeleid wanneer de slug-structuur verandert."
+
+msgid "This is for a domain name change."
+msgstr "Dit is voor een domeinnaamwijziging."
+
+msgid "This is for when a user requests a page that doesn't exist and they are not automatically redirected to a matching page."
+msgstr "Dit is voor wanneer een gebruiker een pagina opvraagt die niet bestaat en ze niet automatisch worden omgeleid naar een overeenkomende pagina."
+
+msgid "This is not required for the plugin to function, but it is helpful for the developer and for future versions of the plugin."
+msgstr "Dit is niet vereist voor de werking van de plugin, maar het is nuttig voor de ontwikkelaar en voor toekomstige versies van de plugin."
+
+msgid "This only affects the list of potential matches shown to the user on a custom 404 page."
+msgstr "Dit heeft alleen invloed op de lijst met mogelijke overeenkomsten die aan de gebruiker op een aangepaste 404-pagina worden getoond."
+
+msgid "This reveals: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when an issue is reported)."
+msgstr "Dit onthult: alles in de debug-log, het beheerders-e-mailadres, geïnstalleerde PHP-extensies, actieve plugins, PHP-versie, WordPress-versie, MySQL-versie, totaal aantal gepubliceerde pagina's en berichten, etc. (alles wat wordt gevraagd wanneer een probleem wordt gerapporteerd)."
+
+msgid "This sets how early in the process a 404 is handled by this plugin. If there are multiple plugins that should handle a 404, then set this higher (999) so that this plugin gets the 404 last. (default 9)"
+msgstr "Dit bepaalt hoe vroeg in het proces een 404 wordt afgehandeld door deze plugin. Als er meerdere plugins zijn die een 404 moeten afhandelen, stel dit dan hoger in (999) zodat deze plugin de 404 als laatste krijgt. (standaard 9)"
+
+msgid "This shortcode can be used on the 404 page and will display a list of suggested pages."
+msgstr "Deze shortcode kan worden gebruikt op de 404-pagina en toont een lijst met voorgestelde pagina's."
+
+msgid "This surrounds each item in the list. (defaults: &lt;li&gt; / &lt;/li&gt;)"
+msgstr "Dit omringt elk item in de lijst. (standaard: &lt;li&gt; / &lt;/li&gt;)"
+
+msgid "This text will appear before the list of suggestions (default: &lt;h3&gt;Here are some other great pages&lt;/h3&gt;)"
+msgstr "Deze tekst verschijnt vóór de lijst met suggesties (standaard: &lt;h3&gt;Hier zijn enkele andere geweldige pagina's&lt;/h3&gt;)"
+
+msgid "This will break your website."
+msgstr "Dit zal uw website breken."
+
+msgid "This will not change the URL if the destination 404 page is set to (Default 404 Page) or Home Page."
+msgstr "Dit zal de URL niet wijzigen als de bestemmings-404-pagina is ingesteld op (Standaard 404-pagina) of Startpagina."
+
+msgid "Tools"
+msgstr "Extra"
+
+msgid "Total Redirects"
+msgstr "Totaal omleidingen"
+
+msgid "Total URLs"
+msgstr "Totaal URL's"
+
+msgid "Trash"
+msgstr "Prullenbak"
+
+msgid "Trash Redirected URL"
+msgstr "Omgeleide URL naar prullenbak"
+
+msgid "Trashed Redirects"
+msgstr "Verwijderde omleidingen"
+
+msgid "Trashed URLs"
+msgstr "Verwijderde URL's"
+
+msgid "Treat this URL as a regular expression"
+msgstr "Behandel deze URL als een reguliere expressie"
+
+msgid "Type"
+msgstr "Type"
+
+msgid "Type a page name here and select it to add it to the exlusion list"
+msgstr "Typ hier een paginanaam en selecteer deze om deze aan de uitsluitingslijst toe te voegen"
+
+msgid "URL"
+msgstr "URL"
+
+msgid "URL(s) deleted"
+msgstr "URL('s) verwijderd"
+
+msgid "URL(s) marked as Captured."
+msgstr "URL('s) gemarkeerd als vastgelegd."
+
+msgid "URL(s) marked as Ignored."
+msgstr "URL('s) gemarkeerd als genegeerd."
+
+msgid "URL(s) marked as Later."
+msgstr "URL('s) gemarkeerd als later."
+
+msgid "URL(s) moved to trash"
+msgstr "URL('s) naar prullenbak verplaatst"
+
+msgid "URL(s) restored."
+msgstr "URL('s) hersteld."
+
+msgid "URLs"
+msgstr "URL's"
+
+msgid "Under the Settings menu"
+msgstr "Onder het menu Instellingen"
+
+msgid "Unique Page Not Found Referrers"
+msgstr "Unieke verwijzers pagina niet gevonden"
+
+msgid "Unique Page Not Found URLs"
+msgstr "Unieke URL's pagina niet gevonden"
+
+msgid "Unique Page Not Found Visitors"
+msgstr "Unieke bezoekers pagina niet gevonden"
+
+msgid "Unique Redirected Referrers"
+msgstr "Unieke omgeleide verwijzers"
+
+msgid "Unique Redirected Visitors"
+msgstr "Unieke omgeleide bezoekers"
+
+msgid "Unique URLs Redirected"
+msgstr "Unieke omgeleide URL's"
+
+msgid "Unknown"
+msgstr "Onbekend"
+
+msgid "Update Redirect"
+msgstr "Omleiding bijwerken"
+
+msgid "Update the URL bar"
+msgstr "URL-balk bijwerken"
+
+msgid "Use one line per user agent. If the text is found anywhere in the user agent string then it applies."
+msgstr "Gebruik één regel per user agent. Als de tekst ergens in de user agent string wordt gevonden, is het van toepassing."
+
+msgid "User"
+msgstr "Gebruiker"
+
+msgid "User names listed here will be able to do everything an admin can do with the plugin."
+msgstr "Gebruikersnamen die hier worden vermeld, kunnen alles doen wat een beheerder met de plugin kan doen."
+
+msgid "Using the purge options will move all selected redirects to the trash. You must then empty the trash to delete them."
+msgstr "Het gebruik van de opschoningsopties verplaatst alle geselecteerde omleidingen naar de prullenbak. U moet vervolgens de prullenbak legen om ze te verwijderen."
+
+msgid "View logs for"
+msgstr "Bekijk logs voor"
+
+msgid "Visit"
+msgstr "Bezoeken"
+
+msgid "WARNING: When used incorrectly this WILL break your website. Use at your own risk. Please, for the love of all that is holy, leave this empty if you don't know what you're doing."
+msgstr "WAARSCHUWING: Bij onjuist gebruik zal dit uw website breken. Gebruik op eigen risico. Laat dit veld leeg als u niet weet wat u doet."
+
+msgid "When an error is detected by the plugin, email the entire log file to the developer."
+msgstr "Wanneer de plugin een fout detecteert, e-mail het volledige logbestand naar de ontwikkelaar."
+
+msgid "When checked the URL will be changed from the custom 404 page URL to the URL originally requested (after the page headers load)."
+msgstr "Wanneer aangevinkt, wordt de URL gewijzigd van de aangepaste 404-pagina-URL naar de oorspronkelijk aangevraagde URL (nadat de paginakopteksten zijn geladen)."
+
+msgid "When checked, the text is treated as a regular expression."
+msgstr "Wanneer aangevinkt, wordt de tekst behandeld als een reguliere expressie."
+
+msgid "When selected, ALL REQUESTS (even for pages that exist, even for non-404s) will be treated like a 404."
+msgstr "Wanneer geselecteerd, worden ALLE VERZOEKEN (zelfs voor pagina's die bestaan, zelfs voor niet-404's) behandeld als een 404."
+
+msgid "When the number of captured 404s would cause an admin notification, an email will be sent to the addresses specified here."
+msgstr "Wanneer het aantal vastgelegde 404's een beheerdersmelding zou veroorzaken, wordt er een e-mail verzonden naar de hier opgegeven adressen."
+
+msgid "You can see which are recognized by looking at the default 404 destination option."
+msgstr "U kunt zien welke worden herkend door te kijken naar de standaard 404-bestemmingsoptie."
+
+msgid "You can see which post types are recognized by looking at the default 404 destination option, which has a list of pages, posts, products, etc."
+msgstr "U kunt zien welke berichttypen worden herkend door te kijken naar de standaard 404-bestemmingsoptie, die een lijst bevat van pagina's, berichten, producten, etc."
+
+msgid "add-exclude-page-data-url"
+msgstr "add-exclude-page-data-url"
+
+msgid "addManualRedirectAction"
+msgstr "addManualRedirectAction"
+
+msgid "ajaxTrashLink"
+msgstr "ajaxTrashLink"
+
+msgid "and <B>from_url,to_url</B>"
+msgstr "en <B>from_url,to_url</B>"
+
+msgid "and redirect to the specified page."
+msgstr "en omleiden naar de opgegeven pagina."
+
+msgid "bulkOptions"
+msgstr "bulkOptions"
+
+msgid "data-pagination-ajax-url"
+msgstr "data-pagination-ajax-url"
+
+msgid "data-pagination-ajax-action"
+msgstr "data-pagination-ajax-action"
+
+msgid "data-pagination-ajax-subpage"
+msgstr "data-pagination-ajax-subpage"
+
+msgid "data-pagination-ajax-nonce"
+msgstr "data-pagination-ajax-nonce"
+
+msgid "data-url"
+msgstr "data-url"
+
+msgid "days (0 means immediately, default 30)"
+msgstr "dagen (0 betekent onmiddellijk, standaard 30)"
+
+msgid "deletePermanentlyHTML"
+msgstr "deletePermanentlyHTML"
+
+msgid "destination-does-not-exist"
+msgstr "destination-does-not-exist"
+
+msgid "destination-exists"
+msgstr "destination-exists"
+
+msgid "disallow-redirect-all-requests"
+msgstr "disallow-redirect-all-requests"
+
+msgid "earliestLogDate"
+msgstr "earliestLogDate"
+
+msgid "editLink"
+msgstr "editLink"
+
+msgid "editlinkHTML"
+msgstr "editlinkHTML"
+
+msgid "filterText"
+msgstr "filterText"
+
+msgid "is maintained by"
+msgstr "wordt onderhouden door"
+
+msgid "loaded-excluded-pages"
+msgstr "loaded-excluded-pages"
+
+msgid "logCurrentRowCount"
+msgstr "logCurrentRowCount"
+
+msgid "logCurrentSizeDiskUsage"
+msgstr "logCurrentSizeDiskUsage"
+
+msgid "logslinkHTML"
+msgstr "logslinkHTML"
+
+msgid "of"
+msgstr "van"
+
+msgid "pageIDAndType"
+msgstr "pageIDAndType"
+
+msgid "postedURL"
+msgstr "postedURL"
+
+msgid "redirectPageTitle"
+msgstr "redirectPageTitle"
+
+msgid "rowActions"
+msgstr "rowActions"
+
+msgid "rowClass"
+msgstr "rowClass"
+
+msgid "rowCode"
+msgstr "rowCode"
+
+msgid "rowURL"
+msgstr "rowURL"
+
+msgid "selecteSsettingsLevel"
+msgstr "selecteSsettingsLevel"
+
+msgid "selectedAutoCats"
+msgstr "selectedAutoCats"
+
+msgid "selectedAutoRedirects"
+msgstr "selectedAutoRedirects"
+
+msgid "selectedAutoTags"
+msgstr "selectedAutoTags"
+
+msgid "selectedCapture404"
+msgstr "selectedCapture404"
+
+msgid "selectedDefaultRedirect301"
+msgstr "selectedDefaultRedirect301"
+
+msgid "selectedDefaultRedirect302"
+msgstr "selectedDefaultRedirect302"
+
+msgid "selectedRemoveMatches"
+msgstr "selectedRemoveMatches"
+
+msgid "selectedSendErrorLogs"
+msgstr "selectedSendErrorLogs"
+
+msgid "selectedThemeCalm"
+msgstr "selectedThemeCalm"
+
+msgid "selectedThemeMono"
+msgstr "selectedThemeMono"
+
+msgid "selectedThemeNeon"
+msgstr "selectedThemeNeon"
+
+msgid "selectedThemeObsidian"
+msgstr "selectedThemeObsidian"
+
+msgid "selectedUnderSettings"
+msgstr "selectedUnderSettings"
+
+msgid "showSearchFilter"
+msgstr "showSearchFilter"
+
+msgid "statusTitle"
+msgstr "statusTitle"
+
+msgid "toolsExportRedirectsLink"
+msgstr "toolsExportRedirectsLink"
+
+msgid "toolsImportFormActionLink"
+msgstr "toolsImportFormActionLink"
+
+msgid "toolsImportRedirectsLink"
+msgstr "toolsImportRedirectsLink"
+
+msgid "toolsMaintenanceFormActionLink"
+msgstr "toolsMaintenanceFormActionLink"
+
+msgid "toolsPurgeFormActionLink"
+msgstr "toolsPurgeFormActionLink"
+
+msgid "urlPlaceholder"
+msgstr "urlPlaceholder"
+
+msgid "will match any URL that begins with"
+msgstr "komt overeen met elke URL die begint met"
+
+#. Plural form with HTML
+#: includes/View.php
+msgid "There is <a>%s captured 404 URL</a> that needs to be processed."
+msgid_plural "There are <a>%s captured 404 URLs</a> to be processed."
+msgstr[0] "Er is <a>%s vastgelegde 404-URL</a> die moet worden verwerkt."
+msgstr[1] "Er zijn <a>%s vastgelegde 404-URL's</a> die moeten worden verwerkt."
+
+#. Plural form with %s
+#: includes/DataAccess.php
+msgid "%s redirect entry was moved to the trash."
+msgid_plural "%s redirect entries were moved to the trash."
+msgstr[0] "%s omleidingsitem is naar de prullenbak verplaatst."
+msgstr[1] "%s omleidingsitems zijn naar de prullenbak verplaatst."
+
+#: includes/DatabaseUpgradesEtc.php:119
+msgid "404 Solution: N-gram spell check cache is being built in the background to optimize performance. This may take a few minutes on large sites."
+msgstr "404 Solution: N-gram spellingcontrole cache wordt op de achtergrond opgebouwd om de prestaties te optimaliseren. Dit kan enkele minuten duren op grote websites."
+
+#: includes/DatabaseUpgradesEtc.php:123
+msgid "404 Solution: Built N-gram cache for %d pages to optimize spell checking performance."
+msgstr "404 Solution: N-gram cache opgebouwd voor %d pagina's om de prestaties van spellingcontrole te optimaliseren."
+
+#: includes/DatabaseUpgradesEtc.php:140
+msgid "Before deactivating:"
+msgstr "Voor het deactiveren:"
+
+msgid "Choose what should happen to your data. These preferences will be saved for later if you decide to delete the plugin."
+msgstr "Kies wat er met uw gegevens moet gebeuren. Deze voorkeuren worden opgeslagen voor later als u besluit de plugin te verwijderen."
+
+msgid "What should happen to your data?"
+msgstr "Wat moet er met uw gegevens gebeuren?"
+
+msgid "Keep my redirects (%d redirects)"
+msgstr "Mijn omleidingen behouden (%d omleidingen)"
+
+msgid "Check this if you plan to reinstall the plugin later. Your redirect configurations will be preserved."
+msgstr "Vink dit aan als u van plan bent de plugin later opnieuw te installeren. Uw omleidingsconfiguraties worden bewaard."
+
+msgid "Keep 404 logs"
+msgstr "404-logs behouden"
+
+msgid "Historical 404 data and logs will be preserved if checked."
+msgstr "Historische 404-gegevens en logs worden bewaard indien aangevinkt."
+
+msgid "Note: Cache tables will always be deleted as they can be rebuilt."
+msgstr "Opmerking: Cachetabellen worden altijd verwijderd omdat ze opnieuw kunnen worden opgebouwd."
+
+msgid "Why are you deactivating? (Optional)"
+msgstr "Waarom deactiveert u de plugin? (Optioneel)"
+
+msgid "Temporary deactivation for debugging"
+msgstr "Tijdelijke deactivering voor debugging"
+
+msgid "The plugin is not working as expected"
+msgstr "De plugin werkt niet zoals verwacht"
+
+msgid "I found a better plugin"
+msgstr "Ik heb een betere plugin gevonden"
+
+msgid "I no longer need this functionality"
+msgstr "Ik heb deze functionaliteit niet meer nodig"
+
+msgid "Too complicated to configure"
+msgstr "Te ingewikkeld om te configureren"
+
+msgid "Performance issues"
+msgstr "Prestatieproblemen"
+
+msgid "Other reason"
+msgstr "Andere reden"
+
+msgid "Help us improve (Optional)"
+msgstr "Help ons te verbeteren (Optioneel)"
+
+msgid "Help improve the plugin (Optional)"
+msgstr "Help de plugin te verbeteren (Optioneel)"
+
+msgid "Share why you're deactivating. Your feedback helps us improve."
+msgstr "Deel waarom u deactiveert. Uw feedback helpt ons te verbeteren."
+
+
+msgid "Email Feedback & Deactivate"
+msgstr "Feedback verzenden en deactiveren"
+
+msgid "Send feedback to help improve the plugin"
+msgstr "Stuur feedback om de plugin te helpen verbeteren"
+
+msgid "Your email (optional):"
+msgstr "Uw e-mailadres (optioneel):"
+
+msgid "your@email.com (optional)"
+msgstr "uw@email.com (optioneel)"
+
+msgid "Additional details:"
+msgstr "Aanvullende details:"
+
+msgid "Please share any additional feedback..."
+msgstr "Deel graag eventuele aanvullende feedback..."
+
+msgid "Your feedback helps us improve. We respect your privacy and will not share your information."
+msgstr "Uw feedback helpt ons verbeteren. We respecteren uw privacy en zullen uw informatie niet delen."
+
+msgid "Insufficient permissions"
+msgstr "Onvoldoende machtigingen"
+
+msgid "Could not save preferences. Your choices may not be preserved."
+msgstr "Kan voorkeuren niet opslaan. Uw keuzes worden mogelijk niet bewaard."
+
+msgid "Preferences saved successfully"
+msgstr "Voorkeuren succesvol opgeslagen"
+
+msgid "Failed to save preferences"
+msgstr "Kan voorkeuren niet opslaan"
+
+msgid "N-gram cache rebuild is already in progress. Please wait for it to complete."
+msgstr "Het opnieuw opbouwen van de N-gram-cache is al bezig. Wacht tot het voltooid is."
+
+msgid "Error rebuilding N-gram cache: %s"
+msgstr "Fout bij opnieuw opbouwen van N-gram-cache: %s"
+
+msgid "N-gram cache rebuilt successfully: %d total entries processed (%d posts/pages, %d categories, %d tags), %d successful, %d failed."
+msgstr "N-gram-cache succesvol opnieuw opgebouwd: %d totale items verwerkt (%d berichten/pagina's, %d categorieën, %d tags), %d geslaagd, %d mislukt."
+
+msgid "Spelling cache cleared successfully."
+msgstr "SpellingsCache succesvol leeggemaakt."
+
+msgid "Cache Management"
+msgstr "Cachebeheer"
+
+msgid "N-gram Cache"
+msgstr "N-gram-cache"
+
+msgid "Rebuild the N-gram spell checker cache. This optimizes 404 URL matching performance. May take several minutes on large sites."
+msgstr "Bouw de N-gram spellingscontrolecache opnieuw op. Dit optimaliseert de prestaties van URL-matching voor 404. Kan enkele minuten duren op grote sites."
+
+msgid "Rebuild N-gram Cache"
+msgstr "N-gram-cache opnieuw opbouwen"
+
+msgid "Spelling Cache"
+msgstr "SpellingsCache"
+
+msgid "Clear the spelling cache to force recalculation of URL matches. Useful after making significant content changes."
+msgstr "Wis de spellingsCache om herberekening van URL-overeenkomsten af te dwingen. Handig na grote inhoudswijzigingen."
+
+msgid "Clear Spelling Cache"
+msgstr "SpellingsCache wissen"
+
+msgid "Disable automatic dark mode detection"
+msgstr "Automatische detectie van donkere modus uitschakelen"
+
+msgid "When unchecked and theme is set to \"Default\", the plugin will automatically switch to a dark theme if your WordPress admin color scheme is dark (Midnight, Ectoplasm, Coffee), if you have a dark mode plugin enabled, or if your browser/OS prefers dark mode."
+msgstr "Wanneer uitgeschakeld en het thema is ingesteld op \"Standaard\", schakelt de plugin automatisch over naar een donker thema als uw WordPress-beheerder kleurenschema donker is (Midnight, Ectoplasm, Coffee), als u een donkere modus plugin hebt ingeschakeld, of als uw browser/OS de voorkeur geeft aan donkere modus."
+
+msgid "Your feedback helps us improve. System information (WordPress version, PHP version, installed plugins) will be included. We respect your privacy and will not share your information."
+msgstr "Uw feedback helpt ons verbeteren. Systeeminformatie (WordPress-versie, PHP-versie, geïnstalleerde plugins) wordt meegestuurd. We respecteren uw privacy en zullen uw informatie niet delen."
+
+msgid "Plugin Language Override"
+msgstr "Plugin-taaloverride"
+
+msgid "Use WordPress Default"
+msgstr "WordPress-standaard gebruiken"
+
+msgid "Override the language used for this plugin's admin interface. Leave on \"Use WordPress Default\" to respect WordPress and user language settings."
+msgstr "Override de taal die wordt gebruikt voor de beheerinterface van deze plugin. Laat op \"WordPress-standaard gebruiken\" staan om de WordPress- en gebruikerstaalinstellingen te respecteren."
+
+#: includes/PluginLogic.php
+msgid "Error: Invalid language selected"
+msgstr "Fout: Ongeldige taal geselecteerd"
+
+#: includes/html/adminOptionsGeneral.html
+msgid "When an error is detected by the plugin, email the entire log file to the developer. This is not required for the plugin to function, but it is helpful for the developer and for future versions of the plugin. This reveals: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when an issue is reported). Log files are checked daily when maintenance is run."
+msgstr "Wanneer de plugin een fout detecteert, wordt het hele logbestand per e-mail naar de ontwikkelaar gestuurd. Dit is niet vereist voor de werking van de plugin, maar het is nuttig voor de ontwikkelaar en voor toekomstige versies van de plugin. Dit onthult: alles in het debuglogboek, het e-mailadres van de beheerder, geïnstalleerde PHP-extensies, actieve plugins, PHP-versie, WordPress-versie, MySQL-versie, totaal gepubliceerde pagina's en berichten, enz. (alles wat wordt gevraagd wanneer een probleem wordt gemeld). Logbestanden worden dagelijks gecontroleerd wanneer onderhoud wordt uitgevoerd."
+
+#: includes/html/viewSuggestions.html
+msgid "Display the closest matching pages by using the shortcode [abj404_solution_page_suggestions]."
+msgstr "Toon de best passende pagina's door de shortcode [abj404_solution_page_suggestions] te gebruiken."
+
+#: includes/html/viewSuggestions.html
+msgid "This shortcode can be used on the 404 page and will display a list of suggested pages. This is for when a user requests a page that doesn't exist and they are not automatically redirected to a matching page."
+msgstr "Deze shortcode kan worden gebruikt op de 404-pagina en toont een lijst met voorgestelde pagina's. Dit is voor wanneer een gebruiker een pagina opvraagt die niet bestaat en ze niet automatisch worden doorgestuurd naar een overeenkomende pagina."
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedLogging.html
+msgid "This is best for search engine bots that do need to be redirected when the slug structure changes. Use one line per user agent. If the text is found anywhere in the user agent string then it applies."
+msgstr "Dit is het beste voor zoekmachinebots die moeten worden doorgestuurd wanneer de slug-structuur verandert. Gebruik één regel per user agent. Als de tekst ergens in de user agent-string wordt gevonden, is deze van toepassing."
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedLogging.html
+msgid "This is best for internal processes that don't need to be redirected when the slug structure changes. Search engine user agents should not go here so that they will be redirected when the slug structure changes."
+msgstr "Dit is het beste voor interne processen die niet hoeven te worden doorgestuurd wanneer de slug-structuur verandert. User agents van zoekmachines mogen hier niet worden geplaatst, zodat ze worden doorgestuurd wanneer de slug-structuur verandert."
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedContent.html
+msgid "Pages listed here will not be redirected to (unless a redirect to the page already exists)."
+msgstr "Pagina's die hier worden vermeld, worden niet doorgestuurd naar (tenzij er al een doorverwijzing naar de pagina bestaat)."
+
+#: includes/html/settingsAdvanced.html
+msgid "The plugin will only redirect the post types specified here. Default WordPress post types are \"post\" and \"page.\" The \"product\" type is for WooCommerce users."
+msgstr "De plugin stuurt alleen de hier opgegeven berichttypen door. Standaard WordPress-berichttypen zijn \"post\" en \"page\". Het type \"product\" is voor WooCommerce-gebruikers."
+
+#: includes/html/adminOptionsGeneral.html
+msgid "When the number of captured 404s would cause an admin notification, an email will be sent to the addresses specified here. Multiple email addresses can be separated by commas (,). The \"from\" email address is always the default WordPress admin email:"
+msgstr "Wanneer het aantal vastgelegde 404's een beheerdermelding zou veroorzaken, wordt er een e-mail verzonden naar de hier opgegeven adressen. Meerdere e-mailadressen kunnen worden gescheiden door komma's (,). Het \"van\" e-mailadres is altijd de standaard WordPress-beheerder-e-mail:"
+
+#: includes/DatabaseUpgradesEtc.php:125
+msgid "404 Solution: N-gram spell check cache is being built in the background%s to optimize performance. This may take a few minutes on large sites."
+msgstr "404 Solution: N-gram spellingcontrole-cache wordt op de achtergrond%s opgebouwd om de prestaties te optimaliseren. Dit kan een paar minuten duren op grote sites."
+
+#: includes/PluginLogic.php
+msgid "N-gram cache rebuild is already scheduled or in progress. Please wait for it to complete."
+msgstr "N-gram cache herbouw is al gepland of wordt uitgevoerd. Wacht tot het is voltooid."
+
+#: includes/PluginLogic.php
+msgid "N-gram cache rebuild has been scheduled and will run in the background. This may take several minutes on large sites. You can continue using the plugin normally."
+msgstr "N-gram cache herbouw is gepland en wordt op de achtergrond uitgevoerd. Dit kan enkele minuten duren op grote sites. U kunt de plugin normaal blijven gebruiken."
+
+#: includes/PluginLogic.php
+msgid "Failed to schedule N-gram cache rebuild. Please try again or check your WordPress cron configuration."
+msgstr "N-gram cache herbouw kon niet worden gepland. Probeer het opnieuw of controleer uw WordPress cron-configuratie."
+
+#: includes/UninstallModal.php
+msgid "Deactivate without feedback"
+msgstr "Deactiveren zonder feedback"
+
+#: includes/UninstallModal.php
+msgid "Processing..."
+msgstr "Verwerken..."
+
+#: includes/UninstallModal.php
+msgid "Before deactivating, choose what happens to your data:"
+msgstr "Kies voordat u deactiveert wat er met uw gegevens gebeurt:"
+
+#: includes/UninstallModal.php
+msgid "Keep my redirects (%d)"
+msgstr "Bewaar mijn omleidingen (%d)"
+
+#: includes/UninstallModal.php
+msgid "— saves them for later if you reinstall"
+msgstr "— bewaart ze voor later als u opnieuw installeert"
+
+#: includes/UninstallModal.php
+msgid "— historical data preserved"
+msgstr "— historische gegevens bewaard"
+
+#: includes/UninstallModal.php
+msgid "Cache tables are always deleted (can be rebuilt)"
+msgstr "Cache-tabellen worden altijd verwijderd (kunnen opnieuw worden opgebouwd)"
+
+#: includes/UninstallModal.php
+msgid "What specifically isn't working?"
+msgstr "Wat werkt er specifiek niet?"
+
+#: includes/UninstallModal.php
+msgid "Redirects not triggering/working"
+msgstr "Omleidingen worden niet geactiveerd/werken niet"
+
+#: includes/UninstallModal.php
+msgid "Settings not saving"
+msgstr "Instellingen worden niet opgeslagen"
+
+#: includes/UninstallModal.php
+msgid "Admin pages showing errors"
+msgstr "Beheerpagina's tonen fouten"
+
+#: includes/UninstallModal.php
+msgid "Suggestions not appearing"
+msgstr "Suggesties verschijnen niet"
+
+#: includes/UninstallModal.php
+msgid "Conflicts with other plugins"
+msgstr "Conflicten met andere plugins"
+
+#: includes/UninstallModal.php
+msgid "Other issue (please specify below)"
+msgstr "Ander probleem (specificeer hieronder)"
+
+#: includes/UninstallModal.php
+msgid "What type of performance issue?"
+msgstr "Wat voor soort prestatieprobleem?"
+
+#: includes/UninstallModal.php
+msgid "Slow admin dashboard"
+msgstr "Traag beheerdashboard"
+
+#: includes/UninstallModal.php
+msgid "Slow frontend page loads"
+msgstr "Trage frontend-paginaladingen"
+
+#: includes/UninstallModal.php
+msgid "High database usage"
+msgstr "Hoog databasegebruik"
+
+#: includes/UninstallModal.php
+msgid "Memory issues"
+msgstr "Geheugenproblemen"
+
+#: includes/UninstallModal.php
+msgid "Other (please specify below)"
+msgstr "Ander (specificeer hieronder)"
+
+#: includes/UninstallModal.php
+msgid "What was confusing?"
+msgstr "Wat was verwarrend?"
+
+#: includes/UninstallModal.php
+msgid "Settings are confusing"
+msgstr "Instellingen zijn verwarrend"
+
+#: includes/UninstallModal.php
+msgid "Too many options"
+msgstr "Te veel opties"
+
+#: includes/UninstallModal.php
+msgid "Unclear documentation"
+msgstr "Onduidelijke documentatie"
+
+#: includes/UninstallModal.php
+msgid "Which plugin are you switching to?"
+msgstr "Naar welke plugin schakelt u over?"
+
+#: includes/UninstallModal.php
+msgid "Plugin name (optional)"
+msgstr "Pluginnaam (optioneel)"
+
+#: includes/UninstallModal.php
+msgid "Please tell us more (optional):"
+msgstr "Vertel ons meer (optioneel):"
+
+#: includes/UninstallModal.php
+msgid "What's your reason for deactivating?"
+msgstr "Wat is uw reden voor deactivering?"
+
+#: includes/UninstallModal.php
+msgid "Additional details (optional):"
+msgstr "Aanvullende details (optioneel):"
+
+#: includes/UninstallModal.php
+msgid "Any other information about the issue..."
+msgstr "Andere informatie over het probleem..."
+
+#: includes/UninstallModal.php
+msgid "For follow-up if needed"
+msgstr "Voor follow-up indien nodig"
+
+#: includes/UninstallModal.php
+msgid "Include technical details (system info + sanitized log excerpt) to help diagnose the issue"
+msgstr "Technische details opnemen (systeeminformatie + opgeschoond logfragment) om het probleem te diagnosticeren"
+
+#: includes/UninstallModal.php
+msgid "Feedback could not be sent."
+msgstr "Feedback kon niet worden verzonden."
+
+msgid "Collect incoming 404 URLs"
+msgstr "Binnenkomende 404-URLs verzamelen"
+
+msgid "Calm Ops (Light)"
+msgstr "Calm Ops (Licht)"
+
+msgid "Monochrome Minimal (Light)"
+msgstr "Monochroom Minimaal (Licht)"
+
+msgid "Neon Slate (Dark)"
+msgstr "Neon Slate (Donker)"
+
+msgid "Obsidian Blue (Dark)"
+msgstr "Obsidian Blue (Donker)"
+#: includes/ajax/SettingsModeToggle.php
+msgid "Invalid security token"
+msgstr "Ongeldig beveiligingstoken"
+
+msgid "Unauthorized"
+msgstr "Niet geautoriseerd"
+
+msgid "Invalid mode"
+msgstr "Ongeldige modus"
+
+msgid "Settings mode updated"
+msgstr "Instellingsmodus bijgewerkt"
+
+msgid "Failed to update settings mode"
+msgstr "Kan de instellingsmodus niet bijwerken"
+#: includes/View.php - Simple/Advanced Mode Toggle
+msgid "Simple Mode"
+msgstr "Eenvoudige Modus"
+
+msgid "Advanced Mode"
+msgstr "Geavanceerde Modus"
+
+msgid "Simple Mode shows essential options only. Switch to Advanced Mode for full configuration."
+msgstr "De eenvoudige modus toont alleen essentiële opties. Schakel over naar de geavanceerde modus voor volledige configuratie."
+
+msgid "Advanced Mode shows all options. Switch to Simple Mode for a streamlined view."
+msgstr "De geavanceerde modus toont alle opties. Schakel over naar de eenvoudige modus voor een gestroomlijnde weergave."
+
+msgid "Default (Follows WordPress)"
+msgstr "Standaard (volgt WordPress)"
+
+msgid "Core Settings"
+msgstr "Kerninstellingen"
+
+msgid "404 Capture"
+msgstr "404-opname"
+
+msgid "Default 404 destination"
+msgstr "Standaard 404-bestemming"
+
+msgid "Where to send visitors when a 404 error occurs"
+msgstr "Waar bezoekers naartoe sturen wanneer een 404-fout optreedt"
+
+msgid "Automatically redirect 404s to similar pages when a good match is found"
+msgstr "404's automatisch doorsturen naar vergelijkbare pagina's wanneer een goede match is gevonden"
+
+msgid "Redirect type"
+msgstr "Doorverwijzingstype"
+
+msgid "301 for SEO, 302 for temporary changes"
+msgstr "301 voor SEO, 302 voor tijdelijke wijzigingen"
+
+msgid "Log 404 errors so you can review and fix them"
+msgstr "404-fouten loggen zodat u ze kunt bekijken en oplossen"
+
+msgid "Delete captured URLs after"
+msgstr "Vastgelegde URL's verwijderen na"
+
+msgid "days"
+msgstr "dagen"
+
+msgid "Auto-remove old 404 records (0 to keep forever)"
+msgstr "Oude 404-records automatisch verwijderen (0 om voor altijd te bewaren)"
+
+msgid "Notify me when captured URLs exceed"
+msgstr "Waarschuw mij wanneer vastgelegde URL's overschrijden"
+
+msgid "Show admin notice when 404 count gets high (0 to disable)"
+msgstr "Admin-melding tonen wanneer 404-aantal hoog wordt (0 om uit te schakelen)"
+
+msgid "Maximum log storage"
+msgstr "Maximale logopslag"
+
+msgid "Oldest logs are deleted when this limit is reached"
+msgstr "Oudste logs worden verwijderd wanneer deze limiet is bereikt"
+
+msgid "Need more control? Switch to Advanced Mode for 30+ additional options."
+msgstr "Meer controle nodig? Schakel over naar de geavanceerde modus voor 30+ extra opties."
+
+msgid "Need more control?"
+msgstr "Need more control?"
+
+msgid "Switch to Advanced Mode"
+msgstr "Switch to Advanced Mode"
+
+msgid "for 30+ additional options."
+msgstr "for 30+ additional options."
+
+msgid "Statistics"
+msgstr "Statistics"
+
+msgid "Example:"
+msgstr "Example:"
+
+msgid "/events/(.+) will match any URL that begins with /events/ and redirect to the specified page. Since a capture group is used, you can use a $1 replacement in the destination string of an external URL."
+msgstr "/events/(.+) will match any URL that begins with /events/ and redirect to the specified page. Since a capture group is used, you can use a $1 replacement in the destination string of an external URL."
+
+msgid "URLs to redirect"
+msgstr "URLs to redirect"
+
+msgid "Captured"
+msgstr "Captured"
+
+msgid "Ignored"
+msgstr "Ignored"
+
+msgid "Later"
+msgstr "Later"
+
+msgid "Type to filter URLs... (press Enter)"
+msgstr "Type to filter URLs... (press Enter)"
+
+msgid "Are you sure you want to permanently delete all items in trash?"
+msgstr "Are you sure you want to permanently delete all items in trash?"
+
+msgid "selected"
+msgstr "selected"
+
+msgid "Mark Captured"
+msgstr "Mark Captured"
+
+msgid "Mark Ignored"
+msgstr "Mark Ignored"
+
+msgid "Move to Trash"
+msgstr "Move to Trash"
+
+msgid "Create Redirect"
+msgstr "Create Redirect"
+
+msgid "Clear"
+msgstr "Clear"
+
+msgid "Never"
+msgstr "Never"
+
+msgid "Captured 404 URL"
+msgstr "Captured 404 URL"
+
+msgid "Ignored URL - will not be suggested"
+msgstr "Ignored URL - will not be suggested"
+
+msgid "Edit"
+msgstr "Edit"
+
+msgid "View Logs"
+msgstr "View Logs"
+
+msgid "Delete Permanently"
+msgstr "Delete Permanently"
+
+msgid "Are you sure you want to permanently delete this item?"
+msgstr "Are you sure you want to permanently delete this item?"
+
+msgid "Delete"
+msgstr "Delete"
+
+msgid "Ignore"
+msgstr "Ignore"
+
+msgid "Manual"
+msgstr "Manual"
+
+msgid "Automatic"
+msgstr "Automatic"
+
+msgid "Type to filter redirects... (press Enter)"
+msgstr "Type to filter redirects... (press Enter)"
+
+msgid "redirects selected"
+msgstr "redirects selected"
+
+msgid "Bulk Actions"
+msgstr "Bulk Actions"
+
+msgid "Edit Redirects"
+msgstr "Edit Redirects"
+
+msgid "Restore Redirects"
+msgstr "Restore Redirects"
+
+msgid "Clear Selection"
+msgstr "Clear Selection"
+
+msgid "Are you sure you want to permanently delete all items in the trash?"
+msgstr "Are you sure you want to permanently delete all items in the trash?"
+
+msgid "Add Manual Redirect"
+msgstr "Add Manual Redirect"
+
+msgid "The URL path that should be redirected (without domain)"
+msgstr "The URL path that should be redirected (without domain)"
+
+msgid "Permanent Redirect (Recommended for SEO)"
+msgstr "Permanent Redirect (Recommended for SEO)"
+
+msgid "Temporary Redirect"
+msgstr "Temporary Redirect"
+
+msgid "logs"
+msgstr "logs"
+
+msgid "redirects"
+msgstr "redirects"
+
+msgid "Showing %1$d-%2$d of %3$d %4$s"
+msgstr "Showing %1$d-%2$d of %3$d %4$s"
+
+msgid "Redirects will appear here once created."
+msgstr "Redirects will appear here once created."
+
+msgid "Redirect Logs"
+msgstr "Redirect Logs"
+
+msgid "Action"
+msgstr "Action"
+
+msgid "404"
+msgstr "404"
+
+msgid "Today's Stats"
+msgstr "Today's Stats"
+
+msgid "This Month"
+msgstr "This Month"
+
+msgid "This Year"
+msgstr "This Year"
+
+msgid "All Stats"
+msgstr "All Stats"
+
+msgid "Visit URL"
+msgstr "Visit URL"
+
+msgid "This page doesn't exist or is not published so the redirect won't work."
+msgstr "This page doesn't exist or is not published so the redirect won't work."
+
+
+#: includes/DataAccess.php
+msgid "Just now"
+msgstr "Just now"
+
+#: includes/View.php
+msgid "Data may not be immediately updated. Refresh to see latest changes."
+msgstr "Data may not be immediately updated. Refresh to see latest changes."
+
+#: includes/View.php
+msgid "Last updated: %s"
+msgstr "Last updated: %s"
+
+#: includes/WordPress_Connector.php
+msgid "second"
+msgstr "second"
+
+#: includes/WordPress_Connector.php
+msgid "seconds"
+msgstr "seconds"
+
+#: includes/WordPress_Connector.php
+msgid "minute"
+msgstr "minute"
+
+#: includes/WordPress_Connector.php
+msgid "minutes"
+msgstr "minutes"
+
+#: includes/WordPress_Connector.php
+msgid "hour"
+msgstr "hour"
+
+#: includes/WordPress_Connector.php
+msgid "hours"
+msgstr "hours"
+
+#: includes/WordPress_Connector.php
+msgid "day"
+msgstr "day"
+
+#: includes/WordPress_Connector.php
+msgid "ago"
+msgstr "ago"
+
+#: includes/SetupWizard.php
+msgid "Security check failed. Please try again."
+msgstr "Beveiligingscontrole mislukt. Probeer het opnieuw."
+
+#: includes/SetupWizard.php
+msgid "Error"
+msgstr "Fout"
+
+#: includes/SetupWizard.php
+msgid "You do not have permission to access this page."
+msgstr "U heeft geen toestemming om deze pagina te openen."
+
+#: includes/SetupWizard.php
+msgid "Welcome to 404 Solution"
+msgstr "Welkom bij 404 Solution"
+
+#: includes/SetupWizard.php
+msgid "Close"
+msgstr "Sluiten"
+
+#: includes/SetupWizard.php
+msgid "404 Solution helps you automatically handle 404 errors and broken links on your site."
+msgstr "404 Solution helpt u automatisch 404-fouten en gebroken links op uw site te behandelen."
+
+#: includes/SetupWizard.php
+msgid "Let's configure how it handles missing pages. You can always change these settings later."
+msgstr "Laten we configureren hoe ontbrekende pagina's worden behandeld. U kunt deze instellingen altijd later wijzigen."
+
+#: includes/SetupWizard.php
+msgid "When a page is not found, what should happen?"
+msgstr "Wat moet er gebeuren als een pagina niet wordt gevonden?"
+
+#: includes/SetupWizard.php
+msgid "Automatically redirect to similar page (recommended)"
+msgstr "Automatisch doorverwijzen naar vergelijkbare pagina (aanbevolen)"
+
+#: includes/SetupWizard.php
+msgid "When a match is found, redirect visitors automatically"
+msgstr "Bij een overeenkomst bezoekers automatisch doorverwijzen"
+
+#: includes/SetupWizard.php
+msgid "Just show the default 404 page"
+msgstr "Toon gewoon de standaard 404-pagina"
+
+#: includes/SetupWizard.php
+msgid "Use WordPress's standard \"Page not found\" screen. Manual redirects still work."
+msgstr "Gebruik WordPress standaard \"Pagina niet gevonden\" scherm. Handmatige doorverwijzingen werken nog steeds."
+
+#: includes/SetupWizard.php
+msgid "Log 404 errors for review?"
+msgstr "404-fouten registreren voor beoordeling?"
+
+#: includes/SetupWizard.php
+msgid "Yes, log 404 errors"
+msgstr "Ja, 404-fouten registreren"
+
+#: includes/SetupWizard.php
+msgid "Track missing pages so you can create redirects later"
+msgstr "Ontbrekende pagina's bijhouden om later doorverwijzingen te maken"
+
+#: includes/SetupWizard.php
+msgid "No, don't log 404s"
+msgstr "Nee, geen 404-fouten registreren"
+
+#: includes/SetupWizard.php
+msgid "Only handle manually created redirects"
+msgstr "Alleen handmatig gemaakte doorverwijzingen verwerken"
+
+#: includes/SetupWizard.php
+msgid "Skip Setup"
+msgstr "Installatie overslaan"
+
+#: includes/SetupWizard.php
+msgid "Save & Get Started"
+msgstr "Opslaan en beginnen"
+
+#: includes/html/tableRowPageRedirects.html
+msgid "url-is-normal"
+msgstr "url-is-normal"
+
+#: includes/html/tableRowPageRedirects.html
+msgid "url-looks-like-regex"
+msgstr "url-looks-like-regex"
+
+#: includes/html/tableRowPageRedirects.html
+msgid "This URL looks like a regular expression but is not marked as one. Edit the redirect and check \"Treat this URL as a regular expression\"."
+msgstr "This URL looks like a regular expression but is not marked as one. Edit the redirect and check \"Treat this URL as a regular expression\"."
+
+msgid "Create redirect from old URL to new URL"
+msgstr "Doorverwijzing maken van oude URL naar nieuwe URL"
+
+msgid "If you change the permalink/slug, a redirect will be created from the old URL to the new one."
+msgstr "Als je de permalink/slug wijzigt, wordt er een doorverwijzing gemaakt van de oude URL naar de nieuwe."
+
+msgid "Redirect options are available after the post is published."
+msgstr "Doorverwijzingsopties zijn beschikbaar na publicatie van het bericht."
+
+msgid "404 Solution"
+msgstr "404 Oplossing"
+
+msgid "Slug changed:"
+msgstr "Slug gewijzigd:"
+
+#: includes/html/paginationLinks.html
+msgid "Filter results"
+msgstr "Filter resultaten"
+
+#: includes/html/paginationLinks.html
+msgid "Press Enter to search"
+msgstr "Druk op Enter om te zoeken"
+
+#: includes/html/paginationLinks.html
+msgid "Pagination"
+msgstr "Paginering"
+
+#: includes/View.php
+msgid "Select all"
+msgstr "Alles selecteren"
+
+#: includes/html/settingsModeToggle.html
+msgid "Settings mode"
+msgstr "Instellingenmodus"
+
+#: includes/html/viewSuggestions.html
+msgid "Require minimum match quality"
+msgstr "Minimale overeenkomstkwaliteit vereisen"
+
+#: includes/html/viewSuggestions.html
+msgid "Only show suggestions that closely match the requested URL. This filters out weak matches that may confuse visitors."
+msgstr "Toon alleen suggesties die nauw overeenkomen met de gevraagde URL. Dit filtert zwakke overeenkomsten uit die bezoekers kunnen verwarren."

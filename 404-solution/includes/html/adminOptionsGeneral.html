@@ -1,10 +1,7 @@
 <p>
     <label for="send_error_logs">{Help the developer by sending error logs}:</label>
     <input type="checkbox" name="send_error_logs" id="send_error_logs" value="1" {selectedSendErrorLogs}>
-    <BR/>&nbsp;&nbsp;&nbsp;{When an error is detected by the plugin, email the entire log file to the developer. }
-    {This is not required for the plugin to function, but it is helpful for the developer and for future versions of the plugin. }
-    {This reveals: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when an issue is reported). } 
-    {Log files are checked daily when maintenance is run. }
+    <BR/>&nbsp;&nbsp;&nbsp;{When an error is detected by the plugin, email the entire log file to the developer. This is not required for the plugin to function, but it is helpful for the developer and for future versions of the plugin. This reveals: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when an issue is reported). Log files are checked daily when maintenance is run.}
 </p>
 
 <p>
@@ -26,20 +23,19 @@
 <p>
     <label for="admin_notification_email">{Admin notification email(s)}:</label>
     <input type="text" name="admin_notification_email" id="admin_notification_email" value="{admin_notification_email}" style="width: 500px;">
-    <BR/>&nbsp;&nbsp;&nbsp;{When the number of captured 404s would cause an admin notification, an email will be sent to the addresses specified here. }
-    {Multiple email addresses can be separated by commas (,). The "from" email address is always the default WordPress admin email: } 
+    <BR/>&nbsp;&nbsp;&nbsp;{When the number of captured 404s would cause an admin notification, an email will be sent to the addresses specified here. Multiple email addresses can be separated by commas (,). The "from" email address is always the default WordPress admin email:} 
     <span style="font-weight: bold;">{default_wordpress_admin_email}</span>. 
     {One email will be sent per day (when maintenance is run) until the number of captured 404s goes below the number specified in the alert settings.} 
 </p>
 <p>
-    <label for="capture_deletion">{Collected 404 URL deletion}:</label>
-    <input type="text" name="capture_deletion" id="capture_deletion" value="{capture_deletion}" style="width: 50px;"> {Days (0 Disables Auto Delete)}
-    <BR/>&nbsp;&nbsp;&nbsp;{Automatically removes 404 URLs that have been captured if they haven't been used for the specified amount of time.}
+    <label for="capture_deletion">{Delete captured 404 URLs after}:</label>
+    <input type="text" name="capture_deletion" id="capture_deletion" value="{capture_deletion}" style="width: 50px;"> {days without use (0 to disable)}
+    <BR/>&nbsp;&nbsp;&nbsp;{Removes captured 404 URLs if they haven't been used for the specified amount of time.}
 </p>
 <p>
-    <label for="manual_deletion">{Manual redirect deletion}:</label>
-    <input type="text" name="manual_deletion" id="manual_deletion" value="{manual_deletion}" style="width: 50px;"> {Days (0 Disables Auto Delete)}
-    <BR/>&nbsp;&nbsp;&nbsp;{Automatically removes manually created page redirects if they haven't been used for the specified amount of time.}
+    <label for="manual_deletion">{Delete manual redirects after}:</label>
+    <input type="text" name="manual_deletion" id="manual_deletion" value="{manual_deletion}" style="width: 50px;"> {days without use (0 to disable)}
+    <BR/>&nbsp;&nbsp;&nbsp;{Removes manually created redirects if they haven't been used for the specified amount of time. Does not affect automatically created redirects.}
 </p>
 <p>
     <label for="maximum_log_disk_usage">{Maximum log disk usage (MB)}:</label>
@@ -59,4 +55,41 @@
         <option value="settingsLevel" {selecteSsettingsLevel}>{At the same level as the Settings and Tools menu}</option>
     </select>
     <BR/>&nbsp;&nbsp;&nbsp;{Choose whether the 404 Settings link appears under the "Settings" menu or elsewhere.}
+</p>
+<p>
+    <label for="admin_theme">{Admin theme}:</label>
+    <select name="admin_theme" id="admin_theme">
+        <option value="default" {selectedThemeDefault}>{theme_default}</option>
+        <option value="calm" {selectedThemeCalm}>{Calm Ops (Light)}</option>
+        <option value="mono" {selectedThemeMono}>{Monochrome Minimal (Light)}</option>
+        <option value="neon" {selectedThemeNeon}>{Neon Slate (Dark)}</option>
+        <option value="obsidian" {selectedThemeObsidian}>{Obsidian Blue (Dark)}</option>
+    </select>
+    <BR/>&nbsp;&nbsp;&nbsp;{Choose the color theme for the admin pages. The theme changes immediately for preview, and will be saved when you click "Save Settings".}
+</p>
+<p>
+    <label for="plugin_language_override">{Plugin Language Override}:</label>
+    <select name="plugin_language_override" id="plugin_language_override">
+        <option value="" {selectedLanguageDefault}>{Use WordPress Default}</option>
+        <option value="en_US" {selectedLanguageEnUS}>English (United States)</option>
+        <option value="de_DE" {selectedLanguageDeDE}>Deutsch (German)</option>
+        <option value="es_ES" {selectedLanguageEsES}>Español (Spanish)</option>
+        <option value="fr_FR" {selectedLanguageFrFR}>Français (French)</option>
+        <option value="it_IT" {selectedLanguageItIT}>Italiano (Italian)</option>
+        <option value="pt_BR" {selectedLanguagePtBR}>Português (Portuguese - Brazil)</option>
+        <option value="nl_NL" {selectedLanguageNlNL}>Nederlands (Dutch)</option>
+        <option value="ru_RU" {selectedLanguageRuRU}>Русский (Russian)</option>
+        <option value="ja" {selectedLanguageJa}>日本語 (Japanese)</option>
+        <option value="zh_CN" {selectedLanguageZhCN}>简体中文 (Chinese Simplified)</option>
+        <option value="id_ID" {selectedLanguageIdID}>Bahasa Indonesia (Indonesian)</option>
+        <option value="sv_SE" {selectedLanguageSvSE}>Svenska (Swedish)</option>
+    </select>
+    <BR/>&nbsp;&nbsp;&nbsp;{Override the language used for this plugin's admin interface. Leave on "Use WordPress Default" to respect WordPress and user language settings.}
+</p>
+<p>
+    <label for="disable_auto_dark_mode">
+        <input type="checkbox" name="disable_auto_dark_mode" id="disable_auto_dark_mode" value="1" {disableAutoDarkModeChecked}/>
+        {Disable automatic dark mode detection}
+    </label>
+    <BR/>&nbsp;&nbsp;&nbsp;{When unchecked and theme is set to "Default", the plugin will automatically switch to a dark theme if your WordPress admin color scheme is dark (Midnight, Ectoplasm, Coffee), if you have a dark mode plugin enabled, or if your browser/OS prefers dark mode.}
 </p>

@@ -1,0 +1,2226 @@
+# Translation file for 404 Solution WordPress Plugin
+# Copyright (C) 2025 Aaron J
+# This file is distributed under the same license as the 404 Solution plugin.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: 404 Solution\n"
+"Report-Msgid-Bugs-To: https://github.com/aaron13100/404solution/issues\n"
+"POT-Creation-Date: 2025-11-11 07:26+0000\n"
+"PO-Revision-Date: 2025-11-11 07:26+0000\n"
+"Last-Translator: Auto-Generated\n"
+"Language-Team: Indonesian\n"
+"Language: id_ID\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"X-Generator: 404 Solution Translation Generator v2\n"
+"X-Poedit-KeywordsList: __;_e;_n:1,2;_x:1,2c;_ex:1,2c;_nx:4c,1,2;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c;_n_noop:1,2;_nx_noop:3c,1,2;__ngettext_noop:1,2\n"
+"X-Poedit-Basepath: ..\n"
+"X-Poedit-SearchPath-0: .\n"
+
+
+msgid "404 Solution - Deactivation Options"
+msgstr "404 Solution - Opsi Penonaktifan"
+
+msgid "Cancel"
+msgstr "Batal"
+
+msgid "Deactivate Plugin"
+msgstr "Nonaktifkan Plugin"
+
+msgid "Deactivating"
+msgstr "Menonaktifkan"
+
+msgid "Saving..."
+msgstr "Menyimpan..."
+
+#, fuzzy
+msgid "Could not save settings - missing security token. The wizard may appear again on next visit."
+msgstr "Could not save settings - missing security token. The wizard may appear again on next visit."
+
+#, fuzzy
+msgid "Could not save dismissal. The wizard may appear again on next visit."
+msgstr "Could not save dismissal. The wizard may appear again on next visit."
+
+#, fuzzy
+msgid "Could not save dismissal: "
+msgstr "Could not save dismissal: "
+
+#, fuzzy
+msgid " The wizard may appear again on next visit."
+msgstr " The wizard may appear again on next visit."
+
+#, fuzzy
+msgid "Network error - could not save dismissal. The wizard may appear again on next visit."
+msgstr "Network error - could not save dismissal. The wizard may appear again on next visit."
+
+msgid "Settings"
+msgstr "Pengaturan"
+
+msgid "404 Solution: Migrated %d redirects to subdirectory-independent format."
+msgstr "404 Solution: Berhasil memigrasikan %d pengalihan ke format independen subdirektori."
+msgid "%1$s - %2$s of %3$s"
+msgstr "%1$s - %2$s dari %3$s"
+
+msgid "(A custom string has been entered.)"
+msgstr "(String kustom telah dimasukkan.)"
+
+msgid "(A page has been selected.)"
+msgstr "(Sebuah halaman telah dipilih.)"
+
+msgid "(All results displayed for \"%s.\")"
+msgstr "(Semua hasil ditampilkan untuk \"%s.\")"
+
+msgid "(All results displayed.)"
+msgstr "(Semua hasil ditampilkan.)"
+
+msgid "(An external URL will be used.)"
+msgstr "(URL eksternal akan digunakan.)"
+
+msgid "(Begin typing a URL)"
+msgstr "(Mulai ketik URL)"
+
+msgid "(Data truncated. Too many results for \"%s!\".)"
+msgstr "(Data dipotong. Terlalu banyak hasil untuk \"%s!\".)"
+
+msgid "(Data truncated. Too many results!)"
+msgstr "(Data dipotong. Terlalu banyak hasil!)"
+
+msgid "(Default 404 Page)"
+msgstr "(Halaman 404 Default)"
+
+msgid "(Explain)"
+msgstr "(Penjelasan)"
+
+msgid "(Hide Info)"
+msgstr "(Sembunyikan Info)"
+
+msgid "(Home Page)"
+msgstr "(Halaman Beranda)"
+
+msgid "(No matching results found for \"%s.\")"
+msgstr "(Tidak ada hasil yang cocok untuk \"%s.\")"
+
+msgid "(No matching results found.)"
+msgstr "(Tidak ada hasil yang cocok.)"
+
+msgid "(Please choose from the dropdown list instead of typing your own URL.)"
+msgstr "(Silakan pilih dari daftar dropdown daripada mengetik URL Anda sendiri.)"
+
+msgid "(Required)"
+msgstr "(Wajib)"
+
+msgid "(Show All Logs)"
+msgstr "(Tampilkan Semua Log)"
+
+msgid "(Special)"
+msgstr "(Khusus)"
+
+msgid "(The log file does not exist.)"
+msgstr "(File log tidak ada.)"
+
+msgid "(The specified page doesn't exist. Please update this setting.)"
+msgstr "(Halaman yang ditentukan tidak ada. Silakan perbarui pengaturan ini.)"
+
+msgid "(Type a page name or an external URL)"
+msgstr "(Ketik nama halaman atau URL eksternal)"
+
+msgid "(Type a page name)"
+msgstr "(Ketik nama halaman)"
+
+msgid "(Type to filter)"
+msgstr "(Ketik untuk memfilter)"
+
+msgid "(don't suggest .jpg files)"
+msgstr "(jangan sarankan file .jpg)"
+
+msgid "(don't suggest .pdf files)"
+msgstr "(jangan sarankan file .pdf)"
+
+msgid "(don't suggest pages within any directory named /private/)"
+msgstr "(jangan sarankan halaman dalam direktori bernama /private/)"
+
+msgid "(don't suggest pages within the /members/ directory)"
+msgstr "(jangan sarankan halaman dalam direktori /members/)"
+
+msgid "(don't suggest the specific page with slug 'old-contact-page')"
+msgstr "(jangan sarankan halaman dengan slug 'old-contact-page')"
+
+msgid "(ignore all .jpg files)"
+msgstr "(abaikan semua file .jpg)"
+
+msgid "(ignore all .js files)"
+msgstr "(abaikan semua file .js)"
+
+msgid "(ignore all .php files)"
+msgstr "(abaikan semua file .php)"
+
+msgid "(ignore everything in the cache directory)"
+msgstr "(abaikan semua yang ada di direktori cache)"
+
+msgid "(ignore everything in this directory)"
+msgstr "(abaikan semua yang ada di direktori ini)"
+
+msgid "(unless a redirect to the page already exists)."
+msgstr "(kecuali pengalihan ke halaman tersebut sudah ada)."
+
+msgid "* 404s are still redirected when possible."
+msgstr "* 404 tetap dialihkan jika memungkinkan."
+
+msgid "* Do not capture 404 URLs."
+msgstr "* Jangan catat URL 404."
+
+msgid "* Do not redirect 404s for the patterns listed here."
+msgstr "* Jangan alihkan 404 untuk pola yang tercantum di sini."
+
+msgid "* Do not redirect 404s from the user agents listed here."
+msgstr "* Jangan alihkan 404 dari user agent yang tercantum di sini."
+
+msgid "* If the string appears anywhere within the user agent string then it's a match."
+msgstr "* Jika string muncul di mana saja dalam string user agent maka itu cocok."
+
+msgid "* One pattern per line."
+msgstr "* Satu pola per baris."
+
+msgid "* One string per line."
+msgstr "* Satu string per baris."
+
+msgid "* One type per line."
+msgstr "* Satu tipe per baris."
+
+msgid "* Strings are case insensitive."
+msgstr "* String tidak peka huruf besar/kecil."
+
+msgid "* Strings are case sensitive."
+msgstr "* String peka huruf besar/kecil."
+
+msgid "* These patterns match the path of a URL, not a title.\""
+msgstr "* Pola ini cocok dengan path URL, bukan judul.\""
+
+msgid "* Use an asterisk (*) to match \"any pattern.\""
+msgstr "* Gunakan tanda bintang (*) untuk mencocokkan \"pola apa pun.\""
+
+msgid "404 Page Suggestions"
+msgstr "Saran Halaman 404"
+
+msgid "404 URL marked as %s successfully!"
+msgstr "URL 404 berhasil ditandai sebagai %s!"
+
+msgid "<a>View</a> the debug file."
+msgstr "<a>Lihat</a> file debug."
+
+msgid "Action Taken"
+msgstr "Tindakan yang Diambil"
+
+msgid "Add Redirect"
+msgstr "Tambahkan Pengalihan"
+
+msgid "Add a Manual Redirect"
+msgstr "Tambahkan Pengalihan Manual"
+
+msgid "Add a Redirect"
+msgstr "Tambahkan Pengalihan"
+
+msgid "Admin notification email(s)"
+msgstr "Email notifikasi admin"
+
+msgid "Admin notification level"
+msgstr "Tingkat notifikasi admin"
+
+msgid "Admin theme"
+msgstr "Tema admin"
+
+msgid "Advanced"
+msgstr "Lanjutan"
+
+#: includes/View.php - Inline mode toggle
+msgid "Simple"
+msgstr "Sederhana"
+
+#: includes/View.php - Quick links / Sticky save bar / Toast notification
+msgid "View Stats"
+msgstr "Lihat Statistik"
+
+msgid "Captured 404s"
+msgstr "404 yang Ditangkap"
+
+msgid "Documentation"
+msgstr "Dokumentasi"
+
+msgid "Plugin v%s"
+msgstr "Plugin v%s"
+
+msgid "Settings saved successfully!"
+msgstr "Pengaturan berhasil disimpan!"
+
+msgid "Smart Matching"
+msgstr "Pencocokan Cerdas"
+
+msgid "Advanced Settings (Etc)"
+msgstr "Pengaturan Lanjutan (Dll)"
+
+msgid "Content & URL Filtering"
+msgstr "Penyaringan Konten & URL"
+
+msgid "Logging & Privacy"
+msgstr "Pencatatan & Privasi"
+
+msgid "Advanced Configuration"
+msgstr "Konfigurasi Lanjutan"
+
+msgid "Expand All"
+msgstr "Buka Semua"
+
+msgid "Collapse All"
+msgstr "Tutup Semua"
+
+msgid "Feedback sent successfully."
+msgstr "Masukan berhasil dikirim."
+
+msgid "Note: Feedback email could not be sent."
+msgstr "Catatan: Email masukan tidak dapat dikirim."
+
+msgid "All"
+msgstr "Semua"
+
+msgid "All other redirects must be deleted and only one regex redirect for all URLs must be created for this to work."
+msgstr "Semua pengalihan lainnya harus dihapus dan hanya satu pengalihan regex untuk semua URL yang harus dibuat agar ini berfungsi."
+
+msgid "All trashed URLs have been deleted!"
+msgstr "Semua URL yang ada di tong sampah telah dihapus!"
+
+msgid "Allow category suggestions"
+msgstr "Izinkan saran kategori"
+
+msgid "Allow tag suggestions"
+msgstr "Izinkan saran tag"
+
+msgid "An unknown error has occurred."
+msgstr "Terjadi kesalahan yang tidak diketahui."
+
+msgid "Apply"
+msgstr "Terapkan"
+
+msgid "At the same level as the Settings and Tools menu"
+msgstr "Pada level yang sama dengan menu Pengaturan dan Alat"
+
+msgid "Auto"
+msgstr "Auto"
+
+msgid "Delete automatic redirects after"
+msgstr "Hapus pengalihan otomatis setelah"
+
+msgid "Auto Redirects"
+msgstr "Pengalihan Otomatis"
+
+
+msgid "Automatic 301 Redirects"
+msgstr "Pengalihan 301 Otomatis"
+
+msgid "Automatic 302 Redirects"
+msgstr "Pengalihan 302 Otomatis"
+
+msgid "Automatic Redirects"
+msgstr "Pengalihan Otomatis"
+
+msgid "Automatically created"
+msgstr "Dibuat secara otomatis"
+
+msgid "Automatically creates redirects based on best possible suggested page."
+msgstr "Secara otomatis membuat pengalihan berdasarkan halaman yang paling cocok."
+
+msgid "Removes captured 404 URLs if they haven't been used for the specified amount of time."
+msgstr "Menghapus URL 404 yang tercatat secara otomatis jika tidak ada aktivitas selama periode waktu yang ditentukan."
+
+msgid "Removes manually created redirects if they haven't been used for the specified amount of time. Does not affect automatically created redirects."
+msgstr "Menghapus pengalihan yang dibuat manual jika tidak digunakan selama waktu yang ditentukan. Tidak mempengaruhi pengalihan yang dibuat otomatis."
+
+msgid "Captured 404 URLs"
+msgstr "URL 404 yang Tercatat"
+
+msgid "Captured URLs"
+msgstr "URL yang Tercatat"
+
+msgid "Captured URLs (0 Disables Notification)"
+msgstr "URL yang Tercatat (Masukkan 0 untuk Menonaktifkan Notifikasi)"
+
+msgid "Categories"
+msgstr "Kategori"
+
+msgid "Category"
+msgstr "Kategori"
+
+msgid "Category:"
+msgstr "Kategori:"
+
+msgid "Changes may not be updated immediately when ordering by this column"
+msgstr "Perubahan mungkin tidak diperbarui secara langsung saat mengurutkan berdasarkan kolom ini"
+
+msgid "Checks each redirect for a new matching permalink before the user is redirected. If a new page permalink is found matching the redirected URL then the redirect will be deleted."
+msgstr "Memeriksa setiap pengalihan untuk permalink yang cocok sebelum pengguna dialihkan. Jika permalink halaman baru ditemukan yang cocok dengan URL pengalihan maka pengalihan akan dihapus."
+
+msgid "Choose at least one URL"
+msgstr "Pilih setidaknya satu URL"
+
+msgid "Choose whether the 404 Settings link appears under the \"Settings\" menu or elsewhere."
+msgstr "Pilih apakah link Pengaturan 404 muncul di bawah menu \"Pengaturan\" atau di tempat lain."
+
+msgid "Choose the color theme for the admin pages. The theme changes immediately for preview, and will be saved when you click \"Save Settings\"."
+msgstr "Pilih tema warna untuk halaman admin. Tema berubah langsung untuk pratinjau, dan akan disimpan saat Anda mengklik \"Simpan Pengaturan\"."
+
+msgid "Cleanup is done daily."
+msgstr "Pembersihan dilakukan setiap hari."
+
+msgid "Click to view debug data for all suggestions"
+msgstr "Klik untuk melihat data debug untuk semua saran"
+
+msgid "Delete captured 404 URLs after"
+msgstr "Hapus URL 404 yang tercatat setelah"
+
+msgid "Create a CSV file with the redirects and captured 404s."
+msgstr "Buat file CSV dengan pengalihan dan 404 yang tercatat."
+
+msgid "Create and Download"
+msgstr "Buat dan Unduh"
+
+msgid "Create automatic redirects"
+msgstr "Buat pengalihan otomatis"
+
+msgid "Create redirects on slug change"
+msgstr "Buat pengalihan saat slug berubah"
+
+msgid "Create automatic redirects for categories"
+msgstr "Buat pengalihan otomatis untuk kategori"
+
+msgid "Create automatic redirects for tags"
+msgstr "Buat pengalihan otomatis untuk tag"
+
+msgid "Created"
+msgstr "Dibuat"
+
+msgid "Credits"
+msgstr "Kredit"
+
+msgid "Current approximate log disk usage"
+msgstr "Penggunaan disk log saat ini (perkiraan)"
+
+msgid "Custom"
+msgstr "Kustom"
+
+msgid "Custom Taxonomies"
+msgstr "Taksonomi Kustom"
+
+msgid "DATABASE_VERSION"
+msgstr "DATABASE_VERSION"
+
+msgid "DB version"
+msgstr "Versi DB"
+
+msgid "Date"
+msgstr "Tanggal"
+
+msgid "days without use (0 to disable)"
+msgstr "hari tanpa penggunaan (0 untuk menonaktifkan)"
+
+msgid "Debug Log"
+msgstr "Log Debug"
+
+msgid "Debug file not found. (%s)"
+msgstr "File debug tidak ditemukan. (%s)"
+
+msgid "Debug file size: %1$s KB (%2$s MB)."
+msgstr "Ukuran file debug: %1$s KB (%2$s MB)."
+
+msgid "Debug file size: %s KB."
+msgstr "Ukuran file debug: %s KB."
+
+msgid "Debug file(s) deleted. (%s)"
+msgstr "File debug dihapus. (%s)"
+
+msgid "Debug logging"
+msgstr "Pencatatan debug"
+
+msgid "Default"
+msgstr "Default"
+
+msgid "Default WordPress post types are \"post\" and \"page.\""
+msgstr "Tipe post WordPress default adalah \"post\" dan \"page.\""
+
+msgid "Default redirect type"
+msgstr "Jenis pengalihan standar"
+
+msgid "Delete the Debug File"
+msgstr "Hapus File Debug"
+
+msgid "Destination"
+msgstr "Tujuan"
+
+msgid "Display Before/After each suggested page"
+msgstr "Tampilkan Sebelum/Sesudah setiap halaman yang disarankan"
+
+msgid "Display Before/After page suggestions"
+msgstr "Tampilkan Sebelum/Sesudah saran halaman"
+
+msgid "Display a WordPress admin notification when the number of captured URLs goes above this number"
+msgstr "Tampilkan notifikasi admin WordPress ketika jumlah URL yang tercatat melebihi angka ini"
+
+msgid "Display if no suggestion results"
+msgstr "Tampilkan jika tidak ada hasil saran"
+
+msgid "Display the closest matching pages by using the shortcode <span style=\"font-weight: bold;\">[abj404_solution_page_suggestions]</span>."
+msgstr "Tampilkan halaman yang paling cocok dengan menggunakan shortcode <span style=\"font-weight: bold;\">[abj404_solution_page_suggestions]</span>."
+
+msgid "Displayed 404 Page"
+msgstr "Halaman 404 yang Ditampilkan"
+
+msgid "Earliest log date"
+msgstr "Tanggal log tertua"
+
+msgid "Edit Redirect"
+msgstr "Ubah Pengalihan"
+
+msgid "Edit Redirect Details"
+msgstr "Ubah Detail Pengalihan"
+
+msgid "Empty Trash"
+msgstr "Kosongkan Tong Sampah"
+
+msgid "Error: An invalid purge type was selected. Exiting."
+msgstr "Kesalahan: Tipe pembersihan tidak valid dipilih. Keluar."
+
+msgid "Error: Auto match score value must be a number between 0 and 99"
+msgstr "Kesalahan: Nilai skor pencocokan otomatis harus berupa angka antara 0 dan 99"
+
+msgid "Error: Bad %s operation specified."
+msgstr "Kesalahan: Operasi %s tidak valid ditentukan."
+
+msgid "Error: Bad data passed for update redirect request."
+msgstr "Kesalahan: Data tidak valid diteruskan untuk permintaan pembaruan pengalihan."
+
+msgid "Error: Bad trash operation specified."
+msgstr "Kesalahan: Operasi tong sampah tidak valid ditentukan."
+
+msgid "Error: Data not formatted properly."
+msgstr "Kesalahan: Data tidak diformat dengan benar."
+
+msgid "Error: External URL doesn't contain ://"
+msgstr "Kesalahan: URL eksternal tidak mengandung ://"
+
+msgid "Error: External URL is too short."
+msgstr "Kesalahan: URL eksternal terlalu pendek."
+
+msgid "Error: External redirect URL failed validation."
+msgstr "Kesalahan: URL pengalihan eksternal gagal validasi."
+
+msgid "Error: External URL must use http:// or https:// protocol only."
+msgstr "Kesalahan: URL eksternal harus menggunakan protokol http:// atau https:// saja."
+
+msgid "Error: Invalid theme selected"
+msgstr "Kesalahan: Tema tidak valid dipilih"
+
+msgid "Error: Invalid value specified for default redirect type"
+msgstr "Kesalahan: Nilai tidak valid ditentukan untuk jenis pengalihan standar"
+
+msgid "Error: Maximum number of suggest value must be a number greater than or equal to 1"
+msgstr "Kesalahan: Nilai jumlah maksimum saran harus berupa angka lebih besar atau sama dengan 1"
+
+msgid "Error: No ID(s) found for edit request."
+msgstr "Kesalahan: Tidak ada ID yang ditemukan untuk permintaan edit."
+
+msgid "Error: No ID(s) specified for bulk action. (%s)"
+msgstr "Kesalahan: Tidak ada ID yang ditentukan untuk tindakan massal. (%s)"
+
+msgid "Error: No records were imported. SQL result: %s"
+msgstr "Kesalahan: Tidak ada catatan yang diimpor. Hasil SQL: %s"
+
+msgid "Error: No redirect types were selected. No purges will be done."
+msgstr "Kesalahan: Tidak ada jenis pengalihan yang dipilih. Tidak ada pembersihan yang akan dilakukan."
+
+msgid "Error: No valid redirect types were selected. Exiting."
+msgstr "Kesalahan: Tidak ada jenis pengalihan yang valid dipilih. Keluar."
+
+msgid "Error: Suggestion minimum score value must be a number between 1 and 99"
+msgstr "Kesalahan: Nilai skor minimum saran harus berupa angka antara 1 dan 99"
+
+msgid "Error: Template redirect priority value must be a number between 0 and 999"
+msgstr "Kesalahan: Nilai prioritas pengalihan template harus berupa angka antara 0 dan 999"
+
+msgid "Error: URL is a required field."
+msgstr "Kesalahan: URL adalah field yang wajib diisi."
+
+msgid "Error: URL must start with /"
+msgstr "Kesalahan: URL harus dimulai dengan /"
+
+msgid "Error: Redirect destination is required."
+msgstr "Kesalahan: Destinasi pengalihan diperlukan."
+
+msgid "Error: Unable to move redirect from trash."
+msgstr "Kesalahan: Tidak dapat memindahkan pengalihan dari tong sampah."
+
+msgid "Error: Unable to move redirect to trash."
+msgstr "Kesalahan: Tidak dapat memindahkan pengalihan ke tong sampah."
+
+msgid "Error: Unable to update redirect data."
+msgstr "Kesalahan: Tidak dapat memperbarui data pengalihan."
+
+msgid "Error: Unknown Database Error!"
+msgstr "Kesalahan: Kesalahan Database Tidak Diketahui!"
+
+msgid "Error: Unrecognized bulk action. (%s)"
+msgstr "Kesalahan: Tindakan massal tidak dikenali. (%s)"
+
+msgid "Error: You didn't check the I understand checkbox. No importing for you!"
+msgstr "Kesalahan: Anda tidak mencentang kotak \"Saya mengerti\". Proses impor dibatalkan karena Anda tidak mencentang kotak konfirmasi."
+
+msgid "Error: You didn't check the I understand checkbox. No purging of records for you!"
+msgstr "Kesalahan: Anda tidak mencentang kotak \"Saya mengerti\". Proses penghapusan catatan dibatalkan karena Anda tidak mencentang kotak konfirmasi."
+
+msgid "Error: The time to wait before an automatic update must be a number between 0 and something around %d."
+msgstr "Kesalahan: Waktu tunggu sebelum pembaruan otomatis harus berupa angka antara 0 dan sekitar %d."
+
+msgid "Error: You selected external URL but did not enter a URL."
+msgstr "Kesalahan: Anda memilih URL eksternal tetapi tidak memasukkan URL."
+
+msgid "Error: unable to add new redirect."
+msgstr "Kesalahan: tidak dapat menambahkan pengalihan baru."
+
+msgid "Error: unable to mark URL as %s"
+msgstr "Kesalahan: tidak dapat menandai URL sebagai %s"
+
+msgid "Error: unable to remove URL from %s list"
+msgstr "Kesalahan: tidak dapat menghapus URL dari daftar %s"
+
+msgid "Etcetera"
+msgstr "Lain-lain"
+
+msgid "Even if more pages could be suggested, show at most this many (default: 5)"
+msgstr "Meskipun lebih banyak halaman dapat disarankan, tampilkan paling banyak sejumlah ini (default: 5)"
+
+msgid "Example"
+msgstr "Contoh"
+
+msgid "Examples:"
+msgstr "Contoh:"
+
+msgid "Exclude Specific Pages, Posts, Categories, Etc"
+msgstr "Kecualikan Halaman, Post, Kategori, Dll Tertentu"
+
+msgid "Exclude Suggestion URLs (Regex)"
+msgstr "Kecualikan URL Saran (Regex)"
+
+msgid "Exclude potential suggestions if their final URL matches one of these patterns."
+msgstr "Kecualikan saran potensial jika URL akhir mereka cocok dengan salah satu pola ini."
+
+msgid "Export"
+msgstr "Ekspor"
+
+msgid "External"
+msgstr "Eksternal"
+
+msgid "External Page"
+msgstr "Halaman Eksternal"
+
+msgid "External User Agents - Do Not Log"
+msgstr "User Agent Eksternal - Jangan Dicatat"
+
+msgid "Files and Folders Ignore Strings - Do Not Process"
+msgstr "String Abaikan File dan Folder - Jangan Diproses"
+
+msgid "Files and folders listed here will be ignored."
+msgstr "File dan folder yang tercantum di sini akan diabaikan."
+
+msgid "First, all of the normal \"exact match\" URLs are checked, then all of the regular expression URLs are checked."
+msgstr "Pertama, semua URL \"pencocokan tepat\" normal diperiksa, kemudian semua URL regular expression diperiksa."
+
+msgid "General"
+msgstr "Umum"
+
+msgid "General Settings"
+msgstr "Pengaturan Umum"
+
+msgid "Go to first page"
+msgstr "Ke halaman pertama"
+
+msgid "Go to last page"
+msgstr "Ke halaman terakhir"
+
+msgid "Go to next page"
+msgstr "Ke halaman berikutnya"
+
+msgid "Go to previous page"
+msgstr "Ke halaman sebelumnya"
+
+msgid "Help the developer by sending error logs"
+msgstr "Bantu pengembang dengan mengirim log kesalahan"
+
+msgid "Here are some other great pages"
+msgstr "Berikut adalah beberapa halaman hebat lainnya"
+
+msgid "Hide %s"
+msgstr "Sembunyikan %s"
+
+msgid "Hits"
+msgstr "Kunjungan"
+
+msgid "Hits Redirected"
+msgstr "Kunjungan yang Dialihkan"
+
+msgid "Home Page"
+msgstr "Halaman Beranda"
+
+msgid "Home Page:"
+msgstr "Halaman Beranda:"
+
+msgid "I understand the above statement, I know what I am doing... blah blah blah. Just delete the records!"
+msgstr "Saya mengerti pernyataan di atas, saya tahu apa yang saya lakukan... bla bla bla. Hapus saja catatannya!"
+
+msgid "I understand the above statement."
+msgstr "Saya mengerti pernyataan di atas."
+
+msgid "IP Address"
+msgstr "Alamat IP"
+
+#, fuzzy
+msgid "If no suggested pages are found, then this text will be displayed.  (default: &lt;p&gt;No suggestions. :/ &lt;/p&gt;)"
+msgstr "Jika tidak ada halaman yang memenuhi skor pencocokan minimum, maka teks ini akan ditampilkan.  (default: &lt;p&gt;Tidak ada saran. :/ &lt;/p&gt;)"
+
+msgid "If you've created custom post types and would like to redirect users to them, you'll have to enter them here."
+msgstr "Jika Anda telah membuat jenis post kustom dan ingin mengalihkan pengguna ke sana, Anda harus memasukkannya di sini."
+
+msgid "If you've created custom taxonomies and would like to redirect users to them, you'll have to enter them here."
+msgstr "Jika Anda telah membuat taksonomi kustom dan ingin mengalihkan pengguna ke sana, Anda harus memasukkannya di sini."
+
+msgid "Ignore 404 Error"
+msgstr "Abaikan Kesalahan 404"
+
+msgid "Ignored 404 URLs"
+msgstr "URL 404 yang Diabaikan"
+
+msgid "Ignored URLs"
+msgstr "URL yang Diabaikan"
+
+msgid "Import"
+msgstr "Impor"
+
+msgid "Import 404 Redirected Data"
+msgstr "Impor Data Pengalihan 404"
+
+msgid "Import a CSV file with the redirects and captured 404s."
+msgstr "Impor file CSV dengan pengalihan dan 404 yang tercatat."
+
+msgid "Including breaking the site by creating bad redirects, entering a bad regular expression, deleting existing redirects, and giving other users admin access to the plugin."
+msgstr "Termasuk merusak situs dengan membuat pengalihan buruk, memasukkan regular expression buruk, menghapus pengalihan yang ada, dan memberikan akses admin plugin ke pengguna lain."
+
+msgid "Internal Process User Agents - Do Not Log"
+msgstr "User Agent Proses Internal - Jangan Dicatat"
+
+msgid "Issue deleting debug file. (%s)"
+msgstr "Masalah saat menghapus file debug. (%s)"
+
+msgid "JAPANESE_FLASHCARDS_URL"
+msgstr "JAPANESE_FLASHCARDS_URL"
+
+msgid "Keeps the most recent (and deletes the oldest) log records when the disk usage reaches this limit."
+msgstr "Menyimpan catatan log terbaru (dan menghapus yang terlama) saat penggunaan disk mencapai batas ini."
+
+msgid "LINK_FIRST_PAGE"
+msgstr "LINK_FIRST_PAGE"
+
+msgid "LINK_LAST_PAGE"
+msgstr "LINK_LAST_PAGE"
+
+msgid "LINK_NEXT_PAGE"
+msgstr "LINK_NEXT_PAGE"
+
+msgid "LINK_PREVIOUS_PAGE"
+msgstr "LINK_PREVIOUS_PAGE"
+
+msgid "Last Used"
+msgstr "Terakhir Digunakan"
+
+msgid "List one user name per line."
+msgstr "Daftarkan satu nama pengguna per baris."
+
+msgid "Log files are checked daily when maintenance is run."
+msgstr "File log diperiksa setiap hari saat pemeliharaan dijalankan."
+
+msgid "Log raw IPs"
+msgstr "Catat IP mentah"
+
+msgid "Logging raw IP addresses may not meet the EU General Data Protection Regulation (GDPR) guidelines."
+msgstr "Mencatat alamat IP mentah mungkin tidak memenuhi pedoman Peraturan Perlindungan Data Umum UE (GDPR)."
+
+msgid "Logs"
+msgstr "Log"
+
+msgid "MB"
+msgstr "MB"
+
+msgid "Maintenance"
+msgstr "Pemeliharaan"
+
+msgid "Major version auto update delay"
+msgstr "Penundaan pembaruan otomatis versi utama"
+
+msgid "Man"
+msgstr "Man"
+
+msgid "Manual 301 Redirects"
+msgstr "Pengalihan 301 Manual"
+
+msgid "Manual 302 Redirects"
+msgstr "Pengalihan 302 Manual"
+
+msgid "Manual Redirects"
+msgstr "Pengalihan Manual"
+
+msgid "Delete manual redirects after"
+msgstr "Hapus pengalihan manual setelah"
+
+msgid "Manually created"
+msgstr "Dibuat secara manual"
+
+msgid "Maximum log disk usage (MB)"
+msgstr "Penggunaan disk log maksimum (MB)"
+
+msgid "Maximum number of suggestions to display"
+msgstr "Jumlah maksimum saran yang ditampilkan"
+
+msgid "Minimum match score"
+msgstr "Skor pencocokan minimum"
+
+#~ msgid "Minimum score of suggestions to display"
+#~ msgstr "Skor minimum saran yang ditampilkan"
+
+msgid "Multiple email addresses can be separated by commas (,). The \"from\" email address is always the default WordPress admin email:"
+msgstr "Beberapa alamat email dapat dipisahkan dengan koma (,). Alamat email \"dari\" selalu merupakan email admin WordPress default:"
+
+msgid "Never Used"
+msgstr "Tidak Pernah Digunakan"
+
+msgid "New Redirect Added Successfully!"
+msgstr "Pengalihan Baru Berhasil Ditambahkan!"
+
+msgid "New major version => wait this many days. New minor version => automatically update about 3 days after the release date."
+msgstr "Versi utama baru => tunggu sejumlah hari ini. Versi minor baru => perbarui otomatis sekitar 3 hari setelah tanggal rilis."
+
+msgid "No Captured 404 Records To Display"
+msgstr "Tidak Ada Catatan 404 yang Tercatat untuk Ditampilkan"
+
+msgid "No Redirect Records To Display"
+msgstr "Tidak Ada Catatan Pengalihan untuk Ditampilkan"
+
+msgid "No Results To Display"
+msgstr "Tidak Ada Hasil untuk Ditampilkan"
+
+msgid "No suggestions. :/"
+msgstr "Tidak ada saran. :/"
+
+msgid "No suggestions. :/ "
+msgstr "Tidak ada saran. :/ "
+
+msgid "Note that including a bad regular expression or one that takes too long will break your website."
+msgstr "Perhatikan bahwa menyertakan regular expression buruk atau yang membutuhkan waktu terlalu lama akan merusak situs web Anda."
+
+msgid "Note: Do not include the parenthesis or explanations shown in the examples above."
+msgstr "Catatan: Jangan sertakan tanda kurung atau penjelasan yang ditampilkan dalam contoh di atas."
+
+msgid "Note: Here is a list of all post types in the database:"
+msgstr "Catatan: Berikut adalah daftar semua tipe post dalam database:"
+
+msgid "Note: The \"scores\" that appear in the format of \"(75.7576)\" after the page links are only displayed for admin users."
+msgstr "Catatan: \"Skor\" yang muncul dalam format \"(75.7576)\" setelah link halaman hanya ditampilkan untuk pengguna admin."
+
+msgid "OPTION_MIN_AUTO_SCORE"
+msgstr "OPTION_MIN_AUTO_SCORE"
+
+msgid "OPTION_TEMPLATE_REDIRECT_PRIORITY"
+msgstr "OPTION_TEMPLATE_REDIRECT_PRIORITY"
+
+msgid "One email will be sent per day (when maintenance is run) until the number of captured 404s goes below the number specified in the alert settings."
+msgstr "Satu email akan dikirim per hari (ketika pemeliharaan dijalankan) hingga jumlah 404 yang tercatat turun di bawah angka yang ditentukan dalam pengaturan peringatan."
+
+msgid "Only create an automatic redirect if the suggested page has a score above the specified number (default 90)"
+msgstr "Hanya buat pengalihan otomatis jika halaman yang disarankan memiliki skor di atas angka yang ditentukan (default 90)"
+
+msgid "Options"
+msgstr "Opsi"
+
+msgid "Options Saved Successfully!"
+msgstr "Opsi Berhasil Disimpan!"
+
+msgid "Organize Later"
+msgstr "Atur Nanti"
+
+msgid "Page"
+msgstr "Halaman"
+
+msgid "Page Not Found Displayed"
+msgstr "Halaman Tidak Ditemukan Ditampilkan"
+
+msgid "Page Redirects"
+msgstr "Pengalihan Halaman"
+
+msgid "Page suggestions title"
+msgstr "Judul saran halaman"
+
+msgid "Pages listed here will not be redirected to"
+msgstr "Halaman yang tercantum di sini tidak akan dialihkan ke"
+
+msgid "Permanent 301"
+msgstr "Permanen 301"
+
+msgid "Plugin Admin Users"
+msgstr "Pengguna Admin Plugin"
+
+msgid "Plugin version"
+msgstr "Versi plugin"
+
+msgid "Purge Entries!"
+msgstr "Hapus Entri"
+
+msgid "Purge Options"
+msgstr "Opsi Pembersihan"
+
+msgid "Purge Type"
+msgstr "Tipe Pembersihan"
+
+msgid "REDIRECT_TO_USER_FIELD_WARNING"
+msgstr "REDIRECT_TO_USER_FIELD_WARNING"
+
+msgid "Recognized Post Types"
+msgstr "Tipe Post yang Dikenali"
+
+msgid "Records imported: %s"
+msgstr "Catatan yang diimpor: %s"
+
+msgid "Redirect"
+msgstr "Pengalihan"
+
+msgid "Redirect & Capture Logs"
+msgstr "Log Pengalihan & Pencatatan"
+
+msgid "Redirect Details"
+msgstr "Detail Pengalihan"
+
+msgid "Redirect Information Updated Successfully!"
+msgstr "Informasi Pengalihan Berhasil Diperbarui!"
+
+msgid "Redirect Removed Successfully!"
+msgstr "Pengalihan Berhasil Dihapus!"
+
+msgid "Redirect Type"
+msgstr "Jenis Pengalihan"
+
+msgid "Redirect Types"
+msgstr "Jenis Pengalihan"
+
+msgid "Redirect all requests"
+msgstr "Alihkan semua permintaan"
+
+msgid "Redirect all unhandled 404s to"
+msgstr "Alihkan semua 404 yang tidak ditangani ke"
+
+msgid "Redirect moved to trash successfully!"
+msgstr "Pengalihan berhasil dipindahkan ke tong sampah!"
+
+msgid "Redirect restored from trash successfully!"
+msgstr "Pengalihan berhasil dipulihkan dari tong sampah!"
+
+msgid "Redirect to"
+msgstr "Alihkan ke"
+
+msgid "Redirected to"
+msgstr "Dialihkan ke"
+
+msgid "Redirects"
+msgstr "Pengalihan"
+
+msgid "Referrer"
+msgstr "Perujuk"
+
+msgid "RegEx"
+msgstr "RegEx"
+
+msgid "Regular Expression (Manually Created)"
+msgstr "Regular Expression (Dibuat Secara Manual)"
+
+msgid "Remove Ignore Status"
+msgstr "Hapus Status Abaikan"
+
+msgid "Remove Later Status"
+msgstr "Hapus Status Nanti"
+
+msgid "Remove redirect upon matching permalink"
+msgstr "Hapus pengalihan saat permalink cocok"
+
+msgid "Removed 404 URL from %s list successfully!"
+msgstr "URL 404 berhasil dihapus dari daftar %s!"
+
+msgid "Removes automatically created redirects if they haven't been used for the specified amount of time. Does not affect manually created redirects."
+msgstr "Menghapus pengalihan yang dibuat otomatis jika tidak digunakan selama waktu yang ditentukan. Tidak mempengaruhi pengalihan yang dibuat manual."
+
+msgid "Required"
+msgstr "Wajib"
+
+msgid "Restore"
+msgstr "Pulihkan"
+
+msgid "Rows per page:"
+msgstr "Baris per halaman:"
+
+msgid "Run Maintenance"
+msgstr "Jalankan Pemeliharaan"
+
+msgid "Run maintenance to delete old data (etc).&nbsp;&nbsp;It is not necessary to run this manually, as it's done automatically on a daily basis."
+msgstr "Jalankan pemeliharaan untuk menghapus data lama (dll).&nbsp;&nbsp;Tidak perlu menjalankan ini secara manual, karena dilakukan secara otomatis setiap hari."
+
+msgid "SELECTED_SUGGEST_CATS"
+msgstr "SELECTED_SUGGEST_CATS"
+
+msgid "SELECTED_SUGGEST_TAGS"
+msgstr "SELECTED_SUGGEST_TAGS"
+
+msgid "SELECTED_SUGGEST_URL"
+msgstr "SELECTED_SUGGEST_URL"
+
+msgid "SUGGEST_MAX_SUGGESTIONS"
+msgstr "SUGGEST_MAX_SUGGESTIONS"
+
+msgid "SUGGEST_MIN_SCORE"
+msgstr "SUGGEST_MIN_SCORE"
+
+msgid "SUGGEST_USER_AFTER"
+msgstr "SUGGEST_USER_AFTER"
+
+msgid "SUGGEST_USER_BEFORE"
+msgstr "SUGGEST_USER_BEFORE"
+
+msgid "SUGGEST_USER_ENTRY_AFTER"
+msgstr "SUGGEST_USER_ENTRY_AFTER"
+
+msgid "SUGGEST_USER_ENTRY_BEFORE"
+msgstr "SUGGEST_USER_ENTRY_BEFORE"
+
+msgid "SUGGEST_USER_NO_RESULTS"
+msgstr "SUGGEST_USER_NO_RESULTS"
+
+msgid "SUGGEST_USER_TITLE"
+msgstr "SUGGEST_USER_TITLE"
+
+msgid "Sanity Check"
+msgstr "Pemeriksaan Validitas"
+
+msgid "Save Settings"
+msgstr "Simpan Pengaturan"
+
+msgid "Saving settings..."
+msgstr "Menyimpan pengaturan..."
+
+msgid "Section filters"
+msgstr "Filter bagian"
+
+
+msgid "Search engine user agents should not go here so that they will be redirected when the slug structure changes."
+msgstr "User agent mesin pencari tidak boleh masuk ke sini sehingga mereka akan dialihkan ketika struktur slug berubah."
+
+msgid "Since a capture group is used, you can use a $1 replacement in the destination string of an external URL."
+msgstr "Karena grup tangkapan digunakan, Anda dapat menggunakan pengganti $1 dalam string tujuan URL eksternal."
+
+msgid "So please use caution and test them elsewhere before trying them here. If you don't know what you're doing please don't use this option (as it's not necessary for the functioning of the plugin)."
+msgstr "Jadi harap berhati-hati dan uji di tempat lain sebelum mencobanya di sini. Jika Anda tidak tahu apa yang Anda lakukan, harap jangan gunakan opsi ini (karena tidak diperlukan untuk fungsi plugin)."
+
+msgid "Some options were not saved successfully."
+msgstr "Beberapa opsi tidak berhasil disimpan."
+
+msgid "Special"
+msgstr "Khusus"
+
+msgid "Stats"
+msgstr "Statistik"
+
+msgid "Status"
+msgstr "Status"
+
+msgid "Suggestions"
+msgstr "Saran"
+
+
+msgid "Supported formats are: <B>from_url,status,type,to_url,wp_type</B>"
+msgstr "Format yang didukung adalah: <B>from_url,status,type,to_url,wp_type</B>"
+
+msgid "TEXT_BEFORE_LINKS"
+msgstr "TEXT_BEFORE_LINKS"
+
+msgid "TEXT_CURRENT_PAGE"
+msgstr "TEXT_CURRENT_PAGE"
+
+msgid "TEXT_SHOW_ROWS"
+msgstr "TEXT_SHOW_ROWS"
+
+msgid "TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING"
+msgstr "TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING"
+
+msgid "TOOLTIP_POPUP_EXPLANATION_EMPTY"
+msgstr "TOOLTIP_POPUP_EXPLANATION_EMPTY"
+
+msgid "TOOLTIP_POPUP_EXPLANATION_EMTPY"
+msgstr "TOOLTIP_POPUP_EXPLANATION_EMTPY"
+
+msgid "TOOLTIP_POPUP_EXPLANATION_PAGE"
+msgstr "TOOLTIP_POPUP_EXPLANATION_PAGE"
+
+msgid "TOOLTIP_POPUP_EXPLANATION_URL"
+msgstr "TOOLTIP_POPUP_EXPLANATION_URL"
+
+msgid "Tag"
+msgstr "Tag"
+
+msgid "Tag:"
+msgstr "Tag:"
+
+msgid "Tags"
+msgstr "Tag"
+
+msgid "Template Redirect Priority"
+msgstr "Prioritas Pengalihan Template"
+
+msgid "Temporary 302"
+msgstr "Sementara 302"
+
+msgid "The \"product\" type is for WooCommerce users."
+msgstr "Tipe \"product\" adalah untuk pengguna WooCommerce."
+
+msgid "The 404 Solution menu should appear"
+msgstr "Menu 404 Solution seharusnya muncul"
+
+msgid "The file seems to have loaded okay. Please check the redirects page."
+msgstr "File sepertinya telah dimuat dengan baik. Silakan periksa halaman pengalihan."
+
+msgid "The plugin will only redirect the post types specified here."
+msgstr "Plugin hanya akan mengalihkan jenis post yang ditentukan di sini."
+
+msgid "The plugin will redirect to normal taxonomies (categories and tags) and the ones listed here."
+msgstr "Plugin akan mengalihkan ke taksonomi normal (kategori dan tag) dan yang tercantum di sini."
+
+#~ msgid "The suggested page must \"score\" at least this much to be shown as a suggestion (min: 10, max: 90, default: 25)"
+#~ msgstr "Halaman yang disarankan harus \"mencetak skor\" setidaknya sebanyak ini untuk ditampilkan sebagai saran (min: 10, maks: 90, default: 25)"
+
+msgid "The user specified 404 page wasn't found. Please update the user-specified 404 page on the Options page."
+msgstr "Halaman 404 yang ditentukan pengguna tidak ditemukan. Silakan perbarui halaman 404 yang ditentukan pengguna di halaman Opsi."
+
+msgid "This cannot be undone. All redirects for URLs that do not already exist will be imported."
+msgstr "Ini tidak dapat dibatalkan. Semua pengalihan untuk URL yang belum ada akan diimpor."
+
+msgid "This creates the list. For example, use &lt;ol style=\"list-style-type: none;\"&gt; to hide the numbers in the list. (defaults: &lt;ol&gt; / &lt;/ol&gt;)"
+msgstr "Ini membuat daftar. Misalnya, gunakan &lt;ol style=\"list-style-type: none;\"&gt; untuk menyembunyikan angka dalam daftar. (default: &lt;ol&gt; / &lt;/ol&gt;)"
+
+msgid "This is best for internal processes that don't need to be redirected when the slug structure changes."
+msgstr "Ini terbaik untuk proses internal yang tidak perlu dialihkan ketika struktur slug berubah."
+
+msgid "This is best for search engine bots that do need to be redirected when the slug structure changes."
+msgstr "Ini terbaik untuk bot mesin pencari yang perlu dialihkan ketika struktur slug berubah."
+
+msgid "This is for a domain name change."
+msgstr "Ini untuk perubahan nama domain."
+
+msgid "This is for when a user requests a page that doesn't exist and they are not automatically redirected to a matching page."
+msgstr "Ini untuk ketika pengguna meminta halaman yang tidak ada dan mereka tidak secara otomatis dialihkan ke halaman yang cocok."
+
+msgid "This is not required for the plugin to function, but it is helpful for the developer and for future versions of the plugin."
+msgstr "Ini tidak diperlukan agar plugin berfungsi, tetapi bermanfaat bagi pengembang dan untuk versi plugin di masa mendatang."
+
+msgid "This only affects the list of potential matches shown to the user on a custom 404 page."
+msgstr "Ini hanya mempengaruhi daftar kecocokan potensial yang ditampilkan kepada pengguna pada halaman 404 kustom."
+
+msgid "This reveals: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when an issue is reported)."
+msgstr "Ini mengungkapkan: semua yang ada di log debug, alamat email admin, ekstensi PHP yang terinstal, plugin aktif, versi PHP, versi WordPress, versi MySQL, total halaman dan post yang dipublikasikan, dll. (semua yang diminta saat masalah dilaporkan)."
+
+msgid "This sets how early in the process a 404 is handled by this plugin. If there are multiple plugins that should handle a 404, then set this higher (999) so that this plugin gets the 404 last. (default 9)"
+msgstr "Ini mengatur seberapa awal dalam proses 404 ditangani oleh plugin ini. Jika ada beberapa plugin yang harus menangani 404, maka atur ini lebih tinggi (999) sehingga plugin ini mendapatkan 404 terakhir. (default 9)"
+
+msgid "This shortcode can be used on the 404 page and will display a list of suggested pages."
+msgstr "Shortcode ini dapat digunakan pada halaman 404 dan akan menampilkan daftar halaman yang disarankan."
+
+msgid "This surrounds each item in the list. (defaults: &lt;li&gt; / &lt;/li&gt;)"
+msgstr "Ini mengelilingi setiap item dalam daftar. (default: &lt;li&gt; / &lt;/li&gt;)"
+
+msgid "This text will appear before the list of suggestions (default: &lt;h3&gt;Here are some other great pages&lt;/h3&gt;)"
+msgstr "Teks ini akan muncul sebelum daftar saran (default: &lt;h3&gt;Berikut adalah beberapa halaman hebat lainnya&lt;/h3&gt;)"
+
+msgid "This will break your website."
+msgstr "Ini akan merusak situs web Anda."
+
+msgid "This will not change the URL if the destination 404 page is set to (Default 404 Page) or Home Page."
+msgstr "Ini tidak akan mengubah URL jika halaman tujuan 404 diatur ke (Halaman 404 Default) atau Halaman Beranda."
+
+msgid "Tools"
+msgstr "Alat"
+
+msgid "Total Redirects"
+msgstr "Total Pengalihan"
+
+msgid "Total URLs"
+msgstr "Total URL"
+
+msgid "Trash"
+msgstr "Tong Sampah"
+
+msgid "Trash Redirected URL"
+msgstr "Buang URL yang Dialihkan"
+
+msgid "Trashed Redirects"
+msgstr "Pengalihan di Tong Sampah"
+
+msgid "Trashed URLs"
+msgstr "URL di Tong Sampah"
+
+msgid "Treat this URL as a regular expression"
+msgstr "Perlakukan URL ini sebagai regular expression"
+
+msgid "Type"
+msgstr "Tipe"
+
+msgid "Type a page name here and select it to add it to the exlusion list"
+msgstr "Ketik nama halaman di sini dan pilih untuk menambahkannya ke daftar pengecualian"
+
+msgid "URL"
+msgstr "URL"
+
+msgid "URL(s) deleted"
+msgstr "URL dihapus"
+
+msgid "URL(s) marked as Captured."
+msgstr "URL ditandai sebagai Tercatat."
+
+msgid "URL(s) marked as Ignored."
+msgstr "URL ditandai sebagai Diabaikan."
+
+msgid "URL(s) marked as Later."
+msgstr "URL ditandai sebagai Nanti."
+
+msgid "URL(s) moved to trash"
+msgstr "URL dipindahkan ke tong sampah"
+
+msgid "URL(s) restored."
+msgstr "URL dipulihkan."
+
+msgid "URLs"
+msgstr "URL"
+
+msgid "Under the Settings menu"
+msgstr "Di bawah menu Pengaturan"
+
+msgid "Unique Page Not Found Referrers"
+msgstr "Perujuk Unik Halaman Tidak Ditemukan"
+
+msgid "Unique Page Not Found URLs"
+msgstr "URL Unik Halaman Tidak Ditemukan"
+
+msgid "Unique Page Not Found Visitors"
+msgstr "Pengunjung Unik Halaman Tidak Ditemukan"
+
+msgid "Unique Redirected Referrers"
+msgstr "Perujuk Unik yang Dialihkan"
+
+msgid "Unique Redirected Visitors"
+msgstr "Pengunjung Unik yang Dialihkan"
+
+msgid "Unique URLs Redirected"
+msgstr "URL Unik yang Dialihkan"
+
+msgid "Unknown"
+msgstr "Tidak Diketahui"
+
+msgid "Update Redirect"
+msgstr "Perbarui Pengalihan"
+
+msgid "Update the URL bar"
+msgstr "Perbarui bilah alamat"
+
+msgid "Use one line per user agent. If the text is found anywhere in the user agent string then it applies."
+msgstr "Gunakan satu baris per user agent. Jika teks ditemukan di mana saja dalam string user agent maka itu berlaku."
+
+msgid "User"
+msgstr "Pengguna"
+
+msgid "User names listed here will be able to do everything an admin can do with the plugin."
+msgstr "Nama pengguna yang tercantum di sini akan dapat melakukan semua yang dapat dilakukan admin dengan plugin."
+
+msgid "Using the purge options will move all selected redirects to the trash. You must then empty the trash to delete them."
+msgstr "Menggunakan opsi pembersihan akan memindahkan semua pengalihan yang dipilih ke tong sampah. Anda kemudian harus mengosongkan tong sampah untuk menghapusnya."
+
+msgid "View logs for"
+msgstr "Lihat log untuk"
+
+msgid "Visit"
+msgstr "Kunjungi"
+
+msgid "WARNING: When used incorrectly this WILL break your website. Use at your own risk. Please, for the love of all that is holy, leave this empty if you don't know what you're doing."
+msgstr "PERINGATAN: Jika digunakan dengan tidak benar ini AKAN merusak situs web Anda. Gunakan dengan risiko Anda sendiri. Tolong, demi segala sesuatu yang suci, biarkan ini kosong jika Anda tidak tahu apa yang Anda lakukan."
+
+msgid "When an error is detected by the plugin, email the entire log file to the developer."
+msgstr "Ketika kesalahan terdeteksi oleh plugin, kirimkan email seluruh file log ke pengembang."
+
+msgid "When checked the URL will be changed from the custom 404 page URL to the URL originally requested (after the page headers load)."
+msgstr "Jika dicentang, URL akan diubah dari URL halaman 404 kustom ke URL yang awalnya diminta (setelah header halaman dimuat)."
+
+msgid "When checked, the text is treated as a regular expression."
+msgstr "Jika dicentang, teks diperlakukan sebagai regular expression."
+
+msgid "When selected, ALL REQUESTS (even for pages that exist, even for non-404s) will be treated like a 404."
+msgstr "Jika dipilih, SEMUA PERMINTAAN (bahkan untuk halaman yang ada, bahkan untuk non-404) akan diperlakukan seperti 404."
+
+msgid "When the number of captured 404s would cause an admin notification, an email will be sent to the addresses specified here."
+msgstr "Ketika jumlah 404 yang tercatat akan menyebabkan notifikasi admin, email akan dikirimkan ke alamat yang ditentukan di sini."
+
+msgid "You can see which are recognized by looking at the default 404 destination option."
+msgstr "Anda dapat melihat mana yang dikenali dengan melihat opsi tujuan 404 default."
+
+msgid "You can see which post types are recognized by looking at the default 404 destination option, which has a list of pages, posts, products, etc."
+msgstr "Anda dapat melihat tipe post mana yang dikenali dengan melihat opsi tujuan 404 default, yang memiliki daftar halaman, post, produk, dll."
+
+msgid "add-exclude-page-data-url"
+msgstr "add-exclude-page-data-url"
+
+msgid "addManualRedirectAction"
+msgstr "addManualRedirectAction"
+
+msgid "ajaxTrashLink"
+msgstr "ajaxTrashLink"
+
+msgid "and <B>from_url,to_url</B>"
+msgstr "dan <B>from_url,to_url</B>"
+
+msgid "and redirect to the specified page."
+msgstr "dan alihkan ke halaman yang ditentukan."
+
+msgid "bulkOptions"
+msgstr "bulkOptions"
+
+msgid "data-pagination-ajax-url"
+msgstr "data-pagination-ajax-url"
+
+msgid "data-pagination-ajax-action"
+msgstr "data-pagination-ajax-action"
+
+msgid "data-pagination-ajax-subpage"
+msgstr "data-pagination-ajax-subpage"
+
+msgid "data-pagination-ajax-nonce"
+msgstr "data-pagination-ajax-nonce"
+
+msgid "data-url"
+msgstr "data-url"
+
+msgid "days (0 means immediately, default 30)"
+msgstr "hari (0 berarti segera, default 30)"
+
+msgid "deletePermanentlyHTML"
+msgstr "deletePermanentlyHTML"
+
+msgid "destination-does-not-exist"
+msgstr "destination-does-not-exist"
+
+msgid "destination-exists"
+msgstr "destination-exists"
+
+msgid "disallow-redirect-all-requests"
+msgstr "disallow-redirect-all-requests"
+
+msgid "earliestLogDate"
+msgstr "earliestLogDate"
+
+msgid "editLink"
+msgstr "editLink"
+
+msgid "editlinkHTML"
+msgstr "editlinkHTML"
+
+msgid "filterText"
+msgstr "filterText"
+
+msgid "is maintained by"
+msgstr "dipelihara oleh"
+
+msgid "loaded-excluded-pages"
+msgstr "loaded-excluded-pages"
+
+msgid "logCurrentRowCount"
+msgstr "logCurrentRowCount"
+
+msgid "logCurrentSizeDiskUsage"
+msgstr "logCurrentSizeDiskUsage"
+
+msgid "logslinkHTML"
+msgstr "logslinkHTML"
+
+msgid "of"
+msgstr "dari"
+
+msgid "pageIDAndType"
+msgstr "pageIDAndType"
+
+msgid "postedURL"
+msgstr "postedURL"
+
+msgid "redirectPageTitle"
+msgstr "redirectPageTitle"
+
+msgid "rowActions"
+msgstr "rowActions"
+
+msgid "rowClass"
+msgstr "rowClass"
+
+msgid "rowCode"
+msgstr "rowCode"
+
+msgid "rowURL"
+msgstr "rowURL"
+
+msgid "selecteSsettingsLevel"
+msgstr "selecteSsettingsLevel"
+
+msgid "selectedAutoCats"
+msgstr "selectedAutoCats"
+
+msgid "selectedAutoRedirects"
+msgstr "selectedAutoRedirects"
+
+msgid "selectedAutoTags"
+msgstr "selectedAutoTags"
+
+msgid "selectedCapture404"
+msgstr "selectedCapture404"
+
+msgid "selectedDefaultRedirect301"
+msgstr "selectedDefaultRedirect301"
+
+msgid "selectedDefaultRedirect302"
+msgstr "selectedDefaultRedirect302"
+
+msgid "selectedRemoveMatches"
+msgstr "selectedRemoveMatches"
+
+msgid "selectedSendErrorLogs"
+msgstr "selectedSendErrorLogs"
+
+msgid "selectedThemeCalm"
+msgstr "selectedThemeCalm"
+
+msgid "selectedThemeMono"
+msgstr "selectedThemeMono"
+
+msgid "selectedThemeNeon"
+msgstr "selectedThemeNeon"
+
+msgid "selectedThemeObsidian"
+msgstr "selectedThemeObsidian"
+
+msgid "selectedUnderSettings"
+msgstr "selectedUnderSettings"
+
+msgid "showSearchFilter"
+msgstr "showSearchFilter"
+
+msgid "statusTitle"
+msgstr "statusTitle"
+
+msgid "toolsExportRedirectsLink"
+msgstr "toolsExportRedirectsLink"
+
+msgid "toolsImportFormActionLink"
+msgstr "toolsImportFormActionLink"
+
+msgid "toolsImportRedirectsLink"
+msgstr "toolsImportRedirectsLink"
+
+msgid "toolsMaintenanceFormActionLink"
+msgstr "toolsMaintenanceFormActionLink"
+
+msgid "toolsPurgeFormActionLink"
+msgstr "toolsPurgeFormActionLink"
+
+msgid "urlPlaceholder"
+msgstr "urlPlaceholder"
+
+msgid "will match any URL that begins with"
+msgstr "akan cocok dengan URL apa pun yang dimulai dengan"
+
+#. Plural form with HTML
+#: includes/View.php
+msgid "There is <a>%s captured 404 URL</a> that needs to be processed."
+msgid_plural "There are <a>%s captured 404 URLs</a> to be processed."
+msgstr[0] "Ada <a>%s URL 404 yang tercatat</a> yang perlu diproses."
+
+#. Plural form with %s
+#: includes/DataAccess.php
+msgid "%s redirect entry was moved to the trash."
+msgid_plural "%s redirect entries were moved to the trash."
+msgstr[0] "%s entri pengalihan dipindahkan ke tong sampah."
+
+#: includes/DatabaseUpgradesEtc.php:119
+msgid "404 Solution: N-gram spell check cache is being built in the background to optimize performance. This may take a few minutes on large sites."
+msgstr "404 Solution: Cache pemeriksaan ejaan N-gram sedang dibangun di latar belakang untuk mengoptimalkan kinerja. Proses ini mungkin memerlukan beberapa menit pada situs besar."
+
+#: includes/DatabaseUpgradesEtc.php:123
+msgid "404 Solution: Built N-gram cache for %d pages to optimize spell checking performance."
+msgstr "404 Solution: Cache N-gram dibangun untuk %d halaman untuk mengoptimalkan kinerja pemeriksaan ejaan."
+
+#: includes/DatabaseUpgradesEtc.php:140
+msgid "Before deactivating:"
+msgstr "Sebelum menonaktifkan:"
+
+msgid "Choose what should happen to your data. These preferences will be saved for later if you decide to delete the plugin."
+msgstr "Pilih apa yang akan terjadi pada data Anda. Preferensi ini akan disimpan untuk nanti jika Anda memutuskan untuk menghapus plugin."
+
+msgid "What should happen to your data?"
+msgstr "Apa yang akan terjadi pada data Anda?"
+
+msgid "Keep my redirects (%d redirects)"
+msgstr "Simpan pengalihan saya (%d pengalihan)"
+
+msgid "Check this if you plan to reinstall the plugin later. Your redirect configurations will be preserved."
+msgstr "Centang ini jika Anda berencana menginstal ulang plugin nanti. Konfigurasi pengalihan Anda akan dipertahankan."
+
+msgid "Keep 404 logs"
+msgstr "Simpan log 404"
+
+msgid "Historical 404 data and logs will be preserved if checked."
+msgstr "Data dan log 404 historis akan dipertahankan jika dicentang."
+
+msgid "Note: Cache tables will always be deleted as they can be rebuilt."
+msgstr "Catatan: Tabel cache akan selalu dihapus karena dapat dibangun kembali."
+
+msgid "Why are you deactivating? (Optional)"
+msgstr "Mengapa Anda menonaktifkan? (Opsional)"
+
+msgid "Temporary deactivation for debugging"
+msgstr "Penonaktifan sementara untuk debugging"
+
+msgid "The plugin is not working as expected"
+msgstr "Plugin tidak berfungsi seperti yang diharapkan"
+
+msgid "I found a better plugin"
+msgstr "Saya menemukan plugin yang lebih baik"
+
+msgid "I no longer need this functionality"
+msgstr "Saya tidak lagi memerlukan fungsi ini"
+
+msgid "Too complicated to configure"
+msgstr "Terlalu rumit untuk dikonfigurasi"
+
+msgid "Performance issues"
+msgstr "Masalah kinerja"
+
+msgid "Other reason"
+msgstr "Alasan lain"
+
+msgid "Help us improve (Optional)"
+msgstr "Bantu kami meningkatkan (Opsional)"
+
+msgid "Help improve the plugin (Optional)"
+msgstr "Bantu meningkatkan plugin (Opsional)"
+
+msgid "Share why you're deactivating. Your feedback helps us improve."
+msgstr "Bagikan alasan Anda menonaktifkan. Masukan Anda membantu kami meningkatkan plugin."
+
+
+msgid "Email Feedback & Deactivate"
+msgstr "Kirimkan Masukan dan Nonaktifkan"
+
+msgid "Send feedback to help improve the plugin"
+msgstr "Kirimkan masukan untuk membantu meningkatkan plugin"
+
+msgid "Your email (optional):"
+msgstr "Email Anda (opsional):"
+
+msgid "your@email.com (optional)"
+msgstr "email@anda.com (opsional)"
+
+msgid "Additional details:"
+msgstr "Detail tambahan:"
+
+msgid "Please share any additional feedback..."
+msgstr "Silakan bagikan masukan tambahan..."
+
+msgid "Your feedback helps us improve. We respect your privacy and will not share your information."
+msgstr "Masukan Anda membantu kami meningkatkan plugin. Kami menghormati privasi Anda dan tidak akan membagikan informasi Anda."
+
+msgid "Insufficient permissions"
+msgstr "Izin tidak mencukupi"
+
+msgid "Could not save preferences. Your choices may not be preserved."
+msgstr "Tidak dapat menyimpan preferensi. Pilihan Anda mungkin tidak tersimpan."
+
+msgid "Preferences saved successfully"
+msgstr "Preferensi berhasil disimpan"
+
+msgid "Failed to save preferences"
+msgstr "Gagal menyimpan preferensi"
+
+msgid "N-gram cache rebuild is already in progress. Please wait for it to complete."
+msgstr "Pembangunan ulang cache N-gram sedang berlangsung. Harap tunggu hingga selesai."
+
+msgid "Error rebuilding N-gram cache: %s"
+msgstr "Kesalahan saat membangun ulang cache N-gram: %s"
+
+msgid "N-gram cache rebuilt successfully: %d total entries processed (%d posts/pages, %d categories, %d tags), %d successful, %d failed."
+msgstr "Cache N-gram berhasil dibangun ulang: %d total entri diproses (%d posting/halaman, %d kategori, %d tag), %d berhasil, %d gagal."
+
+msgid "Spelling cache cleared successfully."
+msgstr "Cache ejaan berhasil dihapus."
+
+msgid "Cache Management"
+msgstr "Manajemen Cache"
+
+msgid "N-gram Cache"
+msgstr "Cache N-gram"
+
+msgid "Rebuild the N-gram spell checker cache. This optimizes 404 URL matching performance. May take several minutes on large sites."
+msgstr "Bangun ulang cache pemeriksa ejaan N-gram. Ini mengoptimalkan kinerja pencocokan URL 404. Proses ini mungkin memerlukan beberapa menit pada situs besar."
+
+msgid "Rebuild N-gram Cache"
+msgstr "Bangun Ulang Cache N-gram"
+
+msgid "Spelling Cache"
+msgstr "Cache Ejaan"
+
+msgid "Clear the spelling cache to force recalculation of URL matches. Useful after making significant content changes."
+msgstr "Hapus cache ejaan untuk memaksa perhitungan ulang pencocokan URL. Berguna setelah membuat perubahan konten yang signifikan."
+
+msgid "Clear Spelling Cache"
+msgstr "Hapus Cache Ejaan"
+
+msgid "Disable automatic dark mode detection"
+msgstr "Nonaktifkan deteksi mode gelap otomatis"
+
+msgid "When unchecked and theme is set to \"Default\", the plugin will automatically switch to a dark theme if your WordPress admin color scheme is dark (Midnight, Ectoplasm, Coffee), if you have a dark mode plugin enabled, or if your browser/OS prefers dark mode."
+msgstr "Ketika tidak dicentang dan tema diatur ke \"Default\", plugin akan otomatis beralih ke tema gelap jika skema warna admin WordPress Anda gelap (Midnight, Ectoplasm, Coffee), jika Anda memiliki plugin mode gelap yang diaktifkan, atau jika browser/OS Anda lebih menyukai mode gelap."
+
+msgid "Your feedback helps us improve. System information (WordPress version, PHP version, installed plugins) will be included. We respect your privacy and will not share your information."
+msgstr "Masukan Anda membantu kami meningkatkan plugin. Informasi sistem (versi WordPress, versi PHP, plugin yang terinstal) akan disertakan. Kami menghormati privasi Anda dan tidak akan membagikan informasi Anda."
+
+msgid "Plugin Language Override"
+msgstr "Penggantian Bahasa Plugin"
+
+msgid "Use WordPress Default"
+msgstr "Gunakan Default WordPress"
+
+msgid "Override the language used for this plugin's admin interface. Leave on \"Use WordPress Default\" to respect WordPress and user language settings."
+msgstr "Ganti bahasa yang digunakan untuk antarmuka admin plugin ini. Biarkan pada \"Gunakan Default WordPress\" untuk menghormati pengaturan bahasa WordPress dan pengguna."
+
+#: includes/PluginLogic.php
+msgid "Error: Invalid language selected"
+msgstr "Kesalahan: Bahasa yang dipilih tidak valid"
+
+#: includes/html/adminOptionsGeneral.html
+msgid "When an error is detected by the plugin, email the entire log file to the developer. This is not required for the plugin to function, but it is helpful for the developer and for future versions of the plugin. This reveals: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when an issue is reported). Log files are checked daily when maintenance is run."
+msgstr "Ketika kesalahan terdeteksi oleh plugin, kirimkan email seluruh file log ke pengembang. Ini tidak diperlukan agar plugin berfungsi, tetapi ini membantu pengembang dan untuk versi plugin di masa mendatang. Ini mengungkapkan: semua yang ada di log debug, alamat email admin, ekstensi PHP yang terinstal, plugin aktif, versi PHP, versi WordPress, versi MySQL, total halaman dan post yang dipublikasikan, dll. (semua yang diminta ketika melaporkan masalah). File log diperiksa setiap hari ketika pemeliharaan dijalankan."
+
+#: includes/html/viewSuggestions.html
+msgid "Display the closest matching pages by using the shortcode [abj404_solution_page_suggestions]."
+msgstr "Tampilkan halaman yang paling cocok dengan menggunakan shortcode [abj404_solution_page_suggestions]."
+
+#: includes/html/viewSuggestions.html
+msgid "This shortcode can be used on the 404 page and will display a list of suggested pages. This is for when a user requests a page that doesn't exist and they are not automatically redirected to a matching page."
+msgstr "Shortcode ini dapat digunakan pada halaman 404 dan akan menampilkan daftar halaman yang disarankan. Ini untuk ketika pengguna meminta halaman yang tidak ada dan mereka tidak secara otomatis dialihkan ke halaman yang cocok."
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedLogging.html
+msgid "This is best for search engine bots that do need to be redirected when the slug structure changes. Use one line per user agent. If the text is found anywhere in the user agent string then it applies."
+msgstr "Ini terbaik untuk bot mesin pencari yang perlu dialihkan ketika struktur slug berubah. Gunakan satu baris per user agent. Jika teks ditemukan di mana saja dalam string user agent maka itu berlaku."
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedLogging.html
+msgid "This is best for internal processes that don't need to be redirected when the slug structure changes. Search engine user agents should not go here so that they will be redirected when the slug structure changes."
+msgstr "Ini terbaik untuk proses internal yang tidak perlu dialihkan ketika struktur slug berubah. User agent mesin pencari tidak boleh dimasukkan di sini sehingga mereka akan dialihkan ketika struktur slug berubah."
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedContent.html
+msgid "Pages listed here will not be redirected to (unless a redirect to the page already exists)."
+msgstr "Halaman yang tercantum di sini tidak akan dialihkan ke (kecuali pengalihan ke halaman sudah ada)."
+
+#: includes/html/settingsAdvanced.html
+msgid "The plugin will only redirect the post types specified here. Default WordPress post types are \"post\" and \"page.\" The \"product\" type is for WooCommerce users."
+msgstr "Plugin hanya akan mengalihkan jenis post yang ditentukan di sini. Jenis post WordPress default adalah \"post\" dan \"page\". Jenis \"product\" adalah untuk pengguna WooCommerce."
+
+#: includes/html/adminOptionsGeneral.html
+msgid "When the number of captured 404s would cause an admin notification, an email will be sent to the addresses specified here. Multiple email addresses can be separated by commas (,). The \"from\" email address is always the default WordPress admin email:"
+msgstr "Ketika jumlah 404 yang tercatat akan menyebabkan notifikasi admin, email akan dikirimkan ke alamat yang ditentukan di sini. Beberapa alamat email dapat dipisahkan dengan koma (,). Alamat email \"dari\" selalu email admin WordPress default:"
+
+#: includes/DatabaseUpgradesEtc.php:125
+msgid "404 Solution: N-gram spell check cache is being built in the background%s to optimize performance. This may take a few minutes on large sites."
+msgstr "404 Solution: Cache pemeriksaan ejaan N-gram sedang dibangun di latar belakang%s untuk mengoptimalkan kinerja. Proses ini mungkin memerlukan beberapa menit di situs besar."
+
+#: includes/PluginLogic.php
+msgid "N-gram cache rebuild is already scheduled or in progress. Please wait for it to complete."
+msgstr "Pembangunan ulang cache N-gram sudah dijadwalkan atau sedang berlangsung. Harap tunggu hingga selesai."
+
+#: includes/PluginLogic.php
+msgid "N-gram cache rebuild has been scheduled and will run in the background. This may take several minutes on large sites. You can continue using the plugin normally."
+msgstr "Pembangunan ulang cache N-gram telah dijadwalkan dan akan berjalan di latar belakang. Proses ini mungkin memerlukan beberapa menit di situs besar. Anda dapat terus menggunakan plugin secara normal."
+
+#: includes/PluginLogic.php
+msgid "Failed to schedule N-gram cache rebuild. Please try again or check your WordPress cron configuration."
+msgstr "Gagal menjadwalkan pembangunan ulang cache N-gram. Silakan coba lagi atau periksa konfigurasi cron WordPress Anda."
+
+#: includes/UninstallModal.php
+msgid "Deactivate without feedback"
+msgstr "Nonaktifkan tanpa masukan"
+
+#: includes/UninstallModal.php
+msgid "Processing..."
+msgstr "Memproses..."
+
+#: includes/UninstallModal.php
+msgid "Before deactivating, choose what happens to your data:"
+msgstr "Sebelum menonaktifkan, pilih apa yang akan terjadi pada data Anda:"
+
+#: includes/UninstallModal.php
+msgid "Keep my redirects (%d)"
+msgstr "Simpan pengalihan saya (%d)"
+
+#: includes/UninstallModal.php
+msgid "— saves them for later if you reinstall"
+msgstr "— menyimpannya untuk nanti jika Anda menginstal ulang"
+
+#: includes/UninstallModal.php
+msgid "— historical data preserved"
+msgstr "— data historis dipertahankan"
+
+#: includes/UninstallModal.php
+msgid "Cache tables are always deleted (can be rebuilt)"
+msgstr "Tabel cache selalu dihapus (dapat dibangun kembali)"
+
+#: includes/UninstallModal.php
+msgid "What specifically isn't working?"
+msgstr "Apa yang secara khusus tidak berfungsi?"
+
+#: includes/UninstallModal.php
+msgid "Redirects not triggering/working"
+msgstr "Pengalihan tidak terpicu/berfungsi"
+
+#: includes/UninstallModal.php
+msgid "Settings not saving"
+msgstr "Pengaturan tidak tersimpan"
+
+#: includes/UninstallModal.php
+msgid "Admin pages showing errors"
+msgstr "Halaman admin menampilkan kesalahan"
+
+#: includes/UninstallModal.php
+msgid "Suggestions not appearing"
+msgstr "Saran tidak muncul"
+
+#: includes/UninstallModal.php
+msgid "Conflicts with other plugins"
+msgstr "Konflik dengan plugin lain"
+
+#: includes/UninstallModal.php
+msgid "Other issue (please specify below)"
+msgstr "Masalah lain (harap sebutkan di bawah)"
+
+#: includes/UninstallModal.php
+msgid "What type of performance issue?"
+msgstr "Jenis masalah kinerja apa?"
+
+#: includes/UninstallModal.php
+msgid "Slow admin dashboard"
+msgstr "Dashboard admin lambat"
+
+#: includes/UninstallModal.php
+msgid "Slow frontend page loads"
+msgstr "Pemuatan halaman frontend lambat"
+
+#: includes/UninstallModal.php
+msgid "High database usage"
+msgstr "Penggunaan database tinggi"
+
+#: includes/UninstallModal.php
+msgid "Memory issues"
+msgstr "Masalah memori"
+
+#: includes/UninstallModal.php
+msgid "Other (please specify below)"
+msgstr "Lainnya (harap sebutkan di bawah)"
+
+#: includes/UninstallModal.php
+msgid "What was confusing?"
+msgstr "Apa yang membingungkan?"
+
+#: includes/UninstallModal.php
+msgid "Settings are confusing"
+msgstr "Pengaturan membingungkan"
+
+#: includes/UninstallModal.php
+msgid "Too many options"
+msgstr "Terlalu banyak opsi"
+
+#: includes/UninstallModal.php
+msgid "Unclear documentation"
+msgstr "Dokumentasi tidak jelas"
+
+#: includes/UninstallModal.php
+msgid "Which plugin are you switching to?"
+msgstr "Ke plugin mana Anda beralih?"
+
+#: includes/UninstallModal.php
+msgid "Plugin name (optional)"
+msgstr "Nama plugin (opsional)"
+
+#: includes/UninstallModal.php
+msgid "Please tell us more (optional):"
+msgstr "Silakan beri tahu kami lebih lanjut (opsional):"
+
+#: includes/UninstallModal.php
+msgid "What's your reason for deactivating?"
+msgstr "Apa alasan Anda menonaktifkan?"
+
+#: includes/UninstallModal.php
+msgid "Additional details (optional):"
+msgstr "Detail tambahan (opsional):"
+
+#: includes/UninstallModal.php
+msgid "Any other information about the issue..."
+msgstr "Informasi lain tentang masalah ini..."
+
+#: includes/UninstallModal.php
+msgid "For follow-up if needed"
+msgstr "Untuk tindak lanjut jika diperlukan"
+
+#: includes/UninstallModal.php
+msgid "Include technical details (system info + sanitized log excerpt) to help diagnose the issue"
+msgstr "Sertakan detail teknis (info sistem + kutipan log yang dibersihkan) untuk membantu mendiagnosis masalah"
+
+#: includes/UninstallModal.php
+msgid "Feedback could not be sent."
+msgstr "Masukan tidak dapat dikirim."
+
+msgid "Collect incoming 404 URLs"
+msgstr "Kumpulkan URL 404 yang masuk"
+
+msgid "Calm Ops (Light)"
+msgstr "Calm Ops (Terang)"
+
+msgid "Monochrome Minimal (Light)"
+msgstr "Monokrom Minimal (Terang)"
+
+msgid "Neon Slate (Dark)"
+msgstr "Neon Slate (Gelap)"
+
+msgid "Obsidian Blue (Dark)"
+msgstr "Obsidian Blue (Gelap)"
+#: includes/ajax/SettingsModeToggle.php
+msgid "Invalid security token"
+msgstr "Token keamanan tidak valid"
+
+msgid "Unauthorized"
+msgstr "Tidak diizinkan"
+
+msgid "Invalid mode"
+msgstr "Mode tidak valid"
+
+msgid "Settings mode updated"
+msgstr "Mode pengaturan diperbarui"
+
+msgid "Failed to update settings mode"
+msgstr "Gagal memperbarui mode pengaturan"
+#: includes/View.php - Simple/Advanced Mode Toggle
+msgid "Simple Mode"
+msgstr "Mode Sederhana"
+
+msgid "Advanced Mode"
+msgstr "Mode Lanjutan"
+
+msgid "Simple Mode shows essential options only. Switch to Advanced Mode for full configuration."
+msgstr "Mode sederhana hanya menampilkan opsi penting. Beralih ke mode lanjutan untuk konfigurasi lengkap."
+
+msgid "Advanced Mode shows all options. Switch to Simple Mode for a streamlined view."
+msgstr "Mode lanjutan menampilkan semua opsi. Beralih ke mode sederhana untuk tampilan yang lebih ringkas."
+
+msgid "Default (Follows WordPress)"
+msgstr "Default (mengikuti WordPress)"
+
+msgid "Core Settings"
+msgstr "Pengaturan Inti"
+
+msgid "404 Capture"
+msgstr "Penangkapan 404"
+
+msgid "Default 404 destination"
+msgstr "Tujuan 404 default"
+
+msgid "Where to send visitors when a 404 error occurs"
+msgstr "Ke mana mengarahkan pengunjung saat terjadi error 404"
+
+msgid "Automatically redirect 404s to similar pages when a good match is found"
+msgstr "Secara otomatis mengalihkan 404 ke halaman serupa saat ditemukan kecocokan yang baik"
+
+msgid "Redirect type"
+msgstr "Jenis pengalihan"
+
+msgid "301 for SEO, 302 for temporary changes"
+msgstr "301 untuk SEO, 302 untuk perubahan sementara"
+
+msgid "Log 404 errors so you can review and fix them"
+msgstr "Catat error 404 agar Anda dapat meninjau dan memperbaikinya"
+
+msgid "Delete captured URLs after"
+msgstr "Hapus URL yang ditangkap setelah"
+
+msgid "days"
+msgstr "hari"
+
+msgid "Auto-remove old 404 records (0 to keep forever)"
+msgstr "Hapus otomatis catatan 404 lama (0 untuk menyimpan selamanya)"
+
+msgid "Notify me when captured URLs exceed"
+msgstr "Beritahu saya ketika URL yang ditangkap melebihi"
+
+msgid "Show admin notice when 404 count gets high (0 to disable)"
+msgstr "Tampilkan pemberitahuan admin saat jumlah 404 tinggi (0 untuk menonaktifkan)"
+
+msgid "Maximum log storage"
+msgstr "Penyimpanan log maksimum"
+
+msgid "Oldest logs are deleted when this limit is reached"
+msgstr "Log terlama dihapus saat batas ini tercapai"
+
+msgid "Need more control? Switch to Advanced Mode for 30+ additional options."
+msgstr "Butuh lebih banyak kontrol? Beralih ke mode lanjutan untuk 30+ opsi tambahan."
+
+msgid "Need more control?"
+msgstr "Need more control?"
+
+msgid "Switch to Advanced Mode"
+msgstr "Switch to Advanced Mode"
+
+msgid "for 30+ additional options."
+msgstr "for 30+ additional options."
+
+msgid "Statistics"
+msgstr "Statistics"
+
+msgid "Example:"
+msgstr "Example:"
+
+msgid "/events/(.+) will match any URL that begins with /events/ and redirect to the specified page. Since a capture group is used, you can use a $1 replacement in the destination string of an external URL."
+msgstr "/events/(.+) will match any URL that begins with /events/ and redirect to the specified page. Since a capture group is used, you can use a $1 replacement in the destination string of an external URL."
+
+msgid "URLs to redirect"
+msgstr "URLs to redirect"
+
+msgid "Captured"
+msgstr "Captured"
+
+msgid "Ignored"
+msgstr "Ignored"
+
+msgid "Later"
+msgstr "Later"
+
+msgid "Type to filter URLs... (press Enter)"
+msgstr "Type to filter URLs... (press Enter)"
+
+msgid "Are you sure you want to permanently delete all items in trash?"
+msgstr "Are you sure you want to permanently delete all items in trash?"
+
+msgid "selected"
+msgstr "selected"
+
+msgid "Mark Captured"
+msgstr "Mark Captured"
+
+msgid "Mark Ignored"
+msgstr "Mark Ignored"
+
+msgid "Move to Trash"
+msgstr "Move to Trash"
+
+msgid "Create Redirect"
+msgstr "Create Redirect"
+
+msgid "Clear"
+msgstr "Clear"
+
+msgid "Never"
+msgstr "Never"
+
+msgid "Captured 404 URL"
+msgstr "Captured 404 URL"
+
+msgid "Ignored URL - will not be suggested"
+msgstr "Ignored URL - will not be suggested"
+
+msgid "Edit"
+msgstr "Edit"
+
+msgid "View Logs"
+msgstr "View Logs"
+
+msgid "Delete Permanently"
+msgstr "Delete Permanently"
+
+msgid "Are you sure you want to permanently delete this item?"
+msgstr "Are you sure you want to permanently delete this item?"
+
+msgid "Delete"
+msgstr "Delete"
+
+msgid "Ignore"
+msgstr "Ignore"
+
+msgid "Manual"
+msgstr "Manual"
+
+msgid "Automatic"
+msgstr "Automatic"
+
+msgid "Type to filter redirects... (press Enter)"
+msgstr "Type to filter redirects... (press Enter)"
+
+msgid "redirects selected"
+msgstr "redirects selected"
+
+msgid "Bulk Actions"
+msgstr "Bulk Actions"
+
+msgid "Edit Redirects"
+msgstr "Edit Redirects"
+
+msgid "Restore Redirects"
+msgstr "Restore Redirects"
+
+msgid "Clear Selection"
+msgstr "Clear Selection"
+
+msgid "Are you sure you want to permanently delete all items in the trash?"
+msgstr "Are you sure you want to permanently delete all items in the trash?"
+
+msgid "Add Manual Redirect"
+msgstr "Add Manual Redirect"
+
+msgid "The URL path that should be redirected (without domain)"
+msgstr "The URL path that should be redirected (without domain)"
+
+msgid "Permanent Redirect (Recommended for SEO)"
+msgstr "Permanent Redirect (Recommended for SEO)"
+
+msgid "Temporary Redirect"
+msgstr "Temporary Redirect"
+
+msgid "logs"
+msgstr "logs"
+
+msgid "redirects"
+msgstr "redirects"
+
+msgid "Showing %1$d-%2$d of %3$d %4$s"
+msgstr "Showing %1$d-%2$d of %3$d %4$s"
+
+msgid "Redirects will appear here once created."
+msgstr "Redirects will appear here once created."
+
+msgid "Redirect Logs"
+msgstr "Redirect Logs"
+
+msgid "Action"
+msgstr "Action"
+
+msgid "404"
+msgstr "404"
+
+msgid "Today's Stats"
+msgstr "Today's Stats"
+
+msgid "This Month"
+msgstr "This Month"
+
+msgid "This Year"
+msgstr "This Year"
+
+msgid "All Stats"
+msgstr "All Stats"
+
+msgid "Visit URL"
+msgstr "Visit URL"
+
+msgid "This page doesn't exist or is not published so the redirect won't work."
+msgstr "This page doesn't exist or is not published so the redirect won't work."
+
+
+#: includes/DataAccess.php
+msgid "Just now"
+msgstr "Just now"
+
+#: includes/View.php
+msgid "Data may not be immediately updated. Refresh to see latest changes."
+msgstr "Data may not be immediately updated. Refresh to see latest changes."
+
+#: includes/View.php
+msgid "Last updated: %s"
+msgstr "Last updated: %s"
+
+#: includes/WordPress_Connector.php
+msgid "second"
+msgstr "second"
+
+#: includes/WordPress_Connector.php
+msgid "seconds"
+msgstr "seconds"
+
+#: includes/WordPress_Connector.php
+msgid "minute"
+msgstr "minute"
+
+#: includes/WordPress_Connector.php
+msgid "minutes"
+msgstr "minutes"
+
+#: includes/WordPress_Connector.php
+msgid "hour"
+msgstr "hour"
+
+#: includes/WordPress_Connector.php
+msgid "hours"
+msgstr "hours"
+
+#: includes/WordPress_Connector.php
+msgid "day"
+msgstr "day"
+
+#: includes/WordPress_Connector.php
+msgid "ago"
+msgstr "ago"
+
+#: includes/SetupWizard.php
+msgid "Security check failed. Please try again."
+msgstr "Pemeriksaan keamanan gagal. Silakan coba lagi."
+
+#: includes/SetupWizard.php
+msgid "Error"
+msgstr "Kesalahan"
+
+#: includes/SetupWizard.php
+msgid "You do not have permission to access this page."
+msgstr "Anda tidak memiliki izin untuk mengakses halaman ini."
+
+#: includes/SetupWizard.php
+msgid "Welcome to 404 Solution"
+msgstr "Selamat datang di 404 Solution"
+
+#: includes/SetupWizard.php
+msgid "Close"
+msgstr "Tutup"
+
+#: includes/SetupWizard.php
+msgid "404 Solution helps you automatically handle 404 errors and broken links on your site."
+msgstr "404 Solution membantu Anda menangani kesalahan 404 dan tautan rusak di situs Anda secara otomatis."
+
+#: includes/SetupWizard.php
+msgid "Let's configure how it handles missing pages. You can always change these settings later."
+msgstr "Mari konfigurasikan cara menangani halaman yang hilang. Anda selalu dapat mengubah pengaturan ini nanti."
+
+#: includes/SetupWizard.php
+msgid "When a page is not found, what should happen?"
+msgstr "Apa yang harus terjadi ketika halaman tidak ditemukan?"
+
+#: includes/SetupWizard.php
+msgid "Automatically redirect to similar page (recommended)"
+msgstr "Alihkan otomatis ke halaman serupa (disarankan)"
+
+#: includes/SetupWizard.php
+msgid "When a match is found, redirect visitors automatically"
+msgstr "Ketika kecocokan ditemukan, alihkan pengunjung secara otomatis"
+
+#: includes/SetupWizard.php
+msgid "Just show the default 404 page"
+msgstr "Tampilkan saja halaman 404 default"
+
+#: includes/SetupWizard.php
+msgid "Use WordPress's standard \"Page not found\" screen. Manual redirects still work."
+msgstr "Gunakan layar standar \"Halaman tidak ditemukan\" WordPress. Pengalihan manual masih berfungsi."
+
+#: includes/SetupWizard.php
+msgid "Log 404 errors for review?"
+msgstr "Catat kesalahan 404 untuk ditinjau?"
+
+#: includes/SetupWizard.php
+msgid "Yes, log 404 errors"
+msgstr "Ya, catat kesalahan 404"
+
+#: includes/SetupWizard.php
+msgid "Track missing pages so you can create redirects later"
+msgstr "Lacak halaman yang hilang untuk membuat pengalihan nanti"
+
+#: includes/SetupWizard.php
+msgid "No, don't log 404s"
+msgstr "Tidak, jangan catat 404"
+
+#: includes/SetupWizard.php
+msgid "Only handle manually created redirects"
+msgstr "Hanya tangani pengalihan yang dibuat secara manual"
+
+#: includes/SetupWizard.php
+msgid "Skip Setup"
+msgstr "Lewati Pengaturan"
+
+#: includes/SetupWizard.php
+msgid "Save & Get Started"
+msgstr "Simpan dan Mulai"
+
+#: includes/html/tableRowPageRedirects.html
+msgid "url-is-normal"
+msgstr "url-is-normal"
+
+#: includes/html/tableRowPageRedirects.html
+msgid "url-looks-like-regex"
+msgstr "url-looks-like-regex"
+
+#: includes/html/tableRowPageRedirects.html
+msgid "This URL looks like a regular expression but is not marked as one. Edit the redirect and check \"Treat this URL as a regular expression\"."
+msgstr "This URL looks like a regular expression but is not marked as one. Edit the redirect and check \"Treat this URL as a regular expression\"."
+
+msgid "Create redirect from old URL to new URL"
+msgstr "Buat pengalihan dari URL lama ke URL baru"
+
+msgid "If you change the permalink/slug, a redirect will be created from the old URL to the new one."
+msgstr "Jika Anda mengubah permalink/slug, pengalihan akan dibuat dari URL lama ke yang baru."
+
+msgid "Redirect options are available after the post is published."
+msgstr "Opsi pengalihan tersedia setelah pos dipublikasikan."
+
+msgid "404 Solution"
+msgstr "Solusi 404"
+
+msgid "Slug changed:"
+msgstr "Slug berubah:"
+
+#: includes/html/paginationLinks.html
+msgid "Filter results"
+msgstr "Filter hasil"
+
+#: includes/html/paginationLinks.html
+msgid "Press Enter to search"
+msgstr "Tekan Enter untuk mencari"
+
+#: includes/html/paginationLinks.html
+msgid "Pagination"
+msgstr "Paginasi"
+
+#: includes/View.php
+msgid "Select all"
+msgstr "Pilih semua"
+
+#: includes/html/settingsModeToggle.html
+msgid "Settings mode"
+msgstr "Mode pengaturan"
+
+#: includes/html/viewSuggestions.html
+msgid "Require minimum match quality"
+msgstr "Memerlukan kualitas kecocokan minimum"
+
+#: includes/html/viewSuggestions.html
+msgid "Only show suggestions that closely match the requested URL. This filters out weak matches that may confuse visitors."
+msgstr "Hanya tampilkan saran yang sangat cocok dengan URL yang diminta. Ini menyaring kecocokan lemah yang mungkin membingungkan pengunjung."

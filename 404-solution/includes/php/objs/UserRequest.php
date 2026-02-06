@@ -38,7 +38,7 @@ class ABJ_404_Solution_UserRequest {
         $f = ABJ_404_Solution_Functions::getInstance();
         $abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
         
-        $urlToParse = urldecode($_SERVER['REQUEST_URI']);
+        $urlToParse = $f->normalizeUrlString($_SERVER['REQUEST_URI']);
       	
         // if the user somehow requested an invalid URL that's too long then fix it.
         if ($f->strlen($urlToParse) > ABJ404_MAX_URL_LENGTH) {
@@ -72,30 +72,25 @@ class ABJ_404_Solution_UserRequest {
         $urlParts = parse_url($urlToParse);
         if (!is_array($urlParts)) {
             $abj404logging->errorMessage('parse_url returned a non-array value. REQUEST_URI: "' . 
-                    urldecode($_SERVER['REQUEST_URI']) . '", parse_url result: "' . json_encode($urlParts) . '", ' .
+                    $f->normalizeUrlString($_SERVER['REQUEST_URI']) . '", parse_url result: "' . json_encode($urlParts) . '", ' .
                     'urlToParse result: ' . $urlToParse);
             return false;
         }
         // make things work with foreign languages while avoiding XSS issues.
         foreach ($urlParts as $key => $value) {
-            // Decode only if necessary, then sanitize and encode output
             if ($key === 'query') {
-                // For query strings, sanitize each key-value pair
+                // For query strings, preserve reserved characters while removing invalid bytes.
                 parse_str($value, $queryArray);
-                $safeQueryArray = array_map([$f, 'escapeForXSS'], $queryArray);
-                $safeQueryArray = array_map([$f, 'selectivelyURLEncode'], $safeQueryArray);
-                $safeQueryArray = $f->sanitize_text_field_recursive($safeQueryArray);
-
+                $safeQueryArray = $f->sanitizeUrlComponent($queryArray);
                 $urlParts[$key] = http_build_query($safeQueryArray);
             } else {
-                // Sanitize text parts like paths
-                $urlParts[$key] = $f->escapeForXSS($value);
-                $urlParts[$key] = $f->selectivelyURLEncode($value);
+                // Sanitize path/host/etc. without stripping reserved URL characters.
+                $urlParts[$key] = $f->sanitizeUrlComponent($value);
             }
         }
-        
+
         // remove a pointless trailing /amp
-        if (
+        if (isset($urlParts['path']) &&
         	($f->endsWithCaseInsensitive($urlParts['path'], '/amp') ||
         	 $f->endsWithCaseInsensitive($urlParts['path'], '/amp/')
         	)
@@ -110,12 +105,13 @@ class ABJ_404_Solution_UserRequest {
          * http://localhost:8888/404solution-site/2019/02/hello-world2/comment-page-2
          * http://localhost:8888/404solution-site/2019/02/hello-world2/comment-page-2/?quer=true
          */
-        $urlWithoutCommentPage = $urlParts['path'];
+        // Fix for PHP 8.2: Handle URLs with no path component (e.g., http://example.com)
+        $urlWithoutCommentPage = isset($urlParts['path']) ? $urlParts['path'] : '/';
         $commentPagePart = '';
         $results = array();
         if (isset($wp_rewrite) && isset($wp_rewrite->comments_pagination_base)) {
         	$commentregex = '(.*)\/(' . $wp_rewrite->comments_pagination_base . '-[0-9]{1,})(\/|\z)?(.*)';
-        	$f->regexMatch($commentregex, $urlParts['path'], $results);
+        	$f->regexMatch($commentregex, $urlWithoutCommentPage, $results);
         	
         	if (!empty($results)) {
         		$urlWithoutCommentPage = $results[1];

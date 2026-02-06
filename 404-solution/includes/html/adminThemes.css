@@ -1,0 +1,871 @@
+/**
+ * 404 Solution Admin Theme Styles
+ *
+ * This file defines the theme system for the admin pages.
+ * Themes are applied via the data-theme attribute on the body element.
+ *
+ * Available themes:
+ * - default: Default WordPress styling - no custom theme applied
+ * - mono: Monochrome Minimal (Light) - Grayscale with blue accents
+ * - calm: Calm Ops (Light) - Balanced blues and greens
+ * - neon: Neon Slate (Dark) - Dark with violet and cyan accents
+ * - obsidian: Obsidian Blue (Dark) - Deep blue dark theme
+ *
+ * Note: The "default" theme does not set a data-theme attribute,
+ * allowing WordPress to use its default admin styling.
+ */
+
+/* ===== Default Theme: Monochrome Minimal (Light) ===== */
+:root,
+html:not([data-theme]),
+html:not([data-theme]) body,
+html[data-theme="mono"],
+body[data-theme="mono"] {
+  --abj404-bg: #F8FAFC;
+  --abj404-bg-muted: #F5F7FA;
+  --abj404-surface: #ffffff;
+  --abj404-surface-hover: #F6F7F7;  /* Light gray for hover */
+  --abj404-surface-muted: #F1F5F9;
+  --abj404-text: #111827;
+  --abj404-text-muted: #6B7280;
+  --abj404-border: #E5E7EB;
+  --abj404-primary: #374151;
+  --abj404-accent: #2563EB;
+  --abj404-info: #3B82F6;
+  --abj404-success: #10B981;
+  --abj404-warning: #F59E0B;
+  --abj404-danger: #EF4444;
+  --abj404-focus: #93C5FD;
+  --abj404-table-header: #F1F5F9;
+  --abj404-row-hover: #F5F7FA;
+  --abj404-row-selected: #DBEAFE;
+  --abj404-badge-bg: #EFF1F5;
+  --abj404-badge-text: #374151;
+  --abj404-link: var(--abj404-accent);
+}
+
+/* === Calm Ops (Light) === */
+html[data-theme="calm"],
+body[data-theme="calm"] {
+  --abj404-bg: #F7FAFD;
+  --abj404-bg-muted: #F1F6FE;
+  --abj404-surface: #ffffff;
+  --abj404-surface-hover: #F1F6FE;  /* Light blue-gray for hover */
+  --abj404-surface-muted: #E9F0FB;
+  --abj404-text: #17223B;
+  --abj404-text-muted: #5A6B86;
+  --abj404-border: #E1E8F5;
+  --abj404-primary: #1E6BD6;
+  --abj404-accent: #00A27A;
+  --abj404-info: #2B8AE2;
+  --abj404-success: #20B67A;
+  --abj404-warning: #F6A700;
+  --abj404-danger: #D53F3F;
+  --abj404-focus: #5AA2FF;
+  --abj404-table-header: #E9F0FB;
+  --abj404-row-hover: #F1F6FE;
+  --abj404-row-selected: #D7E8FF;
+  --abj404-badge-bg: #EEF2F8;
+  --abj404-badge-text: #3E546E;
+  --abj404-link: var(--abj404-accent);
+}
+
+/* === Neon Slate (Dark) === */
+html[data-theme="neon"],
+body[data-theme="neon"] {
+  --abj404-bg: #0C0F13;
+  --abj404-bg-muted: #11151A;
+  --abj404-surface: #151A21;
+  --abj404-surface-hover: #1B222B;  /* Slightly lighter than surface for hover */
+  --abj404-surface-muted: #1B222B;
+  --abj404-text: #DDE3EB;        /* Reduced from #E5EAF2 to prevent halation */
+  --abj404-text-muted: #B4BFD0;  /* Improved from #A6B0C3 for better contrast */
+  --abj404-border: #273141;
+  --abj404-primary: #7C3AED;
+  --abj404-accent: #22D3EE;
+  --abj404-info: #60A5FA;
+  --abj404-success: #34D399;
+  --abj404-warning: #F59E0B;
+  --abj404-danger: #F87171;
+  --abj404-focus: #38BDF8;
+  --abj404-table-header: #1F2732;
+  --abj404-row-hover: #192028;
+  --abj404-row-selected: #0E2936;
+  --abj404-badge-bg: #202734;
+  --abj404-badge-text: #D0D8E6;  /* Reduced from #CFD8E6 for consistency */
+  --abj404-link: var(--abj404-accent);
+  --abj404-button-bg: #3D4A5C;   /* Much brighter than surface for clear button visibility */
+  --abj404-button-border: #5A6B7F;  /* Bright border for definition */
+  --abj404-button-hover-bg: #4A5A6E;  /* Lighter hover state */
+  --abj404-button-text: #E8EDF3;  /* Slightly brighter text for buttons */
+}
+
+/* === Obsidian Blue (Dark) === */
+html[data-theme="obsidian"],
+body[data-theme="obsidian"] {
+  --abj404-bg: #0A0F1A;
+  --abj404-bg-muted: #0E1522;
+  --abj404-surface: #121826;
+  --abj404-surface-hover: #172032;  /* Slightly lighter than surface for hover */
+  --abj404-surface-muted: #172032;
+  --abj404-text: #DEE5F0;        /* Reduced from #E6ECF7 to prevent halation */
+  --abj404-text-muted: #B8C4D8;  /* Improved from #A9B7CC for better contrast */
+  --abj404-border: #223149;
+  --abj404-primary: #1D4ED8;
+  --abj404-accent: #A78BFA;
+  --abj404-info: #60A5FA;
+  --abj404-success: #22C55E;
+  --abj404-warning: #F59E0B;
+  --abj404-danger: #EF4444;
+  --abj404-focus: #93C5FD;
+  --abj404-table-header: #1B253A;
+  --abj404-row-hover: #141C2C;
+  --abj404-row-selected: #1A2A46;
+  --abj404-badge-bg: #1A2438;
+  --abj404-badge-text: #D5DEF0;  /* Reduced from #DCE6F7 for consistency */
+  --abj404-link: #93C5FD;
+  --abj404-button-bg: #2D3F5C;   /* Much brighter than surface for clear button visibility */
+  --abj404-button-border: #4A6085;  /* Bright border for definition */
+  --abj404-button-hover-bg: #3A4F6E;  /* Lighter hover state */
+  --abj404-button-text: #E8EFF7;  /* Slightly brighter text for buttons */
+}
+
+/* ===== Mode Toggle Button Overrides ===== */
+/* Exclude mode buttons from general button styles - they have their own distinct styling */
+/* Non-active mode button - should look like a subtle link/tab */
+html[data-theme] body.wp-admin .abj404-mode-btn:not(.active),
+body[data-theme].wp-admin .abj404-mode-btn:not(.active),
+html[data-theme] body .abj404-mode-btn:not(.active),
+body[data-theme] .abj404-mode-btn:not(.active) {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: var(--abj404-text-muted) !important;
+}
+
+html[data-theme] body.wp-admin .abj404-mode-btn:not(.active):hover,
+body[data-theme].wp-admin .abj404-mode-btn:not(.active):hover,
+html[data-theme] body .abj404-mode-btn:not(.active):hover,
+body[data-theme] .abj404-mode-btn:not(.active):hover {
+  background: var(--abj404-surface-muted) !important;
+  color: var(--abj404-text) !important;
+  transform: none !important;
+}
+
+/* Active mode button - should be prominent */
+html[data-theme] body.wp-admin .abj404-mode-btn.active,
+body[data-theme].wp-admin .abj404-mode-btn.active,
+html[data-theme] body .abj404-mode-btn.active,
+body[data-theme] .abj404-mode-btn.active {
+  background: var(--abj404-accent) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12) !important;
+}
+
+html[data-theme] body.wp-admin .abj404-mode-btn.active:hover,
+body[data-theme].wp-admin .abj404-mode-btn.active:hover,
+html[data-theme] body .abj404-mode-btn.active:hover,
+body[data-theme] .abj404-mode-btn.active:hover {
+  opacity: 0.9 !important;
+  transform: none !important;
+}
+
+/* ===== Card Styling for Themes ===== */
+/* Apply theme surface color to cards */
+html[data-theme] body .abj404-card,
+body[data-theme] .abj404-card {
+  background: var(--abj404-surface) !important;
+  border-color: var(--abj404-border) !important;
+}
+
+html[data-theme] body .abj404-card-header,
+body[data-theme] .abj404-card-header {
+  border-bottom-color: var(--abj404-border) !important;
+}
+
+html[data-theme] body .abj404-card-header:hover,
+body[data-theme] .abj404-card-header:hover {
+  background: var(--abj404-surface-hover) !important;
+}
+
+html[data-theme] body .abj404-card-title,
+body[data-theme] .abj404-card-title {
+  color: var(--abj404-text) !important;
+}
+
+html[data-theme] body .abj404-card-content,
+body[data-theme] .abj404-card-content {
+  color: var(--abj404-text) !important;
+}
+
+/* ===== Content Tab (Filter Links) Styling for Themes ===== */
+/* Non-active content tabs - make text readable in dark mode */
+html[data-theme] body .abj404-content-tab,
+body[data-theme] .abj404-content-tab {
+  color: var(--abj404-text) !important;
+}
+
+html[data-theme] body .abj404-content-tab:hover,
+body[data-theme] .abj404-content-tab:hover {
+  color: var(--abj404-accent) !important;
+  background: var(--abj404-surface-hover) !important;
+}
+
+html[data-theme] body .abj404-content-tab.active,
+body[data-theme] .abj404-content-tab.active {
+  color: var(--abj404-accent) !important;
+  background: var(--abj404-surface) !important;
+}
+
+/* Tab count badges - make readable in dark mode */
+html[data-theme] body .abj404-content-tab .abj404-tab-count,
+body[data-theme] .abj404-content-tab .abj404-tab-count {
+  background: var(--abj404-badge-bg) !important;
+  color: var(--abj404-badge-text) !important;
+}
+
+html[data-theme] body .abj404-content-tab.active .abj404-tab-count,
+body[data-theme] .abj404-content-tab.active .abj404-tab-count {
+  background: var(--abj404-accent) !important;
+  color: #fff !important;
+}
+
+/* ===== Logs Table Layout Improvements ===== */
+/* Better column distribution for logs table */
+.abj404-logs-table {
+  table-layout: fixed !important;
+  width: 100%;
+}
+
+/* URL column - most important, give it good width */
+.abj404-logs-table th:nth-child(1),
+.abj404-logs-table td:nth-child(1) {
+  width: 22%;
+  word-break: break-all;
+}
+
+/* IP Address column - fixed width for consistent display */
+.abj404-logs-table th:nth-child(2),
+.abj404-logs-table td:nth-child(2) {
+  width: 15%;
+  white-space: nowrap;
+}
+
+/* Referrer column - constrain with ellipsis */
+.abj404-logs-table th:nth-child(3),
+.abj404-logs-table td:nth-child(3) {
+  width: 28%;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Action column */
+.abj404-logs-table th:nth-child(4),
+.abj404-logs-table td:nth-child(4) {
+  width: 18%;
+}
+
+/* Date column */
+.abj404-logs-table th:nth-child(5),
+.abj404-logs-table td:nth-child(5) {
+  width: 12%;
+  white-space: nowrap;
+}
+
+/* User column */
+.abj404-logs-table th:nth-child(6),
+.abj404-logs-table td:nth-child(6) {
+  width: 5%;
+}
+
+/* Referrer links - full width with ellipsis */
+.abj404-logs-table td:nth-child(3) a {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===== Apply theme colors to WordPress admin elements ===== */
+/* Using high specificity selectors to avoid !important */
+/* Note: Selectors check both html[data-theme] and body[data-theme] */
+/* to support early theme application before body element is ready */
+
+/* Background colors for WordPress admin wrapper elements */
+html[data-theme] body.wp-admin #wpcontent,
+body[data-theme].wp-admin #wpcontent,
+html[data-theme] body.wp-admin #wpbody,
+body[data-theme].wp-admin #wpbody,
+html[data-theme] body.wp-admin #wpbody-content,
+body[data-theme].wp-admin #wpbody-content {
+  background-color: var(--abj404-bg);
+}
+
+/* Body background color */
+html[data-theme] body.wp-admin,
+body[data-theme].wp-admin {
+  background-color: var(--abj404-bg) !important;
+}
+
+/* Background colors */
+html[data-theme] body .wrap,
+body[data-theme] .wrap,
+html[data-theme] body.wp-admin #wpwrap .wrap,
+body[data-theme].wp-admin #wpwrap .wrap {
+  background-color: var(--abj404-bg);
+  color: var(--abj404-text);
+}
+
+/* Page headings (like "404 Solution Options") */
+html[data-theme] body .wrap h1,
+html[data-theme] body .wrap h2,
+html[data-theme] body .wrap > h1,
+html[data-theme] body .wrap > h2,
+body[data-theme] .wrap h1,
+body[data-theme] .wrap h2,
+body[data-theme] .wrap > h1,
+body[data-theme] .wrap > h2 {
+  color: var(--abj404-text);
+}
+
+/* Post boxes (the main content containers) */
+html[data-theme] body .postbox,
+html[data-theme] body .postbox-container .metabox-holder .postbox,
+body[data-theme] .postbox,
+body[data-theme] .postbox-container .metabox-holder .postbox {
+  background-color: var(--abj404-surface);
+  border-color: var(--abj404-border);
+  color: var(--abj404-text);
+}
+
+html[data-theme] body .postbox .inside,
+body[data-theme] .postbox .inside {
+  background-color: var(--abj404-surface);
+  color: var(--abj404-text);
+}
+
+/* Postbox headers */
+html[data-theme] body .postbox h2,
+html[data-theme] body .postbox h3,
+html[data-theme] body .postbox .hndle,
+html[data-theme] body .hndle,
+body[data-theme] .postbox h2,
+body[data-theme] .postbox h3,
+body[data-theme] .postbox .hndle,
+body[data-theme] .hndle {
+  background-color: var(--abj404-surface-muted);
+  border-bottom-color: var(--abj404-border);
+  color: var(--abj404-text);
+}
+
+/* Tables */
+body[data-theme] table.wp-list-table,
+body[data-theme] .widefat {
+  background-color: var(--abj404-surface);
+  border-color: var(--abj404-border);
+  color: var(--abj404-text);
+}
+
+body[data-theme] table.wp-list-table thead th,
+body[data-theme] .widefat thead th,
+body[data-theme] table.wp-list-table tfoot th,
+body[data-theme] .widefat tfoot th {
+  background-color: var(--abj404-table-header);
+  border-color: var(--abj404-border);
+  color: var(--abj404-text);
+}
+
+body[data-theme] table.wp-list-table tbody tr,
+body[data-theme] .widefat tbody tr {
+  background-color: var(--abj404-surface);
+  border-color: var(--abj404-border);
+}
+
+body[data-theme] table.wp-list-table tbody tr:hover,
+body[data-theme] .widefat tbody tr:hover {
+  background-color: var(--abj404-row-hover);
+}
+
+body[data-theme] table.wp-list-table tbody tr.selected,
+body[data-theme] .widefat tbody tr.selected {
+  background-color: var(--abj404-row-selected);
+}
+
+body[data-theme] table.wp-list-table tbody td,
+body[data-theme] .widefat tbody td {
+  border-color: var(--abj404-border);
+  color: var(--abj404-text);
+}
+
+/* Form elements */
+html[data-theme] body.wp-admin input[type="text"],
+html[data-theme] body.wp-admin input[type="number"],
+html[data-theme] body.wp-admin input[type="email"],
+html[data-theme] body.wp-admin input[type="password"],
+html[data-theme] body.wp-admin input[type="search"],
+html[data-theme] body.wp-admin textarea,
+html[data-theme] body.wp-admin select,
+body[data-theme].wp-admin input[type="text"],
+body[data-theme].wp-admin input[type="number"],
+body[data-theme].wp-admin input[type="email"],
+body[data-theme].wp-admin input[type="password"],
+body[data-theme].wp-admin input[type="search"],
+body[data-theme].wp-admin textarea,
+body[data-theme].wp-admin select,
+html[data-theme] body input[type="text"],
+html[data-theme] body input[type="number"],
+html[data-theme] body input[type="email"],
+html[data-theme] body input[type="password"],
+html[data-theme] body input[type="search"],
+html[data-theme] body textarea,
+html[data-theme] body select,
+body[data-theme] input[type="text"],
+body[data-theme] input[type="number"],
+body[data-theme] input[type="email"],
+body[data-theme] input[type="password"],
+body[data-theme] input[type="search"],
+body[data-theme] textarea,
+body[data-theme] select {
+  background-color: var(--abj404-surface) !important;
+  border-color: var(--abj404-border) !important;
+  color: var(--abj404-text) !important;
+  border-radius: 4px !important;
+}
+
+html[data-theme] body.wp-admin input[type="text"]:focus,
+html[data-theme] body.wp-admin input[type="number"]:focus,
+html[data-theme] body.wp-admin input[type="email"]:focus,
+html[data-theme] body.wp-admin input[type="password"]:focus,
+html[data-theme] body.wp-admin input[type="search"]:focus,
+html[data-theme] body.wp-admin textarea:focus,
+html[data-theme] body.wp-admin select:focus,
+body[data-theme].wp-admin input[type="text"]:focus,
+body[data-theme].wp-admin input[type="number"]:focus,
+body[data-theme].wp-admin input[type="email"]:focus,
+body[data-theme].wp-admin input[type="password"]:focus,
+body[data-theme].wp-admin input[type="search"]:focus,
+body[data-theme].wp-admin textarea:focus,
+body[data-theme].wp-admin select:focus,
+html[data-theme] body input[type="text"]:focus,
+html[data-theme] body input[type="number"]:focus,
+html[data-theme] body input[type="email"]:focus,
+html[data-theme] body input[type="password"]:focus,
+html[data-theme] body input[type="search"]:focus,
+html[data-theme] body textarea:focus,
+html[data-theme] body select:focus,
+body[data-theme] input[type="text"]:focus,
+body[data-theme] input[type="number"]:focus,
+body[data-theme] input[type="email"]:focus,
+body[data-theme] input[type="password"]:focus,
+body[data-theme] input[type="search"]:focus,
+body[data-theme] textarea:focus,
+body[data-theme] select:focus {
+  border-color: var(--abj404-focus) !important;
+  outline-color: var(--abj404-focus) !important;
+}
+
+/* Select dropdown options */
+html[data-theme] body.wp-admin select option,
+body[data-theme].wp-admin select option,
+html[data-theme] body select option,
+body[data-theme] select option {
+  background-color: var(--abj404-surface) !important;
+  color: var(--abj404-text) !important;
+}
+
+/* jQuery UI Autocomplete dropdown */
+html[data-theme] .ui-autocomplete,
+body[data-theme] .ui-autocomplete,
+html[data-theme] .ui-menu,
+body[data-theme] .ui-menu {
+  background-color: var(--abj404-surface) !important;
+  border-color: var(--abj404-border) !important;
+  color: var(--abj404-text) !important;
+}
+
+html[data-theme] .ui-autocomplete .ui-menu-item,
+body[data-theme] .ui-autocomplete .ui-menu-item,
+html[data-theme] .ui-menu .ui-menu-item,
+body[data-theme] .ui-menu .ui-menu-item {
+  background-color: var(--abj404-surface) !important;
+  color: var(--abj404-text) !important;
+}
+
+html[data-theme] .ui-autocomplete .ui-menu-item .ui-menu-item-wrapper,
+body[data-theme] .ui-autocomplete .ui-menu-item .ui-menu-item-wrapper,
+html[data-theme] .ui-menu .ui-menu-item .ui-menu-item-wrapper,
+body[data-theme] .ui-menu .ui-menu-item .ui-menu-item-wrapper {
+  color: var(--abj404-text) !important;
+}
+
+html[data-theme] .ui-autocomplete .ui-menu-item:hover,
+body[data-theme] .ui-autocomplete .ui-menu-item:hover,
+html[data-theme] .ui-menu .ui-menu-item:hover,
+body[data-theme] .ui-menu .ui-menu-item:hover,
+html[data-theme] .ui-autocomplete .ui-state-active,
+body[data-theme] .ui-autocomplete .ui-state-active,
+html[data-theme] .ui-autocomplete .ui-state-focus,
+body[data-theme] .ui-autocomplete .ui-state-focus {
+  background-color: var(--abj404-surface-muted) !important;
+  color: var(--abj404-text) !important;
+  border-color: var(--abj404-primary) !important;
+}
+
+html[data-theme] .ui-autocomplete .ui-menu-item-wrapper.ui-state-active,
+body[data-theme] .ui-autocomplete .ui-menu-item-wrapper.ui-state-active {
+  background-color: var(--abj404-primary) !important;
+  color: #ffffff !important;
+}
+
+/* Autocomplete category headers */
+html[data-theme] .ui-autocomplete-category,
+body[data-theme] .ui-autocomplete-category {
+  background-color: var(--abj404-surface-muted) !important;
+  color: var(--abj404-text-muted) !important;
+  font-weight: bold;
+  padding: 4px 8px;
+}
+
+/* Buttons */
+/* High specificity selectors to override WordPress defaults */
+html[data-theme] body.wp-admin button,
+html[data-theme] body.wp-admin input[type="button"],
+html[data-theme] body.wp-admin input[type="submit"],
+html[data-theme] body.wp-admin input[type="reset"],
+body[data-theme].wp-admin button,
+body[data-theme].wp-admin input[type="button"],
+body[data-theme].wp-admin input[type="submit"],
+body[data-theme].wp-admin input[type="reset"],
+html[data-theme] body .button,
+html[data-theme] body .button-secondary,
+body[data-theme] .button,
+body[data-theme] .button-secondary {
+  background-color: var(--abj404-button-bg, var(--abj404-surface)) !important;
+  border-color: var(--abj404-button-border, var(--abj404-border)) !important;
+  color: var(--abj404-button-text, var(--abj404-text)) !important;
+  border-radius: 8px !important;
+  border-style: solid !important;
+  border-width: 1px !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 1px 3px rgba(0, 0, 0, 0.3) !important;
+}
+
+html[data-theme] body.wp-admin button:hover,
+html[data-theme] body.wp-admin input[type="button"]:hover,
+html[data-theme] body.wp-admin input[type="submit"]:hover,
+html[data-theme] body.wp-admin input[type="reset"]:hover,
+body[data-theme].wp-admin button:hover,
+body[data-theme].wp-admin input[type="button"]:hover,
+body[data-theme].wp-admin input[type="submit"]:hover,
+body[data-theme].wp-admin input[type="reset"]:hover,
+html[data-theme] body .button:hover,
+html[data-theme] body .button-secondary:hover,
+body[data-theme] .button:hover,
+body[data-theme] .button-secondary:hover {
+  background-color: var(--abj404-button-hover-bg, var(--abj404-surface-muted)) !important;
+  border-color: var(--abj404-primary) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 2px 5px rgba(0, 0, 0, 0.4) !important;
+  transform: translateY(-1px);
+}
+
+html[data-theme] body .button-primary,
+body[data-theme] .button-primary,
+html[data-theme] body input[type="submit"].button-primary,
+body[data-theme] input[type="submit"].button-primary {
+  background-color: var(--abj404-primary) !important;
+  border-color: var(--abj404-primary) !important;
+  color: #ffffff !important;
+  border-radius: 8px !important;
+}
+
+html[data-theme] body .button-primary:hover,
+body[data-theme] .button-primary:hover,
+html[data-theme] body input[type="submit"].button-primary:hover,
+body[data-theme] input[type="submit"].button-primary:hover {
+  opacity: 0.9;
+}
+
+/* Links */
+body[data-theme] a {
+  color: var(--abj404-link);
+}
+
+body[data-theme] a:hover {
+  color: var(--abj404-accent);
+}
+
+/* Navigation tabs */
+body[data-theme] .nav-tab-wrapper,
+body[data-theme] .wrap .nav-tab-wrapper {
+  background-color: var(--abj404-bg);
+  border-bottom-color: var(--abj404-border);
+}
+
+body[data-theme] .nav-tab,
+body[data-theme] a.nav-tab {
+  background-color: var(--abj404-surface);
+  border-color: var(--abj404-border);
+  color: var(--abj404-text);
+}
+
+body[data-theme] .nav-tab:hover,
+body[data-theme] a.nav-tab:hover {
+  background-color: var(--abj404-surface-muted);
+  color: var(--abj404-text);
+}
+
+body[data-theme] .nav-tab-active,
+body[data-theme] .nav-tab-active:hover,
+body[data-theme] a.nav-tab-active,
+body[data-theme] a.nav-tab-active:hover {
+  background-color: var(--abj404-bg);
+  border-bottom-color: var(--abj404-bg);
+  color: var(--abj404-text);
+}
+
+/* Filter navigation (All, Manual Redirects, etc.) */
+html[data-theme] body.wp-admin .subsubsub a,
+body[data-theme].wp-admin .subsubsub a,
+html[data-theme] body .subsubsub a,
+body[data-theme] .subsubsub a {
+  color: var(--abj404-link) !important;
+}
+
+html[data-theme] body.wp-admin .subsubsub a:hover,
+body[data-theme].wp-admin .subsubsub a:hover,
+html[data-theme] body .subsubsub a:hover,
+body[data-theme] .subsubsub a:hover {
+  color: var(--abj404-link-hover) !important;
+}
+
+html[data-theme] body.wp-admin .subsubsub a.current,
+body[data-theme].wp-admin .subsubsub a.current,
+html[data-theme] body .subsubsub a.current,
+body[data-theme] .subsubsub a.current {
+  color: var(--abj404-text) !important;
+  font-weight: 600;
+}
+
+/* Notices and messages */
+body[data-theme] .notice,
+body[data-theme] .updated,
+body[data-theme] .error {
+  background-color: var(--abj404-surface);
+  border-left-color: var(--abj404-info);
+  color: var(--abj404-text);
+}
+
+body[data-theme] .notice.notice-success,
+body[data-theme] .updated {
+  border-left-color: var(--abj404-success);
+}
+
+body[data-theme] .notice.notice-warning {
+  border-left-color: var(--abj404-warning);
+}
+
+body[data-theme] .notice.notice-error,
+body[data-theme] .error {
+  border-left-color: var(--abj404-danger);
+}
+
+/* Pagination */
+body[data-theme] .tablenav,
+body[data-theme] .tablenav-pages {
+  background-color: var(--abj404-surface);
+  color: var(--abj404-text);
+}
+
+body[data-theme] .tablenav .tablenav-pages a {
+  background-color: var(--abj404-surface);
+  border-color: var(--abj404-border);
+  color: var(--abj404-link);
+}
+
+/* Muted text */
+body[data-theme] .description,
+body[data-theme] .form-text,
+body[data-theme] p.description {
+  color: var(--abj404-text-muted);
+}
+
+/* File input styling */
+html[data-theme] body.wp-admin input[type="file"],
+body[data-theme].wp-admin input[type="file"],
+html[data-theme] body input[type="file"],
+body[data-theme] input[type="file"] {
+  background-color: var(--abj404-surface) !important;
+  border: 1px solid var(--abj404-border) !important;
+  border-radius: 8px !important;
+  color: var(--abj404-text) !important;
+  padding: 6px 12px !important;
+}
+
+html[data-theme] body.wp-admin input[type="file"]::-webkit-file-upload-button,
+body[data-theme].wp-admin input[type="file"]::-webkit-file-upload-button,
+html[data-theme] body input[type="file"]::-webkit-file-upload-button,
+body[data-theme] input[type="file"]::-webkit-file-upload-button {
+  background-color: var(--abj404-surface-muted) !important;
+  border: 1px solid var(--abj404-border) !important;
+  border-radius: 6px !important;
+  color: var(--abj404-text) !important;
+  padding: 6px 12px !important;
+  margin-right: 12px !important;
+  cursor: pointer !important;
+}
+
+html[data-theme] body.wp-admin input[type="file"]::-webkit-file-upload-button:hover,
+body[data-theme].wp-admin input[type="file"]::-webkit-file-upload-button:hover,
+html[data-theme] body input[type="file"]::-webkit-file-upload-button:hover,
+body[data-theme] input[type="file"]::-webkit-file-upload-button:hover {
+  background-color: var(--abj404-primary) !important;
+  border-color: var(--abj404-primary) !important;
+  color: #ffffff !important;
+}
+
+/* Chips navigation - preserve scroll spy functionality */
+/* Override general button styles for chips to maintain their distinct states */
+html[data-theme] body.wp-admin .abj404-chip,
+body[data-theme].wp-admin .abj404-chip,
+html[data-theme] body .abj404-chip,
+body[data-theme] .abj404-chip {
+  background-color: var(--abj404-surface) !important;
+  border-color: var(--abj404-border) !important;
+  color: var(--abj404-text) !important;
+  border-radius: 8px !important;
+  opacity: 0.5;
+}
+
+html[data-theme] body.wp-admin .abj404-chip:hover,
+body[data-theme].wp-admin .abj404-chip:hover,
+html[data-theme] body .abj404-chip:hover,
+body[data-theme] .abj404-chip:hover {
+  background-color: var(--abj404-surface-muted) !important;
+  border-color: var(--abj404-text-muted) !important;
+  opacity: 0.7;
+}
+
+/* Section visible (pressed/shown) */
+html[data-theme] body.wp-admin .abj404-chip[aria-pressed="true"],
+body[data-theme].wp-admin .abj404-chip[aria-pressed="true"],
+html[data-theme] body .abj404-chip[aria-pressed="true"],
+body[data-theme] .abj404-chip[aria-pressed="true"] {
+  background-color: var(--abj404-bg-muted) !important;
+  border-color: var(--abj404-accent) !important;
+  box-shadow: inset 0 0 0 1px currentColor !important;
+  opacity: 0.9;
+}
+
+/* Section currently in viewport - Scroll Spy Active State */
+html[data-theme] body.wp-admin .abj404-chip.active,
+body[data-theme].wp-admin .abj404-chip.active,
+html[data-theme] body .abj404-chip.active,
+body[data-theme] .abj404-chip.active {
+  background-color: var(--abj404-accent) !important;
+  border-color: var(--abj404-accent) !important;
+  color: #fff !important;
+  font-weight: 600 !important;
+  box-shadow: 0 2px 8px rgba(34, 113, 177, 0.3) !important;
+  opacity: 1 !important;
+  transform: scale(1.05) !important;
+}
+
+html[data-theme] body.wp-admin .abj404-chip.active:hover,
+body[data-theme].wp-admin .abj404-chip.active:hover,
+html[data-theme] body .abj404-chip.active:hover,
+body[data-theme] .abj404-chip.active:hover {
+  background-color: var(--abj404-accent) !important;
+  box-shadow: 0 3px 12px rgba(34, 113, 177, 0.4) !important;
+}
+
+/* Active chip - make dot brighter/white */
+html[data-theme] body.wp-admin .abj404-chip.active .abj404-chip-dot,
+body[data-theme].wp-admin .abj404-chip.active .abj404-chip-dot,
+html[data-theme] body .abj404-chip.active .abj404-chip-dot,
+body[data-theme] .abj404-chip.active .abj404-chip-dot {
+  background: #fff !important;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.6) !important;
+}
+
+/* Special styling for dark themes */
+body[data-theme="neon"] .postbox,
+body[data-theme="obsidian"] .postbox {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+html[data-theme="neon"] input[type="checkbox"],
+html[data-theme="neon"] input[type="radio"],
+html[data-theme="obsidian"] input[type="checkbox"],
+html[data-theme="obsidian"] input[type="radio"] {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* ===== Typography optimizations for dark themes ===== */
+/* Improve readability by adjusting font rendering and weights for dark backgrounds */
+
+/* Font smoothing for crisper text rendering on dark backgrounds */
+body[data-theme="neon"],
+body[data-theme="obsidian"] {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Reduce font weight on dark backgrounds (text appears heavier on dark) */
+body[data-theme="neon"] .postbox,
+body[data-theme="neon"] .postbox .inside,
+body[data-theme="neon"] p,
+body[data-theme="neon"] td,
+body[data-theme="neon"] th,
+body[data-theme="neon"] label,
+body[data-theme="obsidian"] .postbox,
+body[data-theme="obsidian"] .postbox .inside,
+body[data-theme="obsidian"] p,
+body[data-theme="obsidian"] td,
+body[data-theme="obsidian"] th,
+body[data-theme="obsidian"] label {
+  font-weight: 400;
+}
+
+/* Adjust bold/strong elements to use medium weight instead of bold */
+body[data-theme="neon"] strong,
+body[data-theme="neon"] b,
+body[data-theme="neon"] .button-primary,
+body[data-theme="obsidian"] strong,
+body[data-theme="obsidian"] b,
+body[data-theme="obsidian"] .button-primary {
+  font-weight: 500;
+}
+
+/* Increase line height for better readability in body text */
+body[data-theme="neon"] .postbox .inside,
+body[data-theme="neon"] .form-text,
+body[data-theme="neon"] .description,
+body[data-theme="neon"] p.description,
+body[data-theme="obsidian"] .postbox .inside,
+body[data-theme="obsidian"] .form-text,
+body[data-theme="obsidian"] .description,
+body[data-theme="obsidian"] p.description {
+  line-height: 1.6;
+}
+
+/* Improve table readability with better spacing */
+body[data-theme="neon"] table.wp-list-table tbody td,
+body[data-theme="neon"] .widefat tbody td,
+body[data-theme="obsidian"] table.wp-list-table tbody td,
+body[data-theme="obsidian"] .widefat tbody td {
+  padding-top: 12px;
+  padding-bottom: 12px;
+  line-height: 1.5;
+}
+
+/* ===== Loading Overlay for Dark Themes ===== */
+/* Override the white loading overlay with a dark semi-transparent background */
+html[data-theme="neon"] .abj404-loading-overlay,
+body[data-theme="neon"] .abj404-loading-overlay,
+html[data-theme="obsidian"] .abj404-loading-overlay,
+body[data-theme="obsidian"] .abj404-loading-overlay {
+  background: rgba(12, 15, 19, 0.8) !important;
+}

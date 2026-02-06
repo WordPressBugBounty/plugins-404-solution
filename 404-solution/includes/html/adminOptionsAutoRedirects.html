@@ -1,0 +1,26 @@
+<p>
+<label for="auto_redirects">{Create automatic redirects}:</label>
+<input type="checkbox" name="auto_redirects" id="auto_redirects" value="1"{selectedAutoRedirects}><BR/>
+{spaces}{Automatically creates redirects based on best possible suggested page.}
+</p>
+
+<p>
+<label for="auto_slugs">{Create redirects on slug change}:</label>
+<input type="checkbox" name="auto_slugs" id="auto_slugs" value="1"{selectedAutoSlugs}>
+</p>
+
+<p>
+<label for="auto_cats">{Create automatic redirects for categories}:</label>
+<input type="checkbox" name="auto_cats" id="auto_cats" value="1"{selectedAutoCats}>
+</p>
+
+<p>
+<label for="auto_tags">{Create automatic redirects for tags}:</label>
+<input type="checkbox" name="auto_tags" id="auto_tags" value="1"{selectedAutoTags}>
+</p>
+
+<p>
+<label for="auto_deletion">{Delete automatic redirects after}:</label>
+<input type="text" name="auto_deletion" id="auto_deletion" value="{auto_deletion}" style="width: 50px;"> {days without use (0 to disable)}<BR/>
+{spaces}{Removes automatically created redirects if they haven't been used for the specified amount of time. Does not affect manually created redirects.}
+</p>

@@ -159,11 +159,33 @@ class ABJ_404_Solution_Logging {
                 (extension_loaded('mbstring') ? 'true' : 'false'));
     }
 
-    /** Write the line to the debug file. 
+    /** Write the line to the debug file.
+     *
+     * Sanitizes PII at write-time for GDPR compliance (defense in depth).
+     * Fix for disk space error (reported by 1 user - 2% of errors)
+     * Handles file write failures gracefully to prevent error loops when disk is full.
+     * Uses error suppression and returns status instead of throwing exceptions.
+     *
      * @param string $line
+     * @return bool True on success, false on failure
      */
     function writeLineToDebugFile($line) {
-        file_put_contents($this->getDebugFilePath(), $line . "\n", FILE_APPEND);
+        // Sanitize PII at write-time (GDPR compliance)
+        // This protects all 372 logging calls across the codebase
+        $sanitizedLine = $this->sanitizeLogLine($line);
+
+        // Suppress errors to prevent fatal error when disk is full
+        $result = @file_put_contents($this->getDebugFilePath(), $sanitizedLine . "\n", FILE_APPEND);
+
+        if ($result === false) {
+            // Disk full or permissions issue - log to error_log instead to avoid infinite loop
+            // Don't use errorMessage() here as it would call this function again
+            error_log('404 Solution: Unable to write to debug log (possibly disk full): ' .
+                $this->getDebugFilePath());
+            return false;
+        }
+
+        return true;
     }
     
     /** Email the log file to the plugin developer. */
@@ -250,11 +272,35 @@ class ABJ_404_Solution_Logging {
             $zip->close();
         }
         
+        // Get WordPress content counts
         $count_posts = wp_count_posts();
         $published_posts = $count_posts->publish;
         $count_pages = wp_count_posts('page');
         $published_pages = $count_pages->publish;
-        
+
+        // Get category and tag counts
+        $category_count = wp_count_terms('category');
+        $tag_count = wp_count_terms('post_tag');
+        // Handle WP_Error for categories/tags
+        if (is_wp_error($category_count)) {
+            $category_count = 0;
+        }
+        if (is_wp_error($tag_count)) {
+            $tag_count = 0;
+        }
+
+        // Get plugin-specific counts
+        $abj404dao = ABJ_404_Solution_DataAccess::getInstance();
+        $redirectCounts = $abj404dao->getRedirectStatusCounts(true);
+        $capturedCounts = $abj404dao->getCapturedStatusCounts(true);
+        $totalLogsInDB = $abj404dao->getLogsCount(0);
+
+        // Get storage sizes
+        $logTableSizeBytes = $abj404dao->getLogDiskUsage();
+        $logTableSizeMB = round($logTableSizeBytes / (1024 * 1024), 2);
+        $debugFileSize = file_exists($this->getDebugFilePath()) ? filesize($this->getDebugFilePath()) : 0;
+        $debugFileSizeMB = round($debugFileSize / (1024 * 1024), 2);
+
         $attachments = array();
         $attachments[] = $logFileZip;
         $to = ABJ404_AUTHOR_EMAIL;
@@ -269,11 +315,36 @@ class ABJ_404_Solution_Logging {
         $bodyLines[] = "Plugin version: " . ABJ404_VERSION;
         $bodyLines[] = "MySQL version: " . $wpdb->db_version();
         $bodyLines[] = "Site URL: " . get_site_url();
+        $bodyLines[] = "Multisite: " . (is_multisite() ? 'yes' : 'no');
+        if (is_multisite() && function_exists('is_plugin_active_for_network')) {
+            $bodyLines[] = "Network activated: " . (is_plugin_active_for_network(plugin_basename(ABJ404_FILE)) ? 'yes' : 'no');
+        }
         $bodyLines[] = "WP_MEMORY_LIMIT: " . WP_MEMORY_LIMIT;
         $bodyLines[] = "Extensions: " . implode(", ", get_loaded_extensions());
-        $bodyLines[] = "Published posts: " . $published_posts . ", published pages: " . $published_pages;
-        $bodyLines[] = "Total error count: " . $totalErrorCount;
+        $bodyLines[] = " ";
+        $bodyLines[] = "--- WordPress Content Counts ---";
+        $bodyLines[] = "Published posts: " . $published_posts;
+        $bodyLines[] = "Published pages: " . $published_pages;
+        $bodyLines[] = "Categories: " . $category_count;
+        $bodyLines[] = "Tags: " . $tag_count;
+        $bodyLines[] = " ";
+        $bodyLines[] = "--- 404 Solution Counts ---";
+        $bodyLines[] = "Total redirects (active): " . $redirectCounts['all'];
+        $bodyLines[] = "  - Manual redirects: " . $redirectCounts['manual'];
+        $bodyLines[] = "  - Automatic redirects: " . $redirectCounts['auto'];
+        $bodyLines[] = "  - Regex redirects: " . $redirectCounts['regex'];
+        $bodyLines[] = "  - Trashed redirects: " . $redirectCounts['trash'];
+        $bodyLines[] = "Captured 404s (active): " . $capturedCounts['all'];
+        $bodyLines[] = "  - Captured (new): " . $capturedCounts['captured'];
+        $bodyLines[] = "  - Ignored: " . $capturedCounts['ignored'];
+        $bodyLines[] = "  - Later: " . $capturedCounts['later'];
+        $bodyLines[] = "  - Trashed: " . $capturedCounts['trash'];
+        $bodyLines[] = "Log entries in database: " . $totalLogsInDB;
+        $bodyLines[] = "Log table size: " . $logTableSizeMB . " MB";
+        $bodyLines[] = " ";
+        $bodyLines[] = "Total error count in log file: " . $totalErrorCount;
         $bodyLines[] = "Debug file name: " . $this->getDebugFilename();
+        $bodyLines[] = "Debug file size: " . $debugFileSizeMB . " MB";
         $bodyLines[] = "Active plugins: <pre>" .
           json_encode(get_option('active_plugins'), JSON_PRETTY_PRINT) . "</pre>";
           
@@ -344,6 +415,339 @@ class ABJ_404_Solution_Logging {
         return $latestErrorLineFound;
     }
     
+    /**
+     * Get sanitized log excerpt for support emails
+     * Collects last 15 ERROR/WARN entries (already sanitized at write-time)
+     * If no errors/warnings found, includes last 20 lines of log for context
+     *
+     * @return string Sanitized log excerpt or message if no errors found
+     */
+    function getSanitizedLogExcerptForSupport() {
+        $f = ABJ_404_Solution_Functions::getInstance();
+        $errorEntries = array();
+        $recentLines = array();
+        $maxEntries = 15;
+        $maxRecentLines = 20;
+        $totalLines = 0;
+        $handle = null;
+
+        try {
+            $debugFilePath = $this->getDebugFilePath();
+
+            if (!file_exists($debugFilePath)) {
+                return "No log file available";
+            }
+
+            if ($handle = fopen($debugFilePath, "r")) {
+                $currentEntry = array();
+                $collectingEntry = false;
+
+                // Read file line by line
+                while (($line = fgets($handle)) !== false) {
+                    $totalLines++;
+
+                    // Keep a sliding window of recent lines (for fallback if no errors)
+                    $recentLines[] = $line;
+                    if (count($recentLines) > $maxRecentLines) {
+                        array_shift($recentLines);
+                    }
+
+                    // Check if this is an ERROR or WARN line
+                    $hasError = stripos($line, '(ERROR)') !== false;
+                    $hasWarn = stripos($line, '(WARN)') !== false;
+                    $isDeleteError = stripos($line, 'SQL query error: DELETE command denied to user') !== false;
+
+                    // Start collecting if we find ERROR or WARN (but skip known benign errors)
+                    if (($hasError || $hasWarn) && !$isDeleteError) {
+                        // If we were collecting a previous entry, save it
+                        if ($collectingEntry && !empty($currentEntry)) {
+                            $errorEntries[] = $currentEntry;
+                            // Keep only last N entries (sliding window)
+                            if (count($errorEntries) > $maxEntries) {
+                                array_shift($errorEntries);
+                            }
+                        }
+
+                        // Start new entry (no sanitization needed - already done at write-time)
+                        $currentEntry = array($line);
+                        $collectingEntry = true;
+
+                    } else if ($collectingEntry &&
+                               !$f->regexMatch("^\d{4}[-]\d{2}[-]\d{2} .*\(\w+\):\s.*$", $line)) {
+                        // Continue collecting multiline error (no sanitization needed - already done at write-time)
+                        $currentEntry[] = $line;
+
+                    } else {
+                        // New log entry started, save previous if exists
+                        if ($collectingEntry && !empty($currentEntry)) {
+                            $errorEntries[] = $currentEntry;
+                            if (count($errorEntries) > $maxEntries) {
+                                array_shift($errorEntries);
+                            }
+                        }
+                        $collectingEntry = false;
+                        $currentEntry = array();
+                    }
+                }
+
+                // Save last entry if we were still collecting
+                if ($collectingEntry && !empty($currentEntry)) {
+                    $errorEntries[] = $currentEntry;
+                    if (count($errorEntries) > $maxEntries) {
+                        array_shift($errorEntries);
+                    }
+                }
+
+                fclose($handle);
+
+            } else {
+                return "Log file not readable";
+            }
+
+        } catch (Exception $e) {
+            return "Error reading log file";
+        }
+
+        // Format output
+        if (empty($errorEntries)) {
+            // No errors/warnings found - include last N lines for context
+            if (empty($recentLines)) {
+                return "Log file is empty";
+            }
+            $output = "No ERROR/WARN entries found. Last " . count($recentLines) . " log lines:\n\n";
+            $output .= implode("", $recentLines);
+            return trim($output);
+        }
+
+        $output = "Last " . count($errorEntries) . " ERROR/WARN entries:\n\n";
+        foreach ($errorEntries as $entry) {
+            $output .= implode("\n", $entry) . "\n\n";
+        }
+
+        return trim($output);
+    }
+
+    /**
+     * Mask email address with adaptive length-based masking
+     * Shows 1-3 chars of username and ≤30% of domain based on length
+     *
+     * Examples:
+     * - joe@mail.com → j***@m***-a1b2
+     * - john@gmail.com → j***@gm***-c3d4
+     * - jennifer@example.com → jen***@exa***-e5f6
+     *
+     * @param string $email Email address to mask
+     * @return string Masked email with consistent hash
+     */
+    private function maskEmailAdaptive($email) {
+        if (empty($email) || strpos($email, '@') === false) {
+            return $email;
+        }
+
+        // Split email into parts
+        $parts = explode('@', $email);
+        if (count($parts) != 2) {
+            // Invalid email (multiple @), mask entire string as text
+            return $this->maskTextAdaptive($email);
+        }
+
+        list($username, $fullDomain) = $parts;
+
+        // Strip TLD from domain (remove .com, .org, .co.uk, etc.)
+        $domainParts = explode('.', $fullDomain);
+        if (count($domainParts) > 1) {
+            // Remove last part (.com), or last 2 parts if it's .co.uk style
+            if (in_array(end($domainParts), array('uk', 'au', 'nz', 'za'))) {
+                // .co.uk style - remove last 2 parts
+                array_pop($domainParts);
+                array_pop($domainParts);
+            } else {
+                // .com style - remove last part
+                array_pop($domainParts);
+            }
+        }
+        $domain = implode('.', $domainParts);
+
+        // Calculate visible characters for username (1-3 based on length)
+        $usernameLen = strlen($username);
+        if ($usernameLen <= 4) {
+            $usernameVisible = 1;
+        } elseif ($usernameLen <= 9) {
+            $usernameVisible = 2;
+        } else {
+            $usernameVisible = 3;
+        }
+
+        // Calculate visible characters for domain (≤30%)
+        $domainLen = strlen($domain);
+        $domainVisible = max(1, (int) ceil($domainLen * 0.3));
+
+        // Create masked parts
+        $maskedUsername = substr($username, 0, $usernameVisible) . '***';
+        $maskedDomain = empty($domain) ? '' : substr($domain, 0, $domainVisible) . '***';
+
+        // Generate consistent hash with WordPress salt for security
+        if (defined('AUTH_SALT')) {
+            $hash = substr(md5(AUTH_SALT . $email), 0, 4);
+        } else {
+            $hash = substr(md5($email), 0, 4);
+        }
+
+        // Format: username***@domain***-hash
+        if (!empty($maskedDomain)) {
+            return $maskedUsername . '@' . $maskedDomain . '-' . $hash;
+        } else {
+            return $maskedUsername . '@-' . $hash;
+        }
+    }
+
+    /**
+     * Mask text (names, usernames) with adaptive length-based masking
+     * Shows 1-3 chars based on length + consistent hash
+     *
+     * Examples:
+     * - Joe → J***-a1b2
+     * - John → J***-c3d4
+     * - Jennifer → Jen***-e5f6
+     *
+     * @param string $text Text to mask
+     * @return string Masked text with consistent hash
+     */
+    private function maskTextAdaptive($text) {
+        if (empty($text)) {
+            return $text;
+        }
+
+        $text = trim($text);
+        $textLen = strlen($text);
+
+        // Calculate visible characters (1-3 based on length)
+        if ($textLen <= 4) {
+            $visible = 1;
+        } elseif ($textLen <= 9) {
+            $visible = 2;
+        } else {
+            $visible = 3;
+        }
+
+        $masked = substr($text, 0, $visible) . '***';
+
+        // Generate consistent hash with WordPress salt
+        if (defined('AUTH_SALT')) {
+            $hash = substr(md5(AUTH_SALT . $text), 0, 4);
+        } else {
+            $hash = substr(md5($text), 0, 4);
+        }
+
+        return $masked . '-' . $hash;
+    }
+
+    /**
+     * Sanitize a single log line for privacy (GDPR compliance)
+     * Uses adaptive masking with consistent hashing for debugging
+     *
+     * @param string $line Log line to sanitize
+     * @return string Sanitized line with PII masked adaptively
+     */
+    public function sanitizeLogLine($line) {
+        $f = ABJ_404_Solution_Functions::getInstance();
+
+        // Strip query strings from URLs (everything after ? in http/https URLs)
+        // This removes tokens, emails, session IDs, search terms, etc. from URLs
+        $line = preg_replace('/(https?:\/\/[^\s?]+)\?[^\s]*/', '$1', $line);
+
+        // Mask email addresses with adaptive length-based masking
+        // Example: john@example.com -> j***@exa***-a1b2
+        $line = preg_replace_callback(
+            '/\S+@\S+/',
+            function($matches) {
+                return $this->maskEmailAdaptive($matches[0]);
+            },
+            $line
+        );
+
+        // Redact IP addresses using existing md5lastOctet function
+        // Keeps first octets, hashes last (e.g., 192.168.1.100 -> 192.168.1.md5hash)
+        $line = preg_replace_callback(
+            '/\b(?:\d{1,3}\.){3}\d{1,3}\b/',
+            function($matches) use ($f) {
+                return $f->md5lastOctet($matches[0]);
+            },
+            $line
+        );
+
+        // Redact IPv6 addresses (including compressed forms) using existing md5lastOctet function
+        // Negative lookbehind prevents matching mid-hex-string; handles ::1, 2001:db8::1, etc.
+        $line = preg_replace_callback(
+            '/(?<![0-9A-Fa-f:])(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}|:(?:(?::[0-9a-fA-F]{1,4}){1,7}|:))(?![0-9A-Fa-f:])/',
+            function($matches) use ($f) {
+                return $f->md5lastOctet($matches[0]);
+            },
+            $line
+        );
+
+        // Mask usernames with adaptive length-based masking
+        // Example: "Current user: john" -> "Current user: j***-a1b2"
+        $line = preg_replace_callback(
+            '/\b(current\s+)?user(name)?:\s*(\S+)/i',
+            function($matches) {
+                $prefix = $matches[1] . 'user' . $matches[2] . ': ';
+                $username = $matches[3];
+                return $prefix . $this->maskTextAdaptive($username);
+            },
+            $line
+        );
+
+        // Mask display names with adaptive length-based masking
+        // Example: "Display name: John Doe" -> "Display name: J***-a1b2"
+        $line = preg_replace_callback(
+            '/\bdisplay\s+name:\s*([^\n,]+)/i',
+            function($matches) {
+                $name = trim($matches[1]);
+                return 'display name: ' . $this->maskTextAdaptive($name);
+            },
+            $line
+        );
+
+        // Redact absolute file paths to prevent info disclosure
+        // Matches /home/user/..., /var/www/..., etc.
+        // Captures leading space/start to preserve formatting
+        $line = preg_replace(
+            '/(^|\s)(\/[^\s]+\/wp-content\/)/i',
+            '$1/...redacted.../wp-content/',
+            $line
+        );
+        $line = preg_replace(
+            '/\b[a-z]:\\\\[^\s]+\\\\wp-content\\\\/i',
+            'C:\\...redacted...\\wp-content\\',
+            $line
+        );
+
+        // Hash long tokens consistently (40+ chars)
+        // Example: "abc123def456..." -> "token-a1b2c3d4"
+        $line = preg_replace_callback(
+            '/\b([A-Za-z0-9_-]{40,})\b/',
+            function($matches) {
+                $hash = substr(md5($matches[1]), 0, 8);
+                return 'token-' . $hash;
+            },
+            $line
+        );
+
+        // Hash WordPress nonces consistently
+        // Example: "_wpnonce=abc123" -> "_wpnonce=nonce-a1b2c3d4"
+        $line = preg_replace_callback(
+            '/_wpnonce=([A-Za-z0-9]+)/',
+            function($matches) {
+                $hash = substr(md5($matches[1]), 0, 8);
+                return '_wpnonce=nonce-' . $hash;
+            },
+            $line
+        );
+
+        return $line;
+    }
+
     /** Return the path to the debug file.
      * @return string
      */

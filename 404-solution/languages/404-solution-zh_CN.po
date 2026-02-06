@@ -1,0 +1,2238 @@
+# Translation file for 404 Solution WordPress Plugin
+# Copyright (C) 2025 Aaron J
+# This file is distributed under the same license as the 404 Solution plugin.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: 404 Solution\n"
+"Report-Msgid-Bugs-To: https://github.com/aaron13100/404solution/issues\n"
+"POT-Creation-Date: 2025-11-11 07:26+0000\n"
+"PO-Revision-Date: 2025-11-24 00:00+0000\n"
+"Last-Translator: Auto-Generated\n"
+"Language-Team: Chinese (Simplified)\n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"X-Generator: 404 Solution Translation Generator v2\n"
+"X-Poedit-KeywordsList: __;_e;_n:1,2;_x:1,2c;_ex:1,2c;_nx:4c,1,2;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c;_n_noop:1,2;_nx_noop:3c,1,2;__ngettext_noop:1,2\n"
+"X-Poedit-Basepath: ..\n"
+"X-Poedit-SearchPath-0: .\n"
+
+
+msgid "404 Solution - Deactivation Options"
+msgstr "404 Solution - 停用选项"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Deactivate Plugin"
+msgstr "停用插件"
+
+msgid "Deactivating"
+msgstr "正在停用"
+
+msgid "Saving..."
+msgstr "正在保存..."
+
+#, fuzzy
+msgid "Could not save settings - missing security token. The wizard may appear again on next visit."
+msgstr "Could not save settings - missing security token. The wizard may appear again on next visit."
+
+#, fuzzy
+msgid "Could not save dismissal. The wizard may appear again on next visit."
+msgstr "Could not save dismissal. The wizard may appear again on next visit."
+
+#, fuzzy
+msgid "Could not save dismissal: "
+msgstr "Could not save dismissal: "
+
+#, fuzzy
+msgid " The wizard may appear again on next visit."
+msgstr " The wizard may appear again on next visit."
+
+#, fuzzy
+msgid "Network error - could not save dismissal. The wizard may appear again on next visit."
+msgstr "Network error - could not save dismissal. The wizard may appear again on next visit."
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "404 Solution: Migrated %d redirects to subdirectory-independent format."
+msgstr "404 Solution：已将 %d 个重定向迁移到与子目录无关的格式。"
+msgid "%1$s - %2$s of %3$s"
+msgstr "%1$s - %3$s 中的 %2$s"
+
+msgid "(A custom string has been entered.)"
+msgstr "(已输入自定义字符串。)"
+
+msgid "(A page has been selected.)"
+msgstr "(已选择页面。)"
+
+msgid "(All results displayed for \"%s.\")"
+msgstr "(已显示 \"%s\" 的所有结果。)"
+
+msgid "(All results displayed.)"
+msgstr "(已显示所有结果。)"
+
+msgid "(An external URL will be used.)"
+msgstr "(将使用外部 URL。)"
+
+msgid "(Begin typing a URL)"
+msgstr "(开始输入 URL)"
+
+msgid "(Data truncated. Too many results for \"%s!\".)"
+msgstr "(数据已截断。\"%s\" 的结果过多！)"
+
+msgid "(Data truncated. Too many results!)"
+msgstr "(数据已截断。结果过多！)"
+
+msgid "(Default 404 Page)"
+msgstr "(默认 404 页面)"
+
+msgid "(Explain)"
+msgstr "(说明)"
+
+msgid "(Hide Info)"
+msgstr "(隐藏信息)"
+
+msgid "(Home Page)"
+msgstr "(首页)"
+
+msgid "(No matching results found for \"%s.\")"
+msgstr "(未找到 \"%s\" 的匹配结果。)"
+
+msgid "(No matching results found.)"
+msgstr "(未找到匹配结果。)"
+
+msgid "(Please choose from the dropdown list instead of typing your own URL.)"
+msgstr "(请从下拉列表中选择，而不是自行输入 URL。)"
+
+msgid "(Required)"
+msgstr "(必填)"
+
+msgid "(Show All Logs)"
+msgstr "(显示所有日志)"
+
+msgid "(Special)"
+msgstr "(特殊)"
+
+msgid "(The log file does not exist.)"
+msgstr "(日志文件不存在。)"
+
+msgid "(The specified page doesn't exist. Please update this setting.)"
+msgstr "(指定的页面不存在。请更新此设置。)"
+
+msgid "(Type a page name or an external URL)"
+msgstr "(输入页面名称或外部 URL)"
+
+msgid "(Type a page name)"
+msgstr "(请输入页面名称)"
+
+msgid "(Type to filter)"
+msgstr "(输入进行筛选)"
+
+msgid "(don't suggest .jpg files)"
+msgstr "(不建议 .jpg 文件)"
+
+msgid "(don't suggest .pdf files)"
+msgstr "(不建议 .pdf 文件)"
+
+msgid "(don't suggest pages within any directory named /private/)"
+msgstr "(不建议 /private/ 目录下的任何页面)"
+
+msgid "(don't suggest pages within the /members/ directory)"
+msgstr "(不建议 /members/ 目录下的页面)"
+
+# translation-verified: Contains technical slug example
+msgid "(don't suggest the specific page with slug 'old-contact-page')"
+msgstr "(不建议 slug 为 'old-contact-page' 的特定页面)"
+
+msgid "(ignore all .jpg files)"
+msgstr "(忽略所有 .jpg 文件)"
+
+msgid "(ignore all .js files)"
+msgstr "(忽略所有 .js 文件)"
+
+msgid "(ignore all .php files)"
+msgstr "(忽略所有 .php 文件)"
+
+msgid "(ignore everything in the cache directory)"
+msgstr "(忽略缓存目录中的所有内容)"
+
+msgid "(ignore everything in this directory)"
+msgstr "(忽略此目录中的所有内容)"
+
+msgid "(unless a redirect to the page already exists)."
+msgstr "(除非该页面的重定向已存在)。"
+
+msgid "* 404s are still redirected when possible."
+msgstr "* 404 仍会在可能时重定向。"
+
+msgid "* Do not capture 404 URLs."
+msgstr "* 不记录 404 URL。"
+
+msgid "* Do not redirect 404s for the patterns listed here."
+msgstr "* 不对此处列出的模式进行 404 重定向。"
+
+msgid "* Do not redirect 404s from the user agents listed here."
+msgstr "* 不对此处列出的用户代理进行 404 重定向。"
+
+msgid "* If the string appears anywhere within the user agent string then it's a match."
+msgstr "* 如果该字符串出现在用户代理字符串的任何位置，则视为匹配。"
+
+msgid "* One pattern per line."
+msgstr "* 每行一个模式。"
+
+msgid "* One string per line."
+msgstr "* 每行一个字符串。"
+
+msgid "* One type per line."
+msgstr "* 每行一个类型。"
+
+msgid "* Strings are case insensitive."
+msgstr "* 字符串不区分大小写。"
+
+msgid "* Strings are case sensitive."
+msgstr "* 字符串区分大小写。"
+
+msgid "* These patterns match the path of a URL, not a title.\""
+msgstr "* 这些模式匹配 URL 的路径，而非标题。\""
+
+msgid "* Use an asterisk (*) to match \"any pattern.\""
+msgstr "* 使用星号 (*) 匹配 \"任何模式\"。"
+
+msgid "404 Page Suggestions"
+msgstr "404 页面建议"
+
+msgid "404 URL marked as %s successfully!"
+msgstr "404 URL 已成功标记为 %s！"
+
+msgid "<a>View</a> the debug file."
+msgstr "<a>查看</a>调试文件。"
+
+msgid "Action Taken"
+msgstr "已执行操作"
+
+msgid "Add Redirect"
+msgstr "添加重定向"
+
+msgid "Add a Manual Redirect"
+msgstr "添加手动重定向"
+
+msgid "Add a Redirect"
+msgstr "添加重定向"
+
+msgid "Admin notification email(s)"
+msgstr "管理员通知邮件地址"
+
+msgid "Admin notification level"
+msgstr "管理员通知级别"
+
+msgid "Admin theme"
+msgstr "管理主题"
+
+msgid "Advanced"
+msgstr "高级"
+
+#: includes/View.php - Inline mode toggle
+msgid "Simple"
+msgstr "简单"
+
+#: includes/View.php - Quick links / Sticky save bar / Toast notification
+msgid "View Stats"
+msgstr "查看统计"
+
+msgid "Captured 404s"
+msgstr "已捕获的404"
+
+msgid "Documentation"
+msgstr "文档"
+
+msgid "Plugin v%s"
+msgstr "插件 v%s"
+
+msgid "Settings saved successfully!"
+msgstr "设置保存成功！"
+
+msgid "Smart Matching"
+msgstr "智能匹配"
+
+msgid "Advanced Settings (Etc)"
+msgstr "高级设置（其他）"
+
+msgid "Content & URL Filtering"
+msgstr "内容和 URL 过滤"
+
+msgid "Logging & Privacy"
+msgstr "日志和隐私"
+
+msgid "Advanced Configuration"
+msgstr "高级配置"
+
+msgid "Expand All"
+msgstr "展开全部"
+
+msgid "Collapse All"
+msgstr "折叠全部"
+
+msgid "Feedback sent successfully."
+msgstr "反馈发送成功。"
+
+msgid "Note: Feedback email could not be sent."
+msgstr "注意：反馈邮件无法发送。"
+
+msgid "All"
+msgstr "全部"
+
+msgid "All other redirects must be deleted and only one regex redirect for all URLs must be created for this to work."
+msgstr "必须删除所有其他重定向，并且仅创建一个针对所有 URL 的正则表达式重定向才能正常工作。"
+
+msgid "All trashed URLs have been deleted!"
+msgstr "回收站已清空"
+
+msgid "Allow category suggestions"
+msgstr "启用分类建议"
+
+msgid "Allow tag suggestions"
+msgstr "启用标签建议"
+
+msgid "An unknown error has occurred."
+msgstr "发生未知错误。"
+
+msgid "Apply"
+msgstr "应用"
+
+msgid "At the same level as the Settings and Tools menu"
+msgstr "与设置和工具菜单处于同一级别"
+
+msgid "Auto"
+msgstr "自动"
+
+msgid "Delete automatic redirects after"
+msgstr "自动删除自动重定向的时间"
+
+msgid "Auto Redirects"
+msgstr "自动重定向"
+
+
+msgid "Automatic 301 Redirects"
+msgstr "自动 301 重定向"
+
+msgid "Automatic 302 Redirects"
+msgstr "自动 302 重定向"
+
+msgid "Automatic Redirects"
+msgstr "自动重定向"
+
+msgid "Automatically created"
+msgstr "自动创建"
+
+msgid "Automatically creates redirects based on best possible suggested page."
+msgstr "根据最匹配的页面自动创建重定向。"
+
+msgid "Removes captured 404 URLs if they haven't been used for the specified amount of time."
+msgstr "删除在指定时间内未使用的已记录的 404 URL。"
+
+msgid "Removes manually created redirects if they haven't been used for the specified amount of time. Does not affect automatically created redirects."
+msgstr "删除在指定时间内未使用的手动创建的重定向。不影响自动创建的重定向。"
+
+msgid "Captured 404 URLs"
+msgstr "已记录的 404 URL"
+
+msgid "Captured URLs"
+msgstr "已记录的 URL"
+
+msgid "Captured URLs (0 Disables Notification)"
+msgstr "已记录的 URL（0 禁用通知）"
+
+msgid "Categories"
+msgstr "分类"
+
+msgid "Category"
+msgstr "分类"
+
+msgid "Category:"
+msgstr "分类："
+
+msgid "Changes may not be updated immediately when ordering by this column"
+msgstr "按此列排序时，更改可能不会立即更新"
+
+msgid "Checks each redirect for a new matching permalink before the user is redirected. If a new page permalink is found matching the redirected URL then the redirect will be deleted."
+msgstr "在用户被重定向之前检查每个重定向的新匹配固定链接。如果找到与重定向 URL 匹配的新页面固定链接，则将删除该重定向。"
+
+msgid "Choose at least one URL"
+msgstr "至少选择一个 URL"
+
+msgid "Choose whether the 404 Settings link appears under the \"Settings\" menu or elsewhere."
+msgstr "选择 404 设置链接是显示在 \"设置\" 菜单下还是其他位置。"
+
+msgid "Choose the color theme for the admin pages. The theme changes immediately for preview, and will be saved when you click \"Save Settings\"."
+msgstr "选择管理页面的颜色主题。主题将立即更改以供预览，点击 \"保存设置\" 时将保存。"
+
+msgid "Cleanup is done daily."
+msgstr "每日执行清理。"
+
+msgid "Click to view debug data for all suggestions"
+msgstr "点击查看所有建议的调试数据"
+
+msgid "Delete captured 404 URLs after"
+msgstr "自动删除已记录 404 URL 的时间"
+
+msgid "Create a CSV file with the redirects and captured 404s."
+msgstr "创建包含重定向和已记录的 404 的 CSV 文件。"
+
+msgid "Create and Download"
+msgstr "创建并下载"
+
+msgid "Create automatic redirects"
+msgstr "创建自动重定向"
+
+msgid "Create redirects on slug change"
+msgstr "在别名更改时创建重定向"
+
+msgid "Create automatic redirects for categories"
+msgstr "为分类创建自动重定向"
+
+msgid "Create automatic redirects for tags"
+msgstr "为标签创建自动重定向"
+
+msgid "Created"
+msgstr "创建时间"
+
+msgid "Credits"
+msgstr "致谢"
+
+msgid "Current approximate log disk usage"
+msgstr "当前日志磁盘使用量（约）"
+
+msgid "Custom"
+msgstr "自定义"
+
+msgid "Custom Taxonomies"
+msgstr "自定义分类法"
+
+msgid "DATABASE_VERSION"
+msgstr "DATABASE_VERSION"
+
+msgid "DB version"
+msgstr "数据库版本"
+
+msgid "Date"
+msgstr "日期"
+
+msgid "days without use (0 to disable)"
+msgstr "天未使用（0 表示禁用）"
+
+msgid "Debug Log"
+msgstr "调试日志"
+
+msgid "Debug file not found. (%s)"
+msgstr "未找到调试文件。(%s)"
+
+# translation-verified: Contains format specifiers
+msgid "Debug file size: %1$s KB (%2$s MB)."
+msgstr "调试文件大小：%1$s KB (%2$s MB)。"
+
+msgid "Debug file size: %s KB."
+msgstr "调试文件大小：%s KB。"
+
+msgid "Debug file(s) deleted. (%s)"
+msgstr "调试文件已删除。(%s)"
+
+msgid "Debug logging"
+msgstr "调试日志记录"
+
+msgid "Default"
+msgstr "Default"
+
+# translation-verified: Contains WordPress technical terms
+msgid "Default WordPress post types are \"post\" and \"page.\""
+msgstr "WordPress 默认文章类型为 \"post\" 和 \"page\"。"
+
+msgid "Default redirect type"
+msgstr "默认重定向类型"
+
+msgid "Delete the Debug File"
+msgstr "删除调试文件"
+
+msgid "Destination"
+msgstr "目标"
+
+msgid "Display Before/After each suggested page"
+msgstr "在每个推荐页面的前后显示"
+
+msgid "Display Before/After page suggestions"
+msgstr "在页面建议的前后显示"
+
+msgid "Display a WordPress admin notification when the number of captured URLs goes above this number"
+msgstr "当已记录的 404 URL 超过此数量时，显示 WordPress 管理员通知"
+
+msgid "Display if no suggestion results"
+msgstr "无建议结果时显示"
+
+# translation-verified: Contains technical shortcode
+msgid "Display the closest matching pages by using the shortcode <span style=\"font-weight: bold;\">[abj404_solution_page_suggestions]</span>."
+msgstr "使用短代码 <span style=\"font-weight: bold;\">[abj404_solution_page_suggestions]</span> 显示最接近的匹配页面。"
+
+msgid "Displayed 404 Page"
+msgstr "显示的 404 页面"
+
+msgid "Earliest log date"
+msgstr "最早日志日期"
+
+msgid "Edit Redirect"
+msgstr "编辑重定向"
+
+msgid "Edit Redirect Details"
+msgstr "编辑重定向详情"
+
+msgid "Empty Trash"
+msgstr "清空回收站"
+
+msgid "Error: An invalid purge type was selected. Exiting."
+msgstr "错误：选择了无效的清除类型。正在退出。"
+
+msgid "Error: Auto match score value must be a number between 0 and 99"
+msgstr "错误：自动匹配分数值必须是 0 到 99 之间的数字"
+
+msgid "Error: Bad %s operation specified."
+msgstr "错误：指定了错误的 %s 操作。"
+
+msgid "Error: Bad data passed for update redirect request."
+msgstr "错误：更新重定向请求传递了错误的数据。"
+
+msgid "Error: Bad trash operation specified."
+msgstr "错误：指定了错误的回收站操作。"
+
+msgid "Error: Data not formatted properly."
+msgstr "错误：数据格式错误。"
+
+msgid "Error: External URL doesn't contain ://"
+msgstr "错误：外部 URL 不包含 ://"
+
+msgid "Error: External URL is too short."
+msgstr "错误：外部 URL 过短。"
+
+msgid "Error: External redirect URL failed validation."
+msgstr "错误：外部重定向 URL 验证失败。"
+
+# translation-verified: Contains technical protocols
+msgid "Error: External URL must use http:// or https:// protocol only."
+msgstr "错误：外部 URL 必须仅使用 http:// 或 https:// 协议。"
+
+msgid "Error: Invalid theme selected"
+msgstr "错误：选择了无效的主题"
+
+msgid "Error: Invalid value specified for default redirect type"
+msgstr "错误：为默认重定向类型指定了无效值"
+
+msgid "Error: Maximum number of suggest value must be a number greater than or equal to 1"
+msgstr "错误：最大建议数值必须大于或等于 1"
+
+msgid "Error: No ID(s) found for edit request."
+msgstr "错误：未找到编辑请求的 ID。"
+
+msgid "Error: No ID(s) specified for bulk action. (%s)"
+msgstr "错误：未为批量操作指定 ID。(%s)"
+
+msgid "Error: No records were imported. SQL result: %s"
+msgstr "错误：未导入任何记录。SQL 结果：%s"
+
+msgid "Error: No redirect types were selected. No purges will be done."
+msgstr "错误：未选择重定向类型。不会执行清除操作。"
+
+msgid "Error: No valid redirect types were selected. Exiting."
+msgstr "错误：未选择有效的重定向类型。正在退出。"
+
+msgid "Error: Suggestion minimum score value must be a number between 1 and 99"
+msgstr "错误：建议最低分数值必须是 1 到 99 之间的数字"
+
+msgid "Error: Template redirect priority value must be a number between 0 and 999"
+msgstr "错误：模板重定向优先级值必须是 0 到 999 之间的数字"
+
+msgid "Error: URL is a required field."
+msgstr "错误：URL 不能为空。"
+
+msgid "Error: URL must start with /"
+msgstr "错误：URL 必须以 / 开头"
+
+msgid "Error: Redirect destination is required."
+msgstr "错误：重定向目标为必填项。"
+
+msgid "Error: Unable to move redirect from trash."
+msgstr "错误：无法从回收站移出重定向。"
+
+msgid "Error: Unable to move redirect to trash."
+msgstr "错误：无法将重定向移至回收站。"
+
+msgid "Error: Unable to update redirect data."
+msgstr "错误：无法更新重定向数据。"
+
+msgid "Error: Unknown Database Error!"
+msgstr "错误：未知数据库错误！"
+
+msgid "Error: Unrecognized bulk action. (%s)"
+msgstr "错误：无法识别的批量操作。(%s)"
+
+msgid "Error: You didn't check the I understand checkbox. No importing for you!"
+msgstr "错误：您未勾选 \"我理解\" 复选框。无法为您导入！"
+
+msgid "Error: You didn't check the I understand checkbox. No purging of records for you!"
+msgstr "错误：您未勾选 \"我理解\" 复选框。无法为您清除记录！"
+
+msgid "Error: The time to wait before an automatic update must be a number between 0 and something around %d."
+msgstr "错误：自动更新前的等待时间必须是一个介于 0 和大约 %d 之间的数字。"
+
+msgid "Error: You selected external URL but did not enter a URL."
+msgstr "错误：您选择了外部 URL 但未输入 URL。"
+
+msgid "Error: unable to add new redirect."
+msgstr "错误：无法添加新重定向。"
+
+msgid "Error: unable to mark URL as %s"
+msgstr "错误：无法将 URL 标记为 %s"
+
+msgid "Error: unable to remove URL from %s list"
+msgstr "错误：无法从 %s 列表中删除 URL"
+
+msgid "Etcetera"
+msgstr "其他"
+
+msgid "Even if more pages could be suggested, show at most this many (default: 5)"
+msgstr "即使可以建议更多页面，最多也只显示这么多（默认：5）"
+
+msgid "Example"
+msgstr "示例"
+
+msgid "Examples:"
+msgstr "示例："
+
+msgid "Exclude Specific Pages, Posts, Categories, Etc"
+msgstr "排除特定页面、文章、分类等"
+
+msgid "Exclude Suggestion URLs (Regex)"
+msgstr "排除建议 URL（正则表达式）"
+
+msgid "Exclude potential suggestions if their final URL matches one of these patterns."
+msgstr "如果其最终 URL 与这些模式之一匹配，则排除潜在建议。"
+
+msgid "Export"
+msgstr "导出"
+
+msgid "External"
+msgstr "外部"
+
+msgid "External Page"
+msgstr "外部页面"
+
+msgid "External User Agents - Do Not Log"
+msgstr "外部用户代理 - 不记录日志"
+
+msgid "Files and Folders Ignore Strings - Do Not Process"
+msgstr "文件和文件夹忽略字符串 - 不处理"
+
+msgid "Files and folders listed here will be ignored."
+msgstr "此处列出的文件和文件夹将被忽略。"
+
+msgid "First, all of the normal \"exact match\" URLs are checked, then all of the regular expression URLs are checked."
+msgstr "首先检查所有常规的 \"精确匹配\" URL，然后检查所有正则表达式 URL。"
+
+msgid "General"
+msgstr "常规"
+
+msgid "General Settings"
+msgstr "常规设置"
+
+msgid "Go to first page"
+msgstr "转到第一页"
+
+msgid "Go to last page"
+msgstr "转到最后一页"
+
+msgid "Go to next page"
+msgstr "转到下一页"
+
+msgid "Go to previous page"
+msgstr "转到上一页"
+
+msgid "Help the developer by sending error logs"
+msgstr "通过发送错误日志帮助开发者"
+
+msgid "Here are some other great pages"
+msgstr "这里有一些其他优质页面"
+
+msgid "Hide %s"
+msgstr "隐藏 %s"
+
+msgid "Hits"
+msgstr "命中次数"
+
+msgid "Hits Redirected"
+msgstr "已重定向次数"
+
+msgid "Home Page"
+msgstr "首页"
+
+msgid "Home Page:"
+msgstr "首页："
+
+msgid "I understand the above statement, I know what I am doing... blah blah blah. Just delete the records!"
+msgstr "我理解上述声明，我知道自己在做什么...等等等等。直接删除记录！"
+
+msgid "I understand the above statement."
+msgstr "我理解上述声明。"
+
+msgid "IP Address"
+msgstr "IP 地址"
+
+#, fuzzy
+msgid "If no suggested pages are found, then this text will be displayed.  (default: &lt;p&gt;No suggestions. :/ &lt;/p&gt;)"
+msgstr "如果没有页面达到最低匹配分数，则将显示此文本。（默认：&lt;p&gt;暂无建议。:/ &lt;/p&gt;）"
+
+msgid "If you've created custom post types and would like to redirect users to them, you'll have to enter them here."
+msgstr "如果您创建了自定义文章类型并希望将用户重定向到它们，则必须在此处输入它们。"
+
+msgid "If you've created custom taxonomies and would like to redirect users to them, you'll have to enter them here."
+msgstr "如果您创建了自定义分类法并希望将用户重定向到它们，则必须在此处输入它们。"
+
+msgid "Ignore 404 Error"
+msgstr "忽略 404 错误"
+
+msgid "Ignored 404 URLs"
+msgstr "已忽略的 404 URL"
+
+msgid "Ignored URLs"
+msgstr "已忽略的 URL"
+
+msgid "Import"
+msgstr "导入"
+
+msgid "Import 404 Redirected Data"
+msgstr "导入 404 重定向数据"
+
+msgid "Import a CSV file with the redirects and captured 404s."
+msgstr "导入包含重定向和已记录的 404 的 CSV 文件。"
+
+msgid "Including breaking the site by creating bad redirects, entering a bad regular expression, deleting existing redirects, and giving other users admin access to the plugin."
+msgstr "包括通过创建错误的重定向、输入错误的正则表达式、删除现有重定向以及授予其他用户对插件的管理员访问权限来破坏站点。"
+
+msgid "Internal Process User Agents - Do Not Log"
+msgstr "内部进程用户代理 - 不记录日志"
+
+msgid "Issue deleting debug file. (%s)"
+msgstr "删除调试文件时出现问题。(%s)"
+
+msgid "JAPANESE_FLASHCARDS_URL"
+msgstr "JAPANESE_FLASHCARDS_URL"
+
+msgid "Keeps the most recent (and deletes the oldest) log records when the disk usage reaches this limit."
+msgstr "当磁盘使用量达到此限制时，保留最新的日志记录（并删除最旧的）。"
+
+msgid "LINK_FIRST_PAGE"
+msgstr "LINK_FIRST_PAGE"
+
+msgid "LINK_LAST_PAGE"
+msgstr "LINK_LAST_PAGE"
+
+msgid "LINK_NEXT_PAGE"
+msgstr "LINK_NEXT_PAGE"
+
+msgid "LINK_PREVIOUS_PAGE"
+msgstr "LINK_PREVIOUS_PAGE"
+
+msgid "Last Used"
+msgstr "最后使用"
+
+msgid "List one user name per line."
+msgstr "每行列出一个用户名。"
+
+msgid "Log files are checked daily when maintenance is run."
+msgstr "运行维护时，每天检查日志文件。"
+
+msgid "Log raw IPs"
+msgstr "记录真实 IP"
+
+msgid "Logging raw IP addresses may not meet the EU General Data Protection Regulation (GDPR) guidelines."
+msgstr "记录真实 IP 地址可能不符合欧盟 GDPR 隐私保护规范。"
+
+msgid "Logs"
+msgstr "日志"
+
+msgid "MB"
+msgstr "MB"
+
+msgid "Maintenance"
+msgstr "维护"
+
+msgid "Major version auto update delay"
+msgstr "主要版本自动更新延迟"
+
+msgid "Man"
+msgstr "手动"
+
+msgid "Manual 301 Redirects"
+msgstr "手动 301 重定向"
+
+msgid "Manual 302 Redirects"
+msgstr "手动 302 重定向"
+
+msgid "Manual Redirects"
+msgstr "手动重定向"
+
+msgid "Delete manual redirects after"
+msgstr "自动删除手动重定向的时间"
+
+msgid "Manually created"
+msgstr "手动创建"
+
+msgid "Maximum log disk usage (MB)"
+msgstr "最大日志磁盘使用量（MB）"
+
+msgid "Maximum number of suggestions to display"
+msgstr "显示的最大建议数"
+
+msgid "Minimum match score"
+msgstr "最低匹配分数"
+
+#~ msgid "Minimum score of suggestions to display"
+#~ msgstr "显示建议的最低分数"
+
+msgid "Multiple email addresses can be separated by commas (,). The \"from\" email address is always the default WordPress admin email:"
+msgstr "多个电子邮件地址可以用逗号 (,) 分隔。\"发件人\" 电子邮件地址始终为默认的 WordPress 管理员邮箱："
+
+msgid "Never Used"
+msgstr "从未使用"
+
+msgid "New Redirect Added Successfully!"
+msgstr "新重定向添加成功！"
+
+msgid "New major version => wait this many days. New minor version => automatically update about 3 days after the release date."
+msgstr "新主要版本 => 等待这么多天。新次要版本 => 发布日期后约 3 天自动更新。"
+
+msgid "No Captured 404 Records To Display"
+msgstr "没有可显示的已记录 404 记录"
+
+msgid "No Redirect Records To Display"
+msgstr "没有可显示的重定向记录"
+
+msgid "No Results To Display"
+msgstr "没有可显示的结果"
+
+msgid "No suggestions. :/"
+msgstr "暂无建议。:/"
+
+msgid "No suggestions. :/ "
+msgstr "暂无建议。:/ "
+
+msgid "Note that including a bad regular expression or one that takes too long will break your website."
+msgstr "请注意，包含错误的正则表达式或执行时间过长的正则表达式会破坏您的网站。"
+
+msgid "Note: Do not include the parenthesis or explanations shown in the examples above."
+msgstr "注意：不要包含上述示例中显示的括号或说明。"
+
+msgid "Note: Here is a list of all post types in the database:"
+msgstr "注意：以下是数据库中所有文章类型的列表："
+
+msgid "Note: The \"scores\" that appear in the format of \"(75.7576)\" after the page links are only displayed for admin users."
+msgstr "注意：页面链接后以 \"(75.7576)\" 格式显示的 \"分数\" 仅对管理员用户显示。"
+
+msgid "OPTION_MIN_AUTO_SCORE"
+msgstr "OPTION_MIN_AUTO_SCORE"
+
+msgid "OPTION_TEMPLATE_REDIRECT_PRIORITY"
+msgstr "OPTION_TEMPLATE_REDIRECT_PRIORITY"
+
+msgid "One email will be sent per day (when maintenance is run) until the number of captured 404s goes below the number specified in the alert settings."
+msgstr "每天将发送一封电子邮件（运行维护时），直到已记录的 404 数量低于警报设置中指定的数量。"
+
+msgid "Only create an automatic redirect if the suggested page has a score above the specified number (default 90)"
+msgstr "仅当推荐页面的分数高于指定数字时才创建自动重定向（默认 90）"
+
+msgid "Options"
+msgstr "选项"
+
+msgid "Options Saved Successfully!"
+msgstr "选项保存成功！"
+
+msgid "Organize Later"
+msgstr "稍后整理"
+
+msgid "Page"
+msgstr "页面"
+
+msgid "Page Not Found Displayed"
+msgstr "显示页面未找到"
+
+msgid "Page Redirects"
+msgstr "页面重定向"
+
+msgid "Page suggestions title"
+msgstr "页面建议标题"
+
+msgid "Pages listed here will not be redirected to"
+msgstr "此处列出的页面不会被重定向到"
+
+msgid "Permanent 301"
+msgstr "永久 301"
+
+msgid "Plugin Admin Users"
+msgstr "插件管理员用户"
+
+msgid "Plugin version"
+msgstr "插件版本"
+
+msgid "Purge Entries!"
+msgstr "清除记录"
+
+msgid "Purge Options"
+msgstr "清除选项"
+
+msgid "Purge Type"
+msgstr "清除类型"
+
+msgid "REDIRECT_TO_USER_FIELD_WARNING"
+msgstr "REDIRECT_TO_USER_FIELD_WARNING"
+
+msgid "Recognized Post Types"
+msgstr "已识别的文章类型"
+
+msgid "Records imported: %s"
+msgstr "已导入记录：%s"
+
+msgid "Redirect"
+msgstr "重定向"
+
+msgid "Redirect & Capture Logs"
+msgstr "重定向和捕获日志"
+
+msgid "Redirect Details"
+msgstr "重定向详情"
+
+msgid "Redirect Information Updated Successfully!"
+msgstr "重定向信息更新成功！"
+
+msgid "Redirect Removed Successfully!"
+msgstr "重定向删除成功！"
+
+msgid "Redirect Type"
+msgstr "重定向类型"
+
+msgid "Redirect Types"
+msgstr "重定向类型"
+
+msgid "Redirect all requests"
+msgstr "重定向所有请求"
+
+msgid "Redirect all unhandled 404s to"
+msgstr "将所有未处理的 404 重定向到"
+
+msgid "Redirect moved to trash successfully!"
+msgstr "已移至回收站"
+
+msgid "Redirect restored from trash successfully!"
+msgstr "重定向已成功从回收站恢复！"
+
+msgid "Redirect to"
+msgstr "重定向到"
+
+msgid "Redirected to"
+msgstr "已重定向到"
+
+msgid "Redirects"
+msgstr "重定向"
+
+msgid "Referrer"
+msgstr "引荐来源"
+
+msgid "RegEx"
+msgstr "正则"
+
+msgid "Regular Expression (Manually Created)"
+msgstr "正则表达式（手动创建）"
+
+msgid "Remove Ignore Status"
+msgstr "移除忽略状态"
+
+msgid "Remove Later Status"
+msgstr "移除稍后状态"
+
+msgid "Remove redirect upon matching permalink"
+msgstr "匹配固定链接时删除重定向"
+
+msgid "Removed 404 URL from %s list successfully!"
+msgstr "已成功从 %s 列表中删除 404 URL！"
+
+msgid "Removes automatically created redirects if they haven't been used for the specified amount of time. Does not affect manually created redirects."
+msgstr "删除在指定时间内未使用的自动创建的重定向。不影响手动创建的重定向。"
+
+msgid "Required"
+msgstr "必填"
+
+msgid "Restore"
+msgstr "还原"
+
+msgid "Rows per page:"
+msgstr "每页行数："
+
+msgid "Run Maintenance"
+msgstr "运行维护"
+
+msgid "Run maintenance to delete old data (etc).&nbsp;&nbsp;It is not necessary to run this manually, as it's done automatically on a daily basis."
+msgstr "运行维护以删除旧数据（等）。&nbsp;&nbsp;无需手动运行，因为它每天自动执行。"
+
+msgid "SELECTED_SUGGEST_CATS"
+msgstr "SELECTED_SUGGEST_CATS"
+
+msgid "SELECTED_SUGGEST_TAGS"
+msgstr "SELECTED_SUGGEST_TAGS"
+
+msgid "SELECTED_SUGGEST_URL"
+msgstr "SELECTED_SUGGEST_URL"
+
+msgid "SUGGEST_MAX_SUGGESTIONS"
+msgstr "SUGGEST_MAX_SUGGESTIONS"
+
+msgid "SUGGEST_MIN_SCORE"
+msgstr "SUGGEST_MIN_SCORE"
+
+msgid "SUGGEST_USER_AFTER"
+msgstr "SUGGEST_USER_AFTER"
+
+msgid "SUGGEST_USER_BEFORE"
+msgstr "SUGGEST_USER_BEFORE"
+
+msgid "SUGGEST_USER_ENTRY_AFTER"
+msgstr "SUGGEST_USER_ENTRY_AFTER"
+
+msgid "SUGGEST_USER_ENTRY_BEFORE"
+msgstr "SUGGEST_USER_ENTRY_BEFORE"
+
+msgid "SUGGEST_USER_NO_RESULTS"
+msgstr "SUGGEST_USER_NO_RESULTS"
+
+msgid "SUGGEST_USER_TITLE"
+msgstr "SUGGEST_USER_TITLE"
+
+msgid "Sanity Check"
+msgstr "健全性检查"
+
+msgid "Save Settings"
+msgstr "保存设置"
+
+msgid "Saving settings..."
+msgstr "正在保存设置..."
+
+msgid "Section filters"
+msgstr "部分过滤器"
+
+
+msgid "Search engine user agents should not go here so that they will be redirected when the slug structure changes."
+msgstr "搜索引擎用户代理不应放在此处，以便在别名结构更改时将它们重定向。"
+
+msgid "Since a capture group is used, you can use a $1 replacement in the destination string of an external URL."
+msgstr "由于使用了捕获组，因此可以在外部 URL 的目标字符串中使用 $1 替换。"
+
+msgid "So please use caution and test them elsewhere before trying them here. If you don't know what you're doing please don't use this option (as it's not necessary for the functioning of the plugin)."
+msgstr "因此，请谨慎使用并在其他地方测试它们，然后再在此处尝试。如果您不知道自己在做什么，请不要使用此选项（因为它对于插件的功能并非必需）。"
+
+msgid "Some options were not saved successfully."
+msgstr "某些选项未成功保存。"
+
+msgid "Special"
+msgstr "特殊"
+
+msgid "Stats"
+msgstr "统计"
+
+msgid "Status"
+msgstr "状态"
+
+msgid "Suggestions"
+msgstr "建议"
+
+# translation-verified: Contains technical field names
+msgid "Supported formats are: <B>from_url,status,type,to_url,wp_type</B>"
+msgstr "支持的格式为：<B>from_url,status,type,to_url,wp_type</B>"
+
+msgid "TEXT_BEFORE_LINKS"
+msgstr "TEXT_BEFORE_LINKS"
+
+msgid "TEXT_CURRENT_PAGE"
+msgstr "TEXT_CURRENT_PAGE"
+
+msgid "TEXT_SHOW_ROWS"
+msgstr "TEXT_SHOW_ROWS"
+
+msgid "TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING"
+msgstr "TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING"
+
+msgid "TOOLTIP_POPUP_EXPLANATION_EMPTY"
+msgstr "TOOLTIP_POPUP_EXPLANATION_EMPTY"
+
+msgid "TOOLTIP_POPUP_EXPLANATION_EMTPY"
+msgstr "TOOLTIP_POPUP_EXPLANATION_EMTPY"
+
+msgid "TOOLTIP_POPUP_EXPLANATION_PAGE"
+msgstr "TOOLTIP_POPUP_EXPLANATION_PAGE"
+
+msgid "TOOLTIP_POPUP_EXPLANATION_URL"
+msgstr "TOOLTIP_POPUP_EXPLANATION_URL"
+
+msgid "Tag"
+msgstr "标签"
+
+msgid "Tag:"
+msgstr "标签："
+
+msgid "Tags"
+msgstr "标签"
+
+msgid "Template Redirect Priority"
+msgstr "模板重定向优先级"
+
+msgid "Temporary 302"
+msgstr "临时 302"
+
+# translation-verified: Contains WooCommerce technical term
+msgid "The \"product\" type is for WooCommerce users."
+msgstr "\"product\" 类型适用于 WooCommerce 用户。"
+
+msgid "The 404 Solution menu should appear"
+msgstr "404 Solution 菜单应显示"
+
+msgid "The file seems to have loaded okay. Please check the redirects page."
+msgstr "文件似乎已正常加载。请检查重定向页面。"
+
+msgid "The plugin will only redirect the post types specified here."
+msgstr "插件将仅重定向此处指定的文章类型。"
+
+msgid "The plugin will redirect to normal taxonomies (categories and tags) and the ones listed here."
+msgstr "插件将重定向到常规分类法（分类和标签）以及此处列出的分类法。"
+
+#~ msgid "The suggested page must \"score\" at least this much to be shown as a suggestion (min: 10, max: 90, default: 25)"
+#~ msgstr "匹配度必须达到此分数才能显示为建议（最小：10，最大：90，默认：25）"
+
+msgid "The user specified 404 page wasn't found. Please update the user-specified 404 page on the Options page."
+msgstr "未找到用户指定的 404 页面。请在选项页面上更新用户指定的 404 页面。"
+
+msgid "This cannot be undone. All redirects for URLs that do not already exist will be imported."
+msgstr "此操作无法撤消。将导入所有尚不存在的 URL 的重定向。"
+
+# translation-verified: Contains HTML entities
+msgid "This creates the list. For example, use &lt;ol style=\"list-style-type: none;\"&gt; to hide the numbers in the list. (defaults: &lt;ol&gt; / &lt;/ol&gt;)"
+msgstr "这将创建列表。例如，使用 &lt;ol style=\"list-style-type: none;\"&gt; 隐藏列表中的数字。（默认：&lt;ol&gt; / &lt;/ol&gt;）"
+
+msgid "This is best for internal processes that don't need to be redirected when the slug structure changes."
+msgstr "这最适合在别名结构更改时不需要重定向的内部进程。"
+
+msgid "This is best for search engine bots that do need to be redirected when the slug structure changes."
+msgstr "这最适合在别名结构更改时确实需要重定向的搜索引擎机器人。"
+
+msgid "This is for a domain name change."
+msgstr "这适用于域名更改。"
+
+msgid "This is for when a user requests a page that doesn't exist and they are not automatically redirected to a matching page."
+msgstr "这适用于用户请求不存在的页面且未自动重定向到匹配页面的情况。"
+
+msgid "This is not required for the plugin to function, but it is helpful for the developer and for future versions of the plugin."
+msgstr "这不是插件运行所必需的，但对开发者和插件的未来版本有帮助。"
+
+msgid "This only affects the list of potential matches shown to the user on a custom 404 page."
+msgstr "这仅影响在自定义 404 页面上向用户显示的潜在匹配列表。"
+
+msgid "This reveals: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when an issue is reported)."
+msgstr "这将显示：调试日志中的所有内容、管理员电子邮件地址、已安装的 PHP 扩展、活动插件、PHP 版本、WordPress 版本、MySQL 版本、已发布页面和文章总数等（报告问题时要求的所有内容）。"
+
+msgid "This sets how early in the process a 404 is handled by this plugin. If there are multiple plugins that should handle a 404, then set this higher (999) so that this plugin gets the 404 last. (default 9)"
+msgstr "这设置了此插件在流程中处理 404 的时间。如果有多个插件应处理 404，则将其设置得更高（999），以便此插件最后处理 404。（默认 9）"
+
+msgid "This shortcode can be used on the 404 page and will display a list of suggested pages."
+msgstr "此短代码可在 404 页面上使用，并将显示推荐页面列表。"
+
+# translation-verified: Contains HTML entities
+msgid "This surrounds each item in the list. (defaults: &lt;li&gt; / &lt;/li&gt;)"
+msgstr "这将包围列表中的每个项目。（默认：&lt;li&gt; / &lt;/li&gt;）"
+
+msgid "This text will appear before the list of suggestions (default: &lt;h3&gt;Here are some other great pages&lt;/h3&gt;)"
+msgstr "此文本将显示在建议列表之前（默认：&lt;h3&gt;这里有一些其他优质页面&lt;/h3&gt;）"
+
+msgid "This will break your website."
+msgstr "这将破坏您的网站。"
+
+msgid "This will not change the URL if the destination 404 page is set to (Default 404 Page) or Home Page."
+msgstr "如果目标 404 页面设置为（默认 404 页面）或首页，则不会更改 URL。"
+
+msgid "Tools"
+msgstr "工具"
+
+msgid "Total Redirects"
+msgstr "重定向总数"
+
+msgid "Total URLs"
+msgstr "URL 总数"
+
+msgid "Trash"
+msgstr "回收站"
+
+msgid "Trash Redirected URL"
+msgstr "将重定向的 URL 移至回收站"
+
+msgid "Trashed Redirects"
+msgstr "回收站中的重定向"
+
+msgid "Trashed URLs"
+msgstr "回收站中的 URL"
+
+msgid "Treat this URL as a regular expression"
+msgstr "将此 URL 视为正则表达式"
+
+msgid "Type"
+msgstr "类型"
+
+msgid "Type a page name here and select it to add it to the exlusion list"
+msgstr "在此处输入页面名称并选择它以将其添加到排除列表"
+
+msgid "URL"
+msgstr "URL"
+
+msgid "URL(s) deleted"
+msgstr "URL 已删除"
+
+msgid "URL(s) marked as Captured."
+msgstr "URL 已标记为捕获状态。"
+
+msgid "URL(s) marked as Ignored."
+msgstr "URL 已标记为忽略状态。"
+
+msgid "URL(s) marked as Later."
+msgstr "URL 已标记为稍后状态。"
+
+msgid "URL(s) moved to trash"
+msgstr "URL 已移至回收站"
+
+msgid "URL(s) restored."
+msgstr "URL 已恢复。"
+
+msgid "URLs"
+msgstr "URL"
+
+msgid "Under the Settings menu"
+msgstr "在设置菜单下"
+
+msgid "Unique Page Not Found Referrers"
+msgstr "唯一页面未找到引荐来源"
+
+msgid "Unique Page Not Found URLs"
+msgstr "唯一页面未找到 URL"
+
+msgid "Unique Page Not Found Visitors"
+msgstr "唯一页面未找到访客"
+
+msgid "Unique Redirected Referrers"
+msgstr "唯一重定向引荐来源"
+
+msgid "Unique Redirected Visitors"
+msgstr "唯一重定向访客"
+
+msgid "Unique URLs Redirected"
+msgstr "唯一重定向 URL"
+
+msgid "Unknown"
+msgstr "未知"
+
+msgid "Update Redirect"
+msgstr "更新重定向"
+
+msgid "Update the URL bar"
+msgstr "更新 URL 栏"
+
+msgid "Use one line per user agent. If the text is found anywhere in the user agent string then it applies."
+msgstr "每个用户代理使用一行。如果在用户代理字符串的任何位置找到该文本，则适用。"
+
+msgid "User"
+msgstr "用户"
+
+msgid "User names listed here will be able to do everything an admin can do with the plugin."
+msgstr "此处列出的用户名将能够对插件执行管理员可以执行的所有操作。"
+
+msgid "Using the purge options will move all selected redirects to the trash. You must then empty the trash to delete them."
+msgstr "使用清除选项会将所有选定的重定向移至回收站。然后，您必须清空回收站才能删除它们。"
+
+msgid "View logs for"
+msgstr "查看日志"
+
+msgid "Visit"
+msgstr "访问"
+
+msgid "WARNING: When used incorrectly this WILL break your website. Use at your own risk. Please, for the love of all that is holy, leave this empty if you don't know what you're doing."
+msgstr "警告：错误使用时，这将破坏您的网站。使用风险自负。看在上帝的份上，如果您不知道自己在做什么，请将其留空。"
+
+msgid "When an error is detected by the plugin, email the entire log file to the developer."
+msgstr "当插件检测到错误时，将整个日志文件通过电子邮件发送给开发者。"
+
+msgid "When checked the URL will be changed from the custom 404 page URL to the URL originally requested (after the page headers load)."
+msgstr "选中后，URL 将从自定义 404 页面 URL 更改为最初请求的 URL（在页面标题加载后）。"
+
+msgid "When checked, the text is treated as a regular expression."
+msgstr "选中后，文本将被视为正则表达式。"
+
+msgid "When selected, ALL REQUESTS (even for pages that exist, even for non-404s) will be treated like a 404."
+msgstr "选中后，所有请求（即使是存在的页面，即使不是 404）都将被视为 404。"
+
+msgid "When the number of captured 404s would cause an admin notification, an email will be sent to the addresses specified here."
+msgstr "当已记录的 404 数量会导致管理员通知时，将向此处指定的地址发送电子邮件。"
+
+msgid "You can see which are recognized by looking at the default 404 destination option."
+msgstr "您可以通过查看默认 404 目标选项来了解哪些已被识别。"
+
+msgid "You can see which post types are recognized by looking at the default 404 destination option, which has a list of pages, posts, products, etc."
+msgstr "您可以通过查看默认 404 目标选项来了解哪些文章类型已被识别，该选项包含页面、文章、产品等的列表。"
+
+msgid "add-exclude-page-data-url"
+msgstr "add-exclude-page-data-url"
+
+msgid "addManualRedirectAction"
+msgstr "addManualRedirectAction"
+
+msgid "ajaxTrashLink"
+msgstr "ajaxTrashLink"
+
+# translation-verified: Contains technical field names
+msgid "and <B>from_url,to_url</B>"
+msgstr "以及 <B>from_url,to_url</B>"
+
+msgid "and redirect to the specified page."
+msgstr "并重定向到指定页面。"
+
+msgid "bulkOptions"
+msgstr "bulkOptions"
+
+msgid "data-pagination-ajax-url"
+msgstr "data-pagination-ajax-url"
+
+msgid "data-pagination-ajax-action"
+msgstr "data-pagination-ajax-action"
+
+msgid "data-pagination-ajax-subpage"
+msgstr "data-pagination-ajax-subpage"
+
+msgid "data-pagination-ajax-nonce"
+msgstr "data-pagination-ajax-nonce"
+
+msgid "data-url"
+msgstr "data-url"
+
+msgid "days (0 means immediately, default 30)"
+msgstr "天数（0 表示立即，默认 30）"
+
+msgid "deletePermanentlyHTML"
+msgstr "deletePermanentlyHTML"
+
+msgid "destination-does-not-exist"
+msgstr "destination-does-not-exist"
+
+msgid "destination-exists"
+msgstr "destination-exists"
+
+msgid "disallow-redirect-all-requests"
+msgstr "disallow-redirect-all-requests"
+
+msgid "earliestLogDate"
+msgstr "earliestLogDate"
+
+msgid "editLink"
+msgstr "editLink"
+
+msgid "editlinkHTML"
+msgstr "editlinkHTML"
+
+msgid "filterText"
+msgstr "filterText"
+
+msgid "is maintained by"
+msgstr "由以下人员维护"
+
+msgid "loaded-excluded-pages"
+msgstr "loaded-excluded-pages"
+
+msgid "logCurrentRowCount"
+msgstr "logCurrentRowCount"
+
+msgid "logCurrentSizeDiskUsage"
+msgstr "logCurrentSizeDiskUsage"
+
+msgid "logslinkHTML"
+msgstr "logslinkHTML"
+
+msgid "of"
+msgstr "/"
+
+msgid "pageIDAndType"
+msgstr "pageIDAndType"
+
+msgid "postedURL"
+msgstr "postedURL"
+
+msgid "redirectPageTitle"
+msgstr "redirectPageTitle"
+
+msgid "rowActions"
+msgstr "rowActions"
+
+msgid "rowClass"
+msgstr "rowClass"
+
+msgid "rowCode"
+msgstr "rowCode"
+
+msgid "rowURL"
+msgstr "rowURL"
+
+msgid "selecteSsettingsLevel"
+msgstr "selecteSsettingsLevel"
+
+msgid "selectedAutoCats"
+msgstr "selectedAutoCats"
+
+msgid "selectedAutoRedirects"
+msgstr "selectedAutoRedirects"
+
+msgid "selectedAutoTags"
+msgstr "selectedAutoTags"
+
+msgid "selectedCapture404"
+msgstr "selectedCapture404"
+
+# translation-verified: Technical identifier used in code
+msgid "selectedDefaultRedirect301"
+msgstr "selectedDefaultRedirect301"
+
+# translation-verified: Technical identifier used in code
+msgid "selectedDefaultRedirect302"
+msgstr "selectedDefaultRedirect302"
+
+msgid "selectedRemoveMatches"
+msgstr "selectedRemoveMatches"
+
+msgid "selectedSendErrorLogs"
+msgstr "selectedSendErrorLogs"
+
+msgid "selectedThemeCalm"
+msgstr "selectedThemeCalm"
+
+msgid "selectedThemeMono"
+msgstr "selectedThemeMono"
+
+msgid "selectedThemeNeon"
+msgstr "selectedThemeNeon"
+
+msgid "selectedThemeObsidian"
+msgstr "selectedThemeObsidian"
+
+msgid "selectedUnderSettings"
+msgstr "selectedUnderSettings"
+
+msgid "showSearchFilter"
+msgstr "showSearchFilter"
+
+msgid "statusTitle"
+msgstr "statusTitle"
+
+msgid "toolsExportRedirectsLink"
+msgstr "toolsExportRedirectsLink"
+
+msgid "toolsImportFormActionLink"
+msgstr "toolsImportFormActionLink"
+
+msgid "toolsImportRedirectsLink"
+msgstr "toolsImportRedirectsLink"
+
+msgid "toolsMaintenanceFormActionLink"
+msgstr "toolsMaintenanceFormActionLink"
+
+msgid "toolsPurgeFormActionLink"
+msgstr "toolsPurgeFormActionLink"
+
+msgid "urlPlaceholder"
+msgstr "urlPlaceholder"
+
+msgid "will match any URL that begins with"
+msgstr "将匹配以此开头的任何 URL"
+
+#. Plural form with HTML
+#: includes/View.php
+msgid "There is <a>%s captured 404 URL</a> that needs to be processed."
+msgid_plural "There are <a>%s captured 404 URLs</a> to be processed."
+msgstr[0] "有 <a>%s 个已记录的 404 URL</a> 需要处理。"
+
+#. Plural form with %s
+#: includes/DataAccess.php
+msgid "%s redirect entry was moved to the trash."
+msgid_plural "%s redirect entries were moved to the trash."
+msgstr[0] "%s 个重定向条目已移至回收站。"
+
+#: includes/DatabaseUpgradesEtc.php:119
+msgid "404 Solution: N-gram spell check cache is being built in the background to optimize performance. This may take a few minutes on large sites."
+msgstr "404 Solution：正在后台构建 N-gram 拼写检查缓存以优化性能。在大型网站上可能需要几分钟。"
+
+#: includes/DatabaseUpgradesEtc.php:123
+msgid "404 Solution: Built N-gram cache for %d pages to optimize spell checking performance."
+msgstr "404 Solution：已为 %d 个页面构建 N-gram 缓存以优化拼写检查性能。"
+
+#: includes/DatabaseUpgradesEtc.php:140
+msgid "Before deactivating:"
+msgstr "停用前："
+
+msgid "Choose what should happen to your data. These preferences will be saved for later if you decide to delete the plugin."
+msgstr "选择如何处理您的数据。如果您决定删除插件，这些偏好设置将被保存以备后用。"
+
+msgid "What should happen to your data?"
+msgstr "您的数据应该如何处理？"
+
+msgid "Keep my redirects (%d redirects)"
+msgstr "保留我的重定向（%d 个重定向）"
+
+msgid "Check this if you plan to reinstall the plugin later. Your redirect configurations will be preserved."
+msgstr "如果您计划稍后重新安装插件，请勾选此项。您的重定向配置将被保留。"
+
+msgid "Keep 404 logs"
+msgstr "保留 404 日志"
+
+msgid "Historical 404 data and logs will be preserved if checked."
+msgstr "勾选此项后，历史 404 数据和日志将被保留。"
+
+msgid "Note: Cache tables will always be deleted as they can be rebuilt."
+msgstr "注意：缓存表将始终被删除，因为它们可以重建。"
+
+msgid "Why are you deactivating? (Optional)"
+msgstr "您为什么要停用？（可选）"
+
+msgid "Temporary deactivation for debugging"
+msgstr "临时停用以进行调试"
+
+msgid "The plugin is not working as expected"
+msgstr "插件未按预期工作"
+
+msgid "I found a better plugin"
+msgstr "我找到了更好的插件"
+
+msgid "I no longer need this functionality"
+msgstr "我不再需要此功能"
+
+msgid "Too complicated to configure"
+msgstr "配置过于复杂"
+
+msgid "Performance issues"
+msgstr "性能问题"
+
+msgid "Other reason"
+msgstr "其他原因"
+
+msgid "Help us improve (Optional)"
+msgstr "帮助我们改进（可选）"
+
+msgid "Help improve the plugin (Optional)"
+msgstr "帮助改进插件（可选）"
+
+msgid "Share why you're deactivating. Your feedback helps us improve."
+msgstr "分享您停用的原因。您的反馈帮助我们改进。"
+
+
+msgid "Email Feedback & Deactivate"
+msgstr "提交反馈并停用"
+
+msgid "Send feedback to help improve the plugin"
+msgstr "发送反馈以帮助改进插件"
+
+msgid "Your email (optional):"
+msgstr "您的电子邮箱（可选）："
+
+msgid "your@email.com (optional)"
+msgstr "your@email.com（可选）"
+
+msgid "Additional details:"
+msgstr "其他详细信息："
+
+msgid "Please share any additional feedback..."
+msgstr "请分享任何其他反馈..."
+
+msgid "Your feedback helps us improve. We respect your privacy and will not share your information."
+msgstr "您的反馈帮助我们改进。我们尊重您的隐私，不会分享您的信息。"
+
+msgid "Insufficient permissions"
+msgstr "权限不足"
+
+msgid "Could not save preferences. Your choices may not be preserved."
+msgstr "无法保存设置。您的选择可能无法保留。"
+
+msgid "Preferences saved successfully"
+msgstr "偏好设置已成功保存"
+
+msgid "Failed to save preferences"
+msgstr "保存偏好设置失败"
+
+msgid "N-gram cache rebuild is already in progress. Please wait for it to complete."
+msgstr "N-gram 缓存重建已在进行中。请等待完成。"
+
+msgid "Error rebuilding N-gram cache: %s"
+msgstr "重建 N-gram 缓存时出错：%s"
+
+msgid "N-gram cache rebuilt successfully: %d total entries processed (%d posts/pages, %d categories, %d tags), %d successful, %d failed."
+msgstr "N-gram 缓存重建成功：已处理总计 %d 个条目（%d 篇文章/页面、%d 个分类、%d 个标签），成功 %d 个，失败 %d 个。"
+
+msgid "Spelling cache cleared successfully."
+msgstr "拼写缓存已成功清除。"
+
+msgid "Cache Management"
+msgstr "缓存管理"
+
+msgid "N-gram Cache"
+msgstr "N-gram 缓存"
+
+msgid "Rebuild the N-gram spell checker cache. This optimizes 404 URL matching performance. May take several minutes on large sites."
+msgstr "重建 N-gram 拼写检查器缓存。这将优化 404 URL 匹配性能。大型站点可能需要几分钟。"
+
+msgid "Rebuild N-gram Cache"
+msgstr "重建 N-gram 缓存"
+
+msgid "Spelling Cache"
+msgstr "拼写缓存"
+
+msgid "Clear the spelling cache to force recalculation of URL matches. Useful after making significant content changes."
+msgstr "清除拼写缓存以强制重新计算 URL 匹配。在进行重大内容更改后很有用。"
+
+msgid "Clear Spelling Cache"
+msgstr "清除拼写缓存"
+
+msgid "Disable automatic dark mode detection"
+msgstr "禁用自动深色模式检测"
+
+msgid "When unchecked and theme is set to \"Default\", the plugin will automatically switch to a dark theme if your WordPress admin color scheme is dark (Midnight, Ectoplasm, Coffee), if you have a dark mode plugin enabled, or if your browser/OS prefers dark mode."
+msgstr "取消勾选且主题设置为\\\"默认\\\"时，如果您的 WordPress 管理配色方案为深色（Midnight、Ectoplasm、Coffee），或启用了深色模式插件，或您的浏览器/操作系统偏好深色模式，插件将自动切换到深色主题。"
+
+msgid "Your feedback helps us improve. System information (WordPress version, PHP version, installed plugins) will be included. We respect your privacy and will not share your information."
+msgstr "您的反馈帮助我们改进。系统信息（WordPress 版本、PHP 版本、已安装的插件）将被包含在内。我们尊重您的隐私，不会分享您的信息。"
+
+msgid "Plugin Language Override"
+msgstr "插件语言覆盖"
+
+msgid "Use WordPress Default"
+msgstr "使用 WordPress 默认设置"
+
+msgid "Override the language used for this plugin's admin interface. Leave on \"Use WordPress Default\" to respect WordPress and user language settings."
+msgstr "覆盖此插件管理界面使用的语言。保持\\\"使用 WordPress 默认设置\\\"以遵循 WordPress 和用户语言设置。"
+
+#: includes/PluginLogic.php
+msgid "Error: Invalid language selected"
+msgstr "错误：选择了无效的语言"
+
+#: includes/html/adminOptionsGeneral.html
+msgid "When an error is detected by the plugin, email the entire log file to the developer. This is not required for the plugin to function, but it is helpful for the developer and for future versions of the plugin. This reveals: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when an issue is reported). Log files are checked daily when maintenance is run."
+msgstr "当插件检测到错误时，将整个日志文件通过电子邮件发送给开发人员。这不是插件运行所必需的，但对开发人员和插件的未来版本很有帮助。这会显示：调试日志中的所有内容、管理员电子邮件地址、已安装的PHP扩展、活动插件、PHP版本、WordPress版本、MySQL版本、已发布页面和文章总数等（报告问题时所询问的所有内容）。日志文件在运行维护时每天检查。"
+
+#: includes/html/viewSuggestions.html
+# translation-verified: Technical shortcode name [abj404_solution_page_suggestions] intentionally in English
+msgid "Display the closest matching pages by using the shortcode [abj404_solution_page_suggestions]."
+msgstr "使用短代码 [abj404_solution_page_suggestions] 显示最匹配的页面。"
+
+#: includes/html/viewSuggestions.html
+msgid "This shortcode can be used on the 404 page and will display a list of suggested pages. This is for when a user requests a page that doesn't exist and they are not automatically redirected to a matching page."
+msgstr "此短代码可在 404 页面上使用，并将显示建议页面的列表。这是为了当用户请求不存在的页面且未自动重定向到匹配页面时使用。"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedLogging.html
+msgid "This is best for search engine bots that do need to be redirected when the slug structure changes. Use one line per user agent. If the text is found anywhere in the user agent string then it applies."
+msgstr "这最适合在 slug 结构更改时需要重定向的搜索引擎机器人。每个用户代理使用一行。如果在用户代理字符串中的任何位置找到文本，则适用。"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedLogging.html
+msgid "This is best for internal processes that don't need to be redirected when the slug structure changes. Search engine user agents should not go here so that they will be redirected when the slug structure changes."
+msgstr "这最适合在 slug 结构更改时不需要重定向的内部进程。搜索引擎用户代理不应放在这里，以便在 slug 结构更改时重定向它们。"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedContent.html
+msgid "Pages listed here will not be redirected to (unless a redirect to the page already exists)."
+msgstr "此处列出的页面不会被重定向到（除非页面的重定向已存在）。"
+
+#: includes/html/settingsAdvanced.html
+msgid "The plugin will only redirect the post types specified here. Default WordPress post types are \"post\" and \"page.\" The \"product\" type is for WooCommerce users."
+msgstr "插件将只重定向此处指定的文章类型。默认的WordPress文章类型是\\\"post\\\"和\\\"page\\\"。\\\"product\\\"类型适用于WooCommerce用户。"
+
+#: includes/html/adminOptionsGeneral.html
+msgid "When the number of captured 404s would cause an admin notification, an email will be sent to the addresses specified here. Multiple email addresses can be separated by commas (,). The \"from\" email address is always the default WordPress admin email:"
+msgstr "当已记录的 404 数量会导致管理员通知时，将向此处指定的地址发送电子邮件。多个电子邮件地址可以用逗号（,）分隔。\\\"发件人\\\"电子邮件地址始终是默认的WordPress管理员电子邮件："
+
+#: includes/DatabaseUpgradesEtc.php:125
+msgid "404 Solution: N-gram spell check cache is being built in the background%s to optimize performance. This may take a few minutes on large sites."
+msgstr "404 Solution: 正在后台%s构建 N-gram 拼写检查缓存以优化性能。在大型网站上可能需要几分钟。"
+
+#: includes/PluginLogic.php
+msgid "N-gram cache rebuild is already scheduled or in progress. Please wait for it to complete."
+msgstr "N-gram 缓存重建已经计划或正在进行中。请等待其完成。"
+
+#: includes/PluginLogic.php
+msgid "N-gram cache rebuild has been scheduled and will run in the background. This may take several minutes on large sites. You can continue using the plugin normally."
+msgstr "N-gram 缓存重建已计划并将在后台运行。在大型网站上可能需要几分钟。您可以正常继续使用插件。"
+
+#: includes/PluginLogic.php
+msgid "Failed to schedule N-gram cache rebuild. Please try again or check your WordPress cron configuration."
+msgstr "无法计划 N-gram 缓存重建。请重试或检查您的 WordPress cron 配置。"
+
+#: includes/UninstallModal.php
+msgid "Deactivate without feedback"
+msgstr "停用而不提供反馈"
+
+#: includes/UninstallModal.php
+msgid "Processing..."
+msgstr "处理中..."
+
+#: includes/UninstallModal.php
+msgid "Before deactivating, choose what happens to your data:"
+msgstr "在停用之前，选择如何处理您的数据："
+
+#: includes/UninstallModal.php
+msgid "Keep my redirects (%d)"
+msgstr "保留我的重定向（%d）"
+
+#: includes/UninstallModal.php
+msgid "— saves them for later if you reinstall"
+msgstr "— 如果您重新安装，将保存它们以备后用"
+
+#: includes/UninstallModal.php
+msgid "— historical data preserved"
+msgstr "— 保留历史数据"
+
+#: includes/UninstallModal.php
+msgid "Cache tables are always deleted (can be rebuilt)"
+msgstr "缓存表始终被删除（可以重建）"
+
+#: includes/UninstallModal.php
+msgid "What specifically isn't working?"
+msgstr "具体是什么不起作用？"
+
+#: includes/UninstallModal.php
+msgid "Redirects not triggering/working"
+msgstr "重定向未触发/不起作用"
+
+#: includes/UninstallModal.php
+msgid "Settings not saving"
+msgstr "设置未保存"
+
+#: includes/UninstallModal.php
+msgid "Admin pages showing errors"
+msgstr "管理页面显示错误"
+
+#: includes/UninstallModal.php
+msgid "Suggestions not appearing"
+msgstr "建议未显示"
+
+#: includes/UninstallModal.php
+msgid "Conflicts with other plugins"
+msgstr "与其他插件冲突"
+
+#: includes/UninstallModal.php
+msgid "Other issue (please specify below)"
+msgstr "其他问题（请在下面说明）"
+
+#: includes/UninstallModal.php
+msgid "What type of performance issue?"
+msgstr "什么类型的性能问题？"
+
+#: includes/UninstallModal.php
+msgid "Slow admin dashboard"
+msgstr "管理仪表板缓慢"
+
+#: includes/UninstallModal.php
+msgid "Slow frontend page loads"
+msgstr "前端页面加载缓慢"
+
+#: includes/UninstallModal.php
+msgid "High database usage"
+msgstr "数据库使用率高"
+
+#: includes/UninstallModal.php
+msgid "Memory issues"
+msgstr "内存问题"
+
+#: includes/UninstallModal.php
+msgid "Other (please specify below)"
+msgstr "其他（请在下面说明）"
+
+#: includes/UninstallModal.php
+msgid "What was confusing?"
+msgstr "什么让人困惑？"
+
+#: includes/UninstallModal.php
+msgid "Settings are confusing"
+msgstr "设置令人困惑"
+
+#: includes/UninstallModal.php
+msgid "Too many options"
+msgstr "选项太多"
+
+#: includes/UninstallModal.php
+msgid "Unclear documentation"
+msgstr "文档不清楚"
+
+#: includes/UninstallModal.php
+msgid "Which plugin are you switching to?"
+msgstr "您要切换到哪个插件？"
+
+#: includes/UninstallModal.php
+msgid "Plugin name (optional)"
+msgstr "插件名称（可选）"
+
+#: includes/UninstallModal.php
+msgid "Please tell us more (optional):"
+msgstr "请告诉我们更多信息（可选）："
+
+#: includes/UninstallModal.php
+msgid "What's your reason for deactivating?"
+msgstr "您停用的原因是什么？"
+
+#: includes/UninstallModal.php
+msgid "Additional details (optional):"
+msgstr "其他详细信息（可选）："
+
+#: includes/UninstallModal.php
+msgid "Any other information about the issue..."
+msgstr "有关该问题的任何其他信息..."
+
+#: includes/UninstallModal.php
+msgid "For follow-up if needed"
+msgstr "如有需要，用于后续跟进"
+
+#: includes/UninstallModal.php
+msgid "Include technical details (system info + sanitized log excerpt) to help diagnose the issue"
+msgstr "包括技术详细信息（系统信息 + 已清理的日志摘录）以帮助诊断问题"
+
+#: includes/UninstallModal.php
+msgid "Feedback could not be sent."
+msgstr "无法发送反馈。"
+
+msgid "Collect incoming 404 URLs"
+msgstr "收集传入的404 URL"
+
+msgid "Calm Ops (Light)"
+msgstr "Calm Ops（浅色）"
+
+msgid "Monochrome Minimal (Light)"
+msgstr "单色极简（浅色）"
+
+msgid "Neon Slate (Dark)"
+msgstr "Neon Slate（深色）"
+
+msgid "Obsidian Blue (Dark)"
+msgstr "Obsidian Blue（深色）"
+#: includes/ajax/SettingsModeToggle.php
+msgid "Invalid security token"
+msgstr "安全令牌无效"
+
+msgid "Unauthorized"
+msgstr "未授权"
+
+msgid "Invalid mode"
+msgstr "无效模式"
+
+msgid "Settings mode updated"
+msgstr "设置模式已更新"
+
+msgid "Failed to update settings mode"
+msgstr "更新设置模式失败"
+#: includes/View.php - Simple/Advanced Mode Toggle
+msgid "Simple Mode"
+msgstr "简单模式"
+
+msgid "Advanced Mode"
+msgstr "高级模式"
+
+msgid "Simple Mode shows essential options only. Switch to Advanced Mode for full configuration."
+msgstr "简单模式仅显示基本选项。切换到高级模式进行完整配置。"
+
+msgid "Advanced Mode shows all options. Switch to Simple Mode for a streamlined view."
+msgstr "高级模式显示所有选项。切换到简单模式获得简洁视图。"
+
+msgid "Default (Follows WordPress)"
+msgstr "默认（跟随WordPress）"
+
+msgid "Core Settings"
+msgstr "核心设置"
+
+msgid "404 Capture"
+msgstr "404捕获"
+
+msgid "Default 404 destination"
+msgstr "默认404目标"
+
+msgid "Where to send visitors when a 404 error occurs"
+msgstr "发生404错误时将访客发送到哪里"
+
+msgid "Automatically redirect 404s to similar pages when a good match is found"
+msgstr "当找到良好匹配时自动将404重定向到类似页面"
+
+msgid "Redirect type"
+msgstr "重定向类型"
+
+msgid "301 for SEO, 302 for temporary changes"
+msgstr "301用于SEO，302用于临时更改"
+
+msgid "Log 404 errors so you can review and fix them"
+msgstr "记录404错误，以便您查看和修复"
+
+msgid "Delete captured URLs after"
+msgstr "在此之后删除捕获的URL"
+
+msgid "days"
+msgstr "天"
+
+msgid "Auto-remove old 404 records (0 to keep forever)"
+msgstr "自动删除旧的404记录（0表示永久保留）"
+
+msgid "Notify me when captured URLs exceed"
+msgstr "当捕获的URL超过时通知我"
+
+msgid "Show admin notice when 404 count gets high (0 to disable)"
+msgstr "当404计数变高时显示管理员通知（0表示禁用）"
+
+msgid "Maximum log storage"
+msgstr "最大日志存储"
+
+msgid "Oldest logs are deleted when this limit is reached"
+msgstr "达到此限制时将删除最旧的日志"
+
+msgid "Need more control? Switch to Advanced Mode for 30+ additional options."
+msgstr "需要更多控制？切换到高级模式获得30多个额外选项。"
+
+msgid "Need more control?"
+msgstr "需要更多控制？"
+
+msgid "Switch to Advanced Mode"
+msgstr "切换到高级模式"
+
+msgid "for 30+ additional options."
+msgstr "提供30多个额外选项。"
+
+msgid "Statistics"
+msgstr "Statistics"
+
+msgid "Example:"
+msgstr "Example:"
+
+msgid "/events/(.+) will match any URL that begins with /events/ and redirect to the specified page. Since a capture group is used, you can use a $1 replacement in the destination string of an external URL."
+msgstr "/events/(.+) will match any URL that begins with /events/ and redirect to the specified page. Since a capture group is used, you can use a $1 replacement in the destination string of an external URL."
+
+msgid "URLs to redirect"
+msgstr "URLs to redirect"
+
+msgid "Captured"
+msgstr "Captured"
+
+msgid "Ignored"
+msgstr "Ignored"
+
+msgid "Later"
+msgstr "Later"
+
+msgid "Type to filter URLs... (press Enter)"
+msgstr "Type to filter URLs... (press Enter)"
+
+msgid "Are you sure you want to permanently delete all items in trash?"
+msgstr "Are you sure you want to permanently delete all items in trash?"
+
+msgid "selected"
+msgstr "selected"
+
+msgid "Mark Captured"
+msgstr "Mark Captured"
+
+msgid "Mark Ignored"
+msgstr "Mark Ignored"
+
+msgid "Move to Trash"
+msgstr "Move to Trash"
+
+msgid "Create Redirect"
+msgstr "Create Redirect"
+
+msgid "Clear"
+msgstr "Clear"
+
+msgid "Never"
+msgstr "Never"
+
+msgid "Captured 404 URL"
+msgstr "Captured 404 URL"
+
+msgid "Ignored URL - will not be suggested"
+msgstr "Ignored URL - will not be suggested"
+
+msgid "Edit"
+msgstr "Edit"
+
+msgid "View Logs"
+msgstr "View Logs"
+
+msgid "Delete Permanently"
+msgstr "Delete Permanently"
+
+msgid "Are you sure you want to permanently delete this item?"
+msgstr "Are you sure you want to permanently delete this item?"
+
+msgid "Delete"
+msgstr "Delete"
+
+msgid "Ignore"
+msgstr "Ignore"
+
+msgid "Manual"
+msgstr "Manual"
+
+msgid "Automatic"
+msgstr "Automatic"
+
+msgid "Type to filter redirects... (press Enter)"
+msgstr "Type to filter redirects... (press Enter)"
+
+msgid "redirects selected"
+msgstr "redirects selected"
+
+msgid "Bulk Actions"
+msgstr "Bulk Actions"
+
+msgid "Edit Redirects"
+msgstr "Edit Redirects"
+
+msgid "Restore Redirects"
+msgstr "Restore Redirects"
+
+msgid "Clear Selection"
+msgstr "Clear Selection"
+
+msgid "Are you sure you want to permanently delete all items in the trash?"
+msgstr "Are you sure you want to permanently delete all items in the trash?"
+
+msgid "Add Manual Redirect"
+msgstr "Add Manual Redirect"
+
+msgid "The URL path that should be redirected (without domain)"
+msgstr "The URL path that should be redirected (without domain)"
+
+msgid "Permanent Redirect (Recommended for SEO)"
+msgstr "Permanent Redirect (Recommended for SEO)"
+
+msgid "Temporary Redirect"
+msgstr "Temporary Redirect"
+
+msgid "logs"
+msgstr "logs"
+
+msgid "redirects"
+msgstr "redirects"
+
+msgid "Showing %1$d-%2$d of %3$d %4$s"
+msgstr "Showing %1$d-%2$d of %3$d %4$s"
+
+msgid "Redirects will appear here once created."
+msgstr "Redirects will appear here once created."
+
+msgid "Redirect Logs"
+msgstr "Redirect Logs"
+
+msgid "Action"
+msgstr "Action"
+
+msgid "404"
+msgstr "404"
+
+msgid "Today's Stats"
+msgstr "Today's Stats"
+
+msgid "This Month"
+msgstr "This Month"
+
+msgid "This Year"
+msgstr "This Year"
+
+msgid "All Stats"
+msgstr "All Stats"
+
+msgid "Visit URL"
+msgstr "Visit URL"
+
+msgid "This page doesn't exist or is not published so the redirect won't work."
+msgstr "This page doesn't exist or is not published so the redirect won't work."
+
+
+#: includes/DataAccess.php
+msgid "Just now"
+msgstr "刚刚"
+
+#: includes/View.php
+msgid "Data may not be immediately updated. Refresh to see latest changes."
+msgstr "数据可能不会立即更新。刷新以查看最新更改。"
+
+#: includes/View.php
+msgid "Last updated: %s"
+msgstr "上次更新: %s"
+
+#: includes/WordPress_Connector.php
+msgid "second"
+msgstr "秒"
+
+#: includes/WordPress_Connector.php
+msgid "seconds"
+msgstr "秒"
+
+#: includes/WordPress_Connector.php
+msgid "minute"
+msgstr "分钟"
+
+#: includes/WordPress_Connector.php
+msgid "minutes"
+msgstr "分钟"
+
+#: includes/WordPress_Connector.php
+msgid "hour"
+msgstr "小时"
+
+#: includes/WordPress_Connector.php
+msgid "hours"
+msgstr "小时"
+
+#: includes/WordPress_Connector.php
+msgid "day"
+msgstr "天"
+
+#: includes/WordPress_Connector.php
+msgid "ago"
+msgstr "前"
+
+#: includes/SetupWizard.php
+msgid "Security check failed. Please try again."
+msgstr "安全检查失败。请重试。"
+
+#: includes/SetupWizard.php
+msgid "Error"
+msgstr "错误"
+
+#: includes/SetupWizard.php
+msgid "You do not have permission to access this page."
+msgstr "您没有权限访问此页面。"
+
+#: includes/SetupWizard.php
+msgid "Welcome to 404 Solution"
+msgstr "欢迎使用 404 Solution"
+
+#: includes/SetupWizard.php
+msgid "Close"
+msgstr "关闭"
+
+#: includes/SetupWizard.php
+msgid "404 Solution helps you automatically handle 404 errors and broken links on your site."
+msgstr "404 Solution 帮助您自动处理网站上的 404 错误和断开的链接。"
+
+#: includes/SetupWizard.php
+msgid "Let's configure how it handles missing pages. You can always change these settings later."
+msgstr "让我们配置如何处理缺失的页面。您可以随时更改这些设置。"
+
+#: includes/SetupWizard.php
+msgid "When a page is not found, what should happen?"
+msgstr "当页面未找到时，应该怎么做？"
+
+#: includes/SetupWizard.php
+msgid "Automatically redirect to similar page (recommended)"
+msgstr "自动重定向到相似页面（推荐）"
+
+#: includes/SetupWizard.php
+msgid "When a match is found, redirect visitors automatically"
+msgstr "找到匹配项时，自动重定向访问者"
+
+#: includes/SetupWizard.php
+msgid "Just show the default 404 page"
+msgstr "只显示默认的 404 页面"
+
+#: includes/SetupWizard.php
+msgid "Use WordPress's standard \"Page not found\" screen. Manual redirects still work."
+msgstr "使用 WordPress 标准的\"页面未找到\"屏幕。手动重定向仍然有效。"
+
+#: includes/SetupWizard.php
+msgid "Log 404 errors for review?"
+msgstr "记录 404 错误以供审查？"
+
+#: includes/SetupWizard.php
+msgid "Yes, log 404 errors"
+msgstr "是，记录 404 错误"
+
+#: includes/SetupWizard.php
+msgid "Track missing pages so you can create redirects later"
+msgstr "跟踪缺失的页面，以便稍后创建重定向"
+
+#: includes/SetupWizard.php
+msgid "No, don't log 404s"
+msgstr "否，不记录 404"
+
+#: includes/SetupWizard.php
+msgid "Only handle manually created redirects"
+msgstr "仅处理手动创建的重定向"
+
+#: includes/SetupWizard.php
+msgid "Skip Setup"
+msgstr "跳过设置"
+
+#: includes/SetupWizard.php
+msgid "Save & Get Started"
+msgstr "保存并开始"
+
+#: includes/html/tableRowPageRedirects.html
+msgid "url-is-normal"
+msgstr "url-is-normal"
+
+#: includes/html/tableRowPageRedirects.html
+msgid "url-looks-like-regex"
+msgstr "url-looks-like-regex"
+
+#: includes/html/tableRowPageRedirects.html
+msgid "This URL looks like a regular expression but is not marked as one. Edit the redirect and check \"Treat this URL as a regular expression\"."
+msgstr "此URL看起来像正则表达式，但未标记为正则表达式。编辑重定向并勾选\"将此URL视为正则表达式\"。"
+
+msgid "Create redirect from old URL to new URL"
+msgstr "创建从旧URL到新URL的重定向"
+
+msgid "If you change the permalink/slug, a redirect will be created from the old URL to the new one."
+msgstr "如果您更改固定链接/别名，将从旧URL创建重定向到新URL。"
+
+msgid "Redirect options are available after the post is published."
+msgstr "文章发布后可使用重定向选项。"
+
+msgid "404 Solution"
+msgstr "404解决方案"
+
+msgid "Slug changed:"
+msgstr "别名已更改："
+
+#: includes/html/paginationLinks.html
+msgid "Filter results"
+msgstr "筛选结果"
+
+#: includes/html/paginationLinks.html
+msgid "Press Enter to search"
+msgstr "按回车键搜索"
+
+#: includes/html/paginationLinks.html
+msgid "Pagination"
+msgstr "分页"
+
+#: includes/View.php
+msgid "Select all"
+msgstr "全选"
+
+#: includes/html/settingsModeToggle.html
+msgid "Settings mode"
+msgstr "设置模式"
+
+#: includes/html/viewSuggestions.html
+msgid "Require minimum match quality"
+msgstr "要求最低匹配质量"
+
+#: includes/html/viewSuggestions.html
+msgid "Only show suggestions that closely match the requested URL. This filters out weak matches that may confuse visitors."
+msgstr "仅显示与请求的URL紧密匹配的建议。这将过滤掉可能使访问者困惑的弱匹配。"

@@ -104,7 +104,113 @@ abstract class ABJ_404_Solution_Functions {
         
         return $value;
     }
-        
+
+    /**
+     * Normalize a URL string for storage or matching.
+     * - Optionally decode percent-encoded octets
+     * - Strip invalid UTF-8/control bytes
+     *
+     * @param string|null $url
+     * @param array $options Supported keys: decode (bool)
+     * @return string
+     */
+    function normalizeUrlString($url, $options = array()) {
+        $options = array_merge(array('decode' => true), $options);
+
+        if ($url === null || $url === '') {
+            return '';
+        }
+
+        if (!is_string($url)) {
+            $url = strval($url);
+        }
+
+        $url = trim($url);
+        if ($options['decode']) {
+            $url = rawurldecode($url);
+        }
+
+        $url = $this->sanitizeInvalidUTF8($url);
+        // Remove remaining control characters (keep whitespace)
+        $url = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $url);
+
+        return $url;
+    }
+
+    /**
+     * Sanitize URL components without stripping reserved characters.
+     * Keeps characters like ()[]{} for matching but removes invalid UTF-8/control bytes.
+     *
+     * @param mixed $value
+     * @return mixed
+     */
+    function sanitizeUrlComponent($value) {
+        if (is_array($value)) {
+            return array_map([$this, 'sanitizeUrlComponent'], $value);
+        }
+
+        if ($value === null || $value === '') {
+            return '';
+        }
+
+        if (!is_string($value)) {
+            $value = strval($value);
+        }
+
+        $value = $this->sanitizeInvalidUTF8($value);
+        $value = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $value);
+
+        return $value;
+    }
+
+    /**
+     * Encode a URL for legacy matching while preserving URL delimiters.
+     *
+     * @param string|null $url
+     * @return string
+     */
+    function encodeUrlForLegacyMatch($url) {
+        if ($url === null || $url === '') {
+            return '';
+        }
+
+        if (!is_string($url)) {
+            $url = strval($url);
+        }
+
+        $encoded = rawurlencode($url);
+        $encoded = str_replace(
+            array('%2F', '%3F', '%26', '%3D', '%23', '%3A', '%40'),
+            array('/', '?', '&', '=', '#', ':', '@'),
+            $encoded
+        );
+
+        return $encoded;
+    }
+
+    /**
+     * Normalize a URL for use as a cache/transient key.
+     *
+     * This function ensures consistent URL normalization across the codebase:
+     * - Strips query strings (removes everything after '?')
+     * - Applies esc_url for security and consistency
+     *
+     * IMPORTANT: All code that computes cache keys or transient keys from URLs
+     * should use this function to ensure keys match across different code paths.
+     *
+     * Used by: SpellChecker, ShortCode, Ajax_SuggestionPolling, PluginLogic
+     *
+     * @param string $url The URL to normalize
+     * @return string The normalized URL (query string stripped, esc_url applied)
+     */
+    function normalizeURLForCacheKey($url) {
+        $url = $this->normalizeUrlString($url);
+        // Strip query string (everything after '?')
+        $normalized = $this->regexReplace('\?.*', '', $url);
+        // Apply esc_url for security and consistency
+        return esc_url($normalized);
+    }
+
     /** Only URL encode emojis from a string.  
      * @param string $url
      * @return string
@@ -231,7 +337,9 @@ abstract class ABJ_404_Solution_Functions {
     abstract function regexMatchi($pattern, $string, &$regs = null);
     
     abstract function regexReplace($pattern, $replacement, $string);
-    
+
+    abstract function sanitizeInvalidUTF8($string);
+
     /**  Used with array_filter()
      * @param string $value
      * @return boolean
@@ -349,12 +457,17 @@ abstract class ABJ_404_Solution_Functions {
         $meta = explode("|", $idAndType);
 
         $permalink['id'] = $meta[0];
-        $permalink['type'] = $meta[1];
+        // Handle malformed data that doesn't contain a pipe separator
+        $permalink['type'] = isset($meta[1]) ? $meta[1] : '';
         $permalink['score'] = $linkScore;
         $permalink['status'] = 'unknown';
         $permalink['link'] = 'dunno';
 
-        if ($permalink['type'] == ABJ404_TYPE_POST) {
+        // Use strict comparison to avoid null/false == 0 issues with type coercion
+        // Cast to int for comparison since ABJ404_TYPE_* constants are integers
+        $typeInt = is_numeric($permalink['type']) ? (int)$permalink['type'] : -1;
+
+        if ($typeInt === ABJ404_TYPE_POST) {
             if ($rowType == 'image') {
                 $imageURL = wp_get_attachment_image_src($permalink['id'], "attached-image");
                 $permalink['link'] = $imageURL[0];
@@ -364,7 +477,7 @@ abstract class ABJ_404_Solution_Functions {
             $permalink['title'] = get_the_title($permalink['id']);
             $permalink['status'] = get_post_status($permalink['id']);
             
-        } else if ($permalink['type'] == ABJ404_TYPE_TAG) {
+        } else if ($typeInt === ABJ404_TYPE_TAG) {
             $permalink['link'] = get_tag_link($permalink['id']);
             $tag = get_term($permalink['id'], 'post_tag');
             if ($tag != null) {
@@ -378,7 +491,7 @@ abstract class ABJ_404_Solution_Functions {
             	$permalink['status'] = 'published';
             }
             
-        } else if ($permalink['type'] == ABJ404_TYPE_CAT) {
+        } else if ($typeInt === ABJ404_TYPE_CAT) {
             $permalink['link'] = get_category_link($permalink['id']);
             $cat = get_term($permalink['id'], 'category');
             if ($cat != null) {
@@ -392,12 +505,12 @@ abstract class ABJ_404_Solution_Functions {
             	$permalink['status'] = 'published';
             }
             
-        } else if ($permalink['type'] == ABJ404_TYPE_HOME) {
+        } else if ($typeInt === ABJ404_TYPE_HOME) {
             $permalink['link'] = get_home_url();
             $permalink['title'] = get_bloginfo('name');
             $permalink['status'] = 'published';
             
-        } else if ($permalink['type'] == ABJ404_TYPE_EXTERNAL) {
+        } else if ($typeInt === ABJ404_TYPE_EXTERNAL) {
         	$permalink['link'] = $permalink['id'];
         	if ($permalink['link'] == ABJ404_TYPE_EXTERNAL) {
 	        	if ($options == null) {
@@ -411,7 +524,7 @@ abstract class ABJ_404_Solution_Functions {
         	}
         	$permalink['status'] = 'published';
         	
-        } else if ($permalink['type'] == ABJ404_TYPE_404_DISPLAYED) {
+        } else if ($typeInt === ABJ404_TYPE_404_DISPLAYED) {
         	$permalink['link'] = '404';
         	$permalink['status'] = 'published';
         	
@@ -424,11 +537,13 @@ abstract class ABJ_404_Solution_Functions {
         	$permalink['status'] = 'trash';
         }
         
-        // decode anything that might be encoded to support utf8 characters
+        // Decode anything that might be encoded to support utf8 characters
         if (array_key_exists('link', $permalink)) {
-        	$permalink['link'] = urldecode($permalink['link']);
+        	$f = ABJ_404_Solution_Functions::getInstance();
+        	$permalink['link'] = $f->normalizeUrlString($permalink['link']);
         }
-        $permalink['title'] = array_key_exists('title', $permalink) ? urldecode($permalink['title']) : '';
+        $permalink['title'] = array_key_exists('title', $permalink) ?
+            ABJ_404_Solution_Functions::getInstance()->normalizeUrlString($permalink['title']) : '';
         
         return $permalink;
     }
@@ -601,9 +716,24 @@ abstract class ABJ_404_Solution_Functions {
                 $abj404logging->debugMessage("curl didn't work for downloading a URL. " . $e->getMessage());
             }
         }
-        
+
+        // Fallback to file_put_contents if curl didn't work or isn't available
         ABJ_404_Solution_Functions::safeUnlink($filePath);
-        file_put_contents($filePath, fopen($url, 'r'));
+        try {
+            $fileHandle = @fopen($url, 'r');
+            if ($fileHandle === false) {
+                $abj404logging->errorMessage("Failed to open URL for reading: " . $url);
+                return;
+            }
+            $result = file_put_contents($filePath, $fileHandle);
+            fclose($fileHandle);
+
+            if ($result === false) {
+                $abj404logging->errorMessage("Failed to write file: " . $filePath);
+            }
+        } catch (Exception $e) {
+            $abj404logging->errorMessage("Failed to download URL to file. URL: " . $url . ", Error: " . $e->getMessage());
+        }
     }
     
     /** 
@@ -659,8 +789,11 @@ abstract class ABJ_404_Solution_Functions {
         
         // sort the parts
         ksort($queryParts);
-        
-        return urldecode(http_build_query($queryParts));
+
+        $queryParts = $this->sanitizeUrlComponent($queryParts);
+        $built = http_build_query($queryParts, '', '&', PHP_QUERY_RFC3986);
+        $decoded = rawurldecode($built);
+        return $this->normalizeUrlString($decoded, array('decode' => false));
     }
     
     /** We have to remove any 'p=##' because it will cause a 404 otherwise.
@@ -671,15 +804,60 @@ abstract class ABJ_404_Solution_Functions {
         // parse the string
         $queryParts = array();
         parse_str($queryString, $queryParts);
-        
+
         // remove the page id
         if (array_key_exists('p', $queryParts)) {
             unset($queryParts['p']);
         }
-        
+
         // rebuild the string.
-        return urldecode(http_build_query($queryParts));
+        $queryParts = $this->sanitizeUrlComponent($queryParts);
+        $built = http_build_query($queryParts, '', '&', PHP_QUERY_RFC3986);
+        $decoded = rawurldecode($built);
+        return $this->normalizeUrlString($decoded, array('decode' => false));
+    }
+
+    /**
+     * Check if a URL appears to contain regex patterns.
+     *
+     * This is used to warn users when a redirect URL looks like it contains
+     * regex syntax but is not marked as a regex redirect.
+     *
+     * @param string $url The URL to check
+     * @return bool True if the URL appears to contain regex patterns
+     */
+    static function urlLooksLikeRegex($url) {
+        if (empty($url) || !is_string($url)) {
+            return false;
+        }
+
+        // Common regex patterns that are unlikely to appear in normal URLs
+        $regexIndicators = array(
+            '/\(\.\*\)/',           // (.*)  - common capture-all pattern
+            '/\(\.\+\)/',           // (.+)  - one or more of anything
+            '/\(\?\:/',             // (?:   - non-capturing group
+            '/\(\?=/',              // (?=   - positive lookahead
+            '/\(\?!/',              // (?!   - negative lookahead
+            '/\[\^[^\]]+\]/',       // [^...]  - negated character class
+            '/\[[a-z]-[a-z]\]/i',   // [a-z] or [A-Z] - character range
+            '/\[[0-9]-[0-9]\]/',    // [0-9] - digit range
+            '/\\\\d/',              // \d    - digit shorthand
+            '/\\\\w/',              // \w    - word character shorthand
+            '/\\\\s/',              // \s    - whitespace shorthand
+            '/\.\*/',               // .*    - match anything (greedy)
+            '/\.\+/',               // .+    - match one or more of anything
+            '/\.\?/',               // .?    - match zero or one of anything
+            '/\{\d+,?\d*\}/',       // {n} or {n,} or {n,m} - quantifiers
+            '/\|/',                 // |     - alternation (but common in some URLs, so check context)
+        );
+
+        foreach ($regexIndicators as $pattern) {
+            if (preg_match($pattern, $url)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
 }
-

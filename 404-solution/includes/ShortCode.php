@@ -40,28 +40,38 @@ class ABJ_404_Solution_ShortCode {
 			$debugMessage .= "do not update (no cookie found), ";
 		}
 
-		$dest404page = (array_key_exists('dest404page', $options) && isset($options['dest404page']) ?
+		$dest404page = (isset($options['dest404page']) ?
 			$options['dest404page'] :
 			ABJ404_TYPE_404_DISPLAYED . '|' . ABJ404_TYPE_404_DISPLAYED);
-		
+
+		// Check if this is a manual redirect (has query param) - these bypass global 404 page check
+		$queryParamName = ABJ404_PP . '_ref';
+		$isManualRedirect = isset($_GET[$queryParamName]) && !empty($_GET[$queryParamName]);
+
 		// if we're not currently loading the custom 404 page then don't change the URL.
-		if ($abj404logic->thereIsAUserSpecified404Page($dest404page)) {
-			
+		// Exception: manual redirects to custom 404 pages should always allow URL restoration
+		if ($isManualRedirect) {
+			// Manual redirect - we know we're on a custom 404 page, allow URL restoration
+			$debugMessage .= "ok to update (manual redirect to custom 404 page), ";
+		} else if ($abj404logic->thereIsAUserSpecified404Page($dest404page)) {
+
 			// get the user specified 404 page.
 			$permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($dest404page, 0,
 				null, $options);
-			
+
 			// if the last part of the URL does not match the custom 404 page then
 			// don't update the URL.
-			if (!$f->endsWithCaseSensitive($permalink['link'], $_SERVER['REQUEST_URI']) &&
+			// Strip query string from REQUEST_URI for comparison (query params like abj404_solution_ref)
+			$requestUriPath = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+			if (!$f->endsWithCaseSensitive($permalink['link'], $requestUriPath) &&
 					$permalink['status'] != 'trash') {
-						
+
 				$shouldUpdateURL = false;
 				$debugMessage .= "do not update (not on custom 404 page (" .
 					$permalink['link'] . ")), ";
-				
+
 			} else {
-				$debugMessage .= "ok to update (displaying custom 404 page (" . 
+				$debugMessage .= "ok to update (displaying custom 404 page (" .
 					$permalink['link'] . ")), ";
 			}
 		} else {
@@ -76,13 +86,14 @@ class ABJ_404_Solution_ShortCode {
 			// replace the current URL with the user's actual requested URL.
 			$requestedURL = $_REQUEST[$updateURLCookieName];
 			$userFriendlyURL = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ?
-				"https" : "http") . "://" . $_SERVER['HTTP_HOST'] . $requestedURL;
-			
-			$content .= "window.history.replaceState({}, null, '" .
-				$userFriendlyURL . "');\n";
-			
+				"https" : "http") . "://" . $_SERVER['HTTP_HOST'] . esc_url($requestedURL);
+
+			// Use wp_json_encode to safely encode the URL for JavaScript to prevent XSS
+			$content .= "window.history.replaceState({}, null, " .
+				wp_json_encode($userFriendlyURL) . ");\n";
+
 			$debugMessage .= "Updating the URL from " . $_SERVER['REQUEST_URI'] .
-				" to " . $userFriendlyURL . ", ";
+				" to " . esc_url($userFriendlyURL) . ", ";
 		}
 		
 		if ($content != '') {
@@ -129,7 +140,8 @@ class ABJ_404_Solution_ShortCode {
         $urlRequest = '';
         $cookieName = ABJ404_PP . '_REQUEST_URI';
         if (isset($_COOKIE[$cookieName]) && !empty($_COOKIE[$cookieName])) {
-            $urlRequest = esc_url($f->regexReplace('\?.*', '', esc_url($_COOKIE[$cookieName])));
+            // Normalize URL using centralized function for consistency
+            $urlRequest = $f->normalizeURLForCacheKey($f->normalizeUrlString($_COOKIE[$cookieName]));
             // delete the cookie because the request was a one-time thing.
             // we use javascript to delete the cookie because the headers have already been sent.
             $content .= "<script> \n" .
@@ -145,30 +157,79 @@ class ABJ_404_Solution_ShortCode {
         $updateURLCookieName = ABJ404_PP . '_REQUEST_URI';
         $updateURLCookieName .= '_UPDATE_URL';
         if (isset($_COOKIE[$updateURLCookieName]) && !empty($_COOKIE[$updateURLCookieName])) {
+        	// Use UPDATE_URL cookie as fallback if primary cookie wasn't set
+        	// (fixes: manual redirects to custom 404 pages not showing suggestions)
+        	if ($urlRequest == '') {
+        		// Normalize URL using centralized function for consistency
+        		$urlRequest = $f->normalizeURLForCacheKey($f->normalizeUrlString($_COOKIE[$updateURLCookieName]));
+        	}
         	// delete the cookie since we're done with it. it's a one-time use thing.
-        	$content .= "<script> \n" .	
+        	$content .= "<script> \n" .
          	"   var d = new Date(); /* delete the cookie */\n" .
          	"   d.setTime(d.getTime() - (60 * 5)); \n" .
          	'   var expires = "expires="+ d.toUTCString(); ' . "\n" .
          	'   document.cookie = "' . $updateURLCookieName . '=;" + expires + ";path=/"; ' .
          	"</script> \n";
         }
-        
-        if (array_key_exists(ABJ404_PP, $_REQUEST) && isset($_REQUEST[ABJ404_PP]) && 
-                array_key_exists($cookieName, $_REQUEST[ABJ404_PP]) && isset($_REQUEST[ABJ404_PP][$cookieName])) {
-            $urlRequest = $_REQUEST[ABJ404_PP][$cookieName];
+
+        if (isset($_REQUEST[ABJ404_PP]) &&
+                isset($_REQUEST[ABJ404_PP][$cookieName])) {
+            // Normalize URL using centralized function for consistency
+            $urlRequest = $f->normalizeURLForCacheKey($f->normalizeUrlString($_REQUEST[ABJ404_PP][$cookieName]));
         }
-        
+
+        // Fallback: check for URL passed via query parameter
+        // (fixes: cookies from 301 redirects aren't stored by browsers)
+        $queryParamName = ABJ404_PP . '_ref';
+        if ($urlRequest == '' && isset($_GET[$queryParamName]) && !empty($_GET[$queryParamName])) {
+            // Normalize URL using centralized function for consistency
+            $urlRequest = $f->normalizeURLForCacheKey($f->normalizeUrlString($_GET[$queryParamName]));
+        }
+
         if ($urlRequest == '') {
             // if no 404 was detected then we don't offer any suggestions
             return "<!-- " . ABJ404_PP . " - No 404 was detected. No suggestions to offer. -->\n";
         }
-        
+
+        // Check for cached suggestion computation (transient-based)
+        $urlKey = md5($urlRequest);
+        $transientKey = 'abj404_suggest_' . $urlKey;
+        $cachedData = get_transient($transientKey);
+
+        if ($cachedData !== false) {
+            if (isset($cachedData['status']) && $cachedData['status'] === 'complete') {
+                // Suggestions ready - use cached data
+                $content .= self::renderSuggestionsHTML(
+                    isset($cachedData['suggestions']) ? $cachedData['suggestions'] : array(),
+                    $urlRequest
+                );
+                $content .= "\n<!-- " . ABJ404_PP . " - End 404 suggestions (cached) -->\n";
+                return $content;
+
+            } elseif (isset($cachedData['status']) && $cachedData['status'] === 'pending') {
+                // Still computing - show loading placeholder
+                self::enqueueAsyncPollingScript($urlRequest);
+                $content .= self::renderAsyncPlaceholder($urlRequest, $options);
+                $content .= "\n<!-- " . ABJ404_PP . " - Suggestions loading -->\n";
+                return $content;
+            }
+        }
+
+        // No async data - fall back to synchronous computation
         $urlSlugOnly = $abj404logic->removeHomeDirectory($urlRequest);
-        $permalinkSuggestionsPacket = $abj404spellChecker->findMatchingPosts($urlSlugOnly, 
-                @$options['suggest_cats'], @$options['suggest_tags']);
-        $permalinkSuggestions = $permalinkSuggestionsPacket[0];
-        $rowType = $permalinkSuggestionsPacket[1];
+
+        // Try cache first (populated by processRedirect() for existing redirects)
+        $permalinkSuggestionsPacket = $abj404spellChecker->getFromPermalinkCache($urlSlugOnly);
+
+        // If cache miss, compute suggestions
+        if (empty($permalinkSuggestionsPacket) || empty($permalinkSuggestionsPacket[0])) {
+            $permalinkSuggestionsPacket = $abj404spellChecker->findMatchingPosts($urlSlugOnly,
+                    @$options['suggest_cats'], @$options['suggest_tags']);
+        }
+
+        // Ensure suggestions is an array (cache may return stdClass from json_decode)
+        $permalinkSuggestions = isset($permalinkSuggestionsPacket[0]) ? (array)$permalinkSuggestionsPacket[0] : [];
+        $rowType = isset($permalinkSuggestionsPacket[1]) ? $permalinkSuggestionsPacket[1] : 'pages';
 
         $showExtraAdminData = (is_user_logged_in() && $abj404logic->userIsPluginAdmin());
         $extraData = null;
@@ -201,71 +262,85 @@ class ABJ_404_Solution_ShortCode {
                 $options['suggest_title'] )) . "\n";
         
         $currentSlug = $abj404logic->removeHomeDirectory(
-                $f->regexReplace('\?.*', '', urldecode($_SERVER['REQUEST_URI'])));
+                $f->regexReplace('\?.*', '', $f->normalizeUrlString($_SERVER['REQUEST_URI'])));
         $displayed = 0;
         $commentPartAndQueryPart = $abj404logic->getCommentPartAndQueryPartOfRequest();
 
+        // Check if minimum score filtering is enabled
+        $minScoreEnabled = isset($options['suggest_minscore_enabled']) && $options['suggest_minscore_enabled'] == '1';
+        $minScore = $minScoreEnabled ? (isset($options['suggest_minscore']) ? intval($options['suggest_minscore']) : 25) : 0;
+
         foreach ($permalinkSuggestions as $idAndType => $linkScore) {
-            $permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($idAndType, $linkScore, 
+            $permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($idAndType, $linkScore,
             	$rowType, $options);
 
-            // only display the suggestion if the score is high enough 
-            // and if we're not currently on the page we're about to suggest.
-            if ($permalink['score'] >= $options['suggest_minscore'] &&
-                    basename($permalink['link']) != $currentSlug) {
-                if ($displayed == 0) {
-                    // <ol>
-                    $content .= wp_kses_post($options['suggest_before']);
-                }
+            // Skip if we're currently on the page we're about to suggest
+            if (basename($permalink['link']) == $currentSlug) {
+                continue;
+            }
 
-                // <li>
-                $content .= wp_kses_post($options['suggest_entrybefore']);
-                
-                $content .= "<a href=\"" . esc_url($permalink['link']) . $commentPartAndQueryPart .
-                	"\" title=\"" . esc_attr($permalink['title']) . "\">" . 
-                	esc_attr($permalink['title']) . "</a>";
-                
-                // display the score after the page link
-                	
-                if ($showExtraAdminData) {
-                    $idParts = explode('|', $idAndType);
-                    $currentId = isset($idParts[0]) ? (int)$idParts[0] : null;
-                    $typeCode  = isset($idParts[1]) ? $idParts[1] : null;
+            // Skip if minimum score filtering is enabled and score is below threshold
+            if ($minScoreEnabled && $permalink['score'] < $minScore) {
+                continue;
+            }
 
-                    $currentSuggestionData = [
-                        'Title' => $permalink['title'],
-                        'Link' => $permalink['link'],
-                        'Score' => number_format($permalink['score'], 2),
-                        'ID_Type_Code' => $idAndType, // e.g., "123|1" or "94|2"
-                    ];
+            if ($displayed == 0) {
+                // <ol>
+                $content .= wp_kses_post($options['suggest_before']);
+            }
 
-                    // Extract ID for lookup
-                    $idParts = explode('|', $idAndType);
-                    $currentId = isset($idParts[0]) ? $idParts[0] : null;
+            // <li>
+            $content .= wp_kses_post($options['suggest_entrybefore']);
 
-                    if ($typeCode == '1') { // It's a Post
-                        $currentSuggestionData = $currentSuggestionData + $extraDataById['post_id_' . $currentId]; 
-                    } else { // It's a Term
-                        $currentSuggestionData = $currentSuggestionData + $extraDataById['term_id_' . $currentId]; 
+            $content .= "<a href=\"" . esc_url($permalink['link']) . $commentPartAndQueryPart .
+                "\" title=\"" . esc_attr($permalink['title']) . "\">" .
+                esc_attr($permalink['title']) . "</a>";
+
+            // display the score after the page link
+
+            if ($showExtraAdminData) {
+                $idParts = explode('|', $idAndType);
+                $currentId = isset($idParts[0]) ? (int)$idParts[0] : null;
+                $typeCode  = isset($idParts[1]) ? $idParts[1] : null;
+
+                $currentSuggestionData = [
+                    'Title' => $permalink['title'],
+                    'Link' => $permalink['link'],
+                    'Score' => number_format($permalink['score'], 2),
+                    'ID_Type_Code' => $idAndType, // e.g., "123|1" or "94|2"
+                ];
+
+                // Extract ID for lookup
+                $idParts = explode('|', $idAndType);
+                $currentId = isset($idParts[0]) ? $idParts[0] : null;
+
+                // Merge extra data if available (post may have been deleted since suggestions were cached)
+                if ($typeCode == '1') { // It's a Post
+                    $extraKey = 'post_id_' . $currentId;
+                    if (isset($extraDataById[$extraKey])) {
+                        $currentSuggestionData = $currentSuggestionData + $extraDataById[$extraKey];
                     }
+                } else { // It's a Term
+                    $extraKey = 'term_id_' . $currentId;
+                    if (isset($extraDataById[$extraKey])) {
+                        $currentSuggestionData = $currentSuggestionData + $extraDataById[$extraKey];
+                    }
+                }
 
-                    // Add this suggestion's data to the array for JS
-                    $adminDebugData[] = $currentSuggestionData;
-                    
-                    // Make the score clickable
-                    $content .= ' (<a href="#" onclick="show404AdminDebugData(); return false;" title="' . 
-                                esc_attr__('Click to view debug data for all suggestions', '404-solution') . 
-                                '">' . number_format($permalink['score'], 2) . // Format score
-                                '</a>)'; 
-                }
-                
-                // </li>
-                $content .= wp_kses_post(@$options['suggest_entryafter']) . "\n";
-                $displayed++;
-                if ($displayed >= $options['suggest_max']) {
-                    break;
-                }
-            } else {
+                // Add this suggestion's data to the array for JS
+                $adminDebugData[] = $currentSuggestionData;
+
+                // Make the score clickable
+                $content .= ' (<a href="#" onclick="show404AdminDebugData(); return false;" title="' .
+                            esc_attr__('Click to view debug data for all suggestions', '404-solution') .
+                            '">' . number_format($permalink['score'], 2) . // Format score
+                            '</a>)';
+            }
+
+            // </li>
+            $content .= wp_kses_post(@$options['suggest_entryafter']) . "\n";
+            $displayed++;
+            if ($displayed >= $options['suggest_max']) {
                 break;
             }
         }
@@ -338,7 +413,7 @@ class ABJ_404_Solution_ShortCode {
             $content .= "    textArea.style.width = '100%';\n";
             $content .= "    textArea.style.height = '300px';\n";
             $content .= "    textArea.style.marginBottom = '10px';\n";
-            $content .= "    // Set value safely using textContent\n"; 
+            $content .= "    // Set value safely using textContent\n";
             $content .= "    textArea.value = debugText;\n";
             $content .= "    textArea.readOnly = true;\n";
             $content .= "    \n";
@@ -365,12 +440,168 @@ class ABJ_404_Solution_ShortCode {
             $content .= "    document.body.appendChild(modalOverlay);\n";
             $content .= "}\n";
             $content .= "</script>\n";
-        }        
+        }
 
         $content .= "\n<!-- " . ABJ404_PP . " - End 404 suggestions for slug " . esc_html($urlSlugOnly) . " -->\n";
 
         return $content;
     }
 
+    /**
+     * Render suggestions HTML from pre-computed data (for AJAX polling response).
+     * This method is called by Ajax_SuggestionPolling when suggestions are ready.
+     *
+     * @param array $suggestionsPacket The suggestions data from findMatchingPosts()
+     * @param string $requestedURL The original 404 URL (for debugging)
+     * @return string HTML content for suggestions
+     */
+    public static function renderSuggestionsHTML($suggestionsPacket, $requestedURL = '') {
+        $abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
+        $f = ABJ_404_Solution_Functions::getInstance();
+        $options = $abj404logic->getOptions();
+
+        // Ensure suggestions is an array (cache may return stdClass from json_decode)
+        $permalinkSuggestions = isset($suggestionsPacket[0]) ? (array)$suggestionsPacket[0] : [];
+        $rowType = isset($suggestionsPacket[1]) ? $suggestionsPacket[1] : 'pages';
+
+        // Check if user is plugin admin to show scores
+        $showExtraAdminData = (is_user_logged_in() && $abj404logic->userIsPluginAdmin());
+
+        $content = '<div class="suggest-404s">' . "\n";
+        $content .= wp_kses_post(
+            str_replace('{suggest_title_text}', __('Here are some other great pages', '404-solution'),
+                $options['suggest_title'] )) . "\n";
+
+        $currentSlug = '';
+        if (isset($_SERVER['REQUEST_URI'])) {
+            $currentSlug = $abj404logic->removeHomeDirectory(
+                $f->regexReplace('\?.*', '', $f->normalizeUrlString($_SERVER['REQUEST_URI'])));
+        }
+
+        $displayed = 0;
+        $commentPartAndQueryPart = $abj404logic->getCommentPartAndQueryPartOfRequest();
+
+        // Check if minimum score filtering is enabled
+        $minScoreEnabled = isset($options['suggest_minscore_enabled']) && $options['suggest_minscore_enabled'] == '1';
+        $minScore = $minScoreEnabled ? (isset($options['suggest_minscore']) ? intval($options['suggest_minscore']) : 25) : 0;
+
+        foreach ($permalinkSuggestions as $idAndType => $linkScore) {
+            $permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($idAndType, $linkScore,
+                $rowType, $options);
+
+            // Skip if we're currently on the page we're about to suggest
+            if ($currentSlug !== '' && basename($permalink['link']) == $currentSlug) {
+                continue;
+            }
+
+            // Skip if minimum score filtering is enabled and score is below threshold
+            if ($minScoreEnabled && $permalink['score'] < $minScore) {
+                continue;
+            }
+
+            if ($displayed == 0) {
+                // <ol>
+                $content .= wp_kses_post($options['suggest_before']);
+            }
+
+            // <li>
+            $content .= wp_kses_post($options['suggest_entrybefore']);
+
+            $content .= "<a href=\"" . esc_url($permalink['link']) . $commentPartAndQueryPart .
+                "\" title=\"" . esc_attr($permalink['title']) . "\">" .
+                esc_attr($permalink['title']) . "</a>";
+
+            // Display the score after the page link (admin only)
+            if ($showExtraAdminData) {
+                $content .= ' (' . number_format($permalink['score'], 4) . ')';
+            }
+
+            // </li>
+            $content .= wp_kses_post(@$options['suggest_entryafter']) . "\n";
+            $displayed++;
+            if ($displayed >= $options['suggest_max']) {
+                break;
+            }
+        }
+
+        if ($displayed >= 1) {
+            // </ol>
+            $content .= wp_kses_post($options['suggest_after']) . "\n";
+        } else {
+            $content .= wp_kses_post(
+                str_replace('{suggest_noresults_text}', __('No suggestions. :/ ', '404-solution'),
+                    $options['suggest_noresults'] ));
+        }
+
+        $content .= "\n</div>";
+
+        return $content;
+    }
+
+    /**
+     * Render a loading placeholder for async suggestions.
+     * Shows skeleton loading animation while suggestions are being computed.
+     *
+     * @param string $requestedURL The 404 URL being looked up
+     * @param array $options Plugin options
+     * @return string HTML placeholder with loading state
+     */
+    public static function renderAsyncPlaceholder($requestedURL, $options) {
+        $suggestMax = isset($options['suggest_max']) ? intval($options['suggest_max']) : 5;
+
+        // Generate skeleton items based on suggest_max
+        $skeletons = '';
+        for ($i = 0; $i < $suggestMax; $i++) {
+            $skeletons .= '<li class="abj404-skeleton"></li>' . "\n";
+        }
+
+        $content = '<div id="abj404-suggestions-placeholder" class="suggest-404s" ' .
+            'data-requested-url="' . esc_attr($requestedURL) . '">' . "\n";
+        $content .= wp_kses_post(
+            str_replace('{suggest_title_text}', __('Here are some other great pages', '404-solution'),
+                $options['suggest_title'] )) . "\n";
+        $content .= wp_kses_post($options['suggest_before']);
+        $content .= '<div class="abj404-loading">' . "\n";
+        $content .= $skeletons;
+        $content .= '</div>' . "\n";
+        $content .= wp_kses_post($options['suggest_after']) . "\n";
+        $content .= '</div>';
+
+        return $content;
+    }
+
+    /**
+     * Enqueue the async suggestion polling JavaScript.
+     *
+     * @param string $requestedURL The 404 URL for polling
+     */
+    public static function enqueueAsyncPollingScript($requestedURL) {
+        // Enqueue jQuery dependency
+        wp_enqueue_script('jquery');
+
+        // Enqueue polling script
+        wp_enqueue_script(
+            'abj404-suggestion-polling',
+            plugin_dir_url(__FILE__) . 'ajax/SuggestionPolling.js',
+            array('jquery'),
+            ABJ404_VERSION,
+            true // Load in footer
+        );
+
+        // Pass AJAX URL, nonce, and localized strings to JavaScript
+        wp_localize_script('abj404-suggestion-polling', 'abj404_suggestions', array(
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('abj404_poll_suggestions'),
+            'no_suggestions_text' => __('No suggestions. :/ ', '404-solution')
+        ));
+
+        // Enqueue loading CSS
+        wp_enqueue_style(
+            'abj404-suggestions-loading',
+            plugin_dir_url(__FILE__) . 'css/suggestions-loading.css',
+            array(),
+            ABJ404_VERSION
+        );
+    }
+
 }
-add_shortcode('abj404_solution_page_suggestions', 'ABJ_404_Solution_ShortCode::shortcodePageSuggestions');
