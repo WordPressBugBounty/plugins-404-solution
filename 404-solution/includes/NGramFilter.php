@@ -1,5 +1,10 @@
 <?php
 
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 /**
  * N-Gram based filtering for spell checker optimization.
  *
@@ -878,6 +883,13 @@ class ABJ_404_Solution_NGramFilter {
 
         global $wpdb;
         $table = $this->dao->getPrefixedTableName('abj404_ngram_cache');
+        if (!isset($wpdb) || !is_object($wpdb) || !is_callable([$wpdb, 'get_var'])) {
+            // In test environments or very early bootstrap, wpdb may not exist.
+            // Treat as "no cache" rather than fatal.
+            $this->ngramCountMemo = 0;
+            return $this->ngramCountMemo;
+        }
+
         $this->ngramCountMemo = (int)$wpdb->get_var("SELECT COUNT(*) FROM {$table}");
         return $this->ngramCountMemo;
     }

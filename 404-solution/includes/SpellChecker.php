@@ -1,5 +1,10 @@
 <?php
 
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 /* Finds similar pages. 
  * Finds search suggestions. */
 
@@ -47,6 +52,9 @@ class ABJ_404_Solution_SpellChecker {
 	private $totalPagesConsidered = 0;
 
 	private $custom404PageID = null;
+
+	/** Prepared regex pattern cache for the current request lifecycle. */
+	private $preparedRegexPatternCache = array();
 
 	/** @var ABJ_404_Solution_Functions */
 	private $f;
@@ -97,6 +105,23 @@ class ABJ_404_Solution_SpellChecker {
 	}
 
 	public static function getInstance() {
+		if (self::$instance !== null) {
+			return self::$instance;
+		}
+
+		// If the DI container is initialized, prefer it.
+		if (function_exists('abj_service') && class_exists('ABJ_404_Solution_ServiceContainer')) {
+			try {
+				$c = ABJ_404_Solution_ServiceContainer::getInstance();
+				if (is_object($c) && method_exists($c, 'has') && $c->has('spell_checker')) {
+					self::$instance = $c->get('spell_checker');
+					return self::$instance;
+				}
+			} catch (Throwable $e) {
+				// fall back
+			}
+		}
+
 		if (self::$instance == null) {
 			self::$instance = new ABJ_404_Solution_SpellChecker();
 		}
@@ -184,9 +209,15 @@ class ABJ_404_Solution_SpellChecker {
 
 	function savePostHandler($post_id, $post, $update, $saveOrDelete) {
 		$options = $this->logic->getOptions();
+		// Defensive: some callers/tests may pass null; WordPress normally provides a WP_Post.
+		if (!is_object($post) || !isset($post->post_type) || !isset($post->post_status) || !isset($post->post_name)) {
+			$this->logger->debugMessage(__CLASS__ . "/" . __FUNCTION__ .
+				": Invalid post object for ID: " . $post_id . " (skipped).");
+			return;
+		}
 		$postType = $post->post_type;
 
-		$acceptedPostTypes = $this->f->explodeNewline($options['recognized_post_types']);
+		$acceptedPostTypes = $this->f->explodeNewline($options['recognized_post_types'] ?? '');
 
 		// 3 options: save a new page, save an existing page (update), delete a page.
 		$deleteSpellingCache = false;
@@ -373,30 +404,49 @@ class ABJ_404_Solution_SpellChecker {
 	 * @param string $requestedURL
 	 * @return array
 	 */
-	function getPermalinkUsingRegEx($requestedURL) {
-		$options = $this->logic->getOptions();
+	function getPermalinkUsingRegEx($requestedURL, $options = null) {
+		if (!is_array($options)) {
+			$options = $this->logic->getOptions();
+		}
+		$isDebug = $this->logger->isDebug();
 
 		$regexURLsRows = $this->dao->getRedirectsWithRegEx();
 
 		foreach ($regexURLsRows as $row) {
 			$regexURL = $row['url'];
 
-            $_REQUEST[ABJ404_PP]['debug_info'] = 'Applying custom regex "' . $regexURL . '" to URL: ' .
-                    $requestedURL;
-			$preparedURL = $this->f->str_replace('/', '\/', $regexURL);
+			if ($isDebug) {
+				$_REQUEST[ABJ404_PP]['debug_info'] = 'Applying custom regex "' . $regexURL . '" to URL: ' .
+					$requestedURL;
+			}
+			$preparedURL = $this->getPreparedRegexPattern($regexURL);
 			if ($this->f->regexMatch($preparedURL, $requestedURL)) {
-				$_REQUEST[ABJ404_PP]['debug_info'] = 'Cleared after regex.';
-				$idAndType = $row['final_dest'] . '|' . $row['type'];
-                $permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($idAndType, '0', 
-                	null, $options);
+				if ($isDebug) {
+					$_REQUEST[ABJ404_PP]['debug_info'] = 'Cleared after regex.';
+				}
+				$rowType = isset($row['type']) ? (int)$row['type'] : 0;
+				$rowDest = isset($row['final_dest']) ? (string)$row['final_dest'] : '';
+				if ($rowType === (int)ABJ404_TYPE_EXTERNAL) {
+					// Fast path: external redirects already have a concrete target URL.
+					$permalink = array(
+						'id' => 0,
+						'type' => ABJ404_TYPE_EXTERNAL,
+						'link' => $rowDest,
+						'title' => '',
+						'score' => 100,
+					);
+				} else {
+					$idAndType = $rowDest . '|' . $row['type'];
+					$permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($idAndType, '0',
+						null, $options);
+				}
 				$permalink['matching_regex'] = $regexURL;
-				$originalPermalink = $permalink;
+				$originalPermalink = $isDebug ? $permalink : null;
 
-				// if the matching regex contains a group and the destination contains a replacement,
-				// then use them
-				$regexMatchResult = $this->f->regexMatch("\.*\(.+\).*", $regexURL);
-				$replacementStrPosResult = $this->f->strpos($permalink['link'], '$');
-				if (($regexMatchResult != 0) && ($replacementStrPosResult !== FALSE)) {
+				// If regex has capture groups and destination has replacement markers, resolve them.
+				$hasCaptureGroup = ($this->f->strpos($regexURL, '(') !== FALSE);
+				$hasReplacementToken = ($this->f->strpos($permalink['link'], '$') !== FALSE);
+				if ($hasCaptureGroup && $hasReplacementToken) {
 					$results = array();
 					$this->f->regexMatch($regexURL, $requestedURL, $results);
 
@@ -409,16 +459,37 @@ class ABJ_404_Solution_SpellChecker {
 					$permalink['link'] = $final;
 				}
 				
-				$this->logger->debugMessage("Found matching regex. Original permalink" . 
-				    json_encode($originalPermalink) . ", final: " . 
-				    json_encode($permalink));
+				if ($isDebug) {
+					$this->logger->debugMessage("Found matching regex. Original permalink" .
+						json_encode($originalPermalink) . ", final: " .
+						json_encode($permalink));
+				}
 
 				return $permalink;
 			}
 
-			$_REQUEST[ABJ404_PP]['debug_info'] = 'Cleared after regex.';
+			if ($isDebug) {
+				$_REQUEST[ABJ404_PP]['debug_info'] = 'Cleared after regex.';
+			}
 		}
+
 		return null;
+	}
+
+	/**
+	 * Normalize and cache regex patterns for reuse within this request.
+	 *
+	 * @param string $regexURL
+	 * @return string
+	 */
+	private function getPreparedRegexPattern($regexURL) {
+		if (isset($this->preparedRegexPatternCache[$regexURL])) {
+			return $this->preparedRegexPatternCache[$regexURL];
+		}
+
+		$prepared = $this->f->str_replace('/', '\/', $regexURL);
+		$this->preparedRegexPatternCache[$regexURL] = $prepared;
+		return $prepared;
 	}
 
     /** Find a match using the an exact slug match.    
@@ -467,10 +538,10 @@ class ABJ_404_Solution_SpellChecker {
 	 * @param string|null $fullRequestedURL Optional full URL path for caching results (e.g., '/site/bad-url')
 	 * @return array|null
 	 */
-	function getPermalinkUsingSpelling($requestedURL, $fullRequestedURL = null) {
+	function getPermalinkUsingSpelling($requestedURL, $fullRequestedURL = null, $optionsOverride = null) {
 		$abj404spellChecker = ABJ_404_Solution_SpellChecker::getInstance();
 
-		$options = $this->logic->getOptions();
+		$options = is_array($optionsOverride) ? $optionsOverride : $this->logic->getOptions();
 
 		if (@$options['auto_redirects'] == '1') {
 			// Site owner wants automatic redirects.

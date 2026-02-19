@@ -1,5 +1,10 @@
 <?php
 
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 /* the glue that holds it together / everything else. */
 
 class ABJ_404_Solution_PluginLogic {
@@ -13,11 +18,16 @@ class ABJ_404_Solution_PluginLogic {
 	/** @var ABJ_404_Solution_Logging */
 	private $logger = null;
 
+	/** @var ABJ_404_Solution_ImportExportService|null */
+	private $importExportService = null;
+
 	private $urlHomeDirectory = null;
 
 	private $urlHomeDirectoryLength = null;
 
 	private $options = null;
+	private $resolvedOptionsSkipDbCheck = null;
+	private $resolvedOptionsWithDbCheck = null;
 
 	/** Track whether we're already in the method that updates the database that may be called recursively.
 	 * @var bool */
@@ -29,13 +39,46 @@ class ABJ_404_Solution_PluginLogic {
     private static $checkingIsAdmin = false;
 
     /** Allowed column names for orderby parameter. */
-    private static $allowedOrderbyColumns = ['url', 'status', 'type', 'dest', 'code', 'timestamp', 'created', 'lastused'];
+    private static $allowedOrderbyColumns = [
+        'url',
+        'status',
+        'type',
+        'dest',
+        'final_dest',
+        'code',
+        'timestamp',
+        'created',
+        'lastused',
+        'last_used',
+        'logshits',
+        'remote_host',
+        'referrer',
+        'action',
+        'username'
+    ];
 
     /** Allowed values for order parameter. */
     private static $allowedOrderValues = ['ASC', 'DESC'];
 
     /** @return ABJ_404_Solution_PluginLogic The singleton instance of the class. */
     public static function getInstance() {
+        if (self::$instance !== null) {
+            return self::$instance;
+        }
+
+        // If the DI container is initialized, prefer it.
+        if (function_exists('abj_service') && class_exists('ABJ_404_Solution_ServiceContainer')) {
+            try {
+                $c = ABJ_404_Solution_ServiceContainer::getInstance();
+                if (is_object($c) && method_exists($c, 'has') && $c->has('plugin_logic')) {
+                    self::$instance = $c->get('plugin_logic');
+                    return self::$instance;
+                }
+            } catch (Throwable $e) {
+                // fall back
+            }
+        }
+
     	if (self::$instance == null) {
     		self::$instance = new ABJ_404_Solution_PluginLogic();
     		self::$uniqID = uniqid("", true);
@@ -71,11 +114,28 @@ class ABJ_404_Solution_PluginLogic {
     		$urlPath = '';
     	}
 
-    	// Fix HIGH #2 (4th review): Decode subdirectory for consistency with runtime processing
-        $decodedPath = $this->f->normalizeUrlString(rtrim($urlPath, '/'));
-    	// Fix HIGH #3 (4th review): Remove null bytes and control characters for security
-    	$this->urlHomeDirectory = preg_replace('/[\x00-\x1F\x7F]/', '', $decodedPath);
+	    	// Fix HIGH #2 (4th review): Decode subdirectory for consistency with runtime processing
+	        $decodedPath = $this->f->normalizeUrlString(rtrim($urlPath, '/'));
+	        if (!is_string($decodedPath)) {
+	        	$decodedPath = '';
+	        }
+	    	// Fix HIGH #3 (4th review): Remove null bytes and control characters for security
+	    	$this->urlHomeDirectory = preg_replace('/[\x00-\x1F\x7F]/', '', $decodedPath);
     	$this->urlHomeDirectoryLength = $this->f->strlen($this->urlHomeDirectory);
+    }
+
+    /** @return ABJ_404_Solution_ImportExportService */
+    private function getImportExportService() {
+        if ($this->importExportService !== null) {
+            return $this->importExportService;
+        }
+
+        if (!class_exists('ABJ_404_Solution_ImportExportService')) {
+            require_once dirname(__FILE__) . '/ImportExportService.php';
+        }
+
+        $this->importExportService = new ABJ_404_Solution_ImportExportService($this->dao, $this->logger);
+        return $this->importExportService;
     }
     
     /** This replaces the current_user_can('administrator') function.
@@ -825,10 +885,10 @@ class ABJ_404_Solution_PluginLogic {
     /** The passed in reason will be appended to the automatically generated reason.
      * @param string $reason
      */
-    function sendTo404Page($requestedURL, $reason = '', $useUserSpecified404 = true) {
+    function sendTo404Page($requestedURL, $reason = '', $useUserSpecified404 = true, $optionsOverride = null) {
         $abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
-        
-        $options = $abj404logic->getOptions();
+
+        $options = (is_array($optionsOverride) ? $optionsOverride : $abj404logic->getOptions());
         
         // ---------------------------------------
         // if there's a default 404 page specified then use that.
@@ -901,6 +961,19 @@ class ABJ_404_Solution_PluginLogic {
      * @return array
      */
     function getOptions($skip_db_check = false) {
+        if (!$skip_db_check && is_array($this->resolvedOptionsWithDbCheck)) {
+            return $this->resolvedOptionsWithDbCheck;
+        }
+        if ($skip_db_check) {
+            if (is_array($this->resolvedOptionsSkipDbCheck)) {
+                return $this->resolvedOptionsSkipDbCheck;
+            }
+            // A full checked set is safe to reuse for skip-db-check callers.
+            if (is_array($this->resolvedOptionsWithDbCheck)) {
+                return $this->resolvedOptionsWithDbCheck;
+            }
+        }
+
     	if ($this->options == null) {
         	$this->options = get_option('abj404_settings');
     	}
@@ -932,6 +1005,12 @@ class ABJ_404_Solution_PluginLogic {
             }
         }
 
+        if ($skip_db_check) {
+            $this->resolvedOptionsSkipDbCheck = $options;
+        } else {
+            $this->resolvedOptionsWithDbCheck = $options;
+        }
+
         return $options;
     }
     
@@ -939,6 +1018,9 @@ class ABJ_404_Solution_PluginLogic {
     	$old_options = $this->options;
     	update_option('abj404_settings', $options);
     	$this->options = $options;
+        // The persistent options changed, so invalidate per-request resolved caches.
+        $this->resolvedOptionsSkipDbCheck = null;
+        $this->resolvedOptionsWithDbCheck = null;
     }
 
     /** Do any maintenance when upgrading to a new version.
@@ -987,6 +1069,12 @@ class ABJ_404_Solution_PluginLogic {
      */
     function updateToNewVersionAction($options) {
     	global $wpdb;
+
+        if (!is_array($options)) {
+            $options = array();
+        }
+        // Ensure all expected keys exist even when called with partial settings (tests/migrations).
+        $options = array_merge($this->getDefaultOptions(), $options);
 
         $currentDBVersion = "(unknown)";
         if (array_key_exists('DB_VERSION', $options)) {
@@ -1419,6 +1507,7 @@ class ABJ_404_Solution_PluginLogic {
             $wpdb->query("DROP TABLE IF EXISTS {$prefix}abj404_permalink_cache");
             $wpdb->query("DROP TABLE IF EXISTS {$prefix}abj404_ngram_cache");
             $wpdb->query("DROP TABLE IF EXISTS {$prefix}abj404_spelling_cache");
+            $wpdb->query("DROP TABLE IF EXISTS {$prefix}abj404_view_cache");
 
             // Temporary tables
             $wpdb->query("DROP TABLE IF EXISTS {$prefix}abj404_logs_hits_temp");
@@ -1700,31 +1789,23 @@ class ABJ_404_Solution_PluginLogic {
         }
     }
     
-    function getExportFilename() {
-    	$tempFile = abj404_getUploadsDir() . 'export.csv';
-    	return $tempFile;
+    function getExportFilename($format = 'native') {
+        return $this->getImportExportService()->getExportFilename($format);
     }
     
     function doExport() {
-    	
-    	$tempFile = $this->getExportFilename();
-    	
-    	$this->dao->doRedirectsExport($tempFile);
-    	
-    	if (file_exists($tempFile)) {
-	    	header('Content-Description: File Transfer');
-	    	header('Content-Disposition: attachment; filename=' . basename($tempFile));
-	    	header('Expires: 0');
-	    	header('Cache-Control: must-revalidate');
-	    	header('Pragma: public');
-	    	header('Content-Length: ' . filesize($tempFile));
-	    	header("Content-Type: text/plain");
-	    	readfile($tempFile);
-            exit(); // avoid headers already sent error. avoid other things executing afterwards.
-	    	
-    	} else {
-    		$this->logger->infoMessage("I don't see any data to export.");
-    	}
+        $this->getImportExportService()->doExport();
+    }
+
+    /**
+     * Convert native export format to a Redirection-compatible CSV shape.
+     *
+     * @param string $sourceFile Native export file path.
+     * @param string $destinationFile Output file path.
+     * @return string Empty string on success, error message otherwise.
+     */
+    function convertExportCsvToRedirectionFormat($sourceFile, $destinationFile) {
+        return $this->getImportExportService()->convertExportCsvToRedirectionFormat($sourceFile, $destinationFile);
     }
     
     /** Expected formats are 
@@ -1732,178 +1813,56 @@ class ABJ_404_Solution_PluginLogic {
      * from_url,to_url 
      */
     function doImportFile() {
-        $anyIssuesToNote = array();
-        if (isset($_FILES['import_file']) && $_FILES['import_file']['error'] == UPLOAD_ERR_OK) {
-            // Validate file extension to prevent malicious file uploads
-            $allowed_extensions = array('csv', 'txt');
-            $file_ext = strtolower(pathinfo($_FILES['import_file']['name'], PATHINFO_EXTENSION));
-            if (!in_array($file_ext, $allowed_extensions)) {
-                return "Error: Invalid file type. Only CSV/TXT files are allowed.";
-            }
-
-            // Validate file size (max 5MB to prevent DoS)
-            $max_file_size = 5 * 1024 * 1024; // 5MB in bytes
-            if ($_FILES['import_file']['size'] > $max_file_size) {
-                return "Error: File too large. Maximum size is 5MB.";
-            }
-
-            // Validate MIME type
-            $allowed_mime_types = array('text/csv', 'text/plain', 'application/csv', 'text/comma-separated-values', 'application/vnd.ms-excel');
-            $finfo = finfo_open(FILEINFO_MIME_TYPE);
-            $mime_type = finfo_file($finfo, $_FILES['import_file']['tmp_name']);
-            finfo_close($finfo);
-            if (!in_array($mime_type, $allowed_mime_types)) {
-                return "Error: Invalid file type. Only CSV files are allowed.";
-            }
-
-            // Open the uploaded file for reading
-            $file_handle = fopen($_FILES['import_file']['tmp_name'], 'r');
-            if (!$file_handle) {
-                return "Error opening the file.";
-            }
-            
-            while (($line = fgets($file_handle)) !== false) {
-                $dataArray = $this->splitCsvLine($line);
-                if (isset($dataArray['error'])) {
-                    return $dataArray['error'];
-                }
-                
-                $anyIssuesToNote = array_merge($anyIssuesToNote, 
-                    $this->loadDataArrayFromFile($dataArray));
-            }
-            fclose($file_handle);
-            
-        } else {
-            return "File upload error.";
-        }
-        
-        if (count($anyIssuesToNote) > 0) {
-            return 'Error: ' . implode(", <BR/>\n", $anyIssuesToNote);
-        }
-
-        $msg = __("The file seems to have loaded okay. Please check the redirects page.", 
-            '404-solution');
-        return $msg;
+        return $this->getImportExportService()->doImportFile();
     }
 
-    function loadDataArrayFromFile($dataArray) {
-        if ($dataArray['from_url'] == 'from_url' || $dataArray['from_url'] == 'request') {
-            return array();
-        }
-        
-        $fromURL = $dataArray['from_url'];
-        $status = ABJ404_STATUS_MANUAL;
-        $final_dest = $dataArray['to_url'];
-        $anyIssuesToNote = array();
-        
-        // avoid duplicates - verify that the from URL doesn't already exist as a redirect.
-        $maybeExisting2 = $this->dao->getExistingRedirectForURL($fromURL);
-        
-        if ((count($maybeExisting2) > 0 && $maybeExisting2['id'] != 0)) {
-            $msg = "Ignored importing redirect because a redirect with the same " .
-                "from URL already exists. URL: " . $fromURL;
-            $this->logger->warn($msg);
-            array_push($anyIssuesToNote, $msg);
-            return $anyIssuesToNote;
-        }
-        
-        // Determine $type based on $final_dest
-        if (empty($final_dest)) {
-            $type = ABJ404_TYPE_404_DISPLAYED; // "404"
-        } else if ($final_dest == '5') {
-            $type = ABJ404_TYPE_HOME; // "homepage"
-        } else if (strpos($final_dest, 'http') !== false) {
-            $type = ABJ404_TYPE_EXTERNAL; // "external"
-            
-            // if there's any kind of regular expression character that is NOT a valid
-            // URL character then we'll assume it's a regular expression.
-            $urlPattern = '/[!#$&\'()*+,;=]/';
-            if (preg_match($urlPattern, $fromURL)) {
-                $status = ABJ404_STATUS_REGEX;
-            }
-            
-            
-        } else if (strpos($final_dest, '/') === 0) {
-            $type = ABJ404_TYPE_POST; // Initially set to "page/post"
-        } else {
-            // Some default or error handling in case $final_dest does not match any expected format
-            $msg = "Unrecognized destination type while importing file. " .
-                "Destination: " . $final_dest;
-            $this->logger->warn($msg);
-            array_push($anyIssuesToNote, $msg);
-            return $anyIssuesToNote;
-        }
-        
-        // If the type is set to ABJ404_TYPE_404_DISPLAYED
-        if ($type == ABJ404_TYPE_404_DISPLAYED) {
-            $final_dest = ABJ404_TYPE_404_DISPLAYED;
-        } else if (strpos($final_dest, 'http') !== false) {
-            // Check if $final_dest contains "http"
-            $type = ABJ404_TYPE_EXTERNAL;
-            // $final_dest remains unchanged
-        } else if ($type == ABJ404_TYPE_HOME) {
-            // If the type is set to ABJ404_TYPE_HOME
-            $final_dest = ABJ404_TYPE_HOME;
-        } else {
-            // If the type is post, further refine the type and set the ID
-            // Trim slashes for slug compatibility
-            $slug = trim($final_dest, '/');
-            
-            // Check if slug corresponds to a post
-            $postsFromSlugRows = $this->dao->getPublishedPagesAndPostsIDs($slug);
-            $postsFromCategoryRows = $this->dao->getPublishedCategories(null, $slug);
-            $postsFromTagRows = $this->dao->getPublishedTags($slug);
-            
-            $postFromSlug = isset($postsFromSlugRows[0]) ? $postsFromSlugRows[0] : null;
-            $postFromCategory = isset($postsFromCategoryRows[0]) ? $postsFromCategoryRows[0] : null;
-            $postFromTag = isset($postsFromTagRows[0]) ? $postsFromTagRows[0] : null;
-            
-            if ($postFromSlug) {
-                $type = ABJ404_TYPE_POST;
-                $final_dest = $postFromSlug->id; // Set to post ID
-            } else if ($postFromCategory) {
-                // Check if slug corresponds to a category
-                $type = ABJ404_TYPE_CAT;
-                $final_dest = $postFromCategory->term_id; // Set to category ID
-            } else if ($postFromTag) {
-                // Check if slug corresponds to a tag
-                $type = ABJ404_TYPE_TAG;
-                $final_dest = $postFromTag->term_id; // Set to tag ID
-            } else {
-                $this->logger->warn("Couldn't find post from slug. slug: " .
-                    $slug);
-            }
-        }
-        $this->dao->setupRedirect($fromURL, $status, $type, $final_dest, 301);
-        
-        return $anyIssuesToNote;
+    function loadDataArrayFromFile($dataArray, $dryRun = false) {
+        return $this->getImportExportService()->loadDataArrayFromFile($dataArray, $dryRun);
     }
     
-    function splitCsvLine($line) {
-        // Split the CSV line into an array
-        // Specify delimiter/enclosure/escape explicitly to avoid PHP 8.4 deprecation about default escape.
-        $data = array_map('trim', str_getcsv($line, ',', '"', '\\'));  // Trim each value in the array
-        
-        // Check the format based on the number of columns
-        if (count($data) === 5) {
-            // Format: from_url,status,type,to_url,wp_type
-            return [
-                'from_url' => $data[0],
-                'status'   => $data[1],
-                'type'     => $data[2],
-                'to_url'   => $data[3],
-                'wp_type'  => $data[4]
-            ];
-        } else if (count($data) === 2) {
-            // Format: from_url,to_url
-            return [
-                'from_url' => $data[0],
-                'to_url'   => $data[1]
-            ];
-        } else {
-            // Invalid format or unexpected number of columns
-            return ["error" => "Invalid CSV format. " . count($data) . " found but 2 or 5 expected."];
-        }
+	    function splitCsvLine($line) {
+	        return $this->getImportExportService()->splitCsvLine($line);
+	    }
+
+    /**
+     * Detect whether this row appears to be a compatible competitor header row.
+     *
+     * @param array $columns
+     * @return bool
+     */
+    function isCompatibleImportHeaderRow($columns) {
+        return $this->getImportExportService()->isCompatibleImportHeaderRow($columns);
+    }
+
+    /**
+     * Normalize import headers for matching.
+     *
+     * @param array $columns
+     * @return array
+     */
+    function normalizeImportHeaders($columns) {
+        return $this->getImportExportService()->normalizeImportHeaders($columns);
+    }
+
+    /**
+     * Map CSV row values into from_url/to_url using known competitor headers.
+     *
+     * @param array $row
+     * @param array $normalizedHeaders
+     * @return array
+     */
+    function mapImportRowByHeaders($row, $normalizedHeaders) {
+        return $this->getImportExportService()->mapImportRowByHeaders($row, $normalizedHeaders);
+    }
+
+    /**
+     * Detect import format by CSV header row.
+     *
+     * @param array $columns
+     * @return string
+     */
+    function detectImportFormatFromHeaders($columns) {
+        return $this->getImportExportService()->detectImportFormatFromHeaders($columns);
     }
     
     function updatePerPageOption($rows) {
@@ -1994,14 +1953,15 @@ class ABJ_404_Solution_PluginLogic {
                     return $message;
                 }
 
-                if ($this->f->regexMatch('[0-9]+', $_GET['id'])) {
+                $id = $_GET['id'] ?? '';
+                if ($id !== '' && $this->f->regexMatch('[0-9]+', $id)) {
                     if ($_GET[$paramName] == 1) {
                         $newstatus = $activeStatus;
                     } else {
                         $newstatus = ABJ404_STATUS_CAPTURED;
                     }
 
-                    $message = $this->dao->updateRedirectTypeStatus(absint($_GET['id']), $newstatus);
+                    $message = $this->dao->updateRedirectTypeStatus(absint($id), $newstatus);
                     if ($message == "") {
                         if ($newstatus == ABJ404_STATUS_CAPTURED) {
                             $message = sprintf(__('Removed 404 URL from %s list successfully!', '404-solution'), $successActionName);
@@ -2497,13 +2457,15 @@ class ABJ_404_Solution_PluginLogic {
 
         $tableOptions['logsid'] = 0;
         if ($this->dao->getPostOrGetSanitize('subpage') == "abj404_logs") {
-            if (isset($_GET['id']) && $this->f->regexMatch('[0-9]+', $_GET['id'])) {                
-                $tableOptions['logsid'] = absint($_GET['id']);
-                
-            } else if (array_key_exists('redirect_to_data_field_id', $_GET) && 
-                    isset($_GET['redirect_to_data_field_id']) && 
-                    $this->f->regexMatch('[0-9]+', $_GET['redirect_to_data_field_id'])) {
-                $tableOptions['logsid'] = absint($_GET['redirect_to_data_field_id']);
+            $logId = (string)$this->dao->getPostOrGetSanitize('id', '');
+            if ($this->f->regexMatch('[0-9]+', $logId)) {
+                $tableOptions['logsid'] = absint($logId);
+
+            } else {
+                $redirectToDataFieldId = (string)$this->dao->getPostOrGetSanitize('redirect_to_data_field_id', '');
+                if ($this->f->regexMatch('[0-9]+', $redirectToDataFieldId)) {
+                    $tableOptions['logsid'] = absint($redirectToDataFieldId);
+                }
             }
         }
 
@@ -2554,86 +2516,104 @@ class ABJ_404_Solution_PluginLogic {
         return $result;
     }
     
-    /** 
-     * @return string
+    /**
+     * @return array<string, mixed>
      */
     function updateOptionsFromPOST() {
-
         $message = "";
         $options = $this->getOptions();
-
-        // get the submitted settings
-        if (!isset($_POST['encodedData'])) {
-            $this->logger->errorMessage('Missing encodedData in POST');
-            return;
-        }
-        $encodedData = $_POST['encodedData'];
-        $postData = $this->f->decodeComplicatedData($encodedData);
 
         // to return after handling the ajax call.
         $returnData = array();
         $returnData['newURL'] = admin_url() . "options-general.php?page=" . ABJ404_PP . '&subpage=abj404_options';
 
-        // verify nonce
-        if (!wp_verify_nonce($postData['nonce'], 'abj404UpdateOptions') || !is_admin()) {
-        	$returnData['message'] = 'Task failed successfully.';
-        	echo json_encode($returnData);
-        	exit(1);
+        // get the submitted settings
+        if (!isset($_POST['encodedData'])) {
+            $this->logger->errorMessage('Missing encodedData in POST');
+            return array(
+                'success' => false,
+                'status' => 400,
+                'message' => 'Missing form data',
+            );
+        }
+
+        $encodedData = $_POST['encodedData'];
+        $postData = $this->f->decodeComplicatedData($encodedData);
+        if (!is_array($postData)) {
+            $this->logger->errorMessage('Invalid JSON encodedData in POST');
+            return array(
+                'success' => false,
+                'status' => 400,
+                'message' => 'Missing form data',
+            );
+        }
+
+        // verify nonce (defense-in-depth; Ajax_Php already verifies for admin-ajax calls)
+        $nonce = isset($postData['nonce']) ? $postData['nonce'] : '';
+        if (!wp_verify_nonce($nonce, 'abj404UpdateOptions') || !is_admin()) {
+            return array(
+                'success' => false,
+                'status' => 403,
+                'message' => 'Invalid security token',
+            );
         }
 
         $_POST = $postData;
 
         // delete the debug file if requested.
         if (array_key_exists('deleteDebugFile', $_POST) && $_POST['deleteDebugFile'] == true) {
-        	$sub = '';
-        	$returnData['error'] = '';
-        	$returnData['message'] = $this->handlePluginAction('updateOptions', $sub);
+            $sub = '';
+            $returnData['error'] = '';
+            $returnData['message'] = $this->handlePluginAction('updateOptions', $sub);
 
         } else {
-        	// save all options - grouped by related functionality
-	        $message .= $this->updateRedirectSettings($options, $_POST);
-	        $message .= $this->updateWordPressSettings($options, $_POST);
-	        $message .= $this->updateNotificationSettings($options, $_POST);
-	        $message .= $this->updateDeletionSettings($options, $_POST);
-	        $message .= $this->updateSuggestionSettings($options, $_POST);
-	        $message .= $this->updateBooleanToggles($options, $_POST);
-	        $message .= $this->updateSuggestionHTMLOptions($options, $_POST);
-	        $message .= $this->updateRegexPatternSettings($options, $_POST);
-	        $message .= $this->updateAdminUsers($options, $_POST);
-	        $message .= $this->updateExcludedPages($options, $_POST);
+            // save all options - grouped by related functionality
+            $message .= $this->updateRedirectSettings($options, $_POST);
+            $message .= $this->updateWordPressSettings($options, $_POST);
+            $message .= $this->updateNotificationSettings($options, $_POST);
+            $message .= $this->updateDeletionSettings($options, $_POST);
+            $message .= $this->updateSuggestionSettings($options, $_POST);
+            $message .= $this->updateBooleanToggles($options, $_POST);
+            $message .= $this->updateSuggestionHTMLOptions($options, $_POST);
+            $message .= $this->updateRegexPatternSettings($options, $_POST);
+            $message .= $this->updateAdminUsers($options, $_POST);
+            $message .= $this->updateExcludedPages($options, $_POST);
 
-	        // save this for later to sanitize it ourselves.
-	        $excludedPages = $options['excludePages[]'];
+            // save this for later to sanitize it ourselves.
+            $excludedPages = $options['excludePages[]'];
 
-	        /** Sanitize all data. */
-	        $new_options = array();
-	        // when sanitizing data we keep the newlines (\n) because some data
-	        // is entered that way and it shouldn't allow any kind of sql
-	        // injection or any other security issues that I foresee at this point.
-	        $new_options = $this->sanitizePostData($options, true);
+            /** Sanitize all data. */
+            $new_options = array();
+            // when sanitizing data we keep the newlines (\n) because some data
+            // is entered that way and it shouldn't allow any kind of sql
+            // injection or any other security issues that I foresee at this point.
+            $new_options = $this->sanitizePostData($options, true);
 
-	        // only some characters in the string.
-	        $excludedPages = $excludedPages == null ? '' : trim($excludedPages);
-	        $excludedPages = preg_replace('/[^\[\",\]a-zA-Z\d\|\\\\ ]/', '', $excludedPages);
+            // only some characters in the string.
+            $excludedPages = $excludedPages == null ? '' : trim($excludedPages);
+            $excludedPages = preg_replace('/[^\[\",\]a-zA-Z\d\|\\\\ ]/', '', $excludedPages);
             $new_options['excludePages[]'] = $excludedPages;
 
-	        $this->updateOptions($new_options);
+            $this->updateOptions($new_options);
 
-	        // update the permalink cache because the post types included may have changed.
-	        $permalinkCache = ABJ_404_Solution_PermalinkCache::getInstance();
-	        $permalinkCache->updatePermalinkCache(2);
+            // update the permalink cache because the post types included may have changed.
+            $permalinkCache = ABJ_404_Solution_PermalinkCache::getInstance();
+            $permalinkCache->updatePermalinkCache(2);
 
-	        $returnData['error'] = $message;
-	        if ($message == "") {
-	        	$returnData['message'] = __('Options Saved Successfully!', '404-solution');
-	        } else {
-	        	$returnData['message'] = __('Some options were not saved successfully.', '404-solution') .
-	        		'		' . $message;
-	        }
+            $returnData['error'] = $message;
+            if ($message == "") {
+                $returnData['message'] = __('Options Saved Successfully!', '404-solution');
+            } else {
+                $returnData['message'] = __('Some options were not saved successfully.', '404-solution') .
+                    '		' . $message;
+            }
         }
 
-        echo json_encode($returnData);
-        exit();
+        return array(
+            'success' => true,
+            'status' => 200,
+            'data' => $returnData,
+        );
     }
 
     /** Update redirect-related settings.
@@ -3036,6 +3016,15 @@ class ABJ_404_Solution_PluginLogic {
     /** Get the "/commentpage" and the "?query=part" of the URL. 
      * @return string */
     function getCommentPartAndQueryPartOfRequest() {
+        // Fast path for common redirects: no query string and no comment-page segment.
+        // This avoids UserRequest initialization/parsing for simple URLs.
+        $requestUri = isset($_SERVER['REQUEST_URI']) ? (string)$_SERVER['REQUEST_URI'] : '';
+        if ($requestUri !== '' &&
+                strpos($requestUri, '?') === false &&
+                strpos($requestUri, '/comment-page-') === false) {
+            return '';
+        }
+
     	$userRequest = ABJ_404_Solution_UserRequest::getInstance();
     	$queryParts = $this->f->removePageIDFromQueryString($userRequest->getQueryString());
     	$queryParts = ($queryParts == '') ? '' : '?' . $queryParts;
@@ -3052,22 +3041,7 @@ class ABJ_404_Solution_PluginLogic {
      * @return boolean true if the user is sent to the default 404 page.
      */
     function forceRedirect($location, $status = 302, $type = -1, $requestedURL = '', $isCustom404 = false) {
-        // Translate redirect destination for multilingual sites (TranslatePress, etc.)
-        $location = $this->maybeTranslateRedirectUrl($location, $requestedURL);
-
-        $commentPartAndQueryPart = $this->getCommentPartAndQueryPartOfRequest();
-        // Sanitize and encode the base location and query parts
-        $sanitizedLocation = esc_url_raw($location); // Ensure the base URL is safe
-        $sanitizedQueryPart = esc_html($commentPartAndQueryPart); // Encode the query part for safe output
-        $finalDestination = $sanitizedLocation . $sanitizedQueryPart;
-
-        // Append _ref LAST for custom 404 redirects (prevents user override via query string)
-        // This is a fallback for when cookies don't survive 301 redirects
-        if ($isCustom404 && !empty($requestedURL)) {
-            $refUrl = preg_replace('/\?.*/', '', $requestedURL); // Strip query string from ref
-            $separator = (strpos($finalDestination, '?') === false) ? '?' : '&';
-            $finalDestination .= $separator . ABJ404_PP . '_ref=' . urlencode($refUrl);
-        }
+        $finalDestination = $this->buildFinalRedirectDestination($location, $requestedURL, $isCustom404);
 
     	$previousRequest = $this->readCookieWithPreviousRqeuestShort();
     	$finalDestNoHome = $this->f->substr($finalDestination, $this->f->strpos($finalDestination, '://') + 3);
@@ -3098,22 +3072,102 @@ class ABJ_404_Solution_PluginLogic {
     	
     	// try a normal redirect using a header.
     	$this->setCookieWithPreviousRequest();
-        wp_redirect($finalDestination, $status, ABJ404_NAME);
+        // If headers can be sent, do a normal header redirect and exit immediately.
+        // Only fall back to JS redirect when headers are already sent.
+        if (!headers_sent()) {
+            if (function_exists('abj404_benchmark_emit_headers')) {
+                abj404_benchmark_emit_headers();
+            }
+            // Prefer wp_safe_redirect for same-host redirects to avoid header-injection edge cases,
+            // but allow external redirects (plugin supports external redirect destinations).
+            $useSafe = false;
+            if (function_exists('wp_safe_redirect')) {
+                $destHost = parse_url($finalDestination, PHP_URL_HOST);
+                if ($destHost === null || $destHost === false || $destHost === '') {
+                    $useSafe = true; // relative URL
+                } else {
+                    $homeHost = parse_url(home_url(), PHP_URL_HOST);
+                    if (is_string($homeHost) && $homeHost !== '' && strtolower($homeHost) === strtolower($destHost)) {
+                        $useSafe = true;
+                    }
+                }
+            }
 
-        // TODO add an ajax request here that fires after 5 seconds.
-        // upon getting the request the server will log the error. the plugin could then notify an admin.
+            if ($useSafe) {
+                wp_safe_redirect($finalDestination, $status, ABJ404_NAME);
+            } else {
+                wp_redirect($finalDestination, $status, ABJ404_NAME);
+            }
+            if (defined('ABJ404_TEST_NO_EXIT') && ABJ404_TEST_NO_EXIT) {
+                return false;
+            }
+            exit;
+        }
 
-        // This javascript redirect will only appear if the header redirect did not work for some reason.
-        // Use wp_json_encode to safely encode URL for JavaScript to prevent XSS
+        // JS fallback redirect for the rare case some other plugin/theme already output content.
+        // Use wp_json_encode to safely encode URL for JavaScript to prevent XSS.
+        if (function_exists('abj404_benchmark_emit_headers')) {
+            abj404_benchmark_emit_headers();
+        }
         $c = '<script>' . 'function doRedirect() {' . "\n" .
                 '   window.location.replace(' . wp_json_encode($finalDestination) . ');' . "\n" .
                 '}' . "\n" .
                 'setTimeout(doRedirect, 1);' . "\n" .
                 '</script>' . "\n" .
                 'Page moved: <a href="' . esc_url($finalDestination) . '">' .
-        			esc_html($location) . '</a>';
+                    esc_html($finalDestination) . '</a>';
         echo $c;
+        if (defined('ABJ404_TEST_NO_EXIT') && ABJ404_TEST_NO_EXIT) {
+            return false;
+        }
         exit;
+    }
+
+    /**
+     * Build the final redirect destination URL.
+     *
+     * This is separated for testability and to avoid mixing HTML escaping with redirect URL construction.
+     *
+     * @param string $location Base redirect destination.
+     * @param string $requestedURL Original requested URL (used for custom 404 ref tracking).
+     * @param bool $isCustom404 Whether we are redirecting to a custom 404 page.
+     * @return string Redirect destination suitable for wp_redirect().
+     */
+    public function buildFinalRedirectDestination($location, $requestedURL = '', $isCustom404 = false) {
+        // Translate redirect destination for multilingual sites (TranslatePress, etc.)
+        $location = $this->maybeTranslateRedirectUrl($location, $requestedURL);
+
+        // Preserve comment pagination and query string from the original request.
+        $commentPartAndQueryPart = (string)$this->getCommentPartAndQueryPartOfRequest();
+        $finalDestination = (string)$location . $commentPartAndQueryPart;
+
+        // Append _ref LAST for custom 404 redirects (prevents user override via query string).
+        // This is a fallback for when cookies don't survive 301 redirects.
+        if ($isCustom404 && is_string($requestedURL) && $requestedURL !== '') {
+            $refUrl = preg_replace('/\?.*/', '', $requestedURL); // Strip query string from ref
+            $refParam = ABJ404_PP . '_ref';
+            if (function_exists('remove_query_arg')) {
+                $finalDestination = remove_query_arg($refParam, $finalDestination);
+            }
+            if (function_exists('add_query_arg')) {
+                $finalDestination = add_query_arg($refParam, rawurlencode($refUrl), $finalDestination);
+            } else {
+                $separator = (strpos($finalDestination, '?') === false) ? '?' : '&';
+                $finalDestination .= $separator . $refParam . '=' . rawurlencode($refUrl);
+            }
+        }
+
+        // Sanitize for redirect header context (NOT HTML context).
+        // Harden against CRLF header injection even when WP helpers are not available.
+        $finalDestination = preg_replace("/[\\r\\n]+/", '', (string)$finalDestination);
+
+        if (function_exists('wp_sanitize_redirect')) {
+            $finalDestination = wp_sanitize_redirect($finalDestination);
+        } elseif (function_exists('esc_url_raw')) {
+            $finalDestination = esc_url_raw($finalDestination);
+        }
+
+        return (string)$finalDestination;
     }
 
     /** Order pages and set the page depth for child pages.

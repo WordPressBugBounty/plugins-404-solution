@@ -1,5 +1,10 @@
 <?php
 
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 /* Functions in this class should all reference one of the following variables or support functions that do.
  *      $wpdb, $_GET, $_POST, $_SERVER, $_.*
  * everything $wpdb related.
@@ -183,14 +188,19 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
     /** Makes all plugin table names lowercase, in case someone thought it was funny to use
 	 * the lower_case_table_names=0 setting. */
-	function renameAbj404TablesToLowerCase() {
-		global $wpdb;
-		// Fetch all tables starting with "abj404", case-insensitive
-		$dbName = esc_sql($wpdb->dbname);
-		$query = "SELECT table_name 
-			FROM information_schema.tables 
-			WHERE table_schema = '{$dbName}' 
-			AND LOWER(table_name) LIKE '%abj404%'";
+		function renameAbj404TablesToLowerCase() {
+			global $wpdb;
+			// Fetch all tables starting with "abj404", case-insensitive
+			$dbNameRaw = $wpdb->dbname ?? '';
+			if ($dbNameRaw === '') {
+				$this->logger->warn("Could not determine database name for lowercase rename.");
+				return;
+			}
+			$dbName = esc_sql($dbNameRaw);
+			$query = "SELECT table_name 
+				FROM information_schema.tables 
+				WHERE table_schema = '{$dbName}' 
+				AND LOWER(table_name) LIKE '%abj404%'";
 		$results = $this->dao->queryAndGetResults($query);
 
 		if (!is_array($results['rows'])) {
@@ -228,11 +238,15 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      * @param string $tableName
      * @param string $colName
      */
-    function handleSpecificCases($tableName, $colName) {
-    	if (strpos($tableName, 'abj404_logsv2') !== false && $colName == 'min_log_id') {
-    		global $wpdb;
-    		$query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/logsSetMinLogID.sql");
-    		$this->dao->queryAndGetResults($query);
+	    function handleSpecificCases($tableName, $colName) {
+	    	if (empty($tableName) || !is_string($tableName)) {
+	    		return;
+	    	}
+
+	    	if (strpos($tableName, 'abj404_logsv2') !== false && $colName == 'min_log_id') {
+	    		global $wpdb;
+	    		$query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/logsSetMinLogID.sql");
+	    		$this->dao->queryAndGetResults($query);
             // Ensure composite index exists after backfilling min_log_id.
             $this->ensureLogsCompositeIndex($tableName);
     	}
@@ -617,10 +631,11 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	    			continue;
 	    		}
 
-	    		$spellingCacheTableName = $this->dao->doTableNameReplacements('{wp_abj404_spelling_cache}');
-	    		if (strtolower($tableName) == $spellingCacheTableName && !empty($spec['unique'])) {
-	    			$this->dao->deleteSpellingCache();
-	    		}
+		    		$spellingCacheTableName = $this->dao->doTableNameReplacements('{wp_abj404_spelling_cache}');
+		    		$tableNameLower = is_string($tableName) ? strtolower($tableName) : '';
+		    		if ($tableNameLower == $spellingCacheTableName && !empty($spec['unique'])) {
+		    			$this->dao->deleteSpellingCache();
+		    		}
 
 	    		$addStatement = $this->buildAddIndexStatementFromParts($tableName, $spec['name'], $spec['columns'], $spec['unique']);
 	    		$this->dao->queryAndGetResults($addStatement);
@@ -939,9 +954,12 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     /** Create table DDL is returned without comments on any columns.
      * @param string $existingTableSQL
      */
-    function removeCommentsFromColumns($createTableDDL) {
-    	return preg_replace('/ (?:COMMENT.+?,[\r\n])/', ",\n", $createTableDDL);
-    }
+	    function removeCommentsFromColumns($createTableDDL) {
+	    	if ($createTableDDL === null) {
+	    		return '';
+	    	}
+	    	return preg_replace('/ (?:COMMENT.+?,[\r\n])/', ",\n", (string) $createTableDDL);
+	    }
 
     function updateTableEngineToInnoDB() {
     	// get a list of all tables.
@@ -1122,7 +1140,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	 * @param string $charset
 	 * @return string|null Default collation or null if unknown.
 	 */
-	function getDefaultCollationForCharset($charset) {
+		function getDefaultCollationForCharset($charset) {
 		// Common charset to default collation mappings
 		$defaults = [
 			'utf8mb4' => 'utf8mb4_general_ci',
@@ -1132,13 +1150,80 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 			'ascii' => 'ascii_general_ci',
 		];
 
-		$charsetLower = strtolower($charset);
-		return $defaults[$charsetLower] ?? null;
-	}
-	
-		/** Ensure our tables use utf8mb4 (do not alter WordPress core tables). */
-		function correctCollations() {
+			$charsetLower = strtolower($charset);
+			return $defaults[$charsetLower] ?? null;
+		}
+
+		/**
+		 * Keep collation identifiers SQL-safe.
+		 *
+		 * @param string $collation
+		 * @return string
+		 */
+		private function sanitizeCollationIdentifier($collation) {
+			if (!is_string($collation) || $collation === '') {
+				return '';
+			}
+			return preg_replace('/[^A-Za-z0-9_]/', '', $collation);
+		}
+
+		/**
+		 * Resolve the utf8mb4 collation target for plugin-table normalization.
+		 *
+		 * Priority:
+		 * 1) Active wpdb connection collation if utf8mb4
+		 * 2) Most common existing utf8mb4 plugin-table collation
+		 * 3) Database default collation variable if utf8mb4
+		 * 4) Safe fallback (utf8mb4_unicode_ci)
+		 *
+		 * @param array $tableNames
+		 * @param array $tableCollations Optional map: table => [collation, charset]
+		 * @return string
+		 */
+		private function resolveTargetUtf8mb4Collation($tableNames, $tableCollations = []) {
 			global $wpdb;
+
+			if (!empty($wpdb->collate)) {
+				$wpdbCollation = $this->sanitizeCollationIdentifier((string)$wpdb->collate);
+				if ($wpdbCollation !== '' && stripos($wpdbCollation, 'utf8mb4') !== false) {
+					return $wpdbCollation;
+				}
+			}
+
+			$counts = [];
+			foreach ($tableNames as $tableName) {
+				$row = $tableCollations[$tableName] ?? $this->getTableCollation($tableName);
+				if (!is_array($row) || count($row) < 2) {
+					continue;
+				}
+				$collation = $this->sanitizeCollationIdentifier((string)$row[0]);
+				$charset = strtolower((string)$row[1]);
+				if ($collation !== '' && $charset === 'utf8mb4' && stripos($collation, 'utf8mb4') !== false) {
+					$counts[$collation] = ($counts[$collation] ?? 0) + 1;
+				}
+			}
+			if (!empty($counts)) {
+				arsort($counts);
+				return array_key_first($counts);
+			}
+
+			$vars = $this->dao->queryAndGetResults("SHOW VARIABLES LIKE 'collation_database'");
+			$rows = $vars['rows'] ?? [];
+			if (!empty($rows)) {
+				$row = $rows[0];
+				$value = $row['Value'] ?? ($row['value'] ?? '');
+				$value = $this->sanitizeCollationIdentifier((string)$value);
+				if ($value !== '' && stripos($value, 'utf8mb4') !== false) {
+					return $value;
+				}
+			}
+
+			return 'utf8mb4_unicode_ci';
+		}
+		
+			/** Ensure our tables use utf8mb4 (do not alter WordPress core tables). */
+			function correctCollations() {
+				global $wpdb;
 			
 			$redirectsTable = $this->dao->doTableNameReplacements("{wp_abj404_redirects}");
 			$logsTable = $this->dao->doTableNameReplacements("{wp_abj404_logsv2}");
@@ -1148,17 +1233,19 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 			
 			$abjTableNames = array($redirectsTable, $logsTable, $lookupTable, $permalinkCacheTable, $spellingCacheTable);
 
-			$targetCharset = 'utf8mb4';
-			$targetCollation = 'utf8mb4_unicode_ci';
-			if (!empty($wpdb->collate) && stripos($wpdb->collate, 'utf8mb4') !== false) {
-				$targetCollation = $wpdb->collate;
-			}
+				$tableCollations = [];
+				foreach ($abjTableNames as $tableName) {
+					$tableCollations[$tableName] = $this->getTableCollation($tableName);
+				}
+
+				$targetCharset = 'utf8mb4';
+				$targetCollation = $this->resolveTargetUtf8mb4Collation($abjTableNames, $tableCollations);
+				
+				foreach ($abjTableNames as $tableName) {
+					$abjTableData = $tableCollations[$tableName] ?? null;
 			
-			foreach ($abjTableNames as $tableName) {
-				$abjTableData = $this->getTableCollation($tableName);
-		
-				if ($abjTableData === null) {
-					$this->logger->warn("Failed to retrieve collation for $tableName.");
+					if ($abjTableData === null) {
+						$this->logger->warn("Failed to retrieve collation for $tableName.");
 					continue;  // Skip this table if collation can't be determined
 				}
 		

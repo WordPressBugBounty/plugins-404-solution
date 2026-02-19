@@ -1,5 +1,10 @@
 <?php
 
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 /**
  * AJAX handler for toggling between Simple and Advanced settings modes.
  */
@@ -37,20 +42,29 @@ class ABJ_404_Solution_Ajax_SettingsModeToggle {
 
         // Verify nonce for CSRF protection
         if (!wp_verify_nonce($nonce, 'abj404_mode_toggle')) {
-            wp_send_json_error(array('message' => __('Invalid security token', '404-solution')));
-            exit;
+            wp_send_json_error(array('message' => __('Invalid security token', '404-solution')), 403);
+            if (!(defined('ABJ404_TEST_NO_EXIT') && ABJ404_TEST_NO_EXIT)) {
+                exit;
+            }
+            return;
         }
 
         // Verify user has appropriate capabilities
         if (!$abj404logic->userIsPluginAdmin()) {
-            wp_send_json_error(array('message' => __('Unauthorized', '404-solution')));
-            exit;
+            wp_send_json_error(array('message' => __('Unauthorized', '404-solution')), 403);
+            if (!(defined('ABJ404_TEST_NO_EXIT') && ABJ404_TEST_NO_EXIT)) {
+                exit;
+            }
+            return;
         }
 
         // Validate mode
         if ($mode !== 'simple' && $mode !== 'advanced') {
-            wp_send_json_error(array('message' => __('Invalid mode', '404-solution')));
-            exit;
+            wp_send_json_error(array('message' => __('Invalid mode', '404-solution')), 400);
+            if (!(defined('ABJ404_TEST_NO_EXIT') && ABJ404_TEST_NO_EXIT)) {
+                exit;
+            }
+            return;
         }
 
         // Set the mode
@@ -62,9 +76,12 @@ class ABJ_404_Solution_Ajax_SettingsModeToggle {
                 'message' => __('Settings mode updated', '404-solution')
             ));
         } else {
-            wp_send_json_error(array('message' => __('Failed to update settings mode', '404-solution')));
+            wp_send_json_error(array('message' => __('Failed to update settings mode', '404-solution')), 500);
         }
 
-        exit;
+        if (!(defined('ABJ404_TEST_NO_EXIT') && ABJ404_TEST_NO_EXIT)) {
+            exit;
+        }
+        return;
     }
 }

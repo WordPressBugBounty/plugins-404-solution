@@ -1,10 +1,18 @@
 <?php
 
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 /* Functions in this class should only be for plugging into WordPress listeners (filters, actions, etc).  */
 
 class ABJ_404_Solution_WordPress_Connector {
 
 	private static $instance = null;
+    private const REVIEW_INITIAL_DELAY_DAYS = 30;
+    private const REVIEW_ASK_LATER_DELAY_DAYS = 7;
+    private const REVIEW_CLOSE_X_SNOOZE_DAYS = 14;
 
 	/** @var ABJ_404_Solution_PluginLogic */
 	private $logic;
@@ -20,6 +28,9 @@ class ABJ_404_Solution_WordPress_Connector {
 
 	/** @var ABJ_404_Solution_SpellChecker */
 	private $spellChecker;
+
+	/** @var ABJ_404_Solution_FrontendRequestPipeline|null */
+	private $frontendPipeline = null;
 
 	/**
 	 * Constructor with dependency injection.
@@ -39,7 +50,44 @@ class ABJ_404_Solution_WordPress_Connector {
 		$this->spellChecker = $spellChecker !== null ? $spellChecker : ABJ_404_Solution_SpellChecker::getInstance();
 	}
 
+	/** @return ABJ_404_Solution_FrontendRequestPipeline */
+	private function getFrontendPipeline() {
+		if ($this->frontendPipeline !== null) {
+			return $this->frontendPipeline;
+		}
+
+		if (!class_exists('ABJ_404_Solution_FrontendRequestPipeline')) {
+			require_once dirname(__FILE__) . '/FrontendRequestPipeline.php';
+		}
+
+		$this->frontendPipeline = new ABJ_404_Solution_FrontendRequestPipeline(
+			$this->logic,
+			$this->dao,
+			$this->logger,
+			$this->f,
+			$this->spellChecker
+		);
+		return $this->frontendPipeline;
+	}
+
 	public static function getInstance() {
+		if (self::$instance !== null) {
+			return self::$instance;
+		}
+
+		// If the DI container is initialized, prefer it.
+		if (function_exists('abj_service') && class_exists('ABJ_404_Solution_ServiceContainer')) {
+			try {
+				$c = ABJ_404_Solution_ServiceContainer::getInstance();
+				if (is_object($c) && method_exists($c, 'has') && $c->has('wordpress_connector')) {
+					self::$instance = $c->get('wordpress_connector');
+					return self::$instance;
+				}
+			} catch (Throwable $e) {
+				// fall back
+			}
+		}
+
 		if (self::$instance == null) {
 			self::$instance = new ABJ_404_Solution_WordPress_Connector();
 		}
@@ -49,71 +97,87 @@ class ABJ_404_Solution_WordPress_Connector {
 	
 	/** Setup. */
     static function init() {
-    	if (is_admin()) {
-            register_deactivation_hook(ABJ404_NAME, 'ABJ_404_Solution_PluginLogic::runOnPluginDeactivation');
-            register_activation_hook(ABJ404_NAME, 'ABJ_404_Solution_PluginLogic::runOnPluginActivation');
+        self::registerLifecycleHooks();
+        self::registerAdminHooks();
+        self::registerAsyncSuggestionHooks();
+        ABJ_404_Solution_PluginLogic::doRegisterCrons();
+    }
 
-            // Multisite support: handle new blog creation
-            if (is_multisite()) {
-                // WordPress < 5.1 compatibility
-                add_action('wpmu_new_blog', 'ABJ_404_Solution_PluginLogic::activateNewSite', 10, 6);
-                // WordPress >= 5.1 compatibility
-                add_action('wp_initialize_site', 'ABJ_404_Solution_PluginLogic::activateNewSiteModern', 10, 2);
-                // Handle blog deletion
-                add_action('delete_blog', 'ABJ_404_Solution_PluginLogic::deleteBlogData', 10, 2);
-            }
-
-            // include only if necessary
-            add_filter("plugin_action_links_" . ABJ404_NAME,
-            	'ABJ_404_Solution_WordPress_Connector::addSettingsLinkToPluginPage');
-            add_action('admin_notices',
-            	'ABJ_404_Solution_WordPress_Connector::echoDashboardNotification');
-            add_action('admin_menu',
-            	'ABJ_404_Solution_WordPress_Connector::addMainSettingsPageLink');
-            // a priority of 11 makes sure our style sheet is more important than jquery's. otherwise the indent
-            // doesn't work for the ajax dropdown list.
-            add_action('admin_enqueue_scripts',
-            	'ABJ_404_Solution_WordPress_Connector::add_scripts', 11);
-            // Output critical theme CSS early (priority 1) to prevent FOUC
-            add_action('admin_head',
-            	'ABJ_404_Solution_WordPress_Connector::outputCriticalThemeCSS', 1);
-            // wp_ajax_nopriv_ is for normal users
-
-            ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_echoViewLogsFor', 'ABJ_404_Solution_Ajax_Php::echoViewLogsFor');
-            ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_trashLink', 'ABJ_404_Solution_Ajax_TrashLink::trashAction');
-            ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_echoRedirectToPages', 'ABJ_404_Solution_Ajax_Php::echoRedirectToPages');
-            ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_updateOptions', 'ABJ_404_Solution_Ajax_Php::updateOptions');
-
-            // Initialize settings mode toggle (Simple/Advanced modes)
-            ABJ_404_Solution_Ajax_SettingsModeToggle::init();
-
-            // Initialize uninstall modal (shows popup when user deletes plugin)
-            ABJ_404_Solution_UninstallModal::init();
-
-            // Initialize setup wizard (shows on first visit to plugin pages)
-            ABJ_404_Solution_SetupWizard::init();
+    private static function registerLifecycleHooks() {
+        if (!is_admin()) {
+            return;
         }
 
-        // Async suggestion computation and polling - must work for both logged-in and non-logged-in users
-        // These are registered outside is_admin() because:
-        // 1. Background worker (wp_remote_post) may not have admin context
-        // 2. Frontend users polling from 404 page may not be logged in
+        register_deactivation_hook(ABJ404_NAME, 'ABJ_404_Solution_PluginLogic::runOnPluginDeactivation');
+        register_activation_hook(ABJ404_NAME, 'ABJ_404_Solution_PluginLogic::runOnPluginActivation');
+
+        if (is_multisite()) {
+            add_action('wpmu_new_blog', 'ABJ_404_Solution_PluginLogic::activateNewSite', 10, 6);
+            add_action('wp_initialize_site', 'ABJ_404_Solution_PluginLogic::activateNewSiteModern', 10, 2);
+            add_action('delete_blog', 'ABJ_404_Solution_PluginLogic::deleteBlogData', 10, 2);
+        }
+    }
+
+    private static function registerAdminHooks() {
+        if (!is_admin()) {
+            return;
+        }
+
+        add_filter("plugin_action_links_" . ABJ404_NAME,
+            'ABJ_404_Solution_WordPress_Connector::addSettingsLinkToPluginPage');
+        add_action('admin_notices',
+            'ABJ_404_Solution_WordPress_Connector::echoDashboardNotification');
+        add_action('admin_menu',
+            'ABJ_404_Solution_WordPress_Connector::addMainSettingsPageLink');
+        add_action('admin_enqueue_scripts',
+            'ABJ_404_Solution_WordPress_Connector::add_scripts', 11);
+        add_action('admin_head',
+            'ABJ_404_Solution_WordPress_Connector::outputCriticalThemeCSS', 1);
+
+        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_echoViewLogsFor', 'ABJ_404_Solution_Ajax_Php::echoViewLogsFor');
+        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_trashLink', 'ABJ_404_Solution_Ajax_TrashLink::trashAction');
+        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_echoRedirectToPages', 'ABJ_404_Solution_Ajax_Php::echoRedirectToPages');
+        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_updateOptions', 'ABJ_404_Solution_Ajax_Php::updateOptions');
+
+        ABJ_404_Solution_Ajax_SettingsModeToggle::init();
+        ABJ_404_Solution_UninstallModal::init();
+        ABJ_404_Solution_SetupWizard::init();
+        if (class_exists('ABJ_404_Solution_Privacy')) {
+            ABJ_404_Solution_Privacy::init();
+        }
+    }
+
+    private static function registerAsyncSuggestionHooks() {
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404_compute_suggestions', 'ABJ_404_Solution_Ajax_SuggestionCompute::computeSuggestions');
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_nopriv_abj404_compute_suggestions', 'ABJ_404_Solution_Ajax_SuggestionCompute::computeSuggestions');
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404_poll_suggestions', 'ABJ_404_Solution_Ajax_SuggestionPolling::pollSuggestions');
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_nopriv_abj404_poll_suggestions', 'ABJ_404_Solution_Ajax_SuggestionPolling::pollSuggestions');
-
-        ABJ_404_Solution_PluginLogic::doRegisterCrons();
     }
 
     /** Include things necessary for ajax. */
     static function add_scripts($hook) {
         // only load this stuff for this plugin. 
         // thanks to https://pippinsplugins.com/loading-scripts-correctly-in-the-wordpress-admin/
-    	if (!array_key_exists('abj404_settingsPageName', $GLOBALS) || 
-    		$hook != $GLOBALS['abj404_settingsPageName']) {
+        if (!array_key_exists('abj404_settingsPageName', $GLOBALS) ||
+                $hook != $GLOBALS['abj404_settingsPageName']) {
             return;
         }
+
+        $subpage = '';
+        if (array_key_exists('subpage', $_GET)) {
+            $subpage = sanitize_text_field(self::normalizeRequestScalar($_GET['subpage']));
+        }
+        // Default plugin landing is redirects when subpage is not specified.
+        if ($subpage === '') {
+            $subpage = 'abj404_redirects';
+        }
+
+        $isOptionsPage = ($subpage === 'abj404_options');
+        $isStatsPage = ($subpage === 'abj404_stats');
+        $isCardAccordionPage = in_array($subpage, array('abj404_options', 'abj404_tools', 'abj404_stats'), true);
+        $isLogsPage = ($subpage === 'abj404_logs');
+        $isListPage = in_array($subpage, array('abj404_redirects', 'abj404_captured', 'abj404_logs'), true);
+        $needsDestinationAutocomplete = in_array($subpage, array('abj404_redirects', 'abj404_captured', 'abj404_options'), true);
 
         // remove the "thank you for creating with wordpress" message
         add_filter('admin_footer_text',
@@ -140,62 +204,81 @@ class ABJ_404_Solution_WordPress_Connector {
             'an_external_url_will_be_used' => __('(An external URL will be used.)', '404-solution')
         );
         wp_localize_script('abj404-redirect_to_ajax', 'abj404localization', $translation_array );        
-        ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-redirect_to_ajax');
-        wp_localize_script('abj404-exclude_pages_ajax', 'abj404localization', $translation_array );
-        ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-exclude_pages_ajax');
+        if ($needsDestinationAutocomplete) {
+            ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-redirect_to_ajax');
+            wp_localize_script('abj404-exclude_pages_ajax', 'abj404localization', $translation_array );
+            ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-exclude_pages_ajax');
+        }
         
         // make sure the "apply" button is only enabled if at least one checkbox is selected
         wp_register_script('abj404-enable_disable_apply_button_js', 
                 ABJ404_URL . 'includes/js/enableDisableApplyButton.js');
         $translation_array = array('{altText}' => __('Choose at least one URL', '404-solution'));
         wp_localize_script('abj404-enable_disable_apply_button_js', 'abj404localization', $translation_array);
-        ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-enable_disable_apply_button_js');
-        
-        ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-view-updater', plugin_dir_url(__FILE__) . 'ajax/view_updater.js', 
+        if ($isListPage) {
+            ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-enable_disable_apply_button_js');
+            ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-trash_link_ajax', plugin_dir_url(__FILE__) . 'ajax/trash_link_ajax.js',
+                    array('jquery'));
+            ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-table-interactions', plugin_dir_url(__FILE__) . 'js/tableInteractions.js',
+                    array('jquery'));
+
+            // Localized strings for time-ago display
+            wp_localize_script('abj404-table-interactions', 'abj404_time_ago', array(
+                'second'  => __('second', '404-solution'),
+                'seconds' => __('seconds', '404-solution'),
+                'minute'  => __('minute', '404-solution'),
+                'minutes' => __('minutes', '404-solution'),
+                'hour'    => __('hour', '404-solution'),
+                'hours'   => __('hours', '404-solution'),
+                'day'     => __('day', '404-solution'),
+                'days'    => __('days', '404-solution'),
+                'ago'     => __('ago', '404-solution'),
+            ));
+        }
+
+        if ($isListPage || $isStatsPage) {
+            ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-view-updater', plugin_dir_url(__FILE__) . 'ajax/view_updater.js',
+                    array('jquery', 'jquery-ui-autocomplete'));
+        }
+
+        if ($isLogsPage) {
+            ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-search_logs_ajax', plugin_dir_url(__FILE__) . 'ajax/search_logs_ajax.js',
                 array('jquery', 'jquery-ui-autocomplete'));
-        ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-search_logs_ajax', plugin_dir_url(__FILE__) . 'ajax/search_logs_ajax.js', 
-                array('jquery', 'jquery-ui-autocomplete'));
-        ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-trash_link_ajax', plugin_dir_url(__FILE__) . 'ajax/trash_link_ajax.js', 
+        }
+
+        if ($isOptionsPage) {
+            ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-general-js', plugin_dir_url(__FILE__) . 'js/general.js',
                 array('jquery'));
-        ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-general-js', plugin_dir_url(__FILE__) . 'js/general.js',
-        	array('jquery'));
 
-        // Localize general.js strings for translation
-        wp_localize_script('abj404-general-js', 'abj404General', array(
-            'savingSettings' => __('Saving settings...', '404-solution'),
-        ));
+            // Localize general.js strings for translation
+            wp_localize_script('abj404-general-js', 'abj404General', array(
+                'savingSettings' => __('Saving settings...', '404-solution'),
+            ));
 
-        ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-theme-preview', plugin_dir_url(__FILE__) . 'js/themePreview.js',
-        	array('jquery'));
-        ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-options-accordion', plugin_dir_url(__FILE__) . 'js/optionsAccordion.js',
-        	array('jquery'));
+            ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-theme-preview', plugin_dir_url(__FILE__) . 'js/themePreview.js',
+                array('jquery'));
 
-        // Localize accordion strings for translation
-        wp_localize_script('abj404-options-accordion', 'abj404Accordion', array(
-            'expandAll' => __('Expand All', '404-solution'),
-            'collapseAll' => __('Collapse All', '404-solution'),
-        ));
+            // Settings mode toggle (Simple/Advanced)
+            ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-settings-mode-toggle', plugin_dir_url(__FILE__) . 'ajax/SettingsModeToggle.js',
+                array('jquery'));
+        }
 
-        // Settings mode toggle (Simple/Advanced)
-        ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-settings-mode-toggle', plugin_dir_url(__FILE__) . 'ajax/SettingsModeToggle.js',
-        	array('jquery'));
+        if ($isCardAccordionPage) {
+            ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-options-accordion', plugin_dir_url(__FILE__) . 'js/optionsAccordion.js',
+                array('jquery'));
 
-        // Table interactions (checkboxes, bulk actions, modals)
-        ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-table-interactions', plugin_dir_url(__FILE__) . 'js/tableInteractions.js',
-        	array('jquery'));
+            // Localize accordion strings for translation
+            wp_localize_script('abj404-options-accordion', 'abj404Accordion', array(
+                'expandAll' => __('Expand All', '404-solution'),
+                'collapseAll' => __('Collapse All', '404-solution'),
+            ));
+        }
 
-        // Localized strings for time-ago display
-        wp_localize_script('abj404-table-interactions', 'abj404_time_ago', array(
-            'second'  => __('second', '404-solution'),
-            'seconds' => __('seconds', '404-solution'),
-            'minute'  => __('minute', '404-solution'),
-            'minutes' => __('minutes', '404-solution'),
-            'hour'    => __('hour', '404-solution'),
-            'hours'   => __('hours', '404-solution'),
-            'day'     => __('day', '404-solution'),
-            'days'    => __('days', '404-solution'),
-            'ago'     => __('ago', '404-solution'),
-        ));
+        ABJ_404_Solution_WPUtils::my_wp_enq_scrpt(
+            'abj404-review-feedback',
+            plugin_dir_url(__FILE__) . 'js/reviewFeedback.js',
+            array()
+        );
 
         ABJ_404_Solution_WPUtils::my_wp_enq_style('abj404solution-styles', ABJ404_URL . 'includes/html/404solutionStyles.css',
                 null);
@@ -465,211 +548,15 @@ class ABJ_404_Solution_WordPress_Connector {
     }
 
     function processRedirectAllRequests() {
-    	$options = $this->logic->getOptions();
-    	
-    	$userRequest = ABJ_404_Solution_UserRequest::getInstance();
-    	// setup ignore variables on $_REQUEST['abj404solution']
-    	$pathOnly = $userRequest->getPath();
-    	
-    	// remove the home directory from the URL parts because it should not be considered for spell checking.
-    	$urlSlugOnly = $userRequest->getOnlyTheSlug();
-    	
-    	$this->logic->initializeIgnoreValues($pathOnly, $urlSlugOnly);
-    	
-    	// create a UserRequest object to store various information about the request for later use.
-    	$requestedURL = $userRequest->getPathWithSortedQueryString();
-    	
-    	$this->tryRegexRedirect($options, $requestedURL);
-    	
-    	// if we're supposed to redirect all requests then a regex redirect should be in place.
-    	if (is_admin() || !is_404()) {
-    		$this->logger->warn("If REDIRECT_ALL_REQUESTS is turned on then a " .
-    			"regex redirect must be in place.");
-    	}
+        $this->getFrontendPipeline()->processRedirectAllRequests();
     }
     /**
      * Process the 404s
      */
     function process404() {
-        if (!is_404() || is_admin()) {
-            return;
-        }
-        
-        $abj404connector = ABJ_404_Solution_WordPress_Connector::getInstance();
-
-        
-        $_REQUEST[ABJ404_PP]['process_start_time'] = microtime(true);
-
-        // create a UserRequest object to store various information about the request for later use.
-        $userRequest = ABJ_404_Solution_UserRequest::getInstance();
-        
-        $pathOnly = $userRequest->getPath();
-
-        // remove the home directory from the URL parts because it should not be considered for spell checking.
-        $urlSlugOnly = $userRequest->getOnlyTheSlug();
-
-        // setup ignore variables on $_REQUEST['abj404solution']
-        $this->logic->initializeIgnoreValues($pathOnly, $urlSlugOnly);
-        
-        if ($_REQUEST[ABJ404_PP]['ignore_donotprocess']) {
-            $this->dao->logRedirectHit($pathOnly, '404', 'ignore_donotprocess');
-            return;
-        }
-        
-        $requestedURL = $userRequest->getPathWithSortedQueryString();
-        $requestedURLWithoutComments = $userRequest->getRequestURIWithoutCommentsPage();
-        
-        // Get URL data if it's already in our database
-        $redirect = $this->dao->getActiveRedirectForURL($requestedURL);
-
-        $options = $this->logic->getOptions();
-
-        $this->logAReallyLongDebugMessage($options, $requestedURL, $redirect);
-
-        if ($requestedURL != "") {
-            // if we already know where to go then go there.
-            if ($redirect['id'] != '0' && $redirect['final_dest'] != '0') {
-                // A redirect record exists.
-                $abj404connector->processRedirect($requestedURL, $redirect, 'existing');
-
-                // we only reach this line if an error happens because the user should already be redirected.
-                exit;
-            }
-            
-            if ($requestedURLWithoutComments != $requestedURL) {
-            	$redirect = $this->dao->getActiveRedirectForURL($requestedURLWithoutComments);
-            	if ($redirect['id'] != '0' && $redirect['final_dest'] != '0') {
-            		// A redirect record exists.
-            		$abj404connector->processRedirect($requestedURL, $redirect, 'existing');
-            		
-            		// we only reach this line if an error happens because the user should already be redirected.
-            		exit;
-            	}
-            }
-
-            $autoRedirectsAreOn = !array_key_exists('auto_redirects', $options) ||
-            	$options['auto_redirects'] == '1';
-            	
-            // --------------------------------------------------------------
-            // try a permalink change.
-            if ($autoRedirectsAreOn) {
-	       		$slugPermalink = $this->spellChecker->getPermalinkUsingSlug($urlSlugOnly);
-	            if (!empty($slugPermalink)) {
-	                $redirectType = $slugPermalink['type'];
-	                $this->dao->setupRedirect($requestedURL, ABJ404_STATUS_AUTO, $redirectType, $slugPermalink['id'], $options['default_redirect'], 0);
-	
-	                $this->dao->logRedirectHit($requestedURL, $slugPermalink['link'], 'exact slug');
-	                $this->logic->forceRedirect(esc_url($slugPermalink['link']), esc_html($options['default_redirect']));
-	                exit;
-	            }
-            }
-
-            // --------------------------------------------------------------
-            // try the regex URLs.
-            $sentTo404Page = $this->tryRegexRedirect($options, $requestedURL);
-            if ($sentTo404Page) {
-            	return;
-            }
-
-            if (!$autoRedirectsAreOn) {
-            	// Trigger async suggestion computation if 404 page has shortcode
-            	$this->triggerAsyncSuggestionsIfNeeded($requestedURL);
-            	$this->logic->sendTo404Page($requestedURL,
-            		'Do not create redirects per the options.');
-            	return;
-            }
-            
-            // --------------------------------------------------------------
-            // try spell checking.
-            // Pass full URL so results can be cached for shortcode if no auto-redirect
-            $permalink = $this->spellChecker->getPermalinkUsingSpelling($urlSlugOnly, $requestedURL);
-            if (!empty($permalink)) {
-                $redirectType = $permalink['type'];
-                $this->dao->setupRedirect($requestedURL, ABJ404_STATUS_AUTO, $redirectType, $permalink['id'], $options['default_redirect'], 0);
-
-                $this->dao->logRedirectHit($requestedURL, $permalink['link'], 'spell check');
-                $this->logic->forceRedirect(esc_url($permalink['link']), esc_html($options['default_redirect']));
-                exit;
-            }
-
-        } else {
-
-            // this is for a permalink structure that has changed?
-            if (is_single() || is_page()) {
-                if (!is_feed() && !is_trackback() && !is_preview()) {
-                    $theID = get_the_ID();
-                    $permalink = ABJ_404_Solution_Functions::permalinkInfoToArray(
-                    	$theID . "|" . ABJ404_TYPE_POST, 0, null, $options);
-
-                    $urlParts = parse_url($permalink['link']);
-                    $perma_link = $urlParts['path'];
-
-                    $paged = get_query_var('page') ? esc_html(get_query_var('page')) : FALSE;
-
-                    if (!$paged === FALSE) {
-                        if ($urlParts['query'] == "") {
-                            if ($this->f->substr($perma_link, -1) == "/") {
-                                $perma_link .= $paged . "/";
-                            } else {
-                                $perma_link .= "/" . $paged;
-                            }
-                        } else {
-                            $urlParts['query'] .= "&page=" . $paged;
-                        }
-                    }
-
-                    $perma_link .= $this->f->sortQueryString($urlParts);
-
-                    // Check for forced permalinks.
-                    if (@$options['auto_redirects'] == '1') {
-                        if ($requestedURL != $perma_link) {
-                            if ($redirect['id'] != '0') {
-                                $abj404connector->processRedirect($requestedURL, $redirect, 'single page 3');
-                            } else {
-                                $this->dao->setupRedirect(esc_url($requestedURL), ABJ404_STATUS_AUTO, ABJ404_TYPE_POST, $permalink['id'], $options['default_redirect'], 0);
-                                $this->dao->logRedirectHit($requestedURL, $permalink['link'], 'single page');
-                                $this->logic->forceRedirect(esc_url($permalink['link']), 
-                                        esc_html($options['default_redirect']));
-                                exit;
-                            }
-                        }
-                    }
-
-                    if ($requestedURL == $perma_link) {
-                        // Not a 404 Link. Check for matches.
-                        if ($options['remove_matches'] == '1') {
-                            if ($redirect['id'] != '0') {
-                                $this->dao->deleteRedirect($redirect['id']);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // this is for requests like website.com/?p=123
-        $this->logic->tryNormalPostQuery($options);
-
-        $this->dao->logRedirectHit($requestedURL, '404', 'gave up.');
-
-        // Trigger async suggestion computation if 404 page has shortcode
-        $this->triggerAsyncSuggestionsIfNeeded($requestedURL);
-        $this->logic->sendTo404Page($requestedURL, '');
+        return $this->getFrontendPipeline()->process404();
     }
 
-    /**
-     * Trigger async suggestion computation if the 404 page has the shortcode.
-     * Fires a non-blocking HTTP request to compute suggestions in the background.
-     *
-     * @param string $requestedURL The URL that caused the 404
-     */
-    private function triggerAsyncSuggestionsIfNeeded($requestedURL) {
-        // Check if 404 page has the suggestions shortcode
-        if ($this->spellChecker->does404PageHaveSuggestionsShortcode()) {
-            $this->spellChecker->triggerAsyncSuggestionComputation($requestedURL);
-        }
-    }
-    
     /** 
      * 
      * @param $options
@@ -677,47 +564,14 @@ class ABJ_404_Solution_WordPress_Connector {
      * @return boolean true if the user is sent to the default 404 page.
      */
     function tryRegexRedirect($options, $requestedURL) {
-    	$regexPermalink = $this->spellChecker->getPermalinkUsingRegEx($requestedURL);
-    	if (!empty($regexPermalink)) {
-    		$this->dao->logRedirectHit($regexPermalink['matching_regex'], $regexPermalink['link'], 'regex match',
-    			$requestedURL);
-    		$sentTo404Page = $this->logic->forceRedirect($regexPermalink['link'], 
-    			esc_html($options['default_redirect']), $regexPermalink['type'],
-    			$requestedURL);
-    		if ($sentTo404Page) {
-    			return true;
-    		}
-    		exit;
-    	}
-    	return false;
+        return $this->getFrontendPipeline()->tryRegexRedirect($options, $requestedURL);
     }
     
 	/**
 	 * @param options
 	 */
     function logAReallyLongDebugMessage($options, $requestedURL, $redirect) {
-	 	
-        $debugOptionsMsg = esc_html('auto_redirects: ' . $options['auto_redirects'] . ', auto_score: ' . 
-                $options['auto_score'] . ', template_redirect_priority: ' . $options['template_redirect_priority'] .
-                ', auto_cats: ' . $options['auto_cats'] . ', auto_tags: ' .
-                $options['auto_tags'] . ', dest404page: ' . $options['dest404page']);
-
-        $remoteAddress = esc_sql($_SERVER['REMOTE_ADDR']);
-        if (!array_key_exists('log_raw_ips', $options) || $options['log_raw_ips'] != '1') {
-        	$remoteAddress = $this->f->md5lastOctet($remoteAddress);
-        }
-        
-        $httpUserAgent = "";
-        if (array_key_exists("HTTP_USER_AGENT", $_SERVER)) {
-        	$httpUserAgent = $_SERVER['HTTP_USER_AGENT'];
-        }
-
-        $debugServerMsg = esc_html('HTTP_USER_AGENT: ' . $httpUserAgent . ', REMOTE_ADDR: ' . 
-                $remoteAddress . ', REQUEST_URI: ' . $this->f->normalizeUrlString($_SERVER['REQUEST_URI']));
-        $this->logger->debugMessage("Processing 404 for URL: " . $requestedURL . " | Redirect: " .
-                wp_kses_post(json_encode($redirect)) . " | is_single(): " . is_single() . " | " . "is_page(): " . is_page() .
-                " | is_feed(): " . is_feed() . " | is_trackback(): " . is_trackback() . " | is_preview(): " .
-                is_preview() . " | options: " . $debugOptionsMsg . ', ' . $debugServerMsg);
+        $this->getFrontendPipeline()->logAReallyLongDebugMessage($options, $requestedURL, $redirect);
 	}
     
     /** Redirect to the page specified. 
@@ -730,99 +584,7 @@ class ABJ_404_Solution_WordPress_Connector {
      * @return boolean true if the user is sent to the default 404 page.
      */
     function processRedirect($requestedURL, $redirect, $matchReason) {
-
-        if (( $redirect['status'] != ABJ404_STATUS_MANUAL && $redirect['status'] != ABJ404_STATUS_AUTO ) || $redirect['disabled'] != 0) {
-            // It's a redirect that has been deleted, ignored, or captured.
-            $this->logger->errorMessage("processRedirect() was called with bad redirect data. Data: " .
-                    wp_kses_post(print_r($redirect, true)));
-        }
-
-        // Handle ABJ404_TYPE_404_DISPLAYED: send to 404 page directly, don't redirect
-        if ($redirect['type'] == ABJ404_TYPE_404_DISPLAYED) {
-            $this->dao->logRedirectHit($redirect['url'], '404', $matchReason);
-            // Trigger async suggestions if the 404 page has the shortcode
-            $this->triggerAsyncSuggestionsIfNeeded($requestedURL);
-            $this->logic->sendTo404Page($requestedURL, $matchReason);
-            return true;
-        }
-
-        // Check if destination is the custom 404 page or has the shortcode
-        // If so, set the _STATUS_404 cookie so WordPress treats it as a 404 page
-        $isRedirectToCustom404Page = false;
-
-        if ($redirect['type'] == ABJ404_TYPE_POST) {
-            $options = $this->logic->getOptions();
-            $dest404page = isset($options['dest404page']) ? $options['dest404page'] : null;
-
-            // Check if destination matches the global custom 404 page
-            if ($dest404page !== null && $this->logic->thereIsAUserSpecified404Page($dest404page)) {
-                $dest404Parts = explode('|', $dest404page);
-                $custom404Id = isset($dest404Parts[0]) ? (int)$dest404Parts[0] : 0;
-                if ($custom404Id > 0 && $redirect['final_dest'] == $custom404Id) {
-                    $isRedirectToCustom404Page = true;
-                }
-            }
-
-            // Also check if destination page has the shortcode
-            if (!$isRedirectToCustom404Page) {
-                $destPage = get_post($redirect['final_dest']);
-                if ($destPage && has_shortcode($destPage->post_content, ABJ404_SHORTCODE_NAME)) {
-                    $isRedirectToCustom404Page = true;
-                }
-            }
-        }
-
-        // Set cookies and pre-compute suggestions only when redirecting to a 404-style page
-        // (Security fix: don't set cookies for regular redirects - query strings may contain tokens)
-        if ($isRedirectToCustom404Page) {
-            $this->logic->setCookieWithPreviousRequest();
-            setcookie(ABJ404_PP . '_STATUS_404', 'true', time() + 20, "/");
-
-            // Pre-compute suggestions before redirect (stores to DB cache)
-            // This ensures findMatchingPosts() is called even for existing redirects
-            $urlSlugOnly = $this->logic->removeHomeDirectory($requestedURL);
-            $spellChecker = ABJ_404_Solution_SpellChecker::getInstance();
-            $spellChecker->findMatchingPosts($urlSlugOnly,
-                @$options['suggest_cats'], @$options['suggest_tags']);
-
-            // Trigger async suggestion computation for transient-based polling
-            // (We already verified destination has shortcode, so call directly)
-            $spellChecker->triggerAsyncSuggestionComputation($requestedURL);
-        }
-
-        if ($redirect['type'] == ABJ404_TYPE_EXTERNAL) {
-        	$this->dao->logRedirectHit($redirect['url'], $redirect['final_dest'], 'external');
-            $this->logic->forceRedirect($redirect['final_dest'], esc_html($redirect['code']));
-            exit;
-        }
-
-        $key = $redirect['final_dest'] . "|" . $redirect['type'];
-        $permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($key, 0);
-
-        // log only the path part of the URL
-        $redirectedTo = esc_url($permalink['link']);
-        $urlParts = parse_url($redirectedTo);
-        if (array_key_exists('path', $urlParts)) {
-        	$redirectedTo = $urlParts['path'];
-        }
-
-        $finalLink = $permalink['link'];
-
-        $this->dao->logRedirectHit($redirect['url'], $redirectedTo, $matchReason);
-        // Pass $isRedirectToCustom404Page so forceRedirect can append _ref at the end
-        // (appending last prevents user override via query string injection)
-        $sendTo404Page = $this->logic->forceRedirect(
-            $finalLink,
-            esc_html($redirect['code']),
-            -1,
-            $requestedURL,
-            $isRedirectToCustom404Page
-        );
-        
-        if ($sendTo404Page) {
-        	return;
-        }
-        exit;
+        return $this->getFrontendPipeline()->processRedirect($requestedURL, $redirect, $matchReason);
     }
 
     /** Display an admin dashboard notification.
@@ -858,7 +620,7 @@ class ABJ_404_Solution_WordPress_Connector {
         }
     }
 
-    /** Display a review request notification after 14 days of plugin use.
+    /** Display a review request notification after a sustained period of plugin use.
      * Uses a qualification question to ensure only satisfied users are directed to leave reviews.
      * Unhappy users are directed to provide feedback instead.
      *
@@ -867,6 +629,7 @@ class ABJ_404_Solution_WordPress_Connector {
      * - Never shows again after user clicks review link button
      * - Never shows again after user submits feedback
      * - Shows again in 7 days after "Ask again later"
+     * - Shows again in 14 days after close "X"
      */
     static function maybeShowReviewRequest() {
         // Only show on 404 Solution plugin pages
@@ -896,19 +659,25 @@ class ABJ_404_Solution_WordPress_Connector {
             return;
         }
 
-        // Show review request after 14 days (1209600 seconds)
+        // Show review request after enough real usage time has passed.
         $days_installed = (time() - $installed_time) / 86400;
-        if ($days_installed < 14) {
+        if ($days_installed < self::REVIEW_INITIAL_DELAY_DAYS) {
             return;
         }
 
         // Handle user responses to qualification question
         if (isset($_GET['abj404_review_response'])) {
-            if (!wp_verify_nonce($_GET['_wpnonce'], 'abj404_review_response')) {
+            $rawResponseNonce = isset($_GET['_wpnonce']) ? $_GET['_wpnonce'] : '';
+            $responseNonce = sanitize_text_field(self::normalizeRequestScalar($rawResponseNonce));
+            if ($responseNonce === '' || !wp_verify_nonce($responseNonce, 'abj404_review_response')) {
                 return;
             }
 
-            $response = sanitize_text_field($_GET['abj404_review_response']);
+            $response = sanitize_text_field(self::normalizeRequestScalar($_GET['abj404_review_response']));
+            $allowedResponses = array('yes', 'not_yet', 'ask_later', 'close_x', 'never');
+            if (!in_array($response, $allowedResponses, true)) {
+                return;
+            }
 
             if ($response === 'yes') {
                 // User thinks it deserves 5 stars - show review link
@@ -920,7 +689,11 @@ class ABJ_404_Solution_WordPress_Connector {
                 delete_user_meta(get_current_user_id(), 'abj404_review_remind_later');
             } elseif ($response === 'ask_later') {
                 // User wants to be reminded in 7 days
-                update_user_meta(get_current_user_id(), 'abj404_review_remind_later', time() + (7 * 86400));
+                update_user_meta(get_current_user_id(), 'abj404_review_remind_later', time() + (self::REVIEW_ASK_LATER_DELAY_DAYS * 86400));
+                delete_user_meta(get_current_user_id(), 'abj404_review_step');
+            } elseif ($response === 'close_x') {
+                // Close button snoozes this prompt for at least two weeks.
+                update_user_meta(get_current_user_id(), 'abj404_review_remind_later', time() + (self::REVIEW_CLOSE_X_SNOOZE_DAYS * 86400));
                 delete_user_meta(get_current_user_id(), 'abj404_review_step');
             } elseif ($response === 'never') {
                 // User never wants to see this - PERMANENT dismissal
@@ -936,7 +709,9 @@ class ABJ_404_Solution_WordPress_Connector {
 
         // Handle "Going to review now" button click - PERMANENT dismissal
         if (isset($_GET['abj404_leaving_review'])) {
-            if (wp_verify_nonce($_GET['_wpnonce'], 'abj404_leaving_review')) {
+            $rawLeavingReviewNonce = isset($_GET['_wpnonce']) ? $_GET['_wpnonce'] : '';
+            $leavingReviewNonce = sanitize_text_field(self::normalizeRequestScalar($rawLeavingReviewNonce));
+            if ($leavingReviewNonce !== '' && wp_verify_nonce($leavingReviewNonce, 'abj404_leaving_review')) {
                 update_user_meta(get_current_user_id(), 'abj404_review_dismissed', 'permanent');
                 delete_user_meta(get_current_user_id(), 'abj404_review_step');
                 delete_user_meta(get_current_user_id(), 'abj404_review_remind_later');
@@ -952,12 +727,18 @@ class ABJ_404_Solution_WordPress_Connector {
         }
 
         // Handle feedback submission - PERMANENT dismissal
+        $rawFeedbackNonce = isset($_POST['abj404_feedback_nonce']) ? $_POST['abj404_feedback_nonce'] : '';
+        $feedbackNonce = sanitize_text_field(self::normalizeRequestScalar($rawFeedbackNonce));
         if (isset($_POST['abj404_submit_feedback']) &&
-            wp_verify_nonce($_POST['abj404_feedback_nonce'], 'abj404_submit_feedback')) {
+            $feedbackNonce !== '' &&
+            wp_verify_nonce($feedbackNonce, 'abj404_submit_feedback')) {
 
-            // Get selected issues (checkboxes)
-            $issues = isset($_POST['feedback_issues']) ? array_map('sanitize_text_field', $_POST['feedback_issues']) : array();
-            $feedback_details = sanitize_textarea_field($_POST['feedback_details']);
+            // Get selected issues (checkboxes) and normalize malformed inputs safely.
+            $issuesRaw = isset($_POST['feedback_issues']) ? $_POST['feedback_issues'] : array();
+            $issues = self::sanitizeFeedbackIssues($issuesRaw);
+
+            $feedbackDetailsRaw = isset($_POST['feedback_details']) ? $_POST['feedback_details'] : '';
+            $feedback_details = sanitize_textarea_field(self::normalizeRequestScalar($feedbackDetailsRaw));
 
             // Prepare feedback data
             $feedback_data = array(
@@ -1052,6 +833,10 @@ class ABJ_404_Solution_WordPress_Connector {
             add_query_arg('abj404_review_response', 'never'),
             'abj404_review_response'
         );
+        $close_url = wp_nonce_url(
+            add_query_arg('abj404_review_response', 'close_x'),
+            'abj404_review_response'
+        );
 
         $html = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/html/reviewQualificationQuestion.html");
         $f = ABJ_404_Solution_Functions::getInstance();
@@ -1059,6 +844,7 @@ class ABJ_404_Solution_WordPress_Connector {
         $html = $f->str_replace('{not_yet_url}', esc_attr($not_yet_url), $html);
         $html = $f->str_replace('{ask_later_url}', esc_attr($ask_later_url), $html);
         $html = $f->str_replace('{never_url}', esc_attr($never_url), $html);
+        $html = $f->str_replace('{close_url}', esc_attr($close_url), $html);
         echo $html;
     }
 
@@ -1074,11 +860,16 @@ class ABJ_404_Solution_WordPress_Connector {
             add_query_arg('abj404_review_response', 'never'),
             'abj404_review_response'
         );
+        $close_url = wp_nonce_url(
+            add_query_arg('abj404_review_response', 'close_x'),
+            'abj404_review_response'
+        );
 
         $html = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/html/reviewLinkNotice.html");
         $f = ABJ_404_Solution_Functions::getInstance();
         $html = $f->str_replace('{review_link_url}', esc_attr($review_link_url), $html);
         $html = $f->str_replace('{never_url}', esc_attr($never_url), $html);
+        $html = $f->str_replace('{close_url}', esc_attr($close_url), $html);
         echo $html;
     }
 
@@ -1086,6 +877,10 @@ class ABJ_404_Solution_WordPress_Connector {
     private static function showFeedbackFormNotice() {
         $never_url = wp_nonce_url(
             add_query_arg('abj404_review_response', 'never'),
+            'abj404_review_response'
+        );
+        $close_url = wp_nonce_url(
+            add_query_arg('abj404_review_response', 'close_x'),
             'abj404_review_response'
         );
 
@@ -1098,7 +893,66 @@ class ABJ_404_Solution_WordPress_Connector {
         $f = ABJ_404_Solution_Functions::getInstance();
         $html = $f->str_replace('{nonce_field}', $nonce_field, $html);
         $html = $f->str_replace('{never_url}', esc_attr($never_url), $html);
+        $html = $f->str_replace('{close_url}', esc_attr($close_url), $html);
         echo $html;
+    }
+
+    /**
+     * Safely unslash request data when wp_unslash exists and is callable.
+     * Some test environments report wp_unslash as existing but throw when called.
+     *
+     * @param mixed $value
+     * @return mixed
+     */
+    private static function safeWpUnslash($value) {
+        if (!function_exists('wp_unslash')) {
+            return $value;
+        }
+
+        try {
+            return wp_unslash($value);
+        } catch (Throwable $e) {
+            return $value;
+        }
+    }
+
+    /**
+     * Normalize request input to a scalar string to avoid warnings when arrays/objects are passed.
+     *
+     * @param mixed $value
+     * @return string
+     */
+    private static function normalizeRequestScalar($value) {
+        $value = self::safeWpUnslash($value);
+        if (is_array($value) || is_object($value)) {
+            return '';
+        }
+        return (string)$value;
+    }
+
+    /**
+     * Normalize and sanitize feedback issue selections from request data.
+     *
+     * @param mixed $issuesRaw
+     * @return array<int, string>
+     */
+    private static function sanitizeFeedbackIssues($issuesRaw) {
+        $issuesRaw = self::safeWpUnslash($issuesRaw);
+        if (!is_array($issuesRaw)) {
+            $issuesRaw = array($issuesRaw);
+        }
+
+        $issues = array();
+        foreach ($issuesRaw as $issue) {
+            if (is_array($issue) || is_object($issue)) {
+                continue;
+            }
+            $clean = sanitize_text_field((string)$issue);
+            if ($clean !== '') {
+                $issues[] = $clean;
+            }
+        }
+        return $issues;
     }
 
     /** Adds a link under the "Settings" link to the plugin page.

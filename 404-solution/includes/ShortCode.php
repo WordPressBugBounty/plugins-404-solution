@@ -1,5 +1,10 @@
 <?php
 
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 /* Functions in this class should only be for plugging into WordPress listeners (filters, actions, etc).  */
 
 class ABJ_404_Solution_ShortCode {
@@ -458,7 +463,8 @@ class ABJ_404_Solution_ShortCode {
     public static function renderSuggestionsHTML($suggestionsPacket, $requestedURL = '') {
         $abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
         $f = ABJ_404_Solution_Functions::getInstance();
-        $options = $abj404logic->getOptions();
+        // Rendering should be side-effect free (no upgrade/migration work triggered on frontend/AJAX).
+        $options = $abj404logic->getOptions(true);
 
         // Ensure suggestions is an array (cache may return stdClass from json_decode)
         $permalinkSuggestions = isset($suggestionsPacket[0]) ? (array)$suggestionsPacket[0] : [];

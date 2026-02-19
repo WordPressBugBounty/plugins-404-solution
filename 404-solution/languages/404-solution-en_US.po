@@ -39,6 +39,27 @@ msgstr "Saving..."
 msgid "Could not save settings - missing security token. The wizard may appear again on next visit."
 msgstr "Could not save settings - missing security token. The wizard may appear again on next visit."
 
+msgid "404 Solution Logs"
+msgstr "404 Solution Logs"
+
+msgid "Timestamp"
+msgstr "Timestamp"
+
+msgid "Requested URL"
+msgstr "Requested URL"
+
+msgid "Destination URL"
+msgstr "Destination URL"
+
+msgid "Some items could not be anonymized."
+msgstr "Some items could not be anonymized."
+
+msgid "Rate limit exceeded. Please try again later."
+msgstr "Rate limit exceeded. Please try again later."
+
+msgid "Invalid nonce. Please reload the page."
+msgstr "Invalid nonce. Please reload the page."
+
 msgid "Could not save dismissal. The wizard may appear again on next visit."
 msgstr "Could not save dismissal. The wizard may appear again on next visit."
 
@@ -118,6 +139,9 @@ msgstr "(The log file does not exist.)"
 
 msgid "(The specified page doesn't exist. Please update this setting.)"
 msgstr "(The specified page doesn't exist. Please update this setting.)"
+
+msgid "(Destination unavailable)"
+msgstr "(Destination unavailable)"
 
 msgid "(Type a page name or an external URL)"
 msgstr "(Type a page name or an external URL)"
@@ -2057,6 +2081,22 @@ msgstr "Data may not be immediately updated. Refresh to see latest changes."
 msgid "Last updated: %s"
 msgstr "Last updated: %s"
 
+#: includes/View.php
+msgid "Last checked: %s"
+msgstr "Last checked: %s"
+
+#: includes/View.php
+msgid "Refresh scheduled"
+msgstr "Refresh scheduled"
+
+#: includes/View.php
+msgid "Refresh running"
+msgstr "Refresh running"
+
+#: includes/View.php
+msgid "Refresh paused"
+msgstr "Refresh paused"
+
 #: includes/WordPress_Connector.php
 msgid "second"
 msgstr "second"
@@ -2204,6 +2244,30 @@ msgstr "Press Enter to search"
 msgid "Pagination"
 msgstr "Pagination"
 
+#: includes/html/paginationLinks.html
+msgid "data-pagination-current-signature"
+msgstr "data-pagination-current-signature"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-current-orderby"
+msgstr "data-pagination-current-orderby"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-current-order"
+msgstr "data-pagination-current-order"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-current-filter"
+msgstr "data-pagination-current-filter"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-current-paged"
+msgstr "data-pagination-current-paged"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-current-logsid"
+msgstr "data-pagination-current-logsid"
+
 #: includes/View.php
 msgid "Select all"
 msgstr "Select all"
@@ -2219,3 +2283,154 @@ msgstr "Require minimum match quality"
 #: includes/html/viewSuggestions.html
 msgid "Only show suggestions that closely match the requested URL. This filters out weak matches that may confuse visitors."
 msgstr "Only show suggestions that closely match the requested URL. This filters out weak matches that may confuse visitors."
+
+#: includes/View.php
+msgid "Diagnostics"
+msgstr "Diagnostics"
+
+#: includes/View.php
+msgid "Quick environment checks for troubleshooting and support."
+msgstr "Quick environment checks for troubleshooting and support."
+
+#: includes/View.php
+msgid "OK"
+msgstr "OK"
+
+#: includes/View.php
+msgid "Warning"
+msgstr "Warning"
+
+#: includes/View.php
+msgid "Info"
+msgstr "Info"
+
+#: includes/View.php
+msgid "Plugin Version"
+msgstr "Plugin Version"
+
+#: includes/View.php
+msgid "WordPress Version"
+msgstr "WordPress Version"
+
+#: includes/View.php
+msgid "PHP Version"
+msgstr "PHP Version"
+
+#: includes/View.php
+msgid "Uploads Directory"
+msgstr "Uploads Directory"
+
+#: includes/View.php
+msgid "Not available"
+msgstr "Not available"
+
+#: includes/View.php
+msgid "Uploads Writable"
+msgstr "Uploads Writable"
+
+#: includes/View.php
+msgid "Yes"
+msgstr "Yes"
+
+#: includes/View.php
+msgid "No"
+msgstr "No"
+
+#: includes/View.php
+msgid "mbstring Extension"
+msgstr "mbstring Extension"
+
+#: includes/View.php
+msgid "Loaded"
+msgstr "Loaded"
+
+#: includes/View.php
+msgid "Missing"
+msgstr "Missing"
+
+#: includes/View.php
+msgid "ZipArchive Support"
+msgstr "ZipArchive Support"
+
+#: includes/View.php
+msgid "Available"
+msgstr "Available"
+
+#: includes/View.php
+msgid "WP_DEBUG"
+msgstr "WP_DEBUG"
+
+#: includes/View.php
+msgid "Enabled"
+msgstr "Enabled"
+
+#: includes/View.php
+msgid "Disabled"
+msgstr "Disabled"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-auto-refresh"
+msgstr "data-pagination-auto-refresh"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-refresh-started-text"
+msgstr "data-pagination-refresh-started-text"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-refresh-finished-text"
+msgstr "data-pagination-refresh-finished-text"
+
+#: includes/View.php
+msgid "250ms"
+msgstr "250ms"
+
+#: includes/View.php
+msgid "500ms"
+msgstr "500ms"
+
+#: includes/View.php
+msgid "900ms"
+msgstr "900ms"
+
+#: includes/View.php
+msgid "Disable"
+msgstr "Disable"
+
+#: includes/View.php
+msgid "Simulated DB Latency"
+msgstr "Simulated DB Latency"
+
+#: includes/View.php
+msgid "ON (%d ms per plugin query)"
+msgstr "ON (%d ms per plugin query)"
+
+#: includes/View.php
+msgid "OFF"
+msgstr "OFF"
+
+#: includes/View.php
+msgid "Refreshing data in background…"
+msgstr "Refreshing data in background…"
+
+#: includes/View.php
+msgid "Data refreshed"
+msgstr "Data refreshed"
+
+#: includes/View.php
+msgid "Refresh available"
+msgstr "Refresh available"
+
+msgid "More info"
+msgstr "More info"
+
+msgid "Destination missing. Edit this redirect and choose a destination."
+msgstr "Destination missing. Edit this redirect and choose a destination."
+
+msgid "(Destination missing)"
+msgstr "(Destination missing)"
+
+msgid "data-pagination-refresh-available-text"
+msgstr "data-pagination-refresh-available-text"
+
+msgid "destination-warning-text"
+msgstr "destination-warning-text"

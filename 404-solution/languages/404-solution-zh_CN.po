@@ -1610,7 +1610,7 @@ msgid "Disable automatic dark mode detection"
 msgstr "禁用自动深色模式检测"
 
 msgid "When unchecked and theme is set to \"Default\", the plugin will automatically switch to a dark theme if your WordPress admin color scheme is dark (Midnight, Ectoplasm, Coffee), if you have a dark mode plugin enabled, or if your browser/OS prefers dark mode."
-msgstr "取消勾选且主题设置为\\\"默认\\\"时，如果您的 WordPress 管理配色方案为深色（Midnight、Ectoplasm、Coffee），或启用了深色模式插件，或您的浏览器/操作系统偏好深色模式，插件将自动切换到深色主题。"
+msgstr "取消勾选且主题设置为\"默认\"时，如果您的 WordPress 管理配色方案为深色（Midnight、Ectoplasm、Coffee），或启用了深色模式插件，或您的浏览器/操作系统偏好深色模式，插件将自动切换到深色主题。"
 
 msgid "Your feedback helps us improve. System information (WordPress version, PHP version, installed plugins) will be included. We respect your privacy and will not share your information."
 msgstr "您的反馈帮助我们改进。系统信息（WordPress 版本、PHP 版本、已安装的插件）将被包含在内。我们尊重您的隐私，不会分享您的信息。"
@@ -1622,7 +1622,7 @@ msgid "Use WordPress Default"
 msgstr "使用 WordPress 默认设置"
 
 msgid "Override the language used for this plugin's admin interface. Leave on \"Use WordPress Default\" to respect WordPress and user language settings."
-msgstr "覆盖此插件管理界面使用的语言。保持\\\"使用 WordPress 默认设置\\\"以遵循 WordPress 和用户语言设置。"
+msgstr "覆盖此插件管理界面使用的语言。保持\"使用 WordPress 默认设置\"以遵循 WordPress 和用户语言设置。"
 
 #: includes/PluginLogic.php
 msgid "Error: Invalid language selected"
@@ -1655,11 +1655,11 @@ msgstr "此处列出的页面不会被重定向到（除非页面的重定向已
 
 #: includes/html/settingsAdvanced.html
 msgid "The plugin will only redirect the post types specified here. Default WordPress post types are \"post\" and \"page.\" The \"product\" type is for WooCommerce users."
-msgstr "插件将只重定向此处指定的文章类型。默认的WordPress文章类型是\\\"post\\\"和\\\"page\\\"。\\\"product\\\"类型适用于WooCommerce用户。"
+msgstr "插件将只重定向此处指定的文章类型。默认的WordPress文章类型是\"post\"和\"page\"。\"product\"类型适用于WooCommerce用户。"
 
 #: includes/html/adminOptionsGeneral.html
 msgid "When the number of captured 404s would cause an admin notification, an email will be sent to the addresses specified here. Multiple email addresses can be separated by commas (,). The \"from\" email address is always the default WordPress admin email:"
-msgstr "当已记录的 404 数量会导致管理员通知时，将向此处指定的地址发送电子邮件。多个电子邮件地址可以用逗号（,）分隔。\\\"发件人\\\"电子邮件地址始终是默认的WordPress管理员电子邮件："
+msgstr "当已记录的 404 数量会导致管理员通知时，将向此处指定的地址发送电子邮件。多个电子邮件地址可以用逗号（,）分隔。\"发件人\"电子邮件地址始终是默认的WordPress管理员电子邮件："
 
 #: includes/DatabaseUpgradesEtc.php:125
 msgid "404 Solution: N-gram spell check cache is being built in the background%s to optimize performance. This may take a few minutes on large sites."
@@ -2073,6 +2073,22 @@ msgstr "数据可能不会立即更新。刷新以查看最新更改。"
 #: includes/View.php
 msgid "Last updated: %s"
 msgstr "上次更新: %s"
+#: includes/View.php
+msgid "Last checked: %s"
+msgstr "上次检查: %s"
+
+#: includes/View.php
+msgid "Refresh scheduled"
+msgstr "已安排刷新"
+
+#: includes/View.php
+msgid "Refresh running"
+msgstr "正在刷新"
+
+#: includes/View.php
+msgid "Refresh paused"
+msgstr "刷新已暂停"
+
 
 #: includes/WordPress_Connector.php
 msgid "second"
@@ -2220,6 +2236,30 @@ msgstr "按回车键搜索"
 #: includes/html/paginationLinks.html
 msgid "Pagination"
 msgstr "分页"
+#: includes/html/paginationLinks.html
+msgid "data-pagination-current-signature"
+msgstr "data-pagination-current-signature"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-current-orderby"
+msgstr "data-pagination-current-orderby"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-current-order"
+msgstr "data-pagination-current-order"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-current-filter"
+msgstr "data-pagination-current-filter"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-current-paged"
+msgstr "data-pagination-current-paged"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-current-logsid"
+msgstr "data-pagination-current-logsid"
+
 
 #: includes/View.php
 msgid "Select all"
@@ -2236,3 +2276,179 @@ msgstr "要求最低匹配质量"
 #: includes/html/viewSuggestions.html
 msgid "Only show suggestions that closely match the requested URL. This filters out weak matches that may confuse visitors."
 msgstr "仅显示与请求的URL紧密匹配的建议。这将过滤掉可能使访问者困惑的弱匹配。"
+
+
+msgid "404 Solution Logs"
+msgstr "404 Solution 日志"
+
+msgid "Timestamp"
+msgstr "时间戳"
+
+msgid "Requested URL"
+msgstr "请求的 URL"
+
+msgid "Destination URL"
+msgstr "目标 URL"
+
+msgid "Some items could not be anonymized."
+msgstr "部分项目无法匿名化。"
+
+msgid "Rate limit exceeded. Please try again later."
+msgstr "超过速率限制。请稍后再试。"
+
+msgid "Invalid nonce. Please reload the page."
+msgstr "Nonce 无效。请刷新页面。"
+
+#: includes/View.php
+msgid "Diagnostics"
+msgstr "诊断"
+
+#: includes/View.php
+msgid "Quick environment checks for troubleshooting and support."
+msgstr "用于故障排查和支持的快速环境检查。"
+
+#: includes/View.php
+msgid "OK"
+msgstr "OK"
+
+#: includes/View.php
+msgid "Warning"
+msgstr "警告"
+
+#: includes/View.php
+msgid "Info"
+msgstr "Info"
+
+#: includes/View.php
+msgid "Plugin Version"
+msgstr "插件版本"
+
+#: includes/View.php
+msgid "WordPress Version"
+msgstr "站点程序版本"
+
+#: includes/View.php
+msgid "PHP Version"
+msgstr "PHP 版本"
+
+#: includes/View.php
+msgid "Uploads Directory"
+msgstr "上传目录"
+
+#: includes/View.php
+msgid "Not available"
+msgstr "不可用"
+
+#: includes/View.php
+msgid "Uploads Writable"
+msgstr "上传目录可写"
+
+#: includes/View.php
+msgid "Yes"
+msgstr "是"
+
+#: includes/View.php
+msgid "No"
+msgstr "否"
+
+#: includes/View.php
+msgid "mbstring Extension"
+msgstr "多字节字符串扩展"
+
+#: includes/View.php
+msgid "Loaded"
+msgstr "已加载"
+
+#: includes/View.php
+msgid "Missing"
+msgstr "缺失"
+
+#: includes/View.php
+msgid "ZipArchive Support"
+msgstr "压缩归档支持"
+
+#: includes/View.php
+msgid "Available"
+msgstr "可用"
+
+#: includes/View.php
+msgid "WP_DEBUG"
+msgstr "WP_DEBUG"
+
+#: includes/View.php
+msgid "Enabled"
+msgstr "已启用"
+
+#: includes/View.php
+msgid "Disabled"
+msgstr "已禁用"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-auto-refresh"
+msgstr "data-pagination-auto-refresh"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-refresh-started-text"
+msgstr "正在后台刷新数据…"
+
+#: includes/html/paginationLinks.html
+msgid "data-pagination-refresh-finished-text"
+msgstr "数据已刷新"
+
+#: includes/View.php
+msgid "250ms"
+msgstr "250 毫秒"
+
+#: includes/View.php
+msgid "500ms"
+msgstr "500 毫秒"
+
+#: includes/View.php
+msgid "900ms"
+msgstr "900 毫秒"
+
+#: includes/View.php
+msgid "Disable"
+msgstr "禁用"
+
+#: includes/View.php
+msgid "Simulated DB Latency"
+msgstr "模拟数据库延迟"
+
+#: includes/View.php
+msgid "ON (%d ms per plugin query)"
+msgstr "开启（每次插件查询 %d 毫秒）"
+
+#: includes/View.php
+msgid "OFF"
+msgstr "关闭"
+
+#: includes/View.php
+msgid "Refreshing data in background…"
+msgstr "正在后台刷新数据…"
+
+#: includes/View.php
+msgid "Data refreshed"
+msgstr "数据已刷新"
+
+msgid "(Destination unavailable)"
+msgstr "（目标不可用）"
+
+#: includes/View.php
+msgid "Refresh available"
+msgstr "可用刷新"
+
+msgid "More info"
+msgstr "More info"
+
+msgid "Destination missing. Edit this redirect and choose a destination."
+msgstr "Destination missing. Edit this redirect and choose a destination."
+
+msgid "(Destination missing)"
+msgstr "(Destination missing)"
+
+msgid "data-pagination-refresh-available-text"
+msgstr "data-pagination-refresh-available-text"
+
+msgid "destination-warning-text"
+msgstr "destination-warning-text"

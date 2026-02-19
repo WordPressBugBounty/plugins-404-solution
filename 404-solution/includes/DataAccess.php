@@ -1,5 +1,10 @@
 <?php
 
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 /* Functions in this class should all reference one of the following variables or support functions that do.
  *      $wpdb, $_GET, $_POST, $_SERVER, $_.*
  * everything $wpdb related.
@@ -15,17 +20,56 @@ class ABJ_404_Solution_DataAccess {
 
     /** @var int Maximum age in seconds before hits table is considered stale */
     const HITS_TABLE_MAX_AGE_SECONDS = 300; // 5 minutes
+    /** Minimum interval between hits-table rebuild schedules (server-side dedupe). */
+    const HITS_TABLE_SCHEDULE_COOLDOWN_SECONDS = 30;
+    /** Short-lived cache for admin list snapshots (fast first paint). */
+    const VIEW_SNAPSHOT_CACHE_TTL_SECONDS = 120;
+    /** Minimum interval between expensive refreshes for the same view key. */
+    const VIEW_SNAPSHOT_REFRESH_COOLDOWN_SECONDS = 30;
+    /** Safety cap: avoid storing extremely large payloads in cache. */
+    const VIEW_SNAPSHOT_MAX_PAYLOAD_BYTES = 2097152; // 2 MiB
+    /** Cross-request lock timeout for logs-hits rebuild jobs. */
+    const HITS_TABLE_REBUILD_LOCK_TTL_SECONDS = 180;
+    /** Max age for cached stats-periodic aggregates. */
+    const PERIODIC_STATS_CACHE_TTL_SECONDS = 300;
+    /** Minimum interval before recalculating expensive stats aggregates. */
+    const PERIODIC_STATS_REFRESH_COOLDOWN_SECONDS = 30;
+    /** Retention for dashboard stats snapshot payload (stale snapshot is acceptable for fast first paint). */
+    const STATS_DASHBOARD_CACHE_TTL_SECONDS = 86400;
+    /** Minimum time between full stats snapshot recomputes. */
+    const STATS_DASHBOARD_REFRESH_COOLDOWN_SECONDS = 30;
+    /** Cooldown when DB query quota is exceeded. */
+    const DB_QUOTA_COOLDOWN_SECONDS = 900;
+    /** Cooldown when DB is read-only or storage is full. */
+    const DB_WRITE_BLOCK_COOLDOWN_SECONDS = 900;
+
+    /** Runtime flag: last time we checked whether logs-hits needs rebuild (Unix timestamp). */
+    const HITS_TABLE_LAST_CHECKED_FLAG = 'abj404_logs_hits_last_checked_at';
+    /** Runtime flag: last time we scheduled a rebuild (Unix timestamp). */
+    const HITS_TABLE_LAST_SCHEDULED_FLAG = 'abj404_logs_hits_last_scheduled_at';
+    /** Runtime flag: last schedule decision ('scheduled','running','cooldown','paused','not_needed'). */
+    const HITS_TABLE_LAST_DECISION_FLAG = 'abj404_logs_hits_last_decision';
+    /** Runtime flag: last successful hits-table rebuild completion (Unix timestamp). */
+    const HITS_TABLE_LAST_REFRESHED_FLAG = 'abj404_logs_hits_last_refreshed_at';
 
     private static $instance = null;
 
     /** @var bool Whether the hits table rebuild has been scheduled for this request */
     private static $hitsTableRebuildScheduled = false;
+    /** @var bool Prevent recursive auto-repair attempts on SQL errors. */
+    private static $tableRepairInProgress = false;
+    /** @var bool Prevent recursive invalid-data retry attempts. */
+    private static $invalidDataRetryInProgress = false;
+    /** @var bool Ensure view cache table DDL runs at most once per request. */
+    private static $viewSnapshotTableEnsured = false;
 
     /** @var ABJ_404_Solution_Functions */
     private $f;
 
     /** @var ABJ_404_Solution_Logging */
     private $logger;
+    /** @var array<string,int> Request-local cached counts for redirects list views. */
+    private $redirectsForViewCountRequestCache = array();
 
     /**
      * Constructor with dependency injection.
@@ -41,6 +85,23 @@ class ABJ_404_Solution_DataAccess {
     }
 
     public static function getInstance() {
+        if (self::$instance !== null) {
+            return self::$instance;
+        }
+
+        // If the DI container is initialized, prefer it.
+        if (function_exists('abj_service') && class_exists('ABJ_404_Solution_ServiceContainer')) {
+            try {
+                $c = ABJ_404_Solution_ServiceContainer::getInstance();
+                if (is_object($c) && method_exists($c, 'has') && $c->has('data_access')) {
+                    self::$instance = $c->get('data_access');
+                    return self::$instance;
+                }
+            } catch (Throwable $e) {
+                // fall back to legacy singleton below
+            }
+        }
+
         if (self::$instance == null) {
             // For backward compatibility, create with no arguments
             // The constructor will use getInstance() for dependencies
@@ -125,12 +186,22 @@ class ABJ_404_Solution_DataAccess {
     }
 
     function getLatestPluginVersion() {
+        // Cache version info to avoid repeated slow wordpress.org API calls.
+        $cacheKey = 'abj404_latest_plugin_version_info';
+        if (function_exists('get_transient')) {
+            $cached = get_transient($cacheKey);
+            if (is_array($cached) && isset($cached['version'])) {
+                return $cached;
+            }
+        }
+
         if (!function_exists('plugins_api')) {
               require_once(ABSPATH . 'wp-admin/includes/plugin-install.php');
         }
         if (!function_exists('plugins_api')) {
             $this->logger->infoMessage("I couldn't find the plugins_api function to check for the latest version.");
-            return ABJ404_VERSION;
+            $fallback = array('version' => ABJ404_VERSION, 'last_updated' => null);
+            return $fallback;
         }
 
         $pluginSlug = dirname(ABJ404_NAME);
@@ -153,10 +224,16 @@ class ABJ_404_Solution_DataAccess {
             $this->logger->infoMessage("There was an API issue checking the latest plugin version ("
                     . $api_error . ")");
 
-            return array('version' => ABJ404_VERSION, 'last_updated' => null);
+            $fallback = array('version' => ABJ404_VERSION, 'last_updated' => null);
+            return $fallback;
         }
 
-        return array('version' => $call_api->version, 'last_updated' => $call_api->last_updated);
+        $result = array('version' => $call_api->version, 'last_updated' => $call_api->last_updated);
+        if (function_exists('set_transient')) {
+            $ttl = defined('DAY_IN_SECONDS') ? DAY_IN_SECONDS : 86400;
+            set_transient($cacheKey, $result, $ttl);
+        }
+        return $result;
     }
     
     /** Check wordpress.org for the latest version of this plugin. Return true if the latest version is installed, 
@@ -229,11 +306,13 @@ class ABJ_404_Solution_DataAccess {
         global $wpdb;
         
         $replacements = array();
-        foreach ($wpdb->tables as $tableName) {
+        $tables = (isset($wpdb->tables) && is_array($wpdb->tables)) ? $wpdb->tables : array();
+        foreach ($tables as $tableName) {
             $replacements['{wp_' . $tableName . '}'] = $wpdb->prefix . $tableName;
         }
-        $replacements['{wp_users}'] = $wpdb->users;
-        $replacements['{wp_prefix}'] = $wpdb->prefix;
+        // wpdb properties are not guaranteed on mocks; provide safe fallbacks.
+        $replacements['{wp_users}'] = $wpdb->users ?? ($wpdb->prefix . 'users');
+        $replacements['{wp_prefix}'] = $wpdb->prefix ?? 'wp_';
         $replacements['{wp_prefix_lower}'] = $this->getLowercasePrefix();
         
         // wp database table replacements
@@ -249,6 +328,183 @@ class ABJ_404_Solution_DataAccess {
     }
 
     /**
+     * Build a stable cache key for admin list data/count snapshots.
+     *
+     * @param string $prefix
+     * @param string $sub
+     * @param array $tableOptions
+     * @return string
+     */
+    private function getViewSnapshotCacheKey($prefix, $sub, $tableOptions) {
+        $cacheShape = array(
+            'sub' => (string)$sub,
+            'filter' => (int)($tableOptions['filter'] ?? 0),
+            'orderby' => (string)($tableOptions['orderby'] ?? 'url'),
+            'order' => (string)($tableOptions['order'] ?? 'ASC'),
+            'paged' => (int)($tableOptions['paged'] ?? 1),
+            'perpage' => (int)($tableOptions['perpage'] ?? ABJ404_OPTION_DEFAULT_PERPAGE),
+            'filterText' => (string)($tableOptions['filterText'] ?? ''),
+            'blog' => function_exists('get_current_blog_id') ? (int)get_current_blog_id() : 1,
+        );
+        $encoded = function_exists('wp_json_encode') ? wp_json_encode($cacheShape) : json_encode($cacheShape);
+        return $prefix . '_' . md5((string)$encoded);
+    }
+
+    private function ensureViewSnapshotTableExists() {
+        if (self::$viewSnapshotTableEnsured) {
+            return;
+        }
+        self::$viewSnapshotTableEnsured = true;
+        $create = "CREATE TABLE IF NOT EXISTS {wp_abj404_view_cache} (
+            id bigint(20) NOT NULL auto_increment,
+            cache_key varchar(64) NOT NULL,
+            subpage varchar(64) NOT NULL default '',
+            payload longtext NOT NULL,
+            payload_bytes int(10) unsigned NOT NULL default 0,
+            refreshed_at bigint(20) NOT NULL default 0,
+            expires_at bigint(20) NOT NULL default 0,
+            updated_at bigint(20) NOT NULL default 0,
+            PRIMARY KEY (id),
+            UNIQUE KEY cache_key (cache_key),
+            KEY expires_at (expires_at),
+            KEY refreshed_at (refreshed_at)
+        ) COMMENT='404 Solution View Snapshot Cache Table'";
+        $this->queryAndGetResults($create, array('log_errors' => false));
+    }
+
+    private function getViewSnapshotLockOptionName($cacheKey) {
+        return $this->getLowercasePrefix() . 'abj404_view_cache_lock_' . md5((string)$cacheKey);
+    }
+
+    private function isViewSnapshotRefreshLocked($cacheKey) {
+        if (!function_exists('get_option')) {
+            return false;
+        }
+        $lockKey = $this->getViewSnapshotLockOptionName($cacheKey);
+        $lockValue = get_option($lockKey, false);
+        if ($lockValue === false || $lockValue === '' || $lockValue === null) {
+            return false;
+        }
+        $lockTs = is_numeric($lockValue) ? (int)$lockValue : 0;
+        if ($lockTs > 0 && (time() - $lockTs) > self::VIEW_SNAPSHOT_REFRESH_COOLDOWN_SECONDS) {
+            if (function_exists('delete_option')) {
+                delete_option($lockKey);
+            }
+            return false;
+        }
+        return true;
+    }
+
+    private function acquireViewSnapshotRefreshLock($cacheKey) {
+        if (!function_exists('add_option')) {
+            return true;
+        }
+        if ($this->isViewSnapshotRefreshLocked($cacheKey)) {
+            return false;
+        }
+        $lockKey = $this->getViewSnapshotLockOptionName($cacheKey);
+        return (bool)add_option($lockKey, time(), '', 'no');
+    }
+
+    private function releaseViewSnapshotRefreshLock($cacheKey) {
+        if (function_exists('delete_option')) {
+            delete_option($this->getViewSnapshotLockOptionName($cacheKey));
+        }
+    }
+
+    private function decodeSnapshotPayload($payload) {
+        if (!is_string($payload) || $payload === '') {
+            return null;
+        }
+        $decoded = json_decode($payload, true);
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    private function getViewRowsSnapshotFromTable($cacheKey, $allowExpired = false, $respectCooldown = false) {
+        $this->ensureViewSnapshotTableExists();
+        $query = "SELECT payload, refreshed_at, expires_at
+            FROM {wp_abj404_view_cache}
+            WHERE cache_key = %s LIMIT 1";
+        $result = $this->queryAndGetResults($query, array('query_params' => array($cacheKey), 'log_errors' => false));
+        if (empty($result['rows']) || !is_array($result['rows'][0])) {
+            return null;
+        }
+        $row = $result['rows'][0];
+        $expiresAt = intval($row['expires_at'] ?? 0);
+        $refreshedAt = intval($row['refreshed_at'] ?? 0);
+        $now = time();
+        $isFresh = ($expiresAt > $now);
+        $recentEnough = ($refreshedAt > 0 && ($now - $refreshedAt) <= self::VIEW_SNAPSHOT_REFRESH_COOLDOWN_SECONDS);
+        if (!$allowExpired && !$isFresh) {
+            return null;
+        }
+        if ($respectCooldown && !$isFresh && !$recentEnough) {
+            return null;
+        }
+        return $this->decodeSnapshotPayload((string)($row['payload'] ?? ''));
+    }
+
+    private function setViewRowsSnapshotToTable($cacheKey, $sub, $rows, $ttlSeconds) {
+        if (!is_array($rows)) {
+            return;
+        }
+        $this->ensureViewSnapshotTableExists();
+        $encoded = function_exists('wp_json_encode') ? wp_json_encode($rows) : json_encode($rows);
+        if (!is_string($encoded) || $encoded === '') {
+            return;
+        }
+        $bytes = strlen($encoded);
+        if ($bytes > self::VIEW_SNAPSHOT_MAX_PAYLOAD_BYTES) {
+            return;
+        }
+        $now = time();
+        $expiresAt = $now + max(1, intval($ttlSeconds));
+        $query = "INSERT INTO {wp_abj404_view_cache}
+            (cache_key, subpage, payload, payload_bytes, refreshed_at, expires_at, updated_at)
+            VALUES (%s, %s, %s, %d, %d, %d, %d)
+            ON DUPLICATE KEY UPDATE
+                subpage = VALUES(subpage),
+                payload = VALUES(payload),
+                payload_bytes = VALUES(payload_bytes),
+                refreshed_at = VALUES(refreshed_at),
+                expires_at = VALUES(expires_at),
+                updated_at = VALUES(updated_at)";
+        $this->queryAndGetResults($query, array(
+            'query_params' => array($cacheKey, (string)$sub, $encoded, $bytes, $now, $expiresAt, $now),
+            'log_errors' => false,
+        ));
+        $this->cleanupExpiredViewSnapshotRowsIfNeeded();
+    }
+
+    private function waitForViewRowsSnapshotFromTable($cacheKey, $timeoutMs = 4000) {
+        $deadline = microtime(true) + (max(100, intval($timeoutMs)) / 1000);
+        while (microtime(true) < $deadline) {
+            $rows = $this->getViewRowsSnapshotFromTable($cacheKey, false, false);
+            if (is_array($rows)) {
+                return $rows;
+            }
+            usleep(100000);
+        }
+        return null;
+    }
+
+    private function cleanupExpiredViewSnapshotRowsIfNeeded() {
+        if (!function_exists('get_transient') || !function_exists('set_transient')) {
+            return;
+        }
+        $marker = get_transient('abj404_view_cache_cleanup_marker');
+        if ($marker !== false) {
+            return;
+        }
+        set_transient('abj404_view_cache_cleanup_marker', time(), 1800);
+        $query = "DELETE FROM {wp_abj404_view_cache} WHERE expires_at < %d";
+        $this->queryAndGetResults($query, array(
+            'query_params' => array(time() - self::VIEW_SNAPSHOT_REFRESH_COOLDOWN_SECONDS),
+            'log_errors' => false,
+        ));
+    }
+
+    /**
      * Get the normalized (lowercase) prefix used for all plugin tables.
      * This avoids case-sensitive MySQL filesystems from treating mixed-case
      * prefixes as distinct tables.
@@ -257,7 +513,7 @@ class ABJ_404_Solution_DataAccess {
      */
     public function getLowercasePrefix() {
         global $wpdb;
-        return $this->f->strtolower($wpdb->prefix);
+        return $this->f->strtolower($wpdb->prefix ?? 'wp_');
     }
 
     /**
@@ -306,6 +562,102 @@ class ABJ_404_Solution_DataAccess {
         return 'inline-query';
     }
 
+    /**
+     * Sanitize SQL identifier-like collation names.
+     *
+     * @param string $collation
+     * @return string
+     */
+    private function sanitizeCollationIdentifier($collation) {
+        if (!is_string($collation) || $collation === '') {
+            return '';
+        }
+        return preg_replace('/[^A-Za-z0-9_]/', '', $collation);
+    }
+
+    /**
+     * Resolve an appropriate utf8mb4 collation for CAST/COLLATE comparisons.
+     *
+     * Prefer wpdb connection collation when it's utf8mb4, otherwise fall back
+     * to a safe default.
+     *
+     * @return string
+     */
+    private function getPreferredUtf8mb4Collation() {
+        global $wpdb;
+
+        if (isset($wpdb) && isset($wpdb->collate) && !empty($wpdb->collate)) {
+            $wpdbCollation = $this->sanitizeCollationIdentifier((string)$wpdb->collate);
+            if ($wpdbCollation !== '' && stripos($wpdbCollation, 'utf8mb4') !== false) {
+                return $wpdbCollation;
+            }
+        }
+        return 'utf8mb4_unicode_ci';
+    }
+
+    /**
+     * Determine whether an error indicates invalid text/charset payload.
+     *
+     * @param string $errorText
+     * @return bool
+     */
+    private function isInvalidDataError($errorText) {
+        if (!is_string($errorText) || $errorText === '') {
+            return false;
+        }
+        $lower = strtolower($errorText);
+        return (
+            $this->f->strpos($lower, 'contains invalid data') !== false ||
+            $this->f->strpos($lower, 'incorrect string value') !== false ||
+            $this->f->strpos($lower, 'invalid utf8') !== false
+        );
+    }
+
+    /**
+     * Attempt one retry for invalid-data errors using wpdb's stripped query helper.
+     *
+     * @param string $query
+     * @param array $result
+     * @return void
+     */
+    private function attemptInvalidDataRetry($query, &$result) {
+        if (self::$invalidDataRetryInProgress) {
+            return;
+        }
+
+        self::$invalidDataRetryInProgress = true;
+        try {
+            $retryQuery = $this->get_stripped_query_result($query);
+            if (!is_string($retryQuery) || trim($retryQuery) === '' || $retryQuery === $query) {
+                return;
+            }
+
+            global $wpdb;
+            $wpdb->flush();
+            $result['rows'] = $wpdb->get_results($retryQuery, ARRAY_A);
+            $result['last_error'] = $wpdb->last_error ?? '';
+            $result['last_result'] = $wpdb->last_result ?? array();
+            $result['rows_affected'] = $wpdb->rows_affected ?? 0;
+            $result['insert_id'] = $wpdb->insert_id ?? 0;
+        } catch (Throwable $e) {
+            $this->logger->warn("Invalid-data retry failed: " . $e->getMessage());
+        } finally {
+            self::$invalidDataRetryInProgress = false;
+        }
+    }
+
+    private function applyDiagnosticLatencyIfConfigured() {
+        if (!function_exists('abj404_get_simulated_db_latency_ms')) {
+            return;
+        }
+        $delayMs = absint(abj404_get_simulated_db_latency_ms());
+        if ($delayMs <= 0) {
+            return;
+        }
+        $delayMs = min(5000, $delayMs);
+        usleep($delayMs * 1000);
+    }
+
     /** Return the results of the query in a variable.
      * @param string $query
      * @param array $options
@@ -330,20 +682,35 @@ class ABJ_404_Solution_DataAccess {
         $query = $this->doTableNameReplacements($query);
 
         if (!empty($queryParameters)) {
-            $query = $wpdb->prepare($query, $queryParameters);
+            if (is_array($queryParameters)) {
+                // WPDB::prepare array support varies across versions/mocks.
+                // Prefer varargs, but fall back to array-as-single-arg for older/custom mocks.
+                try {
+                    $query = call_user_func_array(array($wpdb, 'prepare'), array_merge(array($query), $queryParameters));
+                } catch (Throwable $t) {
+                    $query = $wpdb->prepare($query, $queryParameters);
+                }
+            } else {
+                $query = $wpdb->prepare($query, $queryParameters);
+            }
         }
+
+        $this->applyDiagnosticLatencyIfConfigured();
         
         $timer = new ABJ_404_Solution_Timer();
         
         $result = array();
-       	$result['rows'] = $wpdb->get_results($query, ARRAY_A);
+        $result['rows'] = $wpdb->get_results($query, ARRAY_A);
         
         $result['elapsed_time'] = $timer->stop();
-        $result['last_error'] = $wpdb->last_error;
-        $result['last_result'] = $wpdb->last_result;
-        $result['rows_affected'] = $wpdb->rows_affected;
+        if (function_exists('abj404_benchmark_record_db_query')) {
+            abj404_benchmark_record_db_query(((float)$result['elapsed_time']) * 1000.0);
+        }
+        $result['last_error'] = $wpdb->last_error ?? '';
+        $result['last_result'] = $wpdb->last_result ?? array();
+        $result['rows_affected'] = $wpdb->rows_affected ?? 0;
         
-        if ($wpdb->dbh != null) {
+        if (isset($wpdb->dbh) && $wpdb->dbh != null && isset($wpdb->rows_affected)) {
 	        try {
 	            $result['rows_affected'] = $wpdb->rows_affected;
 	        } catch (Exception $ex) {
@@ -351,7 +718,7 @@ class ABJ_404_Solution_DataAccess {
 	    	}
         }
         
-        $result['insert_id'] = $wpdb->insert_id;
+        $result['insert_id'] = $wpdb->insert_id ?? 0;
         
         if (!is_array($result['rows'])) {
             // In production (WP_DEBUG off), only log SQL filename to avoid PII exposure
@@ -360,6 +727,29 @@ class ABJ_404_Solution_DataAccess {
         			new Exception("Query result is not an array."));
         }
         
+        if ($result['last_error'] !== '' && $this->isTransientConnectionError($result['last_error'])) {
+            // Retry once after reconnect for transient connection drops.
+            $this->ensureConnection();
+            $wpdb->flush();
+            $result['rows'] = $wpdb->get_results($query, ARRAY_A);
+            $result['last_error'] = $wpdb->last_error ?? '';
+            $result['last_result'] = $wpdb->last_result ?? array();
+            $result['rows_affected'] = $wpdb->rows_affected ?? 0;
+            $result['insert_id'] = $wpdb->insert_id ?? 0;
+        }
+
+        if ($result['last_error'] !== '' && $this->isMissingPluginTableError($result['last_error'])) {
+            $this->attemptMissingTableRepairAndRetry($query, $result);
+        }
+
+        if ($result['last_error'] !== '' && $this->isInvalidDataError($result['last_error'])) {
+            $this->attemptInvalidDataRetry($query, $result);
+        }
+
+        if ($result['last_error'] !== '') {
+            $this->noteDatabaseIssueFromError($result['last_error']);
+        }
+
         if ($options['log_errors'] && $result['last_error'] != '') {
             if ($this->f->strpos($result['last_error'], 
                     " is marked as crashed ") !== false) {
@@ -382,8 +772,7 @@ class ABJ_404_Solution_DataAccess {
             
             if ($reportError) {
                 $stripped_query = 'n/a';
-                if ($this->f->strpos($result['last_error'],
-                    "WordPress database error: Could not perform query because it contains invalid data") !== false) {
+                if ($this->isInvalidDataError($result['last_error'])) {
                     $stripped_query = $this->get_stripped_query_result($query);
                 }
                 
@@ -427,6 +816,194 @@ class ABJ_404_Solution_DataAccess {
         }
         
         return $result;
+    }
+
+    private function isTransientConnectionError($errorText) {
+        if (!is_string($errorText) || $errorText === '') {
+            return false;
+        }
+        $lower = strtolower($errorText);
+        $transientMarkers = array(
+            'server has gone away',
+            'lost connection to mysql server during query',
+            'error while sending query packet',
+            'packets out of order',
+            'connection was killed',
+        );
+        foreach ($transientMarkers as $marker) {
+            if ($this->f->strpos($lower, $marker) !== false) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function isQuotaLimitError($errorText) {
+        if (!is_string($errorText) || $errorText === '') {
+            return false;
+        }
+        $lower = strtolower($errorText);
+        return ($this->f->strpos($lower, 'max_questions') !== false ||
+            $this->f->strpos($lower, 'resource') !== false && $this->f->strpos($lower, 'question') !== false);
+    }
+
+    private function isDiskFullError($errorText) {
+        if (!is_string($errorText) || $errorText === '') {
+            return false;
+        }
+        $lower = strtolower($errorText);
+        return ($this->f->strpos($lower, 'error 28') !== false ||
+            $this->f->strpos($lower, 'no space left on device') !== false ||
+            $this->f->strpos($lower, 'table is full') !== false);
+    }
+
+    private function isReadOnlyError($errorText) {
+        if (!is_string($errorText) || $errorText === '') {
+            return false;
+        }
+        $lower = strtolower($errorText);
+        return ($this->f->strpos($lower, 'read only') !== false ||
+            $this->f->strpos($lower, 'read-only') !== false ||
+            $this->f->strpos($lower, 'super_read_only') !== false);
+    }
+
+    private function isCollationError($errorText) {
+        if (!is_string($errorText) || $errorText === '') {
+            return false;
+        }
+        $lower = strtolower($errorText);
+        return ($this->f->strpos($lower, 'illegal mix of collations') !== false ||
+            $this->f->strpos($lower, 'unknown collation') !== false ||
+            $this->f->strpos($lower, 'collation') !== false && $this->f->strpos($lower, 'not valid') !== false);
+    }
+
+    private function isDeadlockOrLockTimeoutError($errorText) {
+        if (!is_string($errorText) || $errorText === '') {
+            return false;
+        }
+        $lower = strtolower($errorText);
+        return ($this->f->strpos($lower, 'deadlock found') !== false ||
+            $this->f->strpos($lower, 'lock wait timeout exceeded') !== false ||
+            $this->f->strpos($lower, 'error 1213') !== false ||
+            $this->f->strpos($lower, 'error 1205') !== false);
+    }
+
+    private function setRuntimeFlag($key, $value, $ttlSeconds) {
+        if (function_exists('set_transient')) {
+            set_transient($key, $value, $ttlSeconds);
+            return;
+        }
+        if (function_exists('update_option')) {
+            update_option($key, $value, false);
+        }
+    }
+
+    private function getRuntimeFlag($key) {
+        if (function_exists('get_transient')) {
+            return get_transient($key);
+        }
+        if (function_exists('get_option')) {
+            return get_option($key, false);
+        }
+        return false;
+    }
+
+    private function setPluginDbNotice($type, $message) {
+        $payload = array(
+            'type' => $type,
+            'message' => $message,
+            'timestamp' => time(),
+        );
+        $this->setRuntimeFlag('abj404_plugin_db_notice', $payload, self::DB_WRITE_BLOCK_COOLDOWN_SECONDS);
+    }
+
+    private function localizeOrDefault($text) {
+        if (function_exists('__')) {
+            return __($text, '404-solution');
+        }
+        return $text;
+    }
+
+    private function noteDatabaseIssueFromError($errorText) {
+        if (!is_string($errorText) || trim($errorText) === '') {
+            return;
+        }
+        if ($this->isDiskFullError($errorText)) {
+            $this->setRuntimeFlag('abj404_db_disk_full_until', time() + self::DB_WRITE_BLOCK_COOLDOWN_SECONDS, self::DB_WRITE_BLOCK_COOLDOWN_SECONDS);
+            $this->setPluginDbNotice('disk_full', $this->localizeOrDefault('Database storage appears full (disk/engine space). Plugin write-heavy tasks are temporarily paused.'));
+            return;
+        }
+        if ($this->isQuotaLimitError($errorText)) {
+            $this->setRuntimeFlag('abj404_db_quota_cooldown_until', time() + self::DB_QUOTA_COOLDOWN_SECONDS, self::DB_QUOTA_COOLDOWN_SECONDS);
+            $this->setPluginDbNotice('query_quota', $this->localizeOrDefault('Database query quota was exceeded (for example max_questions). Non-essential plugin background tasks are temporarily paused.'));
+            return;
+        }
+        if ($this->isReadOnlyError($errorText)) {
+            $this->setRuntimeFlag('abj404_db_read_only_until', time() + self::DB_WRITE_BLOCK_COOLDOWN_SECONDS, self::DB_WRITE_BLOCK_COOLDOWN_SECONDS);
+            $this->setPluginDbNotice('read_only', $this->localizeOrDefault('Database appears to be in read-only mode. Plugin write operations are temporarily paused.'));
+            return;
+        }
+        if ($this->isCollationError($errorText)) {
+            $this->setPluginDbNotice('collation', $this->localizeOrDefault('Database collation mismatch was detected. A compatibility fallback was used where possible.'));
+        }
+    }
+
+    private function isQuotaCooldownActive() {
+        $until = (int)$this->getRuntimeFlag('abj404_db_quota_cooldown_until');
+        return ($until > time());
+    }
+
+    private function isWriteBlockActive() {
+        $diskUntil = (int)$this->getRuntimeFlag('abj404_db_disk_full_until');
+        $readOnlyUntil = (int)$this->getRuntimeFlag('abj404_db_read_only_until');
+        return ($diskUntil > time() || $readOnlyUntil > time());
+    }
+
+    private function shouldSkipNonEssentialDbWrites() {
+        return ($this->isQuotaCooldownActive() || $this->isWriteBlockActive());
+    }
+
+    private function isMissingPluginTableError($errorText) {
+        if (!is_string($errorText) || $errorText === '') {
+            return false;
+        }
+        $lower = strtolower($errorText);
+        if ($this->f->strpos($lower, '_abj404_logs_hits') !== false) {
+            return false;
+        }
+        return ($this->f->strpos($lower, "doesn't exist") !== false &&
+            $this->f->strpos($lower, '_abj404_') !== false);
+    }
+
+    /**
+     * Attempt one auto-repair pass for missing plugin tables, then retry query once.
+     *
+     * @param string $query
+     * @param array $result
+     * @return void
+     */
+    private function attemptMissingTableRepairAndRetry($query, &$result) {
+        if (self::$tableRepairInProgress) {
+            return;
+        }
+
+        self::$tableRepairInProgress = true;
+        try {
+            $upgrades = ABJ_404_Solution_DatabaseUpgradesEtc::getInstance();
+            $upgrades->createDatabaseTables(false);
+
+            global $wpdb;
+            $wpdb->flush();
+            $result['rows'] = $wpdb->get_results($query, ARRAY_A);
+            $result['last_error'] = $wpdb->last_error ?? '';
+            $result['last_result'] = $wpdb->last_result ?? array();
+            $result['rows_affected'] = $wpdb->rows_affected ?? 0;
+            $result['insert_id'] = $wpdb->insert_id ?? 0;
+        } catch (Throwable $e) {
+            $this->logger->warn("Missing-table auto-repair failed: " . $e->getMessage());
+        } finally {
+            self::$tableRepairInProgress = false;
+        }
     }
     
     /** Try to call strip_invalid_text_from_query and return the result. 
@@ -553,37 +1130,53 @@ class ABJ_404_Solution_DataAccess {
     }
     
     function executeAsTransaction($statementArray) {
-        $exception = null;
-        $allIsWell = true;
-
         global $wpdb;
+        $maxAttempts = 3;
+        $lastException = null;
+        $lastError = '';
 
-        try {
-            $wpdb->query('START TRANSACTION');
-
-            foreach ($statementArray as $statement) {
-                $wpdb->query($statement);
-                if ($wpdb->last_error != null) {
-                    $allIsWell = false;
-                    $this->logger->errorMessage("Error executing SQL transaction: " . $wpdb->last_error);
-                    $this->logger->errorMessage("SQL causing the transaction error: " . $statement);
-                    break;
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            $allIsWell = true;
+            $lastError = '';
+            $lastException = null;
+            try {
+                $wpdb->query('START TRANSACTION');
+                foreach ($statementArray as $statement) {
+                    $wpdb->query($statement);
+                    if ($wpdb->last_error != null && trim((string)$wpdb->last_error) !== '') {
+                        $allIsWell = false;
+                        $lastError = (string)$wpdb->last_error;
+                        $this->logger->errorMessage("Error executing SQL transaction: " . $lastError);
+                        $this->logger->errorMessage("SQL causing the transaction error: " . $statement);
+                        break;
+                    }
                 }
+            } catch (Throwable $ex) {  // Fixed: Catch Throwable (Exception + Error) for PHP 7+ compatibility
+                $allIsWell = false;
+                $lastException = $ex;
+                $lastError = $ex->getMessage();
             }
-        } catch (Throwable $ex) {  // Fixed: Catch Throwable (Exception + Error) for PHP 7+ compatibility
-            $allIsWell = false;
-            $exception = $ex;
-        }
 
-        if ($allIsWell && $exception == null) {
-            $wpdb->query('commit');
+            if ($allIsWell && $lastException == null) {
+                $wpdb->query('commit');
+                return;
+            }
 
-        } else {
             $wpdb->query('rollback');
+            $retryable = $this->isDeadlockOrLockTimeoutError($lastError);
+            if (!$retryable || $attempt >= $maxAttempts) {
+                break;
+            }
+            // Small jitter prevents immediate lock re-collision.
+            $sleepMicros = 100000 + random_int(0, 200000);
+            usleep($sleepMicros);
         }
 
-        if ($exception != null) {
-            throw $exception;
+        if ($lastException != null) {
+            throw $lastException;
+        }
+        if ($lastError !== '') {
+            throw new Exception($lastError);
         }
     }
     
@@ -923,14 +1516,17 @@ class ABJ_404_Solution_DataAccess {
             }
         }
 
+        // IMPORTANT: The redirects table also stores captured/ignored/later rows.
+        // The Redirects page "All/Manual/Auto/Trash" tabs should only count actual redirects
+        // (manual/auto/regex), not captured URLs.
         $query = "SELECT
-            COUNT(*) as total,
-            SUM(CASE WHEN disabled = 0 THEN 1 ELSE 0 END) as active,
-            SUM(CASE WHEN disabled = 0 AND status = " . ABJ404_STATUS_MANUAL . " THEN 1 ELSE 0 END) as manual,
-            SUM(CASE WHEN disabled = 0 AND status = " . ABJ404_STATUS_AUTO . " THEN 1 ELSE 0 END) as auto,
-            SUM(CASE WHEN disabled = 0 AND status = " . ABJ404_STATUS_REGEX . " THEN 1 ELSE 0 END) as regex,
-            SUM(CASE WHEN disabled = 1 THEN 1 ELSE 0 END) as trash
-            FROM {wp_abj404_redirects}";
+            SUM(CASE WHEN disabled = 0 THEN 1 ELSE 0 END) as active_count,
+            SUM(CASE WHEN disabled = 0 AND status = " . ABJ404_STATUS_MANUAL . " THEN 1 ELSE 0 END) as manual_count,
+            SUM(CASE WHEN disabled = 0 AND status = " . ABJ404_STATUS_AUTO . " THEN 1 ELSE 0 END) as auto_count,
+            SUM(CASE WHEN disabled = 0 AND status = " . ABJ404_STATUS_REGEX . " THEN 1 ELSE 0 END) as regex_count,
+            SUM(CASE WHEN disabled = 1 THEN 1 ELSE 0 END) as trash_count
+            FROM {wp_abj404_redirects}
+            WHERE status IN (" . ABJ404_STATUS_MANUAL . ", " . ABJ404_STATUS_AUTO . ", " . ABJ404_STATUS_REGEX . ")";
         $query = $this->doTableNameReplacements($query);
 
         $result = $this->queryAndGetResults($query);
@@ -940,11 +1536,11 @@ class ABJ_404_Solution_DataAccess {
         if (!empty($rows)) {
             $row = $rows[0];
             $counts = array(
-                'all' => intval($row['active']),
-                'manual' => intval($row['manual']),
-                'auto' => intval($row['auto']),
-                'regex' => intval($row['regex']),
-                'trash' => intval($row['trash'])
+                'all' => intval($row['active_count']),
+                'manual' => intval($row['manual_count']),
+                'auto' => intval($row['auto_count']),
+                'regex' => intval($row['regex_count']),
+                'trash' => intval($row['trash_count'])
             );
         }
 
@@ -1168,10 +1764,62 @@ class ABJ_404_Solution_DataAccess {
      * @return array rows from the redirects table.
      */
     function getRedirectsForView($sub, $tableOptions) {
+        $orderByForSnapshot = strtolower((string)($tableOptions['orderby'] ?? ''));
+        $isLogsMaintenanceSort = ($orderByForSnapshot === 'logshits' || $orderByForSnapshot === 'last_used');
+        $canUseSnapshotCache = absint($tableOptions['perpage'] ?? 0) <= 200
+            && !$isLogsMaintenanceSort;
+        $snapshotCacheKey = '';
+        $refreshLockHeld = false;
+        if ($canUseSnapshotCache) {
+            $snapshotCacheKey = $this->getViewSnapshotCacheKey('abj404_view_rows', $sub, $tableOptions);
+            $cachedRowsFromTable = $this->getViewRowsSnapshotFromTable($snapshotCacheKey, false, false);
+            if (is_array($cachedRowsFromTable)) {
+                return $cachedRowsFromTable;
+            }
+            if (function_exists('get_transient')) {
+                $cachedRows = get_transient($snapshotCacheKey);
+                if (is_array($cachedRows)) {
+                    return $cachedRows;
+                }
+            }
+
+            // Server-side dedupe: don't run the same refresh concurrently.
+            if ($this->isViewSnapshotRefreshLocked($snapshotCacheKey)) {
+                $staleRowsFromTable = $this->getViewRowsSnapshotFromTable($snapshotCacheKey, true, true);
+                if (is_array($staleRowsFromTable)) {
+                    return $staleRowsFromTable;
+                }
+                $waitedRows = $this->waitForViewRowsSnapshotFromTable($snapshotCacheKey, 4000);
+                if (is_array($waitedRows)) {
+                    return $waitedRows;
+                }
+                if (function_exists('get_transient')) {
+                    $waitedTransientRows = get_transient($snapshotCacheKey);
+                    if (is_array($waitedTransientRows)) {
+                        return $waitedTransientRows;
+                    }
+                }
+            } else {
+                // At most once per 30s per cache key: if stale-but-recent snapshot exists, serve it.
+                $recentRowsFromTable = $this->getViewRowsSnapshotFromTable($snapshotCacheKey, true, true);
+                if (is_array($recentRowsFromTable)) {
+                    return $recentRowsFromTable;
+                }
+                $refreshLockHeld = $this->acquireViewSnapshotRefreshLock($snapshotCacheKey);
+            }
+        }
     	
     	// for normal page views we limit the rows returned based on user preferences for paginaiton.
-        $limitStart = ( absint(sanitize_text_field($tableOptions['paged']) - 1)) * absint(sanitize_text_field($tableOptions['perpage']));
-        $limitEnd = absint(sanitize_text_field($tableOptions['perpage']));
+        $paged = absint($tableOptions['paged'] ?? 1);
+        if ($paged < 1) {
+            $paged = 1;
+        }
+        $perpage = absint($tableOptions['perpage'] ?? ABJ404_OPTION_DEFAULT_PERPAGE);
+        if ($perpage < 1) {
+            $perpage = ABJ404_OPTION_DEFAULT_PERPAGE;
+        }
+        $limitStart = ($paged - 1) * $perpage;
+        $limitEnd = $perpage;
         
         $queryAllRowsAtOnce = ($tableOptions['perpage'] > 5000) || ($tableOptions['orderby'] == 'logshits')
                 || ($tableOptions['orderby'] == 'last_used');
@@ -1186,6 +1834,14 @@ class ABJ_404_Solution_DataAccess {
         	$ignoreErrorsOoptions);
         $this->queryAndGetResults("set session sql_big_selects = 1", $ignoreErrorsOoptions);
         $results = $this->queryAndGetResults($query);
+
+        if (!empty($results['last_error']) && $this->isCollationError($results['last_error'])) {
+            $retryOptions = $tableOptions;
+            $retryOptions['forceCollate'] = 'utf8mb4_general_ci';
+            $query = $this->getRedirectsForViewQuery($sub, $retryOptions, $queryAllRowsAtOnce,
+                $limitStart, $limitEnd, false);
+            $results = $this->queryAndGetResults($query);
+        }
 
         // Handle race condition: logs_hits table may have been dropped between existence check and query
         // (fixes bug: "Table 'xxx.wp_abj404_logs_hits' doesn't exist" error during shutdown)
@@ -1231,8 +1887,20 @@ class ABJ_404_Solution_DataAccess {
                     $valB = isset($b[$orderBy]) ? $b[$orderBy] : 0;
                     // For last_used (timestamp), compare as integers
                     // For logshits (count), compare as integers
-                    $cmp = $valA <=> $valB;
-                    return $orderDir === 'DESC' ? -$cmp : $cmp;
+                    $primaryCmp = $valA <=> $valB;
+                    if ($primaryCmp !== 0) {
+                        return $orderDir === 'DESC' ? -$primaryCmp : $primaryCmp;
+                    }
+
+                    // Keep URL tie-break ASC to match SQL ordering.
+                    $urlCmp = strcmp((string)($a['url'] ?? ''), (string)($b['url'] ?? ''));
+                    if ($urlCmp !== 0) {
+                        return $urlCmp;
+                    }
+
+                    // Final tie-break by id in the requested direction.
+                    $idCmp = ((int)($a['id'] ?? 0)) <=> ((int)($b['id'] ?? 0));
+                    return $orderDir === 'DESC' ? -$idCmp : $idCmp;
                 });
                 // Now apply the limit that was skipped in the query
                 $rows = array_slice($rows, $limitStart, $limitEnd);
@@ -1241,16 +1909,38 @@ class ABJ_404_Solution_DataAccess {
         $this->logger->debugMessage("Found " . $foundRowsBeforeLogsData . 
         	" rows to display before log data and " . count($rows) . 
         	" rows to display after log data for page: ". $sub);
+
+        if ($canUseSnapshotCache && $snapshotCacheKey !== '' && is_array($rows)) {
+            $this->setViewRowsSnapshotToTable($snapshotCacheKey, $sub, $rows, self::VIEW_SNAPSHOT_CACHE_TTL_SECONDS);
+            if (function_exists('set_transient')) {
+                set_transient($snapshotCacheKey, $rows, self::VIEW_SNAPSHOT_CACHE_TTL_SECONDS);
+            }
+        }
+        if ($refreshLockHeld && $snapshotCacheKey !== '') {
+            $this->releaseViewSnapshotRefreshLock($snapshotCacheKey);
+        }
         
         return $rows;
     }
     
     function getRedirectsForViewCount($sub, $tableOptions) {
-    	if (array_key_exists(self::KEY_REDIRECTS_FOR_VIEW_COUNT, $_REQUEST) && 
-    		isset($_REQUEST[self::KEY_REDIRECTS_FOR_VIEW_COUNT])) {
-    			
-   			return $_REQUEST[self::KEY_REDIRECTS_FOR_VIEW_COUNT];
-   		}
+        $orderByForSnapshot = strtolower((string)($tableOptions['orderby'] ?? ''));
+        $isLogsMaintenanceSort = ($orderByForSnapshot === 'logshits' || $orderByForSnapshot === 'last_used');
+        $canUseSnapshotCache = function_exists('get_transient')
+            && absint($tableOptions['perpage'] ?? 0) <= 200
+            && !$isLogsMaintenanceSort;
+        $requestCountCacheKey = (string)$sub . '|' . md5(serialize($tableOptions));
+        $countCacheKey = '';
+        if ($canUseSnapshotCache) {
+            $countCacheKey = $this->getViewSnapshotCacheKey('abj404_view_count', $sub, $tableOptions);
+            $cachedCount = get_transient($countCacheKey);
+            if ($cachedCount !== false) {
+                return intval($cachedCount);
+            }
+        }
+        if (array_key_exists($requestCountCacheKey, $this->redirectsForViewCountRequestCache)) {
+            return intval($this->redirectsForViewCountRequestCache[$requestCountCacheKey]);
+        }
     	
         $query = $this->getRedirectsForViewQuery($sub, $tableOptions, false, 0, PHP_INT_MAX,
         	true);
@@ -1260,18 +1950,28 @@ class ABJ_404_Solution_DataAccess {
         	$ignoreErrorsOoptions);
         $this->queryAndGetResults("set session sql_big_selects = 1", $ignoreErrorsOoptions);
         $results = $this->queryAndGetResults($query);
+        if (!empty($results['last_error']) && $this->isCollationError($results['last_error'])) {
+            $retryOptions = $tableOptions;
+            $retryOptions['forceCollate'] = 'utf8mb4_general_ci';
+            $retryQuery = $this->getRedirectsForViewQuery($sub, $retryOptions, false, 0, PHP_INT_MAX, true);
+            $results = $this->queryAndGetResults($retryQuery);
+        }
         
         if ($results['last_error'] != null && trim($results['last_error']) != '') {
         	throw new \Exception("Error getting redirect count: " . esc_html($results['last_error']));
         }
         $rows = $results['rows'];
         if (empty($rows)) {
+            $this->redirectsForViewCountRequestCache[$requestCountCacheKey] = -1;
         	return -1;
         }
         $row = $rows[0];
-        
-        $_REQUEST[self::KEY_REDIRECTS_FOR_VIEW_COUNT] = $row['count'];
-        return $row['count'];
+        $countValue = intval($row['count']);
+        $this->redirectsForViewCountRequestCache[$requestCountCacheKey] = $countValue;
+        if ($canUseSnapshotCache && $countCacheKey !== '') {
+            set_transient($countCacheKey, $countValue, self::VIEW_SNAPSHOT_CACHE_TTL_SECONDS);
+        }
+        return $countValue;
     }
     
     function getRedirectsForViewQuery($sub, $tableOptions, $queryAllRowsAtOnce, 
@@ -1355,8 +2055,12 @@ class ABJ_404_Solution_DataAccess {
                 // only allow letters and the underscore in the orderby string.
                 $orderBy = preg_replace('/[^a-zA-Z_]/', '', trim($orderBy));
             }
-            $order = preg_replace('/[^a-zA-Z_]/', '', trim($tableOptions['order']));
-            $orderByString = "order by published_status asc, " . $orderBy . " " . $order;
+            $order = strtoupper(preg_replace('/[^a-zA-Z_]/', '', trim($tableOptions['order'])));
+            if ($order !== 'DESC') {
+                $order = 'ASC';
+            }
+            $orderByString = "order by published_status asc, " . $orderBy . " " . $order .
+                ", wp_abj404_redirects.url ASC, wp_abj404_redirects.id " . $order;
         }
 
         $searchFilterForRedirectsExists = "no redirects fiter text found";
@@ -1390,7 +2094,15 @@ class ABJ_404_Solution_DataAccess {
         // Ensure consistent collation for string operations (e.g., REPLACE/LOWER) to avoid
         // "Illegal mix of collations" errors when plugin tables use *_bin collations.
         $wpdbCollate = 'utf8mb4_unicode_ci';
-        if (isset($wpdb) && isset($wpdb->collate) && !empty($wpdb->collate)) {
+        $hasForcedCollate = false;
+        if (!empty($tableOptions['forceCollate'])) {
+            $forced = preg_replace('/[^A-Za-z0-9_]/', '', (string)$tableOptions['forceCollate']);
+            if ($forced !== '') {
+                $wpdbCollate = $forced;
+                $hasForcedCollate = true;
+            }
+        }
+        if (!$hasForcedCollate && isset($wpdb) && isset($wpdb->collate) && !empty($wpdb->collate)) {
             $wpdbCollate = preg_replace('/[^A-Za-z0-9_]/', '', $wpdb->collate);
         }
         if ($wpdbCollate === '') {
@@ -1479,18 +2191,37 @@ class ABJ_404_Solution_DataAccess {
     }
     
     function maybeUpdateRedirectsForViewHitsTable() {
+        // Record that we checked during this request (used for admin tooltip UX).
+        $this->setRuntimeFlag(self::HITS_TABLE_LAST_CHECKED_FLAG, time(), 86400);
+
+        if ($this->shouldSkipNonEssentialDbWrites()) {
+            $this->logger->debugMessage(__FUNCTION__ . " skipped due to temporary DB write cooldown.");
+            $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'paused', 86400);
+            return;
+        }
 
         // Check if the table exists
         if (!$this->logsHitsTableExists()) {
             // First-time creation: table must exist before query runs, so create synchronously
             $this->logger->debugMessage(__FUNCTION__ . " creating now because the table doesn't exist (first time).");
-            $this->createRedirectsForViewHitsTable();
+            $created = $this->createRedirectsForViewHitsTable();
+            if ($created) {
+                $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'not_needed', 86400);
+            } else {
+                // Preserve a more specific state set by createRedirectsForViewHitsTable().
+                // For example, if another request already holds the lock we keep "running".
+                $decision = $this->getLogsHitsTableLastDecision();
+                if ($decision !== 'running') {
+                    $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'paused', 86400);
+                }
+            }
             return;
         }
 
         // Check if rebuild is needed (logs have changed since last build)
         if (!$this->hitsTableNeedsRebuild()) {
             // No new log entries - skip rebuild to reduce server load
+            $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'not_needed', 86400);
             return;
         }
 
@@ -1508,11 +2239,115 @@ class ABJ_404_Solution_DataAccess {
      * immediately with existing data, and fresh data is available on next load.
      */
     function scheduleHitsTableRebuild() {
+        if ($this->shouldSkipNonEssentialDbWrites()) {
+            $this->logger->debugMessage(__FUNCTION__ . " skipped due to temporary DB write cooldown.");
+            $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'paused', 86400);
+            return;
+        }
         if (!self::$hitsTableRebuildScheduled) {
+            if ($this->isHitsTableRebuildLocked()) {
+                $this->logger->debugMessage(__FUNCTION__ . " skipping scheduling because another rebuild is already running.");
+                $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'running', 86400);
+                return;
+            }
+
+            $lastScheduled = (int)$this->getRuntimeFlag(self::HITS_TABLE_LAST_SCHEDULED_FLAG);
+            if ($lastScheduled > 0 && (time() - $lastScheduled) < self::HITS_TABLE_SCHEDULE_COOLDOWN_SECONDS) {
+                $this->logger->debugMessage(__FUNCTION__ . " skipping scheduling due to cooldown.");
+                $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'cooldown', 86400);
+                return;
+            }
+
             self::$hitsTableRebuildScheduled = true;
             $this->logger->debugMessage(__FUNCTION__ . " scheduling hits table rebuild for shutdown hook.");
+            $this->setRuntimeFlag(self::HITS_TABLE_LAST_SCHEDULED_FLAG, time(), 86400);
+            $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'scheduled', 86400);
             add_action('shutdown', [$this, 'createRedirectsForViewHitsTable']);
         }
+    }
+
+    private function getHitsTableRebuildLockOptionName() {
+        return $this->getLowercasePrefix() . 'abj404_logs_hits_rebuild_lock';
+    }
+
+    private function isHitsTableRebuildLocked() {
+        if (!function_exists('get_option')) {
+            return false;
+        }
+        $lockValue = get_option($this->getHitsTableRebuildLockOptionName(), false);
+        if ($lockValue === false || $lockValue === null || $lockValue === '') {
+            return false;
+        }
+        // Defensive: if lock is corrupted (non-numeric), clear it so rebuilds can resume.
+        if (!is_numeric($lockValue)) {
+            if (function_exists('delete_option')) {
+                delete_option($this->getHitsTableRebuildLockOptionName());
+            }
+            return false;
+        }
+        $lockTimestamp = is_numeric($lockValue) ? (int)$lockValue : 0;
+        if ($lockTimestamp > 0 && (time() - $lockTimestamp) > self::HITS_TABLE_REBUILD_LOCK_TTL_SECONDS) {
+            if (function_exists('delete_option')) {
+                delete_option($this->getHitsTableRebuildLockOptionName());
+            }
+            return false;
+        }
+        return true;
+    }
+
+    function getLogsHitsTableLastCheckedAt() {
+        $ts = (int)$this->getRuntimeFlag(self::HITS_TABLE_LAST_CHECKED_FLAG);
+        return $ts > 0 ? $ts : null;
+    }
+
+    function getLogsHitsTableLastScheduledAt() {
+        $ts = (int)$this->getRuntimeFlag(self::HITS_TABLE_LAST_SCHEDULED_FLAG);
+        return $ts > 0 ? $ts : null;
+    }
+
+    function getLogsHitsTableLastDecision() {
+        $v = $this->getRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG);
+        return is_string($v) ? $v : '';
+    }
+
+    private function acquireHitsTableRebuildLock() {
+        if (!function_exists('add_option')) {
+            return true;
+        }
+        if ($this->isHitsTableRebuildLocked()) {
+            return false;
+        }
+        return (bool)add_option(
+            $this->getHitsTableRebuildLockOptionName(),
+            time(),
+            '',
+            'no'
+        );
+    }
+
+    private function releaseHitsTableRebuildLock() {
+        if (function_exists('delete_option')) {
+            delete_option($this->getHitsTableRebuildLockOptionName());
+        }
+    }
+
+    private function logsHitsTableExistsViaShowTables() {
+        global $wpdb;
+        if (!isset($wpdb) || !method_exists($wpdb, 'prepare')) {
+            return false;
+        }
+        $tableName = $this->doTableNameReplacements('{wp_abj404_logs_hits}');
+        $showTablesQuery = $wpdb->prepare("SHOW TABLES LIKE %s", $tableName);
+        $fallback = $this->queryAndGetResults($showTablesQuery, array('log_errors' => false));
+        if (empty($fallback['rows'])) {
+            return false;
+        }
+        $firstRow = $fallback['rows'][0];
+        if (!is_array($firstRow)) {
+            return false;
+        }
+        $value = reset($firstRow);
+        return ((string)$value === (string)$tableName);
     }
 
     /**
@@ -1524,7 +2359,14 @@ class ABJ_404_Solution_DataAccess {
         $query = "SELECT 1 FROM information_schema.tables WHERE table_name = '{wp_abj404_logs_hits}' AND table_schema = DATABASE() LIMIT 1";
         $query = $this->doTableNameReplacements($query);
         $results = $this->queryAndGetResults($query);
-        return ($results['rows'] != null && !empty($results['rows']));
+        if ($results['rows'] != null && !empty($results['rows'])) {
+            return true;
+        }
+        if (!empty($results['last_error'])) {
+            // Some hosts restrict information_schema access; fall back to SHOW TABLES.
+            return $this->logsHitsTableExistsViaShowTables();
+        }
+        return false;
     }
 
     /**
@@ -1563,6 +2405,16 @@ class ABJ_404_Solution_DataAccess {
         $results = $this->queryAndGetResults($query);
 
         if ($results['rows'] == null || empty($results['rows'])) {
+            if (!empty($results['last_error'])) {
+                $statusRow = $this->getLogsHitsTableStatusRow();
+                $commentFromStatus = is_array($statusRow) ? ($statusRow['comment'] ?? '') : '';
+                if ($commentFromStatus !== '') {
+                    $parts = explode('|', $commentFromStatus);
+                    if (count($parts) >= 2) {
+                        return (int)$parts[1];
+                    }
+                }
+            }
             return 0;
         }
 
@@ -1622,12 +2474,31 @@ class ABJ_404_Solution_DataAccess {
      * @return int|null Unix timestamp of last update, or null if table doesn't exist
      */
     function getLogsHitsTableLastUpdated() {
+        $runtimeRefreshedAt = (int)$this->getRuntimeFlag(self::HITS_TABLE_LAST_REFRESHED_FLAG);
+        $runtimeRefreshedAt = $runtimeRefreshedAt > 0 ? $runtimeRefreshedAt : null;
+
         $query = "SELECT create_time FROM information_schema.tables WHERE table_name = '{wp_abj404_logs_hits}' AND table_schema = DATABASE()";
         $query = $this->doTableNameReplacements($query);
         $results = $this->queryAndGetResults($query);
 
         if ($results['rows'] == null || empty($results['rows'])) {
-            return null;
+            if (!empty($results['last_error'])) {
+                $statusRow = $this->getLogsHitsTableStatusRow();
+                $dateValue = '';
+                if (is_array($statusRow)) {
+                    $dateValue = $statusRow['update_time'] ?? ($statusRow['create_time'] ?? '');
+                }
+                if ($dateValue !== '') {
+                    $fallbackTimestamp = strtotime((string)$dateValue);
+                    if ($fallbackTimestamp !== false) {
+                        if ($runtimeRefreshedAt !== null && $runtimeRefreshedAt > $fallbackTimestamp) {
+                            return $runtimeRefreshedAt;
+                        }
+                        return $fallbackTimestamp;
+                    }
+                }
+            }
+            return $runtimeRefreshedAt;
         }
 
         $row = $results['rows'][0];
@@ -1635,11 +2506,32 @@ class ABJ_404_Solution_DataAccess {
         $createTime = $row['create_time'] ?? null;
 
         if ($createTime === null) {
-            return null;
+            return $runtimeRefreshedAt;
         }
 
         // Convert MySQL datetime to Unix timestamp
-        return strtotime($createTime);
+        $schemaTimestamp = strtotime($createTime);
+        if ($schemaTimestamp === false) {
+            return $runtimeRefreshedAt;
+        }
+        if ($runtimeRefreshedAt !== null && $runtimeRefreshedAt > $schemaTimestamp) {
+            return $runtimeRefreshedAt;
+        }
+        return $schemaTimestamp;
+    }
+
+    private function getLogsHitsTableStatusRow() {
+        global $wpdb;
+        if (!isset($wpdb) || !method_exists($wpdb, 'prepare')) {
+            return array();
+        }
+        $tableName = $this->doTableNameReplacements('{wp_abj404_logs_hits}');
+        $query = $wpdb->prepare("SHOW TABLE STATUS LIKE %s", $tableName);
+        $results = $this->queryAndGetResults($query, array('log_errors' => false));
+        if (empty($results['rows']) || !is_array($results['rows'][0])) {
+            return array();
+        }
+        return array_change_key_case($results['rows'][0], CASE_LOWER);
     }
 
     /**
@@ -1671,6 +2563,18 @@ class ABJ_404_Solution_DataAccess {
     }
 
     function createRedirectsForViewHitsTable() {
+        $wasRefreshed = false;
+        if ($this->shouldSkipNonEssentialDbWrites()) {
+            $this->logger->debugMessage(__FUNCTION__ . " skipped due to temporary DB write cooldown.");
+            $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'paused', 86400);
+            return false;
+        }
+        if (!$this->acquireHitsTableRebuildLock()) {
+            $this->logger->debugMessage(__FUNCTION__ . " skipped because rebuild lock is already held.");
+            $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'running', 86400);
+            return false;
+        }
+        try {
         
         $finalDestTable = $this->doTableNameReplacements("{wp_abj404_logs_hits}");
         $tempDestTable = $this->doTableNameReplacements("{wp_abj404_logs_hits}_temp");
@@ -1686,6 +2590,11 @@ class ABJ_404_Solution_DataAccess {
         $this->queryAndGetResults($createTempTableQuery);
         $this->queryAndGetResults("truncate table " . $tempDestTable);
         
+        // Capture a pre-insert snapshot watermark.
+        // This keeps rebuild checks consistent with getMaxLogId() while avoiding
+        // claiming coverage for rows that may arrive during/after the insert.
+        $maxLogIdSnapshot = $this->getMaxLogId();
+
         // insert the data into the temp table (this may take time).
         $ttInsertQuery = "insert into " . $tempDestTable . " (requested_url, logsid, " .
         	"last_used, logshits) \n " . $ttSelectQuery;
@@ -1694,8 +2603,7 @@ class ABJ_404_Solution_DataAccess {
         // Store elapsed time and max log ID in comment for invalidation check
         // Format: "elapsed_time|max_log_id" (e.g., "0.35|12345")
         $elapsedTime = $results['elapsed_time'];
-        $maxLogId = $this->getMaxLogId();
-        $comment = $elapsedTime . '|' . $maxLogId;
+        $comment = $elapsedTime . '|' . $maxLogIdSnapshot;
         // Escape comment and truncate to MySQL's 2048 char limit for table comments
         $comment = substr(esc_sql($comment), 0, 2048);
         $addComment = "ALTER TABLE " . $tempDestTable . " COMMENT '" . $comment . "'";
@@ -1707,9 +2615,19 @@ class ABJ_404_Solution_DataAccess {
             "rename table " . $tempDestTable . ' to ' . $finalDestTable
         );
         $this->executeAsTransaction($statements);
+        $this->setRuntimeFlag(self::HITS_TABLE_LAST_REFRESHED_FLAG, time(), 86400);
+        $wasRefreshed = true;
         
         $this->logger->debugMessage(__FUNCTION__ . " refreshed " . $finalDestTable . " in " . $elapsedTime . 
                 " seconds.");
+        } catch (Throwable $e) {
+            // Never break the admin request because a shutdown refresh fails.
+            $this->logger->errorMessage(__FUNCTION__ . " failed: " . $e->getMessage(), $e);
+            $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'paused', 86400);
+        } finally {
+            $this->releaseHitsTableRebuildLock();
+        }
+        return $wasRefreshed;
     }
     
     /**
@@ -1723,11 +2641,15 @@ class ABJ_404_Solution_DataAccess {
             return $rows;
         }
 
-        // Extract all non-empty URLs from rows
+        // Extract all non-empty URLs from rows.
+        // Keep lookup variants so legacy rows (e.g. missing leading slash) still map.
         $urls = array();
         foreach ($rows as $row) {
             if ($row['url'] != null && !empty($row['url'])) {
-                $urls[] = $row['url'];
+                $variants = $this->buildHitsLookupUrlVariants($row['url']);
+                foreach ($variants as $variant) {
+                    $urls[] = $variant;
+                }
             }
         }
 
@@ -1761,17 +2683,37 @@ class ABJ_404_Solution_DataAccess {
             return $rows;
         }
 
-        // Index logs data by URL for fast lookup
+        // Index logs data by canonical URL for fast lookup
         $logsDataByUrl = array();
         foreach ($logsResults as $logRow) {
-            $logsDataByUrl[$logRow['requested_url']] = $logRow;
+            $canonicalUrl = $this->canonicalizeUrlForHitsMatch($logRow['requested_url'] ?? '');
+            if ($canonicalUrl === '') {
+                continue;
+            }
+            if (!isset($logsDataByUrl[$canonicalUrl])) {
+                $logsDataByUrl[$canonicalUrl] = array(
+                    'logsid' => (int)($logRow['logsid'] ?? 0),
+                    'logshits' => (int)($logRow['logshits'] ?? 0),
+                    'last_used' => (int)($logRow['last_used'] ?? 0),
+                );
+                continue;
+            }
+            $existing = $logsDataByUrl[$canonicalUrl];
+            $currentLogsid = (int)($logRow['logsid'] ?? 0);
+            $existingLogsid = (int)($existing['logsid'] ?? 0);
+            $logsDataByUrl[$canonicalUrl]['logsid'] = ($existingLogsid > 0 && $currentLogsid > 0)
+                ? min($existingLogsid, $currentLogsid)
+                : max($existingLogsid, $currentLogsid);
+            $logsDataByUrl[$canonicalUrl]['logshits'] = (int)$existing['logshits'] + (int)($logRow['logshits'] ?? 0);
+            $logsDataByUrl[$canonicalUrl]['last_used'] = max((int)($existing['last_used'] ?? 0), (int)($logRow['last_used'] ?? 0));
         }
 
         // Populate rows with logs data using indexed lookup
         foreach ($rows as &$row) {
             if ($row['url'] != null && !empty($row['url'])) {
-                if (isset($logsDataByUrl[$row['url']])) {
-                    $logData = $logsDataByUrl[$row['url']];
+                $canonicalUrl = $this->canonicalizeUrlForHitsMatch($row['url']);
+                if (isset($logsDataByUrl[$canonicalUrl])) {
+                    $logData = $logsDataByUrl[$canonicalUrl];
                     $row['logsid'] = $logData['logsid'];
                     $row['logshits'] = $logData['logshits'];
                     $row['last_used'] = $logData['last_used'];
@@ -1780,6 +2722,104 @@ class ABJ_404_Solution_DataAccess {
         }
 
         return $rows;
+    }
+
+    private function canonicalizeUrlForHitsMatch($url) {
+        if (!is_string($url)) {
+            return '';
+        }
+
+        $url = trim($url);
+        if ($url === '') {
+            return '';
+        }
+
+        $fragment = '';
+        $fragmentPos = strpos($url, '#');
+        if ($fragmentPos !== false) {
+            $fragment = substr($url, $fragmentPos);
+            $url = substr($url, 0, $fragmentPos);
+        }
+
+        $query = '';
+        $queryPos = strpos($url, '?');
+        if ($queryPos !== false) {
+            $query = substr($url, $queryPos);
+            $url = substr($url, 0, $queryPos);
+        }
+
+        $path = trim($url, '/');
+        $normalizedPath = ($path === '') ? '/' : '/' . $path;
+
+        return $normalizedPath . $query . $fragment;
+    }
+
+    private function buildHitsLookupUrlVariants($url) {
+        $variants = array();
+        if (!is_string($url)) {
+            return $variants;
+        }
+
+        $raw = trim($url);
+        if ($raw !== '') {
+            $variants[] = $raw;
+        }
+
+        $canonical = $this->canonicalizeUrlForHitsMatch($url);
+        if ($canonical !== '') {
+            $variants[] = $canonical;
+            $parts = $this->splitCanonicalHitsUrl($canonical);
+            $pathPart = $parts['path'];
+            $suffixPart = $parts['suffix'];
+
+            $pathVariants = array($pathPart);
+            $noLeadingPath = ltrim($pathPart, '/');
+            if ($noLeadingPath !== '') {
+                $pathVariants[] = $noLeadingPath;
+            }
+
+            if ($pathPart !== '/') {
+                if (substr($pathPart, -1) === '/') {
+                    $toggleTrailingPath = rtrim($pathPart, '/');
+                } else {
+                    $toggleTrailingPath = $pathPart . '/';
+                }
+                $pathVariants[] = $toggleTrailingPath;
+                $toggleNoLeadingPath = ltrim($toggleTrailingPath, '/');
+                if ($toggleNoLeadingPath !== '') {
+                    $pathVariants[] = $toggleNoLeadingPath;
+                }
+            }
+
+            foreach (array_unique($pathVariants) as $pathVariant) {
+                $variants[] = $pathVariant . $suffixPart;
+            }
+        }
+
+        return array_values(array_unique($variants));
+    }
+
+    private function splitCanonicalHitsUrl($canonicalUrl) {
+        $canonicalUrl = (string)$canonicalUrl;
+        $firstQueryPos = strpos($canonicalUrl, '?');
+        $firstFragmentPos = strpos($canonicalUrl, '#');
+
+        if ($firstQueryPos === false && $firstFragmentPos === false) {
+            return array('path' => $canonicalUrl, 'suffix' => '');
+        }
+
+        if ($firstQueryPos === false) {
+            $splitPos = $firstFragmentPos;
+        } elseif ($firstFragmentPos === false) {
+            $splitPos = $firstQueryPos;
+        } else {
+            $splitPos = min($firstQueryPos, $firstFragmentPos);
+        }
+
+        return array(
+            'path' => substr($canonicalUrl, 0, $splitPos),
+            'suffix' => substr($canonicalUrl, $splitPos),
+        );
     }
 
     /**
@@ -1850,7 +2890,20 @@ class ABJ_404_Solution_DataAccess {
         }
 
         // Whitelist allowed columns for orderby to prevent SQL injection
-        $allowedOrderbyColumns = array('timestamp', 'requested_url', 'dest_url', 'id', 'referrer', 'min_log_id', 'logshits', 'action');
+        $allowedOrderbyColumns = array(
+            'timestamp',
+            'requested_url',
+            'url',
+            'dest_url',
+            'id',
+            'referrer',
+            'min_log_id',
+            'logshits',
+            'action',
+            'remote_host',
+            'user_ip',
+            'username',
+        );
         $orderby = sanitize_text_field($abj404logic->sanitizeForSQL($tableOptions['orderby']));
         if (!in_array($orderby, $allowedOrderbyColumns, true)) {
             $orderby = 'timestamp'; // Safe default
@@ -1862,8 +2915,15 @@ class ABJ_404_Solution_DataAccess {
             $order = 'DESC'; // Safe default
         }
 
-        $start = ( absint(sanitize_text_field($tableOptions['paged']) - 1)) * absint(sanitize_text_field($tableOptions['perpage']));
-        $perpage = absint(sanitize_text_field($tableOptions['perpage']));
+        $paged = absint($tableOptions['paged'] ?? 1);
+        if ($paged < 1) {
+            $paged = 1;
+        }
+        $perpage = absint($tableOptions['perpage'] ?? ABJ404_OPTION_DEFAULT_PERPAGE);
+        if ($perpage < 1) {
+            $perpage = ABJ404_OPTION_DEFAULT_PERPAGE;
+        }
+        $start = ($paged - 1) * $perpage;
         
         $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getLogRecords.sql");
         $query = $this->f->str_replace('{logsid_included}', $logsid_included, $query);
@@ -1875,6 +2935,116 @@ class ABJ_404_Solution_DataAccess {
 
         $results = $this->queryAndGetResults($query);
         return $results['rows'];
+    }
+
+    /**
+     * Privacy exporter/eraser support: fetch logsv2 IDs for a given lookup value (usually a username).
+     *
+     * @param string $lkupValue
+     * @param int $page 1-based page
+     * @param int $perPage
+     * @return int[]
+     */
+    public function getLogsv2IdsForLookupValue($lkupValue, $page = 1, $perPage = 100) {
+        global $wpdb;
+
+        $lkupValue = is_string($lkupValue) ? trim($lkupValue) : '';
+        if ($lkupValue === '') {
+            return array();
+        }
+
+        $page = max(1, absint($page));
+        $perPage = max(1, min(500, absint($perPage)));
+        $offset = ($page - 1) * $perPage;
+
+        $logsTable = $this->doTableNameReplacements("{wp_abj404_logsv2}");
+        $lookupTable = $this->doTableNameReplacements("{wp_abj404_lookup}");
+
+        $sql = "SELECT l.id
+            FROM `{$logsTable}` l
+            INNER JOIN `{$lookupTable}` u ON l.username = u.id
+            WHERE u.lkup_value = %s
+            ORDER BY l.id DESC
+            LIMIT %d OFFSET %d";
+
+        $prepared = $wpdb->prepare($sql, $lkupValue, $perPage, $offset);
+        $rows = $wpdb->get_results($prepared, ARRAY_A);
+
+        $ids = array();
+        foreach ((array)$rows as $row) {
+            if (isset($row['id'])) {
+                $ids[] = absint($row['id']);
+            }
+        }
+        return array_values(array_filter($ids));
+    }
+
+    /**
+     * Privacy exporter support: fetch logsv2 rows for a given lookup value (usually a username).
+     *
+     * @param string $lkupValue
+     * @param int $page
+     * @param int $perPage
+     * @return array
+     */
+    public function getLogsv2RowsForLookupValue($lkupValue, $page = 1, $perPage = 50) {
+        global $wpdb;
+
+        $ids = $this->getLogsv2IdsForLookupValue($lkupValue, $page, $perPage);
+        if (empty($ids)) {
+            return array();
+        }
+
+        $logsTable = $this->doTableNameReplacements("{wp_abj404_logsv2}");
+
+        $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+        $sql = "SELECT id, timestamp, user_ip, referrer, requested_url, requested_url_detail, dest_url
+            FROM `{$logsTable}`
+            WHERE id IN ({$placeholders})
+            ORDER BY id DESC";
+
+        // WPDB::prepare historically varies in how it accepts arrays; use varargs for compatibility.
+        $prepared = call_user_func_array(array($wpdb, 'prepare'), array_merge(array($sql), $ids));
+        return (array)$wpdb->get_results($prepared, ARRAY_A);
+    }
+
+    /**
+     * Privacy eraser support: anonymize a set of logsv2 rows by IDs.
+     *
+     * We preserve non-user-identifying fields so site owners can still debug patterns,
+     * while removing IP/username/referrer detail.
+     *
+     * @param int[] $ids
+     * @return bool
+     */
+    public function anonymizeLogsv2RowsByIds($ids) {
+        global $wpdb;
+
+        if (!is_array($ids) || empty($ids)) {
+            return true;
+        }
+
+        $ids = array_values(array_filter(array_map('absint', $ids)));
+        if (empty($ids)) {
+            return true;
+        }
+
+        $logsTable = $this->doTableNameReplacements("{wp_abj404_logsv2}");
+        $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+
+        $sql = "UPDATE `{$logsTable}`
+            SET user_ip = %s,
+                referrer = NULL,
+                requested_url_detail = NULL,
+                username = NULL
+            WHERE id IN ({$placeholders})";
+
+        $params = array_merge(array('(Anonymized)'), $ids);
+        $prepared = call_user_func_array(array($wpdb, 'prepare'), array_merge(array($sql), $params));
+        $result = $wpdb->query($prepared);
+
+        // wpdb::query returns false on error.
+        return ($result !== false);
     }
     
     /** 
@@ -1906,45 +3076,66 @@ class ABJ_404_Solution_DataAccess {
 
         // If the database can't store utf8 URLs then URL-encode before saving (avoid insert errors).
         try {
-            static $requestedUrlCharsetCached = null;
+            static $requestedUrlColumnMeta = null;
 
-            if ($requestedUrlCharsetCached === null && function_exists('get_transient')) {
-                $requestedUrlCharsetCached = get_transient('abj404_logs_requested_url_charset');
-                if ($requestedUrlCharsetCached === false) {
-                    $requestedUrlCharsetCached = null;
+            if ($requestedUrlColumnMeta === null && function_exists('get_transient')) {
+                $requestedUrlColumnMeta = get_transient('abj404_logs_requested_url_column_meta');
+                if ($requestedUrlColumnMeta === false) {
+                    $requestedUrlColumnMeta = null;
                 }
             }
 
-            $getCharsetQuery = $wpdb->prepare("SELECT character_set_name as charset_name \n " .
+            // Backward compatibility: if only legacy charset transient exists, keep using it.
+            if ($requestedUrlColumnMeta === null && function_exists('get_transient')) {
+                $legacyCharset = get_transient('abj404_logs_requested_url_charset');
+                if (is_string($legacyCharset) && $legacyCharset !== '') {
+                    $requestedUrlColumnMeta = array(
+                        'charset_name' => $legacyCharset,
+                        'collation_name' => null,
+                    );
+                }
+            }
+
+            $getCharsetQuery = $wpdb->prepare("SELECT character_set_name as charset_name, collation_name as collation_name \n " .
                 "FROM information_schema.columns \n " .
                 "WHERE lower(table_schema) = lower(%s) \n " .
                 "AND lower(table_name) = lower(%s) \n " .
                 "AND lower(column_name) = lower(%s) ",
                 DB_NAME, $logTableName, 'requested_url');
 
-            if ($requestedUrlCharsetCached === null) {
+            if ($requestedUrlColumnMeta === null) {
                 $resultArray = $wpdb->get_results($getCharsetQuery, ARRAY_A);
                 if (!empty($resultArray)) {
-                    $requestedUrlCharsetCached = $resultArray[0]['charset_name'] ?? $resultArray[0]['CHARSET_NAME'];
+                    $requestedUrlColumnMeta = array(
+                        'charset_name' => $resultArray[0]['charset_name'] ?? $resultArray[0]['CHARSET_NAME'] ?? null,
+                        'collation_name' => $resultArray[0]['collation_name'] ?? $resultArray[0]['COLLATION_NAME'] ?? null,
+                    );
                     if (function_exists('set_transient')) {
                         $ttl = defined('WEEK_IN_SECONDS') ? WEEK_IN_SECONDS : 604800;
-                        set_transient('abj404_logs_requested_url_charset', $requestedUrlCharsetCached, $ttl);
+                        set_transient('abj404_logs_requested_url_column_meta', $requestedUrlColumnMeta, $ttl);
+                        // Keep legacy key in sync for older code paths.
+                        if (!empty($requestedUrlColumnMeta['charset_name'])) {
+                            set_transient('abj404_logs_requested_url_charset', $requestedUrlColumnMeta['charset_name'], $ttl);
+                        }
                     }
                 }
             }
 
-            if (!empty($requestedUrlCharsetCached) && strpos(strtolower($requestedUrlCharsetCached), 'utf8') === false) {
+            $requestedUrlCharset = is_array($requestedUrlColumnMeta) ? ($requestedUrlColumnMeta['charset_name'] ?? null) : null;
+            $requestedUrlCollation = is_array($requestedUrlColumnMeta) ? ($requestedUrlColumnMeta['collation_name'] ?? null) : null;
+
+            if (!empty($requestedUrlCharset) && strpos(strtolower($requestedUrlCharset), 'utf8') === false) {
                     $requested_url = $this->f->encodeUrlForLegacyMatch($requested_url);
 
                     // Avoid spamming logs on every redirect hit.
                     if (function_exists('get_transient') && function_exists('set_transient')) {
                         $warnKey = 'abj404_warned_logs_charset_mismatch';
-                        $warnVal = $logTableName . '|' . strtolower($requestedUrlCharsetCached);
+                        $warnVal = $logTableName . '|' . strtolower($requestedUrlCharset);
                         $already = get_transient($warnKey);
                         if ($already !== $warnVal) {
                             $ttl = defined('WEEK_IN_SECONDS') ? WEEK_IN_SECONDS : 604800;
                             set_transient($warnKey, $warnVal, $ttl);
-                            $this->logger->warn("Logs table column charset is '{$requestedUrlCharsetCached}' for {$logTableName}. URL-encoding stored requested URLs to avoid charset issues.");
+                            $this->logger->warn("Logs table column charset is '{$requestedUrlCharset}' for {$logTableName}. URL-encoding stored requested URLs to avoid charset issues.");
                         }
                     }
             }
@@ -1985,10 +3176,29 @@ class ABJ_404_Solution_DataAccess {
         
         // we have to know what to set for the $minLogID value
         $minLogID = false;
-        $checkMinIDQuery = $wpdb->prepare("SELECT id FROM `" . $logTableName . "` \n " .
-            "WHERE CAST(requested_url AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci = %s \n " .
-            "LIMIT 1", $requested_url);
+        $comparisonCollation = $this->sanitizeCollationIdentifier(isset($requestedUrlCollation) ? (string)$requestedUrlCollation : '');
+        if ($comparisonCollation === '' || stripos($comparisonCollation, 'utf8mb4') === false) {
+            $comparisonCollation = $this->getPreferredUtf8mb4Collation();
+        }
+        $requestedUrlCharsetLower = isset($requestedUrlCharset) ? strtolower((string)$requestedUrlCharset) : '';
+        $canUseUtf8Cast = ($requestedUrlCharsetLower === '' || strpos($requestedUrlCharsetLower, 'utf8') !== false);
+        if ($canUseUtf8Cast) {
+            $checkMinIDQuery = $wpdb->prepare("SELECT id FROM `" . $logTableName . "` \n " .
+                "WHERE CAST(requested_url AS CHAR CHARACTER SET utf8mb4) COLLATE " . $comparisonCollation . " = %s \n " .
+                "LIMIT 1", $requested_url);
+        } else {
+            $checkMinIDQuery = $wpdb->prepare("SELECT id FROM `" . $logTableName . "` \n " .
+                "WHERE requested_url = %s \n " .
+                "LIMIT 1", $requested_url);
+        }
         $checkMinIDQueryResults = $wpdb->get_results($checkMinIDQuery, ARRAY_A);
+        if (!empty($wpdb->last_error) && $this->isInvalidDataError($wpdb->last_error) && $canUseUtf8Cast) {
+            $fallbackResult = $this->queryAndGetResults(
+                "SELECT id FROM `" . $logTableName . "` \n WHERE requested_url = %s \n LIMIT 1",
+                array('query_params' => array($requested_url), 'log_errors' => false)
+            );
+            $checkMinIDQueryResults = $fallbackResult['rows'] ?? array();
+        }
     
         if (empty($checkMinIDQueryResults)) {
             $minLogID = true;
@@ -2727,6 +3937,19 @@ class ABJ_404_Solution_DataAccess {
                     esc_url($fromURL) . " to: " . esc_url($final_dest) . ", Type: " .esc_html($type) . ", Status: " . $status);
         }
 
+        $statusAsInt = is_numeric($status) ? absint($status) : -1;
+        $typeAsInt = is_numeric($type) ? absint($type) : -1;
+
+        // Guard: automatic redirects must point to a currently valid destination.
+        // This prevents persisting "auto" rows with missing/unpublished targets.
+        if ($statusAsInt === ABJ404_STATUS_AUTO &&
+                !$this->isValidAutomaticRedirectDestination($typeAsInt, $final_dest)) {
+            $this->logger->debugMessage("Skipping automatic redirect with invalid destination. " .
+                    "From: " . esc_url($fromURL) . ", Dest: " . esc_html((string)$final_dest) .
+                    ", Type: " . esc_html((string)$type) . ", Status: " . esc_html((string)$status));
+            return 0;
+        }
+
         // if we should not capture a 404 then don't.
         if (!array_key_exists(ABJ404_PP, $_REQUEST) ||
         		!array_key_exists('ignore_doprocess', $_REQUEST[ABJ404_PP]) ||
@@ -2774,6 +3997,66 @@ class ABJ_404_Solution_DataAccess {
         }
 
         return $wpdb->insert_id;
+    }
+
+    /**
+     * Automatic redirects are only valid for published posts or existing terms.
+     * If a destination is missing or unpublished, skip creating the auto redirect.
+     *
+     * @param int $type
+     * @param mixed $finalDest
+     * @return bool
+     */
+    private function isValidAutomaticRedirectDestination($type, $finalDest) {
+        $destId = absint($finalDest);
+
+        if ($type === ABJ404_TYPE_POST) {
+            if ($destId <= 0) {
+                return false;
+            }
+            if (!function_exists('get_post')) {
+                return true;
+            }
+
+            $post = get_post($destId);
+            if (!is_object($post)) {
+                return false;
+            }
+
+            $postStatus = '';
+            if (isset($post->post_status) && is_string($post->post_status)) {
+                $postStatus = strtolower($post->post_status);
+            } else if (function_exists('get_post_status')) {
+                $resolvedStatus = get_post_status($destId);
+                if (is_string($resolvedStatus)) {
+                    $postStatus = strtolower($resolvedStatus);
+                }
+            }
+
+            return in_array($postStatus, array('publish', 'published'), true);
+        }
+
+        if ($type === ABJ404_TYPE_CAT || $type === ABJ404_TYPE_TAG) {
+            if ($destId <= 0) {
+                return false;
+            }
+            if (!function_exists('get_term')) {
+                return true;
+            }
+
+            $taxonomy = ($type === ABJ404_TYPE_CAT) ? 'category' : 'post_tag';
+            $term = get_term($destId, $taxonomy);
+            if ($term === null || $term === false) {
+                return false;
+            }
+            if (function_exists('is_wp_error') && is_wp_error($term)) {
+                return false;
+            }
+            return is_object($term);
+        }
+
+        // Auto redirects should not target other types.
+        return false;
     }
 
     /** Get the redirect for the URL. 
@@ -2948,10 +4231,15 @@ class ABJ_404_Solution_DataAccess {
                  AND COLUMN_NAME = 'post_name'",
                 $wpdb->posts
             ));
-            if ($columnCollation !== null && strpos($columnCollation, 'utf8mb4') !== false) {
+            if ($columnCollation !== null && strpos(strtolower($columnCollation), 'utf8mb4') !== false) {
                 // Column supports utf8mb4 - use CAST for proper Unicode comparison
+                $resolvedCollation = $this->sanitizeCollationIdentifier($columnCollation);
+                if ($resolvedCollation === '') {
+                    $resolvedCollation = $this->getPreferredUtf8mb4Collation();
+                }
                 $specifiedSlug = " */\n and CAST(wp_posts.post_name AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci = "
                         . "'" . esc_sql($slug) . "' \n ";
+                $specifiedSlug = str_replace('utf8mb4_unicode_ci', $resolvedCollation, $specifiedSlug);
             } else {
                 // Legacy column (latin1, utf8, etc.) - use simple comparison
                 $specifiedSlug = " */\n and wp_posts.post_name = "
@@ -2990,6 +4278,24 @@ class ABJ_404_Solution_DataAccess {
         $query = $this->f->str_replace('{order-results}', $orderResults, $query);
         
         $rows = $wpdb->get_results($query);
+        if (!empty($wpdb->last_error) && $this->isInvalidDataError($wpdb->last_error) &&
+                $slug != "" && strpos($query, 'CAST(wp_posts.post_name AS CHAR CHARACTER SET utf8mb4)') !== false) {
+            // Compatibility fallback: retry once without CAST/COLLATE for environments
+            // where mixed encodings still reject utf8mb4 coercion.
+            $fallbackSpecifiedSlug = " */\n and wp_posts.post_name = '" . esc_sql($slug) . "' \n ";
+            $fallbackQuery = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getPublishedPagesAndPostsIDs.sql");
+            $fallbackQuery = $this->doTableNameReplacements($fallbackQuery);
+            $fallbackQuery = $this->f->str_replace('{recognizedPostTypes}', $recognizedPostTypes, $fallbackQuery);
+            $fallbackQuery = $this->f->str_replace('{specifiedSlug}', $fallbackSpecifiedSlug, $fallbackQuery);
+            $fallbackQuery = $this->f->str_replace('{searchTerm}', $searchTerm, $fallbackQuery);
+            $fallbackQuery = $this->f->str_replace('{extraWhereClause}', $extraWhereClause, $fallbackQuery);
+            $fallbackQuery = $this->f->str_replace('{limit-results}', $limitResults, $fallbackQuery);
+            $fallbackQuery = $this->f->str_replace('{order-results}', $orderResults, $fallbackQuery);
+            $fallbackResult = $this->queryAndGetResults($fallbackQuery, array('log_errors' => false));
+            $rows = array_map(function($row) {
+                return (object)$row;
+            }, $fallbackResult['rows'] ?? array());
+        }
 
         // check for errors
         if ($wpdb->last_error) {
@@ -3258,6 +4564,407 @@ class ABJ_404_Solution_DataAccess {
         }
         
         return intval($results[0]);
+    }
+
+    /**
+     * Get periodic log statistics in one query for a given time threshold.
+     *
+     * This replaces multiple per-metric count queries on the stats page and
+     * significantly reduces page-load query overhead.
+     *
+     * @param int $sinceTimestamp Include rows with timestamp >= this value.
+     * @param string $notFoundDest Destination value used for "404" events.
+     * @return array{
+     *   disp404:int,
+     *   distinct404:int,
+     *   visitors404:int,
+     *   refer404:int,
+     *   redirected:int,
+     *   distinctredirected:int,
+     *   distinctvisitors:int,
+     *   distinctrefer:int
+     * }
+     */
+    function getPeriodicStatsSummary($sinceTimestamp, $notFoundDest = '404') {
+        global $wpdb;
+
+        $sinceTimestamp = absint($sinceTimestamp);
+        $notFoundDest = sanitize_text_field((string)$notFoundDest);
+        if ($notFoundDest === '') {
+            $notFoundDest = '404';
+        }
+
+        $zero = array(
+            'disp404' => 0,
+            'distinct404' => 0,
+            'visitors404' => 0,
+            'refer404' => 0,
+            'redirected' => 0,
+            'distinctredirected' => 0,
+            'distinctvisitors' => 0,
+            'distinctrefer' => 0,
+        );
+
+        $logsTable = $this->doTableNameReplacements('{wp_abj404_logsv2}');
+        $sql = "SELECT
+                COUNT(CASE WHEN dest_url = %s THEN 1 END) AS disp404,
+                COUNT(DISTINCT CASE WHEN dest_url = %s THEN requested_url END) AS distinct404,
+                COUNT(DISTINCT CASE WHEN dest_url = %s THEN user_ip END) AS visitors404,
+                COUNT(DISTINCT CASE WHEN dest_url = %s THEN referrer END) AS refer404,
+                COUNT(CASE WHEN dest_url <> %s THEN 1 END) AS redirected,
+                COUNT(DISTINCT CASE WHEN dest_url <> %s THEN requested_url END) AS distinctredirected,
+                COUNT(DISTINCT CASE WHEN dest_url <> %s THEN user_ip END) AS distinctvisitors,
+                COUNT(DISTINCT CASE WHEN dest_url <> %s THEN referrer END) AS distinctrefer
+            FROM {$logsTable}
+            WHERE timestamp >= %d";
+
+        $prepared = $wpdb->prepare(
+            $sql,
+            $notFoundDest,
+            $notFoundDest,
+            $notFoundDest,
+            $notFoundDest,
+            $notFoundDest,
+            $notFoundDest,
+            $notFoundDest,
+            $notFoundDest,
+            $sinceTimestamp
+        );
+
+        $row = $wpdb->get_row($prepared, ARRAY_A);
+        if (!is_array($row)) {
+            return $zero;
+        }
+
+        foreach ($zero as $key => $unused) {
+            $zero[$key] = isset($row[$key]) ? intval($row[$key]) : 0;
+        }
+
+        return $zero;
+    }
+
+    /**
+     * Return periodic stats for today/month/year/all with short-lived cache.
+     *
+     * This avoids repeatedly running expensive DISTINCT aggregates each time the
+     * stats tab is opened while still keeping data reasonably fresh.
+     *
+     * @param string $notFoundDest Destination value used for "404" events.
+     * @return array{
+     *   today:array<string,int>,
+     *   month:array<string,int>,
+     *   year:array<string,int>,
+     *   all:array<string,int>
+     * }
+     */
+    function getPeriodicStatsSummariesCached($notFoundDest = '404') {
+        $today = mktime(0, 0, 0, abs(intval(date('m'))), abs(intval(date('d'))), abs(intval(date('Y'))));
+        $firstm = mktime(0, 0, 0, abs(intval(date('m'))), 1, abs(intval(date('Y'))));
+        $firsty = mktime(0, 0, 0, 1, 1, abs(intval(date('Y'))));
+
+        $thresholds = array(
+            'today' => intval($today),
+            'month' => intval($firstm),
+            'year' => intval($firsty),
+            'all' => 0,
+        );
+
+        $zero = array(
+            'disp404' => 0,
+            'distinct404' => 0,
+            'visitors404' => 0,
+            'refer404' => 0,
+            'redirected' => 0,
+            'distinctredirected' => 0,
+            'distinctvisitors' => 0,
+            'distinctrefer' => 0,
+        );
+        $emptyPayload = array(
+            'today' => $zero,
+            'month' => $zero,
+            'year' => $zero,
+            'all' => $zero,
+        );
+
+        $blogId = 1;
+        if (function_exists('get_current_blog_id')) {
+            $blogId = absint(get_current_blog_id());
+            if ($blogId <= 0) {
+                $blogId = 1;
+            }
+        }
+
+        $cacheKey = 'abj404_stats_periodic_v1_' . $blogId . '_' . md5(
+            $notFoundDest . '|' . $thresholds['today'] . '|' . $thresholds['month'] . '|' . $thresholds['year']
+        );
+        $cached = null;
+        if (function_exists('get_transient')) {
+            $cached = get_transient($cacheKey);
+        }
+
+        $isCachedValid = (is_array($cached) && isset($cached['periods']) && is_array($cached['periods']));
+        $currentMaxLogId = -1;
+        try {
+            $currentMaxLogId = intval($this->getMaxLogId());
+        } catch (Throwable $unused) {
+            $currentMaxLogId = -1;
+        }
+
+        if ($isCachedValid) {
+            $refreshedAt = intval($cached['refreshed_at'] ?? 0);
+            $ageSeconds = max(0, time() - $refreshedAt);
+            $cachedMaxLogId = intval($cached['max_log_id'] ?? -1);
+            if ($currentMaxLogId >= 0 && $cachedMaxLogId === $currentMaxLogId) {
+                $merged = array_merge($emptyPayload, $cached['periods']);
+                return $merged;
+            }
+            if ($ageSeconds < self::PERIODIC_STATS_REFRESH_COOLDOWN_SECONDS) {
+                $merged = array_merge($emptyPayload, $cached['periods']);
+                return $merged;
+            }
+        }
+
+        $lockKey = 'stats-periodic:' . $cacheKey;
+        $lockAcquired = $this->acquireViewSnapshotRefreshLock($lockKey);
+        if (!$lockAcquired && $isCachedValid) {
+            $merged = array_merge($emptyPayload, $cached['periods']);
+            return $merged;
+        }
+
+        try {
+            $periods = array();
+            foreach ($thresholds as $key => $ts) {
+                $periods[$key] = $this->getPeriodicStatsSummary($ts, $notFoundDest);
+            }
+            $result = array_merge($emptyPayload, $periods);
+
+            if (function_exists('set_transient')) {
+                set_transient(
+                    $cacheKey,
+                    array(
+                        'refreshed_at' => time(),
+                        'max_log_id' => $currentMaxLogId,
+                        'periods' => $result,
+                    ),
+                    self::PERIODIC_STATS_CACHE_TTL_SECONDS
+                );
+            }
+
+            return $result;
+        } finally {
+            if ($lockAcquired) {
+                $this->releaseViewSnapshotRefreshLock($lockKey);
+            }
+        }
+    }
+
+    /**
+     * Return a cached snapshot used by the Stats dashboard.
+     *
+     * For user experience, we intentionally prefer stale data over blocking
+     * the request. Fresh recomputation is done by a background AJAX refresh.
+     *
+     * @param bool $allowStale If true, return any cached snapshot immediately.
+     * @return array{refreshed_at:int,hash:string,data:array}
+     */
+    function getStatsDashboardSnapshot($allowStale = true) {
+        $cached = $this->getStatsDashboardSnapshotFromCache();
+        if (is_array($cached) && !empty($cached['data']) && $allowStale) {
+            return $cached;
+        }
+
+        if ($allowStale) {
+            $emptyData = $this->buildEmptyStatsDashboardSnapshotData();
+            $emptyPayload = array(
+                'refreshed_at' => 0,
+                'hash' => $this->hashStatsDashboardSnapshot($emptyData),
+                'data' => $emptyData,
+            );
+            if (function_exists('set_transient')) {
+                set_transient($this->getStatsDashboardSnapshotCacheKey(), $emptyPayload, self::STATS_DASHBOARD_CACHE_TTL_SECONDS);
+            }
+            return $emptyPayload;
+        }
+
+        return $this->refreshStatsDashboardSnapshot(false);
+    }
+
+    /**
+     * Recompute and store the stats dashboard snapshot.
+     *
+     * @param bool $force If true, bypass refresh cooldown checks.
+     * @return array{refreshed_at:int,hash:string,data:array}
+     */
+    function refreshStatsDashboardSnapshot($force = false) {
+        $cached = $this->getStatsDashboardSnapshotFromCache();
+        $hasCachedData = (is_array($cached) && !empty($cached['data']));
+        $cachedAge = $hasCachedData ? max(0, time() - intval($cached['refreshed_at'] ?? 0)) : PHP_INT_MAX;
+
+        if (!$force && $hasCachedData && $cachedAge < self::STATS_DASHBOARD_REFRESH_COOLDOWN_SECONDS) {
+            return $cached;
+        }
+
+        $lockKey = 'stats-dashboard:' . $this->getStatsDashboardSnapshotCacheKey();
+        $lockAcquired = $this->acquireViewSnapshotRefreshLock($lockKey);
+        if (!$lockAcquired && $hasCachedData) {
+            return $cached;
+        }
+
+        try {
+            $data = $this->buildStatsDashboardSnapshotData();
+            $payload = array(
+                'refreshed_at' => time(),
+                'hash' => $this->hashStatsDashboardSnapshot($data),
+                'data' => $data,
+            );
+            if (function_exists('set_transient')) {
+                set_transient($this->getStatsDashboardSnapshotCacheKey(), $payload, self::STATS_DASHBOARD_CACHE_TTL_SECONDS);
+            }
+            return $payload;
+        } catch (Throwable $e) {
+            if ($hasCachedData) {
+                $this->logger->debugMessage(__FUNCTION__ . ' failed to recompute stats snapshot; returning cached snapshot. Error: ' . $e->getMessage());
+                return $cached;
+            }
+            throw $e;
+        } finally {
+            if ($lockAcquired) {
+                $this->releaseViewSnapshotRefreshLock($lockKey);
+            }
+        }
+    }
+
+    private function getStatsDashboardSnapshotFromCache() {
+        if (!function_exists('get_transient')) {
+            return null;
+        }
+        $cached = get_transient($this->getStatsDashboardSnapshotCacheKey());
+        if (!is_array($cached)) {
+            return null;
+        }
+        if (!array_key_exists('data', $cached) || !is_array($cached['data'])) {
+            return null;
+        }
+        $cached['refreshed_at'] = intval($cached['refreshed_at'] ?? 0);
+        $cached['hash'] = is_string($cached['hash'] ?? null) ? $cached['hash'] : '';
+        return $cached;
+    }
+
+    private function getStatsDashboardSnapshotCacheKey() {
+        $blogId = 1;
+        if (function_exists('get_current_blog_id')) {
+            $blogId = absint(get_current_blog_id());
+            if ($blogId <= 0) {
+                $blogId = 1;
+            }
+        }
+        return 'abj404_stats_dashboard_snapshot_v1_' . $blogId;
+    }
+
+    private function hashStatsDashboardSnapshot($data) {
+        $encoded = function_exists('wp_json_encode') ? wp_json_encode($data) : json_encode($data);
+        if (!is_string($encoded)) {
+            $encoded = '';
+        }
+        return md5($encoded);
+    }
+
+    private function buildStatsDashboardSnapshotData() {
+        $redirectsTable = $this->doTableNameReplacements("{wp_abj404_redirects}");
+
+        $auto301 = $this->getStatsCount(
+            "select count(id) from $redirectsTable where disabled = 0 and code = 301 and status = %d",
+            array(ABJ404_STATUS_AUTO)
+        );
+        $auto302 = $this->getStatsCount(
+            "select count(id) from $redirectsTable where disabled = 0 and code = 302 and status = %d",
+            array(ABJ404_STATUS_AUTO)
+        );
+        $manual301 = $this->getStatsCount(
+            "select count(id) from $redirectsTable where disabled = 0 and code = 301 and status = %d",
+            array(ABJ404_STATUS_MANUAL)
+        );
+        $manual302 = $this->getStatsCount(
+            "select count(id) from $redirectsTable where disabled = 0 and code = 302 and status = %d",
+            array(ABJ404_STATUS_MANUAL)
+        );
+        $trashedRedirects = $this->getStatsCount(
+            "select count(id) from $redirectsTable where disabled = 1 and (status = %d or status = %d)",
+            array(ABJ404_STATUS_AUTO, ABJ404_STATUS_MANUAL)
+        );
+
+        $captured = $this->getStatsCount(
+            "select count(id) from $redirectsTable where disabled = 0 and status = %d",
+            array(ABJ404_STATUS_CAPTURED)
+        );
+        $ignored = $this->getStatsCount(
+            "select count(id) from $redirectsTable where disabled = 0 and status in (%d, %d)",
+            array(ABJ404_STATUS_IGNORED, ABJ404_STATUS_LATER)
+        );
+        $trashedCaptured = $this->getStatsCount(
+            "select count(id) from $redirectsTable where disabled = 1 and (status in (%d, %d, %d) )",
+            array(ABJ404_STATUS_CAPTURED, ABJ404_STATUS_IGNORED, ABJ404_STATUS_LATER)
+        );
+
+        $thresholds = array(
+            'today' => mktime(0, 0, 0, abs(intval(date('m'))), abs(intval(date('d'))), abs(intval(date('Y')))),
+            'month' => mktime(0, 0, 0, abs(intval(date('m'))), 1, abs(intval(date('Y')))),
+            'year' => mktime(0, 0, 0, 1, 1, abs(intval(date('Y')))),
+            'all' => 0,
+        );
+        $periods = array();
+        foreach ($thresholds as $periodKey => $ts) {
+            $periods[$periodKey] = $this->getPeriodicStatsSummary($ts, '404');
+        }
+
+        return array(
+            'redirects' => array(
+                'auto301' => intval($auto301),
+                'auto302' => intval($auto302),
+                'manual301' => intval($manual301),
+                'manual302' => intval($manual302),
+                'trashed' => intval($trashedRedirects),
+            ),
+            'captured' => array(
+                'captured' => intval($captured),
+                'ignored' => intval($ignored),
+                'trashed' => intval($trashedCaptured),
+            ),
+            'periods' => $periods,
+        );
+    }
+
+    private function buildEmptyStatsDashboardSnapshotData() {
+        $period = array(
+            'disp404' => 0,
+            'distinct404' => 0,
+            'visitors404' => 0,
+            'refer404' => 0,
+            'redirected' => 0,
+            'distinctredirected' => 0,
+            'distinctvisitors' => 0,
+            'distinctrefer' => 0,
+        );
+        return array(
+            'redirects' => array(
+                'auto301' => 0,
+                'auto302' => 0,
+                'manual301' => 0,
+                'manual302' => 0,
+                'trashed' => 0,
+            ),
+            'captured' => array(
+                'captured' => 0,
+                'ignored' => 0,
+                'trashed' => 0,
+            ),
+            'periods' => array(
+                'today' => $period,
+                'month' => $period,
+                'year' => $period,
+                'all' => $period,
+            ),
+        );
     }
 
     /** 

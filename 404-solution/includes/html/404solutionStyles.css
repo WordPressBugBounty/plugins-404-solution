@@ -432,6 +432,36 @@
     margin: 8px 0 0 0;
 }
 
+/* Review notice in plugin header areas */
+.abj404-review-notice {
+    box-sizing: border-box;
+    position: relative;
+    width: 100%;
+    margin: 8px 0 0 0;
+    padding-right: 40px;
+}
+
+.abj404-review-notice p {
+    margin-right: 4px;
+}
+
+.abj404-review-notice-close {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    line-height: 1;
+    font-size: 18px;
+    font-weight: 700;
+    color: #6b7280;
+    text-decoration: none;
+}
+
+.abj404-review-notice-close:hover,
+.abj404-review-notice-close:focus {
+    color: #111827;
+    text-decoration: none;
+}
+
 .abj404-header-controls #abj404-expand-collapse-all {
     white-space: nowrap;
 }
@@ -873,6 +903,36 @@ ul .ui-autocomplete-category.data-overflow-category {
     position: relative;
     border-bottom: 1px dotted var(--abj404-text-muted, #646970);
     cursor: help;
+}
+
+.abj404-header-tooltip.lefty-tooltip {
+    border-bottom: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    margin-left: 6px;
+    border: 1px solid var(--abj404-border, #dcdcde);
+    border-radius: 999px;
+    color: var(--abj404-text-muted, #646970);
+    background: #fff;
+    vertical-align: middle;
+}
+
+.abj404-header-tooltip-icon {
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.abj404-header-tooltip.lefty-tooltip:hover {
+    color: var(--abj404-accent, #2271b1);
+    border-color: var(--abj404-accent, #2271b1);
+}
+
+.abj404-header-tooltip .lefty-tooltiptext {
+    top: calc(100% + 6px);
 }
 
 .lefty-tooltip .lefty-tooltiptext {
@@ -1570,14 +1630,35 @@ html[data-theme="obsidian"] .abj404-tab-branding {
     color: var(--abj404-accent, #2271b1);
 }
 
+.abj404-table th .sorting-indicator,
 .abj404-table th .sort-indicator {
     display: inline-block;
     margin-left: 4px;
     opacity: 0.5;
+    min-width: 0.8em;
+    text-align: center;
 }
 
+.abj404-table th .sorting-indicator::before,
+.abj404-table th .sort-indicator::before {
+    content: "↕";
+    font-size: 12px;
+    line-height: 1;
+}
+
+.abj404-table th.sorted .sorting-indicator,
 .abj404-table th.sorted .sort-indicator {
     opacity: 1;
+}
+
+.abj404-table th.sorted.asc .sorting-indicator::before,
+.abj404-table th.sorted.asc .sort-indicator::before {
+    content: "↑";
+}
+
+.abj404-table th.sorted.desc .sorting-indicator::before,
+.abj404-table th.sorted.desc .sort-indicator::before {
+    content: "↓";
 }
 
 .abj404-table th input[type="checkbox"] {
@@ -1601,6 +1682,21 @@ html[data-theme="obsidian"] .abj404-tab-branding {
 
 .abj404-table tbody tr:nth-child(even):hover {
     background: #f5f5f5;
+}
+
+.abj404-table tbody tr.destination-does-not-exist,
+.abj404-table tbody tr.destination-does-not-exist:nth-child(even) {
+    background: #ffe7e7;
+}
+
+.abj404-table tbody tr.destination-does-not-exist:hover,
+.abj404-table tbody tr.destination-does-not-exist:nth-child(even):hover {
+    background: #ffd8d8;
+}
+
+.abj404-table tbody tr.destination-does-not-exist .abj404-dest-warning {
+    color: #a02222;
+    font-weight: 600;
 }
 
 .abj404-table td {
@@ -1875,6 +1971,12 @@ html[data-theme="obsidian"] .abj404-tab-branding {
 .abj404-pagination-info {
     color: var(--abj404-text-muted, #646970);
     font-size: 14px;
+}
+
+.abj404-refresh-status {
+    color: var(--abj404-text-muted, #646970);
+    font-size: 12px;
+    min-height: 16px;
 }
 
 .abj404-pagination-controls {
@@ -2409,6 +2511,18 @@ html[data-theme="obsidian"] .abj404-tab-branding {
 .abj404-dest-tooltip:hover .abj404-tooltip-text {
     visibility: visible;
     opacity: 1;
+}
+
+/* Keep top-row destination tooltips readable: show below the row instead of under sticky headers. */
+.abj404-table tbody tr:nth-child(-n+2) .abj404-dest-tooltip .abj404-tooltip-text {
+    top: 125%;
+    bottom: auto;
+}
+
+.abj404-table tbody tr:nth-child(-n+2) .abj404-dest-tooltip .abj404-tooltip-text::after {
+    top: auto;
+    bottom: 100%;
+    border-color: transparent transparent #1d2327 transparent;
 }
 
 /* ============================================
@@ -3297,4 +3411,36 @@ input[type="checkbox"]:focus-visible {
     .abj404-table td {
         border: 1px solid currentColor;
     }
+}
+
+/* ============================================
+   Tools Diagnostics
+   ============================================ */
+
+.abj404-diagnostics-summary table td {
+    vertical-align: middle;
+}
+
+.abj404-status-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.6;
+}
+
+.abj404-pill-success {
+    background: #d1e7dd;
+    color: #0f5132;
+}
+
+.abj404-pill-warning {
+    background: #fff3cd;
+    color: #664d03;
+}
+
+.abj404-pill-info {
+    background: #cff4fc;
+    color: #055160;
 }

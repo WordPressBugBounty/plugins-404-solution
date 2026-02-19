@@ -1,5 +1,10 @@
 <?php
 
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 /**
  * Handles the deactivation modal popup display and AJAX functionality
  * Shows options before plugin deactivation to preserve user data
@@ -350,11 +355,15 @@ class ABJ_404_Solution_UninstallModal {
      */
     public static function handleAjaxSavePreferences() {
         // Security: Verify nonce
-        check_ajax_referer('abj404_uninstall_nonce', 'nonce');
+        $nonceOk = check_ajax_referer('abj404_uninstall_nonce', 'nonce', false);
+        if (!$nonceOk) {
+            wp_send_json_error(array('message' => __('Invalid security token', '404-solution')), 403);
+            return;
+        }
 
         // Security: Check user capabilities
         if (!current_user_can('activate_plugins')) {
-            wp_send_json_error(array('message' => __('Insufficient permissions', '404-solution')));
+            wp_send_json_error(array('message' => __('Insufficient permissions', '404-solution')), 403);
             return;
         }
 
@@ -368,6 +377,8 @@ class ABJ_404_Solution_UninstallModal {
             'uninstall_reason' => isset($_POST['uninstall_reason']) ? sanitize_text_field($_POST['uninstall_reason']) : '',
             'selected_issues' => isset($_POST['selected_issues']) ? sanitize_text_field($_POST['selected_issues']) : '',
             'followup_details' => isset($_POST['followup_details']) ? sanitize_textarea_field($_POST['followup_details']) : '',
+            // Back-compat for older tests/UI that used a single text field.
+            'feedback_details' => isset($_POST['followup_details']) ? sanitize_textarea_field($_POST['followup_details']) : '',
             'better_plugin_name' => isset($_POST['better_plugin_name']) ? sanitize_text_field($_POST['better_plugin_name']) : '',
             'other_reason_text' => isset($_POST['other_reason_text']) ? sanitize_textarea_field($_POST['other_reason_text']) : '',
             'feedback_email' => isset($_POST['feedback_email']) ? sanitize_email($_POST['feedback_email']) : '',
@@ -407,7 +418,7 @@ class ABJ_404_Solution_UninstallModal {
             if ($saved_value !== $preferences) {
                 wp_send_json_error(array(
                     'message' => __('Could not save preferences. Your choices may not be preserved.', '404-solution')
-                ));
+                ), 500);
                 return;
             }
             // If values match, the false return was just because value was unchanged (which is OK)
@@ -819,6 +830,9 @@ class ABJ_404_Solution_UninstallModal {
 
         $all_plugins = get_plugins();
         $active_plugins = get_option('active_plugins', array());
+        if (!is_array($active_plugins)) {
+            $active_plugins = array();
+        }
 
         $active_plugin_names = array();
         foreach ($active_plugins as $plugin_path) {
@@ -856,8 +870,10 @@ class ABJ_404_Solution_UninstallModal {
         // Get database default charset and collation
         if (!defined('DB_NAME')) {
             // Test environment - use wpdb defaults
-            $info['charset'] = $wpdb->charset ?: 'utf8mb4';
-            $info['collation'] = $wpdb->collate ?: 'utf8mb4_unicode_ci';
+            $charset = isset($wpdb->charset) ? $wpdb->charset : '';
+            $collate = isset($wpdb->collate) ? $wpdb->collate : '';
+            $info['charset'] = $charset ?: 'utf8mb4';
+            $info['collation'] = $collate ?: 'utf8mb4_unicode_ci';
             return $info;
         }
 
@@ -889,10 +905,12 @@ class ABJ_404_Solution_UninstallModal {
 
         // Final fallback: WordPress connection settings
         if ($info['charset'] === 'Unknown') {
-            $info['charset'] = $wpdb->charset ?: (defined('DB_CHARSET') ? DB_CHARSET : 'utf8mb4');
+            $charset = isset($wpdb->charset) ? $wpdb->charset : '';
+            $info['charset'] = $charset ?: (defined('DB_CHARSET') ? DB_CHARSET : 'utf8mb4');
         }
         if ($info['collation'] === 'Unknown') {
-            $info['collation'] = $wpdb->collate ?: 'utf8mb4_unicode_ci';
+            $collate = isset($wpdb->collate) ? $wpdb->collate : '';
+            $info['collation'] = $collate ?: 'utf8mb4_unicode_ci';
         }
 
         return $info;
