@@ -255,6 +255,22 @@ abstract class ABJ_404_Solution_Functions {
         return $url;
     }
     
+    /**
+     * Check whether a string contains any UTF-8 4-byte characters (codepoints > U+FFFF).
+     * These characters require utf8mb4 storage; they cannot exist in a utf8mb3 or latin1 column.
+     *
+     * @param string $string
+     * @return bool true if the string contains at least one 4-byte UTF-8 character
+     */
+    function containsUtf8mb4Characters($string) {
+        if ($string === null || $string === '' || !is_string($string)) {
+            return false;
+        }
+        // 4-byte UTF-8 sequences start with a byte in the range F0-F4
+        // followed by three continuation bytes (80-BF).
+        return (bool) preg_match('/[\xF0-\xF4][\x80-\xBF]{3}/', $string);
+    }
+
     /** Uses explode() to return an array.
      * @param string $string
      */
@@ -501,8 +517,8 @@ abstract class ABJ_404_Solution_Functions {
             
         } else if ($typeInt === ABJ404_TYPE_TAG) {
             $permalink['link'] = get_tag_link($permalink['id']);
-            $tag = get_term($permalink['id'], 'post_tag');
-            if ($tag != null) {
+            $tag = get_term($permalink['id']);
+            if ($tag != null && !is_wp_error($tag)) {
                 $permalink['title'] = $tag->name;
             } else {
                 $permalink['title'] = $permalink['link'];
@@ -512,13 +528,17 @@ abstract class ABJ_404_Solution_Functions {
             } else {
             	$permalink['status'] = 'published';
             }
-            
+
         } else if ($typeInt === ABJ404_TYPE_CAT) {
-            $permalink['link'] = get_category_link($permalink['id']);
-            $cat = get_term($permalink['id'], 'category');
-            if ($cat != null) {
-                $permalink['title'] = $cat->name;
+            // Use get_term_link() instead of get_category_link() to support
+            // custom taxonomies like WooCommerce product_cat.
+            $catTerm = get_term($permalink['id']);
+            if ($catTerm != null && !is_wp_error($catTerm)) {
+                $termLink = get_term_link($catTerm);
+                $permalink['link'] = is_wp_error($termLink) ? get_category_link($permalink['id']) : $termLink;
+                $permalink['title'] = $catTerm->name;
             } else {
+                $permalink['link'] = get_category_link($permalink['id']);
                 $permalink['title'] = $permalink['link'];
             }
             if ($permalink['title'] == null || $permalink['title'] == '') {
@@ -659,7 +679,6 @@ abstract class ABJ_404_Solution_Functions {
         curl_setopt($ch, CURLOPT_URL, 'file://' . $path);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         $output = curl_exec($ch);
-        curl_close($ch);
         
         if ($output == null) {
             throw new Exception("Error: Can't read file, even with cURL: " . esc_html($path));
@@ -727,8 +746,7 @@ abstract class ABJ_404_Solution_Functions {
                 curl_setopt($ch, CURLOPT_FILE, $destinationFileWriteHandle); 
                 curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
                 // get curl response
-                curl_exec($ch); 
-                curl_close($ch);
+                curl_exec($ch);
                 fclose($destinationFileWriteHandle);        
                 
                 if (file_exists($filePath) && filesize($filePath) > 0) {

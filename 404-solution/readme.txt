@@ -5,7 +5,7 @@ Tags: 404, redirect, 301, 302
 Requires at least: 5.0
 Requires PHP: 7.4
 Tested up to: 6.9
-Stable tag: 3.2.0
+Stable tag: 3.2.1
 License: GPL-3.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -241,6 +241,12 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 6. **Advanced Options** - Fine-tune intelligent matching, logging, and behavior
 
 == Changelog ==
+
+= Version 3.2.1 (Mar 2, 2026) =
+* FIX: 404 page suggestions now show category names instead of full URLs for WooCommerce product categories and other custom taxonomies.
+* Improvement: Database error admin notices now show actionable guidance and the raw MySQL error in an expandable details section.
+* Improvement: Database error notices auto-clear once the issue resolves.
+* FIX: Disk-full detection now recognizes MySQL error 1114 ("The table '...' is full") format.
 
 = Version 3.2.0 (Feb 17, 2026) =
 * Improvement: Faster loading on key admin pages, especially for larger sites.
