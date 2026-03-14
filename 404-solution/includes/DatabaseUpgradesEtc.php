@@ -14,8 +14,10 @@ if (!defined('ABSPATH')) {
 
 class ABJ_404_Solution_DatabaseUpgradesEtc {
 
+	/** @var self|null */
 	private static $instance = null;
 
+	/** @var string|null */
 	private static $uniqID = null;
 
 	/** @var ABJ_404_Solution_DataAccess */
@@ -61,6 +63,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 		$this->ngramFilter = $ngramFilter !== null ? $ngramFilter : ABJ_404_Solution_NGramFilter::getInstance();
 	}
 
+	/** @return self */
 	public static function getInstance() {
 		if (self::$instance == null) {
 			self::$instance = new ABJ_404_Solution_DatabaseUpgradesEtc();
@@ -70,8 +73,9 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 		return self::$instance;
 	}
 	
-	/** Create the tables when the plugin is first activated. 
-     * @global type $wpdb
+	/** Create the tables when the plugin is first activated.
+     * @param bool $updatingToNewVersion
+     * @return void
      */
     function createDatabaseTables($updatingToNewVersion = false) {
 
@@ -87,7 +91,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     	try {
     		$this->reallyCreateDatabaseTables($updatingToNewVersion);
 
-    	} catch (Throwable $e) {  // Fixed: Catch Throwable (Exception + Error) instead of just Exception
+    	} catch (\Exception $e) {
     		$this->logger->errorMessage("Error creating database tables. ", $e);
     		throw $e;  // Re-throw to propagate the error
     	} finally {
@@ -96,6 +100,10 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     	}
     }
     
+    /**
+     * @param bool $updatingToNewVersion
+     * @return void
+     */
     private function reallyCreateDatabaseTables($updatingToNewVersion = false) {
 		$this->renameAbj404TablesToLowerCase();
 
@@ -161,9 +169,11 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
     		// Show admin notice if migration occurred
     		if ($updatingToNewVersion && !empty($migrationResults['redirects_updated']) && function_exists('add_settings_error')) {
+    			$rawRedirectsUpdated = $migrationResults['redirects_updated'];
+    			$redirectsUpdated = is_scalar($rawRedirectsUpdated) ? (int)$rawRedirectsUpdated : 0;
     			$message = sprintf(
     				__('404 Solution: Migrated %d redirects to subdirectory-independent format.', '404-solution'),
-    				$migrationResults['redirects_updated']
+    				$redirectsUpdated
     			);
     			add_settings_error('abj404_settings', 'migration_success', $message, 'updated');
     		}
@@ -174,20 +184,29 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     	}
     }
     
-    /** Correct any possible outstanding issues. */
+    /**
+     * Correct any possible outstanding issues.
+     * @return void
+     */
     function correctIssuesBefore() {
     	$this->dao->correctDuplicateLookupValues();
     	
     	$this->correctMatchData();
     }
     
-    /** Correct any possible outstanding issues. */
+    /**
+     * Correct any possible outstanding issues.
+     * @return void
+     */
     function correctIssuesAfter() {
     	$this->correctMatchData();
     }
 
-    /** Makes all plugin table names lowercase, in case someone thought it was funny to use
-	 * the lower_case_table_names=0 setting. */
+    /**
+     * Makes all plugin table names lowercase, in case someone thought it was funny to use
+	 * the lower_case_table_names=0 setting.
+     * @return void
+     */
 		function renameAbj404TablesToLowerCase() {
 			global $wpdb;
 			// Fetch all tables starting with "abj404", case-insensitive
@@ -196,10 +215,11 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 				$this->logger->warn("Could not determine database name for lowercase rename.");
 				return;
 			}
-			$dbName = esc_sql($dbNameRaw);
-			$query = "SELECT table_name 
-				FROM information_schema.tables 
-				WHERE table_schema = '{$dbName}' 
+			$dbNameEscaped = esc_sql($dbNameRaw);
+			$dbName = is_array($dbNameEscaped) ? '' : $dbNameEscaped;
+			$query = "SELECT table_name
+				FROM information_schema.tables
+				WHERE table_schema = '{$dbName}'
 				AND LOWER(table_name) LIKE '%abj404%'";
 		$results = $this->dao->queryAndGetResults($query);
 
@@ -229,6 +249,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 		}
 	}
     
+    /** @return void */
     function correctMatchData() {
     	$this->dao->queryAndGetResults("delete from {wp_abj404_spelling_cache} " .
     		"where matchdata is null or matchdata = ''");
@@ -237,6 +258,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	/** When certain columns are created we have to populate data.
      * @param string $tableName
      * @param string $colName
+     * @return void
      */
 	    function handleSpecificCases($tableName, $colName) {
 	    	if (empty($tableName) || !is_string($tableName)) {
@@ -257,6 +279,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     	}
     }
     
+	    /** @return void */
 	    function runInitialCreateTables() {
 	    	global $wpdb;
 	    	$redirectsTable = $this->dao->doTableNameReplacements("{wp_abj404_redirects}");
@@ -298,6 +321,10 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	        $this->verifyColumns($lookupTable, $query);
 	    }
 
+	    /**
+	     * @param string $createTableSql
+	     * @return string
+	     */
 	    private function applyPluginTableCharsetCollate($createTableSql) {
 	    	global $wpdb;
 	    	if (!is_string($createTableSql) || $createTableSql === '') {
@@ -321,6 +348,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      * Schedule background multisite activation to process remaining sites via WP-Cron.
      *
      * @param int $alreadyProcessedBlogId Blog ID that was already processed during activation
+     * @return void
      */
     private function scheduleBackgroundMultisiteActivation($alreadyProcessedBlogId) {
         // Store the processed blog ID so cron handler knows to skip it
@@ -397,7 +425,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
                 ));
 
                 // Run full activation for this site (not just table creation)
-                add_option('abj404_settings', '', '', 'no');
+                add_option('abj404_settings', '', '', false);
 
                 $this->runInitialCreateTables();
                 $this->correctCollations();
@@ -460,6 +488,10 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      * the plugin is network-activated, all sites have the necessary tables.
      *
      * @since 3.0.1
+     */
+    /**
+     * @return void
+     * @phpstan-ignore-next-line method.unused
      */
     private function createTablesForAllSites() {
         global $wpdb;
@@ -530,6 +562,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
         }
     }
 
+    /** @return void */
     function createIndexes() {
     	global $wpdb;
     	$redirectsTable = $this->dao->doTableNameReplacements("{wp_abj404_redirects}");
@@ -564,8 +597,13 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     	$this->verifyIndexes($lookupTable, $query);
     }
 
+    /**
+     * @param string $tableName
+     * @param string $createTableStatementGoal
+     * @return void
+     */
     function verifyIndexes($tableName, $createTableStatementGoal) {
-    	
+
     	// get the current create table statement
     	$existingTableSQL = $this->dao->getCreateTableDDL($tableName);
     	
@@ -576,19 +614,19 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     	// get column names and types pattern;
     	$colNamesAndTypesPattern = "/\s+?(`(\w+?)` (\w.+?) .+?),/";
     	// remove the columns.
-    	$existingTableSQL = preg_replace($colNamesAndTypesPattern, "", $existingTableSQL);
-    	$createTableStatementGoal = preg_replace($colNamesAndTypesPattern, "", 
-    		$createTableStatementGoal);
-    	
+    	$existingTableSQL = preg_replace($colNamesAndTypesPattern, "", $existingTableSQL) ?? '';
+    	$createTableStatementGoal = preg_replace($colNamesAndTypesPattern, "",
+    		$createTableStatementGoal) ?? '';
+
     	// remove the create table and primary key
-    	$existingTableSQL = substr($existingTableSQL, 
-    		strpos($existingTableSQL, 'primary'));
-    	$existingTableSQL = substr($existingTableSQL,
-    		strpos($existingTableSQL, "\n"));
-    	$createTableStatementGoal = substr($createTableStatementGoal,
-    		strpos($createTableStatementGoal, 'primary'));
-    	$createTableStatementGoal = substr($createTableStatementGoal,
-    		strpos($createTableStatementGoal, "\n"));
+    	$primaryPos = strpos($existingTableSQL, 'primary');
+    	$existingTableSQL = $primaryPos !== false ? substr($existingTableSQL, $primaryPos) : '';
+    	$newlinePos = strpos($existingTableSQL, "\n");
+    	$existingTableSQL = $newlinePos !== false ? substr($existingTableSQL, $newlinePos) : '';
+    	$primaryPos = strpos($createTableStatementGoal, 'primary');
+    	$createTableStatementGoal = $primaryPos !== false ? substr($createTableStatementGoal, $primaryPos) : '';
+    	$newlinePos = strpos($createTableStatementGoal, "\n");
+    	$createTableStatementGoal = $newlinePos !== false ? substr($createTableStatementGoal, $newlinePos) : '';
     	
     	// remove the engine= ...
     	$engineLoc = $this->f->strpos($existingTableSQL, ") engine");
@@ -632,7 +670,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	    		}
 
 		    		$spellingCacheTableName = $this->dao->doTableNameReplacements('{wp_abj404_spelling_cache}');
-		    		$tableNameLower = is_string($tableName) ? strtolower($tableName) : '';
+		    		$tableNameLower = strtolower($tableName);
 		    		if ($tableNameLower == $spellingCacheTableName && !empty($spec['unique'])) {
 		    			$this->dao->deleteSpellingCache();
 		    		}
@@ -643,6 +681,11 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	    	}
 	    }
 
+    /**
+     * @param string $tableName
+     * @param string $indexName
+     * @return bool
+     */
     private function indexExists($tableName, $indexName) {
         global $wpdb;
         $sql = $wpdb->prepare("SHOW INDEX FROM {$tableName} WHERE Key_name = %s", $indexName);
@@ -650,13 +693,21 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
         return !empty($results);
     }
 
+	    /**
+	     * @param string $tableName
+	     * @param string $indexDDL
+	     * @return string
+	     * @phpstan-ignore-next-line method.unused
+	     */
 	    private function buildAddIndexStatement($tableName, $indexDDL) {
 	        global $wpdb;
-	        $serverVersion = method_exists($wpdb, 'db_version') ? $wpdb->db_version() : '';
-	        $serverInfo = property_exists($wpdb, 'db_server_info') ? $wpdb->db_server_info : '';
+	        /** @var \wpdb $wpdb */
+	        $serverVersion = method_exists($wpdb, 'db_version') ? ($wpdb->db_version() ?: '') : '';
+	        $serverInfo = property_exists($wpdb, 'db_server_info') ? ($wpdb->db_server_info ?? '') : '';
 
 	        $isMaria = stripos($serverInfo, 'mariadb') !== false || stripos($serverVersion, 'maria') !== false;
-	        $supportsIfNotExists = $isMaria && version_compare(preg_replace('/[^\d\.]/', '', $serverVersion), '10.5', '>=');
+	        $cleanedVersion = preg_replace('/[^\d\.]/', '', $serverVersion) ?? '';
+	        $supportsIfNotExists = $isMaria && version_compare($cleanedVersion, '10.5', '>=');
 
 	        $indexDDL = trim($indexDDL);
 
@@ -705,7 +756,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	     * Returns null if the line doesn't look like a KEY/UNIQUE KEY definition.
 	     *
 	     * @param string $indexDDL
-	     * @return array|null {name:string, columns:string, unique:bool}
+	     * @return array{name: string, columns: string, unique: bool}|null
 	     */
 	    private function parseIndexDDLToSpec($indexDDL) {
 	        $indexDDL = trim($indexDDL);
@@ -734,7 +785,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
 	        $matches = [];
 	        preg_match_all('/^\\s*(?:unique\\s+)?key\\s+.+?\\s*$/im', $createTableSql, $matches);
-	        $lines = $matches[0] ?? [];
+	        $lines = $matches[0];
 
 	        $specsByName = [];
 	        foreach ($lines as $line) {
@@ -759,11 +810,13 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	     */
 	    private function buildAddIndexStatementFromParts($tableName, $indexName, $columnsSql, $unique) {
 	        global $wpdb;
-	        $serverVersion = method_exists($wpdb, 'db_version') ? $wpdb->db_version() : '';
-	        $serverInfo = property_exists($wpdb, 'db_server_info') ? $wpdb->db_server_info : '';
+	        /** @var \wpdb $wpdb */
+	        $serverVersion = method_exists($wpdb, 'db_version') ? ($wpdb->db_version() ?: '') : '';
+	        $serverInfo = property_exists($wpdb, 'db_server_info') ? ($wpdb->db_server_info ?? '') : '';
 
 	        $isMaria = stripos($serverInfo, 'mariadb') !== false || stripos($serverVersion, 'maria') !== false;
-	        $supportsIfNotExists = $isMaria && version_compare(preg_replace('/[^\d\.]/', '', $serverVersion), '10.5', '>=');
+	        $cleanedVersion = preg_replace('/[^\d\.]/', '', $serverVersion) ?? '';
+	        $supportsIfNotExists = $isMaria && version_compare($cleanedVersion, '10.5', '>=');
 
 	        $indexType = $unique ? 'unique index' : 'index';
 	        $ifNotExists = $supportsIfNotExists ? ' if not exists' : '';
@@ -771,6 +824,11 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	        return "alter table " . $tableName . " add " . $indexType . $ifNotExists . " `" . $indexName . "` " . trim($columnsSql);
 	    }
 
+	    /**
+	     * @param string $logsTable
+	     * @param string|null $createSqlOverride
+	     * @return void
+	     */
 	    private function ensureLogsCompositeIndex($logsTable, $createSqlOverride = null) {
 	        $indexName = 'idx_requested_url_timestamp';
 	        $createSql = is_string($createSqlOverride) ? $createSqlOverride : ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/createLogTable.sql");
@@ -793,23 +851,32 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
         }
     }
     
+    /**
+     * @param string $tableName
+     * @param string $createTableStatementGoal
+     * @return void
+     */
     function verifyColumns($tableName, $createTableStatementGoal) {
     	$updatesWereNeeded = false;
     	
     	// find the differences
     	$tableDifferences = $this->getTableDifferences($tableName, $createTableStatementGoal);
-    	if (count($tableDifferences['updateTheseColumns']) > 0 ||
-    		count($tableDifferences['createTheseColumns']) > 0) {
+    	$updateCols = is_array($tableDifferences['updateTheseColumns']) ? $tableDifferences['updateTheseColumns'] : [];
+    	$createCols = is_array($tableDifferences['createTheseColumns']) ? $tableDifferences['createTheseColumns'] : [];
+    	if (count($updateCols) > 0 ||
+    		count($createCols) > 0) {
     		$updatesWereNeeded = true;
     	}
     	// make the changes
     	$this->updateATableBasedOnDifferences($tableName, $tableDifferences);
-    	
+
     	// verify that there are now no changes that need to be made.
     	$tableDifferences = $this->getTableDifferences($tableName, $createTableStatementGoal);
-    	
-    	if (count($tableDifferences['updateTheseColumns']) > 0 || 
-    		count($tableDifferences['createTheseColumns']) > 0) {
+    	$updateCols = is_array($tableDifferences['updateTheseColumns']) ? $tableDifferences['updateTheseColumns'] : [];
+    	$createCols = is_array($tableDifferences['createTheseColumns']) ? $tableDifferences['createTheseColumns'] : [];
+
+    	if (count($updateCols) > 0 ||
+    		count($createCols) > 0) {
     	
     		$this->logger->errorMessage("There are still differences after updating the " . 
     			$tableName . " table. " . print_r($tableDifferences, true));
@@ -820,8 +887,13 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     	}
     }
     
+    /**
+     * @param string $tableName
+     * @param string $createTableStatementGoal
+     * @return array<string, mixed>
+     */
     function getTableDifferences($tableName, $createTableStatementGoal) {
-    	
+
     	// get the current create table statement
     	$existingTableSQL = $this->dao->getCreateTableDDL($tableName);
     	
@@ -831,14 +903,14 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     	
     	// remove the "COLLATE xxx" from the columns.
     	$removeCollatePattern = '/collate \w+ ?/';
-    	$existingTableSQL = preg_replace($removeCollatePattern, "", $existingTableSQL);
-    	$createTableStatementGoal = preg_replace($removeCollatePattern, "", $createTableStatementGoal);
-    	
+    	$existingTableSQL = preg_replace($removeCollatePattern, "", $existingTableSQL) ?? '';
+    	$createTableStatementGoal = preg_replace($removeCollatePattern, "", $createTableStatementGoal) ?? '';
+
     	// remove the int size format from columns because it doesn't matter.
     	$removeIntSizePattern = '/( \w*?int)(\(\d+\))/m';
-    	$existingTableSQL = preg_replace($removeIntSizePattern, "$1", $existingTableSQL);
-    	$createTableStatementGoal = preg_replace($removeIntSizePattern, "$1", $createTableStatementGoal);
-    	
+    	$existingTableSQL = preg_replace($removeIntSizePattern, "$1", $existingTableSQL) ?? '';
+    	$createTableStatementGoal = preg_replace($removeIntSizePattern, "$1", $createTableStatementGoal) ?? '';
+
     	// get column names and types pattern;
     	$colNamesAndTypesPattern = "/\s+?(`(\w+?)` (\w.+)\s?),/";
     	$existingTableMatches = null;
@@ -900,23 +972,33 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     	return $results;
     }
     
+    /**
+     * @param string $tableName
+     * @param array<string, mixed> $tableDifferences
+     * @return void
+     */
     function updateATableBasedOnDifferences($tableName, $tableDifferences) {
-    	
-    	$dropTheseColumns = $tableDifferences['dropTheseColumns'];
-    	$updateTheseColumns = $tableDifferences['updateTheseColumns'];
-    	$createTheseColumns = $tableDifferences['createTheseColumns'];
-    	$goalTableMatchesColumnDDL = $tableDifferences['goalTableMatchesColumnDDL'];
-    	$existingTableMatchesColumnDDL = $tableDifferences['existingTableMatchesColumnDDL'];
-    	$goalTableMatches = $tableDifferences['goalTableMatches'];
-    	$goalTableMatchesColumnNames = $tableDifferences['goalTableMatchesColumnNames'];
-    	
+
+    	/** @var array<int|string, mixed> $dropTheseColumns */
+    	$dropTheseColumns = is_array($tableDifferences['dropTheseColumns']) ? $tableDifferences['dropTheseColumns'] : [];
+    	/** @var array<int|string, mixed> $updateTheseColumns */
+    	$updateTheseColumns = is_array($tableDifferences['updateTheseColumns']) ? $tableDifferences['updateTheseColumns'] : [];
+    	/** @var array<int|string, mixed> $createTheseColumns */
+    	$createTheseColumns = is_array($tableDifferences['createTheseColumns']) ? $tableDifferences['createTheseColumns'] : [];
+    	$goalTableMatchesColumnDDL = is_array($tableDifferences['goalTableMatchesColumnDDL']) ? $tableDifferences['goalTableMatchesColumnDDL'] : [];
+    	$existingTableMatchesColumnDDL = is_array($tableDifferences['existingTableMatchesColumnDDL']) ? $tableDifferences['existingTableMatchesColumnDDL'] : [];
+    	/** @var array<int, array<int, mixed>> $goalTableMatches */
+    	$goalTableMatches = is_array($tableDifferences['goalTableMatches']) ? $tableDifferences['goalTableMatches'] : [];
+    	/** @var array<int|string, mixed> $goalTableMatchesColumnNames */
+    	$goalTableMatchesColumnNames = is_array($tableDifferences['goalTableMatchesColumnNames']) ? $tableDifferences['goalTableMatchesColumnNames'] : [];
+
     	// drop unnecessary columns.
     	foreach ($dropTheseColumns as $colName) {
     		$query = "alter table " . $tableName . " drop " . $colName;
     		$this->dao->queryAndGetResults($query);
     		$this->logger->infoMessage("I dropped a column (1): " . $query);
     	}
-    	
+
     	// say why we're doing what we're doing.
     	if (count($updateTheseColumns) > 0) {
     		$this->logger->infoMessage(self::$uniqID . ": On " . $tableName .
@@ -924,13 +1006,14 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     			print_r($goalTableMatchesColumnDDL, true) . "\n but we have: \n" .
     			print_r($existingTableMatchesColumnDDL, true));
     	}
-    	
+
     	// create missing columns
+    	$goalMatchesSub = is_array($goalTableMatches[1] ?? null) ? $goalTableMatches[1] : [];
     	foreach ($updateTheseColumns as $colDDL) {
     		// find the colum name.
-    		$matchIndex = array_search($colDDL, $goalTableMatches[1]);
-    		$colName = $goalTableMatchesColumnNames[$matchIndex];
-    		
+    		$matchIndex = array_search($colDDL, $goalMatchesSub);
+    		$colName = is_string($goalTableMatchesColumnNames[$matchIndex] ?? null) ? $goalTableMatchesColumnNames[$matchIndex] : '';
+
     		// if the column exists then update it. otherwise create it.
     		if (!in_array($colName, $createTheseColumns)) {
     			// update the existing column.
@@ -952,15 +1035,17 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     }
     
     /** Create table DDL is returned without comments on any columns.
-     * @param string $existingTableSQL
+     * @param string|null $createTableDDL
+     * @return string
      */
 	    function removeCommentsFromColumns($createTableDDL) {
 	    	if ($createTableDDL === null) {
 	    		return '';
 	    	}
-	    	return preg_replace('/ (?:COMMENT.+?,[\r\n])/', ",\n", (string) $createTableDDL);
+	    	return preg_replace('/ (?:COMMENT.+?,[\r\n])/', ",\n", (string) $createTableDDL) ?? $createTableDDL;
 	    }
 
+    /** @return void */
     function updateTableEngineToInnoDB() {
     	// get a list of all tables.
         global $wpdb;
@@ -968,14 +1053,17 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     	$logsTable = $this->dao->doTableNameReplacements("{wp_abj404_logsv2}");
     	
     	// if any rows are found then update the tables.
-    	if (array_key_exists('rows', $result) && !empty($result['rows'])) {
-    		$rows = $result['rows'];
-    		foreach ($rows as $row) {
-    		    $tableName = array_key_exists('table_name', $row) ? $row['table_name'] :
-    		      (array_key_exists('TABLE_NAME', $row) ? $row['TABLE_NAME'] : '');
-    		    $engine = array_key_exists('engine', $row) ? $row['engine'] :
-    		      (array_key_exists('ENGINE', $row) ? $row['ENGINE'] : '');
-    		    
+    	$resultRows = isset($result['rows']) && is_array($result['rows']) ? $result['rows'] : [];
+    	if (!empty($resultRows)) {
+    		foreach ($resultRows as $row) {
+    			if (!is_array($row)) {
+    				continue;
+    			}
+    		    $tableName = array_key_exists('table_name', $row) ? (string)$row['table_name'] :
+    		      (array_key_exists('TABLE_NAME', $row) ? (string)$row['TABLE_NAME'] : '');
+    		    $engine = array_key_exists('engine', $row) ? (string)$row['engine'] :
+    		      (array_key_exists('ENGINE', $row) ? (string)$row['ENGINE'] : '');
+
 		        $query = null;
     		    // Use MyISAM because optimize table is slow otherwise.
                 if ($tableName == $logsTable && $this->dao->isMyISAMSupported()) {
@@ -983,22 +1071,23 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
                         $this->logger->infoMessage("Updating " . $tableName . " to MyISAM.");
                         $query = 'alter table `' . $tableName . '` engine = MyISAM;';
                     }
-                  
+
                 } else if (strtolower($engine) != 'innodb') {
                     $this->logger->infoMessage("Updating " . $tableName . " to InnoDB.");
                     $query = 'alter table `' . $tableName . '` engine = InnoDB;';
                 }
-                
+
                 if ($query == null) {
                     // no updates are necessary for this table.
-                    continue;  
+                    continue;
                 }
-                
+
                 $result = $this->dao->queryAndGetResults($query, array("log_errors" => false));
                 $this->logger->infoMessage("I changed an engine: " . $query);
-                
-                if ($result['last_error'] != null && $result['last_error'] != '' &&
-                  strpos($result['last_error'], 'Index column size too large') !== false) {
+                $lastError = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
+
+                if ($lastError !== '' &&
+                  strpos($lastError, 'Index column size too large') !== false) {
                     
                     // delete the indexes, try again, and create the indexes later.
                     $this->deleteIndexes($tableName);
@@ -1013,7 +1102,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
     /** Retrieve the collation for a given table name.
      * @param string $tableName
-     * @return array|null Array of [collation, charset] or null if retrieval failed.
+     * @return array{0: string, 1: string}|null Array of [collation, charset] or null if retrieval failed.
      */
 	function getTableCollation($tableName) {
 		// Try SHOW CREATE TABLE first
@@ -1036,7 +1125,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
 	/** Parse collation/charset from SHOW CREATE TABLE output.
 	 * @param string $tableName
-	 * @return array|null Array of [collation, charset] or null if parsing failed.
+	 * @return array{0: string, 1: string}|null Array of [collation, charset] or null if parsing failed.
 	 */
 	function getTableCollationFromShowCreate($tableName) {
 		$query = "SHOW CREATE TABLE `$tableName`";
@@ -1048,14 +1137,16 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 			return null;
 		}
 
-		if (empty($results['rows'][0]) || !is_array($results['rows'][0])) {
+		$rows = isset($results['rows']) && is_array($results['rows']) ? $results['rows'] : [];
+		$firstRow = isset($rows[0]) && is_array($rows[0]) ? $rows[0] : null;
+		if ($firstRow === null) {
 			$this->logger->debugMessage("SHOW CREATE TABLE returned no data for $tableName.");
 			return null;
 		}
 
 		// Use array_values to handle varying column name cases ('Create Table', 'CREATE TABLE', etc.)
 		// SHOW CREATE TABLE returns: [table_name, create_statement]
-		$row = array_values($results['rows'][0]);
+		$row = array_values($firstRow);
 		if (count($row) < 2 || empty($row[1])) {
 			$this->logger->debugMessage("SHOW CREATE TABLE returned unexpected format for $tableName.");
 			return null;
@@ -1093,7 +1184,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
 	/** Query information_schema for table collation (fallback method).
 	 * @param string $tableName
-	 * @return array|null Array of [collation, charset] or null if query failed.
+	 * @return array{0: string, 1: string}|null Array of [collation, charset] or null if query failed.
 	 */
 	function getTableCollationFromInformationSchema($tableName) {
 		global $wpdb;
@@ -1164,7 +1255,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 			if (!is_string($collation) || $collation === '') {
 				return '';
 			}
-			return preg_replace('/[^A-Za-z0-9_]/', '', $collation);
+			return preg_replace('/[^A-Za-z0-9_]/', '', $collation) ?? '';
 		}
 
 		/**
@@ -1176,8 +1267,8 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 		 * 3) Database default collation variable if utf8mb4
 		 * 4) Safe fallback (utf8mb4_unicode_ci)
 		 *
-		 * @param array $tableNames
-		 * @param array $tableCollations Optional map: table => [collation, charset]
+		 * @param array<int, string> $tableNames
+		 * @param array<string, array{0: string, 1: string}|null> $tableCollations Optional map: table => [collation, charset]
 		 * @return string
 		 */
 		private function resolveTargetUtf8mb4Collation($tableNames, $tableCollations = []) {
@@ -1193,7 +1284,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 			$counts = [];
 			foreach ($tableNames as $tableName) {
 				$row = $tableCollations[$tableName] ?? $this->getTableCollation($tableName);
-				if (!is_array($row) || count($row) < 2) {
+				if (!is_array($row)) {
 					continue;
 				}
 				$collation = $this->sanitizeCollationIdentifier((string)$row[0]);
@@ -1208,10 +1299,10 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 			}
 
 			$vars = $this->dao->queryAndGetResults("SHOW VARIABLES LIKE 'collation_database'");
-			$rows = $vars['rows'] ?? [];
-			if (!empty($rows)) {
-				$row = $rows[0];
-				$value = $row['Value'] ?? ($row['value'] ?? '');
+			$varRows = isset($vars['rows']) && is_array($vars['rows']) ? $vars['rows'] : [];
+			if (!empty($varRows)) {
+				$row = is_array($varRows[0]) ? $varRows[0] : [];
+				$value = isset($row['Value']) ? $row['Value'] : (isset($row['value']) ? $row['value'] : '');
 				$value = $this->sanitizeCollationIdentifier((string)$value);
 				if ($value !== '' && stripos($value, 'utf8mb4') !== false) {
 					return $value;
@@ -1221,7 +1312,10 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 			return 'utf8mb4_unicode_ci';
 		}
 		
-			/** Ensure our tables use utf8mb4 (do not alter WordPress core tables). */
+			/**
+		 * Ensure our tables use utf8mb4 (do not alter WordPress core tables).
+		 * @return void
+		 */
 			function correctCollations() {
 				global $wpdb;
 			
@@ -1275,8 +1369,9 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 				$results = $this->dao->queryAndGetResults($query,
 					array('ignore_errors' => array("Index column size too large")));
 
-				if (!empty($results['last_error']) &&
-					strpos($results['last_error'], "Index column size too large") !== false) {
+				$lastErr = isset($results['last_error']) && is_string($results['last_error']) ? $results['last_error'] : '';
+			if ($lastErr !== '' &&
+					strpos($lastErr, "Index column size too large") !== false) {
 
 					$this->logger->warn("Charset/collation change for $tableName failed: Index column size too large. Deleting indexes and retrying...");
 
@@ -1316,7 +1411,8 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 				$this->logger->warn("Failed to read columns for {$tableName}: " . $results['last_error']);
 				return null;
 			}
-			$rows = $results['rows'];
+			/** @var array<int, array<string, mixed>> $rows */
+			$rows = isset($results['rows']) && is_array($results['rows']) ? $results['rows'] : [];
 			if (empty($rows)) {
 				return false;
 			}
@@ -1324,7 +1420,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 			$collationKey = null;
 			$firstRow = $rows[0];
 			foreach (array_keys($firstRow) as $key) {
-				if ($this->f->strtolower($key) === 'collation') {
+				if ($this->f->strtolower((string)$key) === 'collation') {
 					$collationKey = $key;
 					break;
 				}
@@ -1335,11 +1431,14 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 			}
 
 			foreach ($rows as $row) {
-				$colCollation = $row[$collationKey] ?? null;
-				if ($colCollation === null || trim((string)$colCollation) === '') {
+				if (!is_array($row)) {
+					continue;
+				}
+				$rawColCollation = $row[$collationKey] ?? null;
+				if ($rawColCollation === null || !is_string($rawColCollation) || trim($rawColCollation) === '') {
 					continue; // Non-character columns
 				}
-				$colCollation = trim((string)$colCollation);
+				$colCollation = trim($rawColCollation);
 				$colCharset = explode('_', $colCollation)[0] ?? '';
 
 				if ($colCharset !== $targetCharset || $colCollation !== $targetCollation) {
@@ -1351,31 +1450,38 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 		}
     
     /** Delete all non-primary indexes from a table.
-     * @param string $tableName */
+     * @param string $tableName
+     * @return void
+     */
     function deleteIndexes($tableName) {
-    	
+
     	// get the indexes list.
-    	$results = $this->dao->queryAndGetResults("show index from " . $tableName . 
+    	$results = $this->dao->queryAndGetResults("show index from " . $tableName .
     		" where key_name != 'PRIMARY'");
-    	$rows = $results['rows'];
-    	
+    	/** @var array<int, array<string, mixed>> $rows */
+    	$rows = isset($results['rows']) && is_array($results['rows']) ? $results['rows'] : [];
+
     	if (empty($rows)) {
     		return;
     	}
-    	
+
     	// find the key_name column because the case can be different on different systems.
     	$keyNameColumn = 'key_name';
     	$aRow = $rows[0];
     	foreach (array_keys($aRow) as $someKey) {
-    		if ($this->f->strtolower($someKey) == 'key_name') {
-    			$keyNameColumn = $someKey;
+    		if ($this->f->strtolower((string)$someKey) == 'key_name') {
+    			$keyNameColumn = (string)$someKey;
     			break;
     		}
     	}
-    	
+
     	foreach ($rows as $row) {
     		// delete them
-    		$query = "alter table " . $tableName . " drop index " . $row[$keyNameColumn];
+    		$indexName = $row[$keyNameColumn] ?? '';
+    		if (!is_string($indexName) || $indexName === '') {
+    			continue;
+    		}
+    		$query = "alter table " . $tableName . " drop index " . $indexName;
     		$this->dao->queryAndGetResults($query);
     	}
     }
@@ -1387,7 +1493,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      *
      * Uses a single atomic SQL UPDATE statement - no locks or transactions needed.
      *
-     * @return array Migration results with counts
+     * @return array<string, mixed> Migration results with counts
      */
     function migrateURLsToRelativePaths() {
         global $wpdb;
@@ -1472,8 +1578,9 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     }
 
 
+    /** @return void */
     function updatePluginCheck() {
-        
+
         $pluginInfo = $this->dao->getLatestPluginVersion();
         
         $shouldUpdate = $this->shouldUpdate($pluginInfo);
@@ -1483,6 +1590,10 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
         }
     }
     
+    /**
+     * @param array<string, mixed> $pluginInfo
+     * @return void
+     */
     function doUpdatePlugin($pluginInfo) {
 
         $this->logger->infoMessage("Attempting update to " . $pluginInfo['version']);
@@ -1516,10 +1627,6 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
         $upret = $upgrader->upgrade(ABJ404_SOLUTION_BASENAME);
         if ($upret) {
             $this->logger->infoMessage("Plugin successfully upgraded to " . $pluginInfo['version']);
-            
-        } else if ($upret instanceof WP_Error) {
-            $this->logger->infoMessage("Plugin upgrade error " . 
-                json_encode($upret->get_error_codes()) . ": " . json_encode($upret->get_error_messages()));
         }
         $output = "";
         if (@ob_get_contents()) {
@@ -1532,27 +1639,31 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
         
         $activateResult = activate_plugin(ABJ404_NAME);
         if ($activateResult instanceof WP_Error) {
-            $this->logger->errorMessage("Plugin activation error " . 
-                json_encode($upret->get_error_codes()) . ": " . json_encode($upret->get_error_messages()));
+            $this->logger->errorMessage("Plugin activation error " .
+                json_encode($activateResult->get_error_codes()) . ": " . json_encode($activateResult->get_error_messages()));
             
-        } else if ($activateResult == null) {
-            $this->logger->infoMessage("Successfully reactivated plugin after upgrade to version " . 
+        } else {
+            $this->logger->infoMessage("Successfully reactivated plugin after upgrade to version " .
                 $pluginInfo['version']);
         }        
     }
     
+    /**
+     * @param array<string, mixed> $pluginInfo
+     * @return bool
+     */
     function shouldUpdate($pluginInfo) {
-        
-        
+
+
         $options = $this->logic->getOptions(true);
-        $latestVersion = $pluginInfo['version'];
-        
+        $latestVersion = isset($pluginInfo['version']) && is_string($pluginInfo['version']) ? $pluginInfo['version'] : '';
+
         if (ABJ404_VERSION == $latestVersion) {
-            $this->logger->debugMessage("The latest plugin version is already installed (" . 
+            $this->logger->debugMessage("The latest plugin version is already installed (" .
                     ABJ404_VERSION . ").");
             return false;
         }
-        
+
         // don't overwrite development versions.
         if (version_compare(ABJ404_VERSION, $latestVersion) == 1) {
             $this->logger->infoMessage("Development version: A more recent version is installed than " . 
@@ -1572,7 +1683,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
         $latestVersionArray = explode(".", $latestVersion);
 
         // check the latest date to see if it's been long enough to update.
-        $lastUpdated = $pluginInfo['last_updated'];
+        $lastUpdated = isset($pluginInfo['last_updated']) && is_string($pluginInfo['last_updated']) ? $pluginInfo['last_updated'] : '';
         $lastReleaseDate = new DateTime($lastUpdated);
         $todayDate = new DateTime();
         $dateInterval = $lastReleaseDate->diff($todayDate);
@@ -1629,7 +1740,8 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
         try {
             // MULTISITE: Use network-aware option getter
-            $currentOffset = $this->getNetworkAwareOption('abj404_ngram_rebuild_offset', 0);
+            $rawCurrentOffset = $this->getNetworkAwareOption('abj404_ngram_rebuild_offset', 0);
+            $currentOffset = is_scalar($rawCurrentOffset) ? (int)$rawCurrentOffset : 0;
 
             // MULTISITE: Count pages across all sites if network-activated
             $totalPages = $this->countTotalPagesForNGramRebuild();
@@ -1671,8 +1783,10 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
                 $cronDisabled = defined('DISABLE_WP_CRON') && DISABLE_WP_CRON;
                 $alreadyScheduled = wp_next_scheduled($hookName);
                 $dbError = !empty($wpdb->last_error) ? $wpdb->last_error : 'none';
-                $rebuildOffset = $this->getNetworkAwareOption('abj404_ngram_rebuild_offset', 'not set');
-                $cacheInitialized = $this->getNetworkAwareOption('abj404_ngram_cache_initialized', 'not set');
+                $rawRebuildOffset = $this->getNetworkAwareOption('abj404_ngram_rebuild_offset', 'not set');
+                $rebuildOffset = is_scalar($rawRebuildOffset) ? (string)$rawRebuildOffset : 'not set';
+                $rawCacheInit = $this->getNetworkAwareOption('abj404_ngram_cache_initialized', 'not set');
+                $cacheInitialized = is_scalar($rawCacheInit) ? (string)$rawCacheInit : 'not set';
 
                 $errorMsg = sprintf(
                     "Failed to schedule N-gram cache rebuild. Hook: %s, Schedule time: %d (current: %d), " .
@@ -1746,9 +1860,11 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
             // MULTISITE: Process one site at a time to ensure all sites get cache entries
             if ($this->isNetworkActivated()) {
                 // Get or initialize list of pending sites
-                $pendingSites = $this->getNetworkAwareOption('abj404_ngram_pending_sites', null);
+                $pendingSitesRaw = $this->getNetworkAwareOption('abj404_ngram_pending_sites', null);
+                /** @var array<int, int> $pendingSites */
+                $pendingSites = is_array($pendingSitesRaw) ? $pendingSitesRaw : [];
 
-                if ($pendingSites === null) {
+                if ($pendingSitesRaw === null) {
                     // First run: Initialize site list and tracking
                     $sites = get_sites(array('fields' => 'ids', 'number' => 0));
                     $this->updateNetworkAwareOption('abj404_ngram_pending_sites', $sites);
@@ -1768,9 +1884,11 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
                 }
 
                 // Get current site to process
-                $currentSiteId = $pendingSites[0];
-                $offset = $this->getNetworkAwareOption('abj404_ngram_current_site_offset', 0);
-                $totalSites = $this->getNetworkAwareOption('abj404_ngram_total_sites', count($pendingSites));
+                $currentSiteId = (int)$pendingSites[0];
+                $rawOffset = $this->getNetworkAwareOption('abj404_ngram_current_site_offset', 0);
+                $offset = is_scalar($rawOffset) ? (int)$rawOffset : 0;
+                $rawTotalSites = $this->getNetworkAwareOption('abj404_ngram_total_sites', count($pendingSites));
+                $totalSites = is_scalar($rawTotalSites) ? (int)$rawTotalSites : count($pendingSites);
                 $completedSites = $totalSites - count($pendingSites);
 
                 // Switch to the site being processed
@@ -1875,7 +1993,8 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
             } else {
                 // SINGLE SITE: Use original simple logic
-                $offset = $this->getNetworkAwareOption('abj404_ngram_rebuild_offset', 0);
+                $rawSingleOffset = $this->getNetworkAwareOption('abj404_ngram_rebuild_offset', 0);
+                $offset = is_scalar($rawSingleOffset) ? (int)$rawSingleOffset : 0;
                 $permalinkCacheTable = $this->dao->getPrefixedTableName('abj404_permalink_cache');
                 $totalPages = (int)$wpdb->get_var("SELECT COUNT(*) FROM {$permalinkCacheTable}");
 
@@ -1953,7 +2072,8 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
                             $cronDisabled = defined('DISABLE_WP_CRON') && DISABLE_WP_CRON;
                         $alreadyScheduled = wp_next_scheduled($hookName, [$offset]);
                         $dbError = !empty($wpdb->last_error) ? $wpdb->last_error : 'none';
-                        $cacheInitialized = $this->getNetworkAwareOption('abj404_ngram_cache_initialized', 'not set');
+                        $rawCacheInit2 = $this->getNetworkAwareOption('abj404_ngram_cache_initialized', 'not set');
+                        $cacheInitialized = is_scalar($rawCacheInit2) ? (string)$rawCacheInit2 : 'not set';
 
                         $errorMsg = sprintf(
                             "Failed to schedule next N-gram rebuild batch at offset %d. Hook: %s, Schedule time: %d (current: %d), " .
@@ -1999,7 +2119,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      *
      * @param int $batchSize Number of pages to process per batch (default: 100)
      * @param bool $forceRebuild Force rebuild even if cache is already populated (default: false)
-     * @return array Statistics: ['total_pages' => int, 'processed' => int, 'success' => int, 'failed' => int]
+     * @return array<string, mixed> Statistics: ['total_pages' => int, 'processed' => int, 'success' => int, 'failed' => int]
      */
     function rebuildNGramCache($batchSize = 100, $forceRebuild = false) {
         global $wpdb;
@@ -2126,7 +2246,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      * Uses the same lock as rebuildNGramCache to prevent concurrent execution.
      *
      * @param int $batchSize Number of entries to process per batch (default: 50)
-     * @return array Statistics: ['posts_added' => int, 'posts_failed' => int, 'categories_added' => int, 'categories_failed' => int]
+     * @return array<string, mixed> Statistics: ['posts_added' => int, 'posts_failed' => int, 'categories_added' => int, 'categories_failed' => int]
      */
     function syncMissingNGrams($batchSize = 50) {
         global $wpdb;
@@ -2173,12 +2293,8 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
                 // Add ngrams for missing posts
                 $result = $this->ngramFilter->updateNGramsForPages($missingIds);
 
-                if (isset($result['success'])) {
-                    $stats['posts_added'] = $result['success'];
-                }
-                if (isset($result['failed'])) {
-                    $stats['posts_failed'] = $result['failed'];
-                }
+                $stats['posts_added'] = $result['success'];
+                $stats['posts_failed'] = $result['failed'];
             } else {
                 $this->logger->debugMessage("No missing post ngram entries found. All posts are synced.");
             }
@@ -2192,7 +2308,8 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
                 // Check which categories are missing from ngram cache
                 foreach ($categories as $category) {
-                    $termId = $category->term_id;
+                    /** @var object{term_id: int, url: string} $category */
+                    $termId = (int)$category->term_id;
 
                     // Check if this category already has an ngram entry
                     $exists = $wpdb->get_var($wpdb->prepare(
@@ -2211,8 +2328,9 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
                     // Add ngrams for missing categories
                     foreach ($missingCategories as $category) {
                         try {
-                            $termId = $category->term_id;
-                            $url = $category->url;
+                            /** @var object{term_id: int, url: string} $category */
+                            $termId = (int)$category->term_id;
+                            $url = (string)$category->url;
 
                             if (empty($url) || $url === 'in code') {
                                 $this->logger->debugMessage("Skipping category {$termId} - no valid URL");
@@ -2257,7 +2375,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      * Cleanup orphaned ngram entries that don't have corresponding posts/pages or categories.
      * This removes stale entries when posts are deleted or categories are removed.
      *
-     * @return array Statistics: ['posts_deleted' => int, 'categories_deleted' => int, 'errors' => int]
+     * @return array<string, mixed> Statistics: ['posts_deleted' => int, 'categories_deleted' => int, 'errors' => int]
      */
     function cleanupOrphanedNGrams() {
         global $wpdb;
@@ -2289,14 +2407,18 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
             // Delete each orphaned post entry
             foreach ($orphanedPosts as $entry) {
+                /** @var object{id: int, type: string} $entry */
+                $entryId = (int)$entry->id;
+                $entryType = (string)$entry->type;
                 $result = $wpdb->delete(
                     $ngramTable,
-                    ['id' => $entry->id, 'type' => $entry->type],
+                    ['id' => $entryId, 'type' => $entryType],
                     ['%d', '%s']
                 );
 
                 if ($result === false) {
-                    $this->logger->errorMessage("Failed to delete orphaned post ngram entry ID {$entry->id}: " . $wpdb->last_error);
+                    $deleteError = is_string($wpdb->last_error) ? $wpdb->last_error : '';
+                    $this->logger->errorMessage("Failed to delete orphaned post ngram entry ID {$entryId}: " . $deleteError);
                     $stats['errors']++;
                 } else {
                     $stats['posts_deleted']++;
@@ -2313,7 +2435,8 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
         if (!empty($publishedCategories)) {
             foreach ($publishedCategories as $category) {
-                $publishedCategoryIds[] = $category->term_id;
+                /** @var object{term_id: int, url: string} $category */
+                $publishedCategoryIds[] = (int)$category->term_id;
             }
         }
 
@@ -2322,18 +2445,15 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
             "SELECT DISTINCT id FROM {$ngramTable} WHERE type = 'category'"
         );
 
-        if ($wpdb->last_error) {
-            $this->logger->errorMessage("Failed to query for category ngram entries: " . $wpdb->last_error);
-            return array_merge($stats, ['error' => $wpdb->last_error]);
-        }
-
         if (!empty($categoryNGramEntries)) {
             $orphanedCategories = [];
 
             // Find category ngram entries that don't have corresponding published categories
             foreach ($categoryNGramEntries as $entry) {
-                if (!in_array($entry->id, $publishedCategoryIds)) {
-                    $orphanedCategories[] = $entry->id;
+                /** @var object{id: int} $entry */
+                $entId = (int)$entry->id;
+                if (!in_array($entId, $publishedCategoryIds)) {
+                    $orphanedCategories[] = $entId;
                 }
             }
 
@@ -2349,7 +2469,8 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
                     );
 
                     if ($result === false) {
-                        $this->logger->errorMessage("Failed to delete orphaned category ngram entry ID {$categoryId}: " . $wpdb->last_error);
+                        $catDeleteError = is_string($wpdb->last_error) ? $wpdb->last_error : '';
+                        $this->logger->errorMessage("Failed to delete orphaned category ngram entry ID {$categoryId}: " . $catDeleteError);
                         $stats['errors']++;
                     } else {
                         $stats['categories_deleted']++;
@@ -2463,7 +2584,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      *
      * Called during daily maintenance cron job.
      *
-     * @return array Statistics: ['deleted' => int, 'errors' => int]
+     * @return array<string, mixed> Statistics: ['deleted' => int, 'errors' => int]
      */
     function cleanupExpiredRateLimitTransients() {
         global $wpdb;
@@ -2549,7 +2670,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      * Should be called during initial setup or manual rebuild.
      *
      * @param int $batchSize Number of categories to process per batch (default: 50)
-     * @return array Statistics: ['processed' => int, 'success' => int, 'failed' => int]
+     * @return array<string, int> Statistics: ['processed' => int, 'success' => int, 'failed' => int]
      */
     function buildNGramsForCategories($batchSize = 50) {
         $this->logger->debugMessage("Building N-grams for categories...");
@@ -2565,8 +2686,9 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
         foreach ($categories as $category) {
             try {
-                $termId = $category->term_id;
-                $url = $category->url;
+                /** @var object{term_id: int, url: string} $category */
+                $termId = (int)$category->term_id;
+                $url = (string)$category->url;
 
                 if (empty($url) || $url === 'in code') {
                     $this->logger->debugMessage("Skipping category {$termId} - no valid URL");
@@ -2605,7 +2727,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      * Should be called during initial setup or manual rebuild.
      *
      * @param int $batchSize Number of tags to process per batch (default: 50)
-     * @return array Statistics: ['processed' => int, 'success' => int, 'failed' => int]
+     * @return array<string, int> Statistics: ['processed' => int, 'success' => int, 'failed' => int]
      */
     function buildNGramsForTags($batchSize = 50) {
         $this->logger->debugMessage("Building N-grams for tags...");
@@ -2621,8 +2743,9 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
         foreach ($tags as $tag) {
             try {
-                $termId = $tag->term_id;
-                $url = $tag->url;
+                /** @var object{term_id: int, url: string} $tag */
+                $termId = (int)$tag->term_id;
+                $url = (string)$tag->url;
 
                 if (empty($url) || $url === 'in code') {
                     $this->logger->debugMessage("Skipping tag {$termId} - no valid URL");
@@ -2661,7 +2784,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      * This is the comprehensive rebuild that should be called from the Tools page.
      *
      * @param int $batchSize Number of items to process per batch
-     * @return array Combined statistics
+     * @return array<string, mixed> Combined statistics
      */
     function buildNGramsForAllContent($batchSize = 100) {
         $this->logger->infoMessage("Starting comprehensive N-gram cache build for all content types...");

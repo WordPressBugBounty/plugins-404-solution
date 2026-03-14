@@ -15,7 +15,8 @@ class ABJ_404_Solution_Privacy {
     const EXPORTER_ID = 'abj404-solution';
     const ERASER_ID = 'abj404-solution';
 
-    public static function init() {
+    /** @return void */
+    public static function init(): void {
         // Add privacy policy content in wp-admin.
         add_action('admin_init', array(__CLASS__, 'addPrivacyPolicyContent'));
 
@@ -24,7 +25,8 @@ class ABJ_404_Solution_Privacy {
         add_filter('wp_privacy_personal_data_erasers', array(__CLASS__, 'registerEraser'));
     }
 
-    public static function addPrivacyPolicyContent() {
+    /** @return void */
+    public static function addPrivacyPolicyContent(): void {
         if (!function_exists('wp_add_privacy_policy_content')) {
             return;
         }
@@ -47,7 +49,11 @@ class ABJ_404_Solution_Privacy {
         wp_add_privacy_policy_content('404 Solution', wp_kses_post($content));
     }
 
-    public static function registerExporter($exporters) {
+    /**
+     * @param array<string, mixed> $exporters
+     * @return array<string, mixed>
+     */
+    public static function registerExporter(array $exporters): array {
         $exporters[self::EXPORTER_ID] = array(
             'exporter_friendly_name' => __('404 Solution Logs', '404-solution'),
             'callback' => array(__CLASS__, 'exporter'),
@@ -55,7 +61,11 @@ class ABJ_404_Solution_Privacy {
         return $exporters;
     }
 
-    public static function registerEraser($erasers) {
+    /**
+     * @param array<string, mixed> $erasers
+     * @return array<string, mixed>
+     */
+    public static function registerEraser(array $erasers): array {
         $erasers[self::ERASER_ID] = array(
             'eraser_friendly_name' => __('404 Solution Logs', '404-solution'),
             'callback' => array(__CLASS__, 'eraser'),
@@ -63,12 +73,16 @@ class ABJ_404_Solution_Privacy {
         return $erasers;
     }
 
+    /** @return ABJ_404_Solution_DataAccess */
     private static function resolveDao() {
         if (function_exists('abj_service') && class_exists('ABJ_404_Solution_ServiceContainer')) {
             try {
                 $c = ABJ_404_Solution_ServiceContainer::getInstance();
                 if (is_object($c) && method_exists($c, 'has') && $c->has('data_access')) {
-                    return $c->get('data_access');
+                    $svc = $c->get('data_access');
+                    if ($svc instanceof ABJ_404_Solution_DataAccess) {
+                        return $svc;
+                    }
                 }
             } catch (Throwable $e) {
                 // fall back
@@ -77,6 +91,10 @@ class ABJ_404_Solution_Privacy {
         return ABJ_404_Solution_DataAccess::getInstance();
     }
 
+    /**
+     * @param mixed $email_address
+     * @return string|null
+     */
     private static function getUsernameFromEmail($email_address) {
         if (!function_exists('get_user_by')) {
             return null;
@@ -94,7 +112,12 @@ class ABJ_404_Solution_Privacy {
         return $username !== '' ? $username : null;
     }
 
-    public static function exporter($email_address, $page = 1) {
+    /**
+     * @param string $email_address
+     * @param int $page
+     * @return array{data: array<int, mixed>, done: bool}
+     */
+    public static function exporter(string $email_address, int $page = 1): array {
         $username = self::getUsernameFromEmail($email_address);
         if ($username === null) {
             return array(
@@ -112,31 +135,38 @@ class ABJ_404_Solution_Privacy {
             : array();
 
         $data = array();
-        foreach ((array)$rows as $row) {
+        foreach ($rows as $row) {
+            $rowIdRaw = isset($row['id']) ? $row['id'] : null;
+            $rowId = (is_scalar($rowIdRaw) ? (string)$rowIdRaw : uniqid('', true));
+            $tsRaw = isset($row['timestamp']) ? $row['timestamp'] : '';
+            $urlRaw = isset($row['requested_url']) ? $row['requested_url'] : '';
+            $destRaw = isset($row['dest_url']) ? $row['dest_url'] : '';
+            $refRaw = isset($row['referrer']) ? $row['referrer'] : '';
+            $ipRaw = isset($row['user_ip']) ? $row['user_ip'] : '';
             $data[] = array(
                 'group_id' => 'abj404_solution_logs',
                 'group_label' => __('404 Solution Logs', '404-solution'),
-                'item_id' => 'abj404_log_' . (isset($row['id']) ? $row['id'] : uniqid('', true)),
+                'item_id' => 'abj404_log_' . $rowId,
                 'data' => array(
                     array(
                         'name' => __('Timestamp', '404-solution'),
-                        'value' => isset($row['timestamp']) ? (string)$row['timestamp'] : '',
+                        'value' => is_scalar($tsRaw) ? (string)$tsRaw : '',
                     ),
                     array(
                         'name' => __('Requested URL', '404-solution'),
-                        'value' => isset($row['requested_url']) ? (string)$row['requested_url'] : '',
+                        'value' => is_scalar($urlRaw) ? (string)$urlRaw : '',
                     ),
                     array(
                         'name' => __('Destination URL', '404-solution'),
-                        'value' => isset($row['dest_url']) ? (string)$row['dest_url'] : '',
+                        'value' => is_scalar($destRaw) ? (string)$destRaw : '',
                     ),
                     array(
                         'name' => __('Referrer', '404-solution'),
-                        'value' => isset($row['referrer']) ? (string)$row['referrer'] : '',
+                        'value' => is_scalar($refRaw) ? (string)$refRaw : '',
                     ),
                     array(
                         'name' => __('IP Address', '404-solution'),
-                        'value' => isset($row['user_ip']) ? (string)$row['user_ip'] : '',
+                        'value' => is_scalar($ipRaw) ? (string)$ipRaw : '',
                     ),
                 ),
             );
@@ -150,7 +180,12 @@ class ABJ_404_Solution_Privacy {
         );
     }
 
-    public static function eraser($email_address, $page = 1) {
+    /**
+     * @param string $email_address
+     * @param int $page
+     * @return array{items_removed: bool, items_retained: bool, messages: array<int, string>, done: bool}
+     */
+    public static function eraser(string $email_address, int $page = 1): array {
         $username = self::getUsernameFromEmail($email_address);
         if ($username === null) {
             return array(

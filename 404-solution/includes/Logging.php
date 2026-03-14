@@ -9,7 +9,9 @@ if (!defined('ABSPATH')) {
 
 class ABJ_404_Solution_Logging {
 
-    /** If an error happens then we will also output these. */
+    /** If an error happens then we will also output these.
+     * @var array<int, string>
+     */
     private static $storedDebugMessages = array();
 
     /** Used to store the last line sent from the debug file. */
@@ -18,6 +20,7 @@ class ABJ_404_Solution_Logging {
     /** Used to store the the debug filename. */
     const DEBUG_FILE_KEY = 'debug_file_key';
     
+    /** @var self|null */
     private static $instance = null;
 
     /**
@@ -45,6 +48,7 @@ class ABJ_404_Solution_Logging {
         return $logger;
     }
 
+    /** @return self */
     public static function getInstance() {
         if (self::$instance !== null) {
             return self::$instance;
@@ -55,24 +59,25 @@ class ABJ_404_Solution_Logging {
             try {
                 $c = ABJ_404_Solution_ServiceContainer::getInstance();
                 if (is_object($c) && method_exists($c, 'has') && $c->has('logging')) {
-                    self::$instance = $c->get('logging');
-                    return self::$instance;
+                    $service = $c->get('logging');
+                    if ($service instanceof ABJ_404_Solution_Logging) {
+                        self::$instance = $service;
+                        return self::$instance;
+                    }
                 }
             } catch (Throwable $e) {
                 // fall back to legacy singleton below
             }
         }
 
-        if (self::$instance == null) {
-            self::$instance = new ABJ_404_Solution_Logging();
+        self::$instance = new ABJ_404_Solution_Logging();
 
-            // log any errors that were stored before the logger existed.
-            if (isset($GLOBALS['abj404_pending_errors']) && is_array($GLOBALS['abj404_pending_errors'])) {
-                foreach ($GLOBALS['abj404_pending_errors'] as $message) {
-                    self::$instance->errorMessage($message);
-                }
-                unset($GLOBALS['abj404_pending_errors']); // Clear after flushing
+        // log any errors that were stored before the logger existed.
+        if (isset($GLOBALS['abj404_pending_errors']) && is_array($GLOBALS['abj404_pending_errors'])) {
+            foreach ($GLOBALS['abj404_pending_errors'] as $message) {
+                self::$instance->errorMessage($message);
             }
+            unset($GLOBALS['abj404_pending_errors']); // Clear after flushing
         }
 
         return self::$instance;
@@ -93,12 +98,14 @@ class ABJ_404_Solution_Logging {
      * @return string */
     function getTimestamp() {
         $date = null;
-        $timezoneString = get_option('timezone_string');
-        
+        $timezoneStringRaw = get_option('timezone_string');
+        $timezoneString = is_string($timezoneStringRaw) ? $timezoneStringRaw : '';
+
         if (!empty($timezoneString)) {
             $date = new DateTime("now", new DateTimeZone($timezoneString));
         } else {
-            $timezoneOffset = (int)get_option('gmt_offset');
+            $gmtOffsetRaw = get_option('gmt_offset');
+            $timezoneOffset = is_scalar($gmtOffsetRaw) ? (int)$gmtOffsetRaw : 0;
             $timezoneOffsetString = '+';
             if ($timezoneOffset < 0) {
                 $timezoneOffsetString = '-';
@@ -120,11 +127,13 @@ class ABJ_404_Solution_Logging {
         return $date->format('Y-m-d H:i:s T');
     }
     
-    /** Send a message to the log file if debug mode is on. 
+    /** Send a message to the log file if debug mode is on.
      * This goes to a file and is used by every other class so it goes here.
-     * @param string $message  
-     * @param \Exception $e If present then a stack trace is included. */
-    function debugMessage($message, $e = null) {
+     * @param string $message
+     * @param \Exception|null $e If present then a stack trace is included.
+     * @return void
+     */
+    function debugMessage(string $message, $e = null): void {
     	$stacktrace = "";
     	if ($e != null) {
     		$stacktrace = ", Stacktrace: " . $e->getTraceAsString();
@@ -141,26 +150,31 @@ class ABJ_404_Solution_Logging {
 
     /** Send a message to the log.
      * This goes to a file and is used by every other class so it goes here.
-     * @param string $message  */
-    function infoMessage($message) {
+     * @param string $message
+     * @return void
+     */
+    function infoMessage(string $message): void {
     	$timestamp = $this->getTimestamp() . ' (INFO): ';
     	$this->writeLineToDebugFile($timestamp . $message);
     }
     
-    /** Send a message to the log. 
+    /** Send a message to the log.
      * This goes to a file and is used by every other class so it goes here.
-     * @param string $message  */
-    function warn($message) {
+     * @param string $message
+     * @return void
+     */
+    function warn(string $message): void {
         $timestamp = $this->getTimestamp() . ' (WARN): ';
         $this->writeLineToDebugFile($timestamp . $message);
     }
 
-/** Always send a message to the error_log.
+    /** Always send a message to the error_log.
      * This goes to a file and is used by every other class so it goes here.
      * @param string $message
-     * @param Exception $e
+     * @param \Exception|null $e
+     * @return void
      */
-    function errorMessage($message, $e = null) {
+    function errorMessage(string $message, $e = null): void {
         if ($e == null) {
             $e = new Exception;
         }
@@ -185,13 +199,14 @@ class ABJ_404_Solution_Logging {
     }
     
     /** Log the user capabilities.
-     * @param string $msg 
+     * @param string $msg
+     * @return void
      */
-    function logUserCapabilities($msg) {
+    function logUserCapabilities(string $msg): void {
     	$f = ABJ_404_Solution_Functions::getInstance();
     	$abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
     	$user = wp_get_current_user();
-        $usercaps = $f->str_replace(',"', ', "', wp_kses_post(json_encode($user->get_role_caps())));
+        $usercaps = $f->str_replace(',"', ', "', wp_kses_post((string)json_encode($user->get_role_caps())));
         
         $userIsPluginAdminStr = "false";
         if ($abj404logic->userIsPluginAdmin()) {
@@ -201,7 +216,7 @@ class ABJ_404_Solution_Logging {
         $this->debugMessage("User caps msg: " . esc_html($msg == '' ? '(none)' : $msg) . ", is_admin(): " . is_admin() . 
         		", current_user_can('administrator'): " . current_user_can('administrator') . 
         		", userIsPluginAdmin(): " . $userIsPluginAdminStr . 
-                ", user caps: " . wp_kses_post(json_encode($user->caps)) . ", get_role_caps: " . 
+                ", user caps: " . wp_kses_post((string)json_encode($user->caps)) . ", get_role_caps: " . 
                 $usercaps . ", WP ver: " . get_bloginfo('version') . ", mbstring: " . 
                 (extension_loaded('mbstring') ? 'true' : 'false'));
     }
@@ -235,8 +250,10 @@ class ABJ_404_Solution_Logging {
         return true;
     }
     
-    /** Email the log file to the plugin developer. */
-    function emailErrorLogIfNecessary() {
+    /** Email the log file to the plugin developer.
+     * @return bool
+     */
+    function emailErrorLogIfNecessary(): bool {
         $abj404dao = ABJ_404_Solution_DataAccess::getInstance();
         $abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
         $options = $abj404logic->getOptions(true);
@@ -266,7 +283,7 @@ class ABJ_404_Solution_Logging {
             $this->debugMessage("Last sent line from file: " . $sentLine);
         }
         if ($sentLine < 1 && array_key_exists(self::LAST_SENT_LINE, $options)) {
-        	$sentLine = $options[self::LAST_SENT_LINE];
+        	$sentLine = is_scalar($options[self::LAST_SENT_LINE]) ? (int)$options[self::LAST_SENT_LINE] : -1;
        		$this->debugMessage("Last sent line from options: " . $sentLine);
         }
         
@@ -292,15 +309,19 @@ class ABJ_404_Solution_Logging {
         	return false;
         	
         } else {
-        	$this->emailLogFileToDeveloper($latestErrorLineFound['line'], 
-        		$latestErrorLineFound['total_error_count'], $sentLine);
+        	$this->emailLogFileToDeveloper((string)($latestErrorLineFound['line'] ?? ''),
+        		$latestErrorLineFound['total_error_count'], (int)$sentLine);
         	return true;
         }
-        
-        return false;
     }
     
-    function emailLogFileToDeveloper($errorLineMessage, $totalErrorCount, $previouslySentLine) {
+    /**
+     * @param string $errorLineMessage
+     * @param int $totalErrorCount
+     * @param int $previouslySentLine
+     * @return void
+     */
+    function emailLogFileToDeveloper(string $errorLineMessage, int $totalErrorCount, int $previouslySentLine): void {
         global $wpdb;
         
         // email the log file.
@@ -326,8 +347,8 @@ class ABJ_404_Solution_Logging {
         $published_pages = $count_pages->publish;
 
         // Get category and tag counts
-        $category_count = wp_count_terms('category');
-        $tag_count = wp_count_terms('post_tag');
+        $category_count = wp_count_terms(array('taxonomy' => 'category'));
+        $tag_count = wp_count_terms(array('taxonomy' => 'post_tag'));
         // Handle WP_Error for categories/tags
         if (is_wp_error($category_count)) {
             $category_count = 0;
@@ -409,10 +430,10 @@ class ABJ_404_Solution_Logging {
         $this->debugMessage("Mail sent. Log zip file deleted.");
     }
     
-    /** 
-     * @return array
+    /**
+     * @return array{num: int, line: string|null, total_error_count: int}
      */
-    function getLatestErrorLine() {
+    function getLatestErrorLine(): array {
         $f = ABJ_404_Solution_Functions::getInstance();
         $latestErrorLineFound = array();
         $latestErrorLineFound['num'] = -1;
@@ -701,7 +722,7 @@ class ABJ_404_Solution_Logging {
 
         // Strip query strings from URLs (everything after ? in http/https URLs)
         // This removes tokens, emails, session IDs, search terms, etc. from URLs
-        $line = preg_replace('/(https?:\/\/[^\s?]+)\?[^\s]*/', '$1', $line);
+        $line = preg_replace('/(https?:\/\/[^\s?]+)\?[^\s]*/', '$1', $line) ?? $line;
 
         // Mask email addresses with adaptive length-based masking
         // Example: john@example.com -> j***@exa***-a1b2
@@ -711,7 +732,7 @@ class ABJ_404_Solution_Logging {
                 return $this->maskEmailAdaptive($matches[0]);
             },
             $line
-        );
+        ) ?? $line;
 
         // Redact IP addresses using existing md5lastOctet function
         // Keeps first octets, hashes last (e.g., 192.168.1.100 -> 192.168.1.md5hash)
@@ -721,7 +742,7 @@ class ABJ_404_Solution_Logging {
                 return $f->md5lastOctet($matches[0]);
             },
             $line
-        );
+        ) ?? $line;
 
         // Redact IPv6 addresses (including compressed forms) using existing md5lastOctet function
         // Negative lookbehind prevents matching mid-hex-string; handles ::1, 2001:db8::1, etc.
@@ -731,7 +752,7 @@ class ABJ_404_Solution_Logging {
                 return $f->md5lastOctet($matches[0]);
             },
             $line
-        );
+        ) ?? $line;
 
         // Mask usernames with adaptive length-based masking
         // Example: "Current user: john" -> "Current user: j***-a1b2"
@@ -743,7 +764,7 @@ class ABJ_404_Solution_Logging {
                 return $prefix . $this->maskTextAdaptive($username);
             },
             $line
-        );
+        ) ?? $line;
 
         // Mask display names with adaptive length-based masking
         // Example: "Display name: John Doe" -> "Display name: J***-a1b2"
@@ -754,7 +775,7 @@ class ABJ_404_Solution_Logging {
                 return 'display name: ' . $this->maskTextAdaptive($name);
             },
             $line
-        );
+        ) ?? $line;
 
         // Redact absolute file paths to prevent info disclosure
         // Matches /home/user/..., /var/www/..., etc.
@@ -763,12 +784,12 @@ class ABJ_404_Solution_Logging {
             '/(^|\s)(\/[^\s]+\/wp-content\/)/i',
             '$1/...redacted.../wp-content/',
             $line
-        );
+        ) ?? $line;
         $line = preg_replace(
             '/\b[a-z]:\\\\[^\s]+\\\\wp-content\\\\/i',
             'C:\\...redacted...\\wp-content\\',
             $line
-        );
+        ) ?? $line;
 
         // Hash long tokens consistently (40+ chars)
         // Example: "abc123def456..." -> "token-a1b2c3d4"
@@ -779,7 +800,7 @@ class ABJ_404_Solution_Logging {
                 return 'token-' . $hash;
             },
             $line
-        );
+        ) ?? $line;
 
         // Hash WordPress nonces consistently
         // Example: "_wpnonce=abc123" -> "_wpnonce=nonce-a1b2c3d4"
@@ -790,7 +811,7 @@ class ABJ_404_Solution_Logging {
                 return '_wpnonce=nonce-' . $hash;
             },
             $line
-        );
+        ) ?? $line;
 
         return $line;
     }
@@ -803,16 +824,17 @@ class ABJ_404_Solution_Logging {
         return $this->getFilePathAndMoveOldFile(abj404_getUploadsDir(), $debugFileName);
     }
     
-    function getDebugFilename() {
+    /** @return string */
+    function getDebugFilename(): string {
         // get the UUID here.
         $abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
         $options = $abj404logic->getOptions(true);
         $debugFileKey = null;
         if (array_key_exists(self::DEBUG_FILE_KEY, $options)) {
-            $debugFileKey = $options[self::DEBUG_FILE_KEY];
+            $debugFileKey = is_string($options[self::DEBUG_FILE_KEY]) ? $options[self::DEBUG_FILE_KEY] : null;
         }
         // if the key doesn't exist then create it.
-        if ($debugFileKey == null || trim($debugFileKey) == '') {
+        if ($debugFileKey === null || trim($debugFileKey) === '') {
             // delete any lingering debug files.
             $this->deleteDebugFile();
 
@@ -828,7 +850,8 @@ class ABJ_404_Solution_Logging {
         return $debugFileName;
     }
     
-    function getDebugFilePathOld() {
+    /** @return string */
+    function getDebugFilePathOld(): string {
         return $this->getDebugFilePath() . "_old.txt";
     }
     
@@ -868,7 +891,8 @@ class ABJ_404_Solution_Logging {
         return $directory . $filename;
     }
     
-    function limitDebugFileSize() {
+    /** @return void */
+    function limitDebugFileSize(): void {
         // delete the sent_line file since it's now incorrect.
         if (file_exists($this->getDebugFilePathSentFile())) {
             ABJ_404_Solution_Functions::safeUnlink($this->getDebugFilePathSentFile());
@@ -883,7 +907,8 @@ class ABJ_404_Solution_Logging {
         rename($this->getDebugFilePath(), $this->getDebugFilePathOld());
     }
     
-    function removeLastSentErrorLineFromDatabase() {
+    /** @return void */
+    function removeLastSentErrorLineFromDatabase(): void {
     	// update the last sent error line since the debug file will be deleted.
     	$abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
     	$options = $abj404logic->getOptions(true);
@@ -912,6 +937,7 @@ class ABJ_404_Solution_Logging {
         if (is_dir($uploadDir)) {
             // Get all files matching the pattern abj404_debug_*.txt
             $files = glob($uploadDir . '/abj404_debug_*.txt');
+            if (!is_array($files)) { $files = array(); }
             foreach ($files as $file) { // Loop through the files and delete them
                 if (is_file($file)) {
                     // Delete the file

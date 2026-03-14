@@ -17,11 +17,19 @@ class ABJ_404_Solution_ImportExportService {
     /** @var ABJ_404_Solution_Logging */
     private $logger;
 
+    /**
+     * @param ABJ_404_Solution_DataAccess $dataAccess
+     * @param ABJ_404_Solution_Logging $logging
+     */
     function __construct($dataAccess, $logging) {
         $this->dao = $dataAccess;
         $this->logger = $logging;
     }
 
+    /**
+     * @param string $format
+     * @return string
+     */
     function getExportFilename($format = 'native') {
         if ($format === 'redirection') {
             return abj404_getUploadsDir() . 'export-redirection.csv';
@@ -29,6 +37,7 @@ class ABJ_404_Solution_ImportExportService {
         return abj404_getUploadsDir() . 'export.csv';
     }
 
+    /** @return void */
     function doExport() {
         $format = isset($_REQUEST['export_format']) ? sanitize_text_field((string)$_REQUEST['export_format']) : 'native';
         $tempFile = $this->getExportFilename($format);
@@ -109,6 +118,8 @@ class ABJ_404_Solution_ImportExportService {
      * Expected formats:
      * - from_url,status,type,to_url,wp_type
      * - from_url,to_url
+     *
+     * @return string
      */
     function doImportFile() {
         $anyIssuesToNote = array();
@@ -134,6 +145,9 @@ class ABJ_404_Solution_ImportExportService {
 
         $allowed_mime_types = array('text/csv', 'text/plain', 'application/csv', 'text/comma-separated-values', 'application/vnd.ms-excel');
         $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        if ($finfo === false) {
+            return 'Error: Unable to determine file type.';
+        }
         $mime_type = finfo_file($finfo, $_FILES['import_file']['tmp_name']);
         if (!in_array($mime_type, $allowed_mime_types)) {
             return 'Error: Invalid file type. Only CSV files are allowed.';
@@ -210,14 +224,19 @@ class ABJ_404_Solution_ImportExportService {
         return __('The file seems to have loaded okay. Please check the redirects page.', '404-solution');
     }
 
+    /**
+     * @param array<string, mixed> $dataArray
+     * @param bool $dryRun
+     * @return array<int, string>
+     */
     function loadDataArrayFromFile($dataArray, $dryRun = false) {
-        if ($dataArray['from_url'] == 'from_url' || $dataArray['from_url'] == 'request') {
+        $fromURL = isset($dataArray['from_url']) && is_string($dataArray['from_url']) ? $dataArray['from_url'] : '';
+        if ($fromURL === 'from_url' || $fromURL === 'request') {
             return array();
         }
 
-        $fromURL = $dataArray['from_url'];
         $status = ABJ404_STATUS_MANUAL;
-        $final_dest = $dataArray['to_url'];
+        $final_dest = isset($dataArray['to_url']) && is_string($dataArray['to_url']) ? $dataArray['to_url'] : '';
         $anyIssuesToNote = array();
 
         $maybeExisting2 = $this->dao->getExistingRedirectForURL($fromURL);
@@ -263,34 +282,41 @@ class ABJ_404_Solution_ImportExportService {
             $postsFromCategoryRows = $this->dao->getPublishedCategories(null, $slug);
             $postsFromTagRows = $this->dao->getPublishedTags($slug);
 
+            /** @var object{id?: int|string, term_id?: int|string}|null $postFromSlug */
             $postFromSlug = isset($postsFromSlugRows[0]) ? $postsFromSlugRows[0] : null;
+            /** @var object{term_id?: int|string}|null $postFromCategory */
             $postFromCategory = isset($postsFromCategoryRows[0]) ? $postsFromCategoryRows[0] : null;
+            /** @var object{term_id?: int|string}|null $postFromTag */
             $postFromTag = isset($postsFromTagRows[0]) ? $postsFromTagRows[0] : null;
 
-            if ($postFromSlug) {
+            if ($postFromSlug && isset($postFromSlug->id)) {
                 $type = $typePost;
-                $final_dest = $postFromSlug->id;
-            } else if ($postFromCategory) {
+                $final_dest = (string)$postFromSlug->id;
+            } else if ($postFromCategory && isset($postFromCategory->term_id)) {
                 $type = $typeCat;
-                $final_dest = $postFromCategory->term_id;
-            } else if ($postFromTag) {
+                $final_dest = (string)$postFromCategory->term_id;
+            } else if ($postFromTag && isset($postFromTag->term_id)) {
                 $type = $typeTag;
-                $final_dest = $postFromTag->term_id;
+                $final_dest = (string)$postFromTag->term_id;
             } else {
                 $this->logger->warn("Couldn't find post from slug. slug: " . $slug);
             }
         }
 
         if (!$dryRun) {
-            $this->dao->setupRedirect($fromURL, $status, $type, $final_dest, 301);
+            $this->dao->setupRedirect($fromURL, (string)$status, (string)$type, (string)$final_dest, (string)301);
         }
 
         return $anyIssuesToNote;
     }
 
+    /**
+     * @param mixed $line
+     * @return array<string, string>
+     */
     function splitCsvLine($line) {
         if (!is_string($line)) {
-            $line = (string)$line;
+            $line = is_scalar($line) ? (string)$line : '';
         }
 
         $data = array_map(function($v) {
@@ -315,6 +341,10 @@ class ABJ_404_Solution_ImportExportService {
         return array('error' => 'Invalid CSV format. ' . count($data) . ' found but 2 or 5 expected.');
     }
 
+    /**
+     * @param array<int, string> $columns
+     * @return bool
+     */
     function isCompatibleImportHeaderRow($columns) {
         $normalized = $this->normalizeImportHeaders($columns);
         $fromIndex = $this->findImportHeaderIndex($normalized, array('from_url', 'request', 'source', 'url', 'match_url'));
@@ -322,6 +352,10 @@ class ABJ_404_Solution_ImportExportService {
         return ($fromIndex !== -1 && $toIndex !== -1);
     }
 
+    /**
+     * @param array<int, string> $columns
+     * @return array<int, string|null>
+     */
     function normalizeImportHeaders($columns) {
         return array_map(function($value) {
             $value = preg_replace('/^\xEF\xBB\xBF/', '', (string)$value);
@@ -333,7 +367,7 @@ class ABJ_404_Solution_ImportExportService {
     /**
      * Best-effort format detection for import UX and diagnostics.
      *
-     * @param array $columns Raw header row.
+     * @param array<int, string> $columns Raw header row.
      * @return string One of: native, redirection, safe_redirect_manager, simple_301, unknown.
      */
     function detectImportFormatFromHeaders($columns) {
@@ -367,6 +401,11 @@ class ABJ_404_Solution_ImportExportService {
         return 'unknown';
     }
 
+    /**
+     * @param array<int, string> $row
+     * @param array<int, string|null> $normalizedHeaders
+     * @return array<string, string>
+     */
     function mapImportRowByHeaders($row, $normalizedHeaders) {
         $fromIndex = $this->findImportHeaderIndex($normalizedHeaders, array('from_url', 'request', 'source', 'url', 'match_url'));
         $toIndex = $this->findImportHeaderIndex($normalizedHeaders, array('to_url', 'target', 'destination', 'action_data', 'redirect_to', 'url_to'));
@@ -389,8 +428,8 @@ class ABJ_404_Solution_ImportExportService {
     }
 
     /**
-     * @param array $headers
-     * @param array $candidates
+     * @param array<int, string|null> $headers
+     * @param array<int, string> $candidates
      * @return int
      */
     private function findImportHeaderIndex($headers, $candidates) {
@@ -404,8 +443,8 @@ class ABJ_404_Solution_ImportExportService {
     }
 
     /**
-     * @param array $columns Already parsed CSV columns for one row.
-     * @return array
+     * @param array<int, string> $columns Already parsed CSV columns for one row.
+     * @return array<string, string>
      */
     private function mapImportRowWithoutHeaders($columns) {
         $columns = array_values($columns);

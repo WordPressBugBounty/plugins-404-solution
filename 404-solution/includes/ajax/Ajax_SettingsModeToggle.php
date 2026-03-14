@@ -11,9 +11,11 @@ if (!defined('ABSPATH')) {
 
 class ABJ_404_Solution_Ajax_SettingsModeToggle {
 
+    /** @var self|null */
     private static $instance = null;
 
-    public static function getInstance() {
+    /** @return self */
+    public static function getInstance(): self {
         if (self::$instance == null) {
             self::$instance = new ABJ_404_Solution_Ajax_SettingsModeToggle();
         }
@@ -22,8 +24,9 @@ class ABJ_404_Solution_Ajax_SettingsModeToggle {
 
     /**
      * Initialize AJAX handlers.
+     * @return void
      */
-    static function init() {
+    static function init(): void {
         $me = ABJ_404_Solution_Ajax_SettingsModeToggle::getInstance();
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404_toggle_settings_mode',
             array($me, 'handleModeToggle'));
@@ -31,8 +34,9 @@ class ABJ_404_Solution_Ajax_SettingsModeToggle {
 
     /**
      * Handle the mode toggle AJAX request.
+     * @return void
      */
-    function handleModeToggle() {
+    function handleModeToggle(): void {
         $abj404dao = ABJ_404_Solution_DataAccess::getInstance();
         $abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
 
@@ -43,28 +47,19 @@ class ABJ_404_Solution_Ajax_SettingsModeToggle {
         // Verify nonce for CSRF protection
         if (!wp_verify_nonce($nonce, 'abj404_mode_toggle')) {
             wp_send_json_error(array('message' => __('Invalid security token', '404-solution')), 403);
-            if (!(defined('ABJ404_TEST_NO_EXIT') && ABJ404_TEST_NO_EXIT)) {
-                exit;
-            }
-            return;
+            return; // @phpstan-ignore deadCode.unreachable
         }
 
         // Verify user has appropriate capabilities
         if (!$abj404logic->userIsPluginAdmin()) {
             wp_send_json_error(array('message' => __('Unauthorized', '404-solution')), 403);
-            if (!(defined('ABJ404_TEST_NO_EXIT') && ABJ404_TEST_NO_EXIT)) {
-                exit;
-            }
-            return;
+            return; // @phpstan-ignore deadCode.unreachable
         }
 
         // Validate mode
         if ($mode !== 'simple' && $mode !== 'advanced') {
             wp_send_json_error(array('message' => __('Invalid mode', '404-solution')), 400);
-            if (!(defined('ABJ404_TEST_NO_EXIT') && ABJ404_TEST_NO_EXIT)) {
-                exit;
-            }
-            return;
+            return; // @phpstan-ignore deadCode.unreachable
         }
 
         // Set the mode
@@ -78,10 +73,5 @@ class ABJ_404_Solution_Ajax_SettingsModeToggle {
         } else {
             wp_send_json_error(array('message' => __('Failed to update settings mode', '404-solution')), 500);
         }
-
-        if (!(defined('ABJ404_TEST_NO_EXIT') && ABJ404_TEST_NO_EXIT)) {
-            exit;
-        }
-        return;
     }
 }

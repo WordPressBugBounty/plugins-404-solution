@@ -9,13 +9,17 @@ if (!defined('ABSPATH')) {
 
 class ABJ_404_Solution_ErrorHandler {
 	
-	/** Keep a reference to the original error handler so we can use it later. */
+	/** Keep a reference to the original error handler so we can use it later.
+	 * @var callable|null
+	 */
 	static $originalErrorHandler = null;
 
-    /** Setup. */
-    static function init() {
+    /** Setup.
+     * @return void
+     */
+    static function init(): void {
     	// store the original error handler.
-    	self::$originalErrorHandler = set_error_handler(function(){});
+    	self::$originalErrorHandler = set_error_handler(function(int $errno, string $errstr, string $errfile = '', int $errline = 0): bool { return false; });
     	restore_error_handler();
     	
         // set to the user defined error handler
@@ -37,7 +41,8 @@ class ABJ_404_Solution_ErrorHandler {
         
         try {
         	// if the error file does not contain the name of our plugin then we ignore it.
-        	$pluginFolder = $f->substr(ABJ404_NAME, 0, $f->strpos(ABJ404_NAME, '/'));
+        	$slashPos = $f->strpos(ABJ404_NAME, '/');
+        	$pluginFolder = $f->substr(ABJ404_NAME, 0, ($slashPos !== false ? $slashPos : null));
         	if ($f->strpos($errfile, $pluginFolder) === false) {
         		// let the normal error handler handle it.
         		
@@ -67,12 +72,12 @@ class ABJ_404_Solution_ErrorHandler {
             
             $extraInfo = "(none)";
             if (array_key_exists(ABJ404_PP, $_REQUEST) && array_key_exists('debug_info', $_REQUEST[ABJ404_PP])) {
-                $extraInfo = stripcslashes(wp_kses_post(json_encode($_REQUEST[ABJ404_PP]['debug_info'])));
+                $extraInfo = stripcslashes(wp_kses_post((string)json_encode($_REQUEST[ABJ404_PP]['debug_info'])));
             }
             $errmsg = "ABJ404-SOLUTION Normal error handler error: errno: " .
-                        wp_kses_post(json_encode($errno)) . ", errstr: " . wp_kses_post(json_encode($errstr)) .
-                        ", \nerrfile: " . stripcslashes(wp_kses_post(json_encode($errfile))) .
-                        ", \nerrline: " . wp_kses_post(json_encode($errline)) .
+                        wp_kses_post((string)json_encode($errno)) . ", errstr: " . wp_kses_post((string)json_encode($errstr)) .
+                        ", \nerrfile: " . stripcslashes(wp_kses_post((string)json_encode($errfile))) .
+                        ", \nerrline: " . wp_kses_post((string)json_encode($errline)) .
                         ', \nAdditional info: ' . $extraInfo . ", mbstring: " . 
                     (extension_loaded('mbstring') ? 'true' : 'false');
             
@@ -110,12 +115,17 @@ class ABJ_404_Solution_ErrorHandler {
         return false;
     }
 
-    static function FatalErrorHandler() {
+    /** @return bool */
+    static function FatalErrorHandler(): bool {
         $lasterror = error_get_last();
         return self::processFatalError($lasterror);
     }
 
-    private static function safeJsonEncode($value) {
+    /**
+     * @param mixed $value
+     * @return string
+     */
+    private static function safeJsonEncode($value): string {
         $encoded = json_encode($value, JSON_PARTIAL_OUTPUT_ON_ERROR);
         if ($encoded === false) {
             return '(json_encode failed) ' . print_r($value, true);
@@ -123,7 +133,11 @@ class ABJ_404_Solution_ErrorHandler {
         return $encoded;
     }
 
-    private static function safeWriteLine($line) {
+    /**
+     * @param string $line
+     * @return bool
+     */
+    private static function safeWriteLine(string $line): bool {
         try {
             $logger = ABJ_404_Solution_Logging::getInstance();
             if (is_object($logger) && method_exists($logger, 'writeLineToDebugFile')) {
@@ -145,12 +159,21 @@ class ABJ_404_Solution_ErrorHandler {
         return false;
     }
 
-    private static function isFatalType($type) {
+    /**
+     * @param int $type
+     * @return bool
+     */
+    private static function isFatalType(int $type): bool {
         $fatalTypes = array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR);
         return in_array($type, $fatalTypes, true);
     }
 
-	    private static function emitJsonAndExit($payload, $httpStatus) {
+	    /**
+	     * @param array<string, mixed> $payload
+	     * @param int $httpStatus
+	     * @return bool
+	     */
+	    private static function emitJsonAndExit(array $payload, int $httpStatus): bool {
 	        if (!headers_sent()) {
 	            // Marker headers help support quickly identify that this response came from our AJAX endpoint.
 	            // These are safe to expose (no sensitive values).
@@ -181,14 +204,19 @@ class ABJ_404_Solution_ErrorHandler {
      * Process a fatal error (shutdown handler).
      * Public for unit tests (allows injecting a fake last error).
      */
-    public static function processFatalError($lasterror) {
+    /**
+     * @param array<string, mixed>|null $lasterror
+     * @return bool
+     */
+    public static function processFatalError($lasterror): bool {
         $f = ABJ_404_Solution_Functions::getInstance();
 
         if ($lasterror == null || !is_array($lasterror) || !array_key_exists('type', $lasterror) ||
             !array_key_exists('file', $lasterror)) {
             return false;
         }
-        if (!self::isFatalType($lasterror['type'])) {
+        $errorType = $lasterror['type'];
+        if (!self::isFatalType(is_int($errorType) ? $errorType : (is_scalar($errorType) ? (int)$errorType : 0))) {
             return false;
         }
 
@@ -286,8 +314,9 @@ class ABJ_404_Solution_ErrorHandler {
         // Default behavior: only log plugin-scope fatals (avoid noise from other plugins/themes).
         try {
             $errno = $lasterror['type'];
-            $errfile = $lasterror['file'];
-            $pluginFolder = $f->substr(ABJ404_NAME, 0, $f->strpos(ABJ404_NAME, '/'));
+            $errfile = is_string($lasterror['file']) ? $lasterror['file'] : '';
+            $slashPos2 = $f->strpos(ABJ404_NAME, '/');
+            $pluginFolder = $f->substr(ABJ404_NAME, 0, ($slashPos2 !== false ? $slashPos2 : null));
 
             // if the error file does not contain the name of our plugin then we ignore it.
             if ($f->strpos($errfile, $pluginFolder) === false) {
@@ -296,10 +325,10 @@ class ABJ_404_Solution_ErrorHandler {
 
             $extraInfo = "(none)";
             if (array_key_exists(ABJ404_PP, $_REQUEST) && array_key_exists('debug_info', $_REQUEST[ABJ404_PP])) {
-                $extraInfo = stripcslashes(wp_kses_post(json_encode($_REQUEST[ABJ404_PP]['debug_info'])));
+                $extraInfo = stripcslashes(wp_kses_post((string)json_encode($_REQUEST[ABJ404_PP]['debug_info'])));
             }
             $errmsg = "ABJ404-SOLUTION Fatal error handler: " .
-                stripcslashes(wp_kses_post(json_encode($lasterror))) .
+                stripcslashes(wp_kses_post((string)json_encode($lasterror))) .
                 ", \nAdditional info: " . $extraInfo . ", mbstring: " .
                 (extension_loaded('mbstring') ? 'true' : 'false');
 

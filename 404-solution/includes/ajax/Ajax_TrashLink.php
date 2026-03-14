@@ -8,8 +8,10 @@ if (!defined('ABSPATH')) {
 /* Funtcions supporting Ajax stuff.  */
 class ABJ_404_Solution_Ajax_TrashLink {
 
-    /** Handle trash/restore actions via AJAX. */
-    static function trashAction() {
+    /** Handle trash/restore actions via AJAX.
+     * @return void
+     */
+    static function trashAction(): void {
         $abj404dao = ABJ_404_Solution_DataAccess::getInstance();
         $abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
         $abj404view = $GLOBALS['abj404view'] ?? null;
@@ -18,15 +20,9 @@ class ABJ_404_Solution_Ajax_TrashLink {
             try {
                 $c = ABJ_404_Solution_ServiceContainer::getInstance();
                 if (is_object($c) && method_exists($c, 'has')) {
-                    if ($c->has('data_access')) {
-                        $abj404dao = $c->get('data_access');
-                    }
-                    if ($c->has('plugin_logic')) {
-                        $abj404logic = $c->get('plugin_logic');
-                    }
-                    if ($c->has('view')) {
-                        $abj404view = $c->get('view');
-                    }
+                    if ($c->has('data_access')) { $abj404dao = $c->get('data_access'); }
+                    if ($c->has('plugin_logic')) { $abj404logic = $c->get('plugin_logic'); }
+                    if ($c->has('view')) { $abj404view = $c->get('view'); }
                 }
             } catch (Throwable $e) {
                 // fall back to singletons above
@@ -36,25 +32,22 @@ class ABJ_404_Solution_Ajax_TrashLink {
             $abj404view = ABJ_404_Solution_View::getInstance();
         }
 
+        /** @var ABJ_404_Solution_DataAccess $abj404dao */
+        /** @var ABJ_404_Solution_PluginLogic $abj404logic */
+
         $nonceOk = function_exists('check_ajax_referer')
             ? check_ajax_referer('abj404_ajaxTrash', '_wpnonce', false)
-            : (function_exists('check_admin_referer') ? check_admin_referer('abj404_ajaxTrash', '_wpnonce', false) : false);
+            : (function_exists('check_admin_referer') ? check_admin_referer('abj404_ajaxTrash', '_wpnonce') : false);
 
         if (!$nonceOk || !is_admin()) {
             wp_send_json_error(array('message' => __('Invalid security token', '404-solution')), 403);
-            if (!(defined('ABJ404_TEST_NO_EXIT') && ABJ404_TEST_NO_EXIT)) {
-                exit;
-            }
-            return;
+            return; // @phpstan-ignore deadCode.unreachable
         }
 
         // Verify user has appropriate capabilities (respects plugin admin users)
         if (!$abj404logic->userIsPluginAdmin()) {
             wp_send_json_error(array('message' => __('Unauthorized', '404-solution')), 403);
-            if (!(defined('ABJ404_TEST_NO_EXIT') && ABJ404_TEST_NO_EXIT)) {
-                exit;
-            }
-            return;
+            return; // @phpstan-ignore deadCode.unreachable
         }
         
         $idToTrash = $abj404dao->getPostOrGetSanitize('id');
@@ -62,7 +55,7 @@ class ABJ_404_Solution_Ajax_TrashLink {
         $subpage = $abj404dao->getPostOrGetSanitize('subpage');
         
         $data = array();
-        $data['resultset'] = $abj404dao->moveRedirectsToTrash($idToTrash, $trashAction);
+        $data['resultset'] = $abj404dao->moveRedirectsToTrash((int)$idToTrash, (int)$trashAction);
         $data['subsubsub'] = is_object($abj404view) && method_exists($abj404view, 'getSubSubSub')
             ? $abj404view->getSubSubSub($subpage)
             : '';
@@ -86,10 +79,6 @@ class ABJ_404_Solution_Ajax_TrashLink {
 	                'result' => 'fail',
 	            ), 500);
 	        }
-        if (!(defined('ABJ404_TEST_NO_EXIT') && ABJ404_TEST_NO_EXIT)) {
-            exit;
-        }
-        return;
     }
     
 }

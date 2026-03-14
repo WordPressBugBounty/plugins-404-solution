@@ -8,47 +8,53 @@ if (!defined('ABSPATH')) {
 /* Static functions that can be used from anywhere.  */
 class ABJ_404_Solution_FunctionsPreg extends ABJ_404_Solution_Functions {
 
+	/** @var self|null */
 	private static $instance = null;
-	
-	public static function getInstance() {
+
+	public static function getInstance(): self {
 		if (self::$instance == null) {
 			self::$instance = new ABJ_404_Solution_FunctionsPreg();
 		}
-		
+
 		return self::$instance;
 	}
-	
-	/** Use this to find a delimiter. 
-     * @var array */
+
+	/** Use this to find a delimiter.
+     * @var array<int, string> */
     private $delimiterChars = array('`', '^', '|', '~', '!', ';', ':', ',', '@', "'", '/');
 
-    function ord($char) {
+    function ord(string $char): int {
         return ord($char);
     }
-    
-    function strtolower($string) {
+
+    function strtolower(string $string): string {
         return strtolower($string);
     }
-    
-    function strlen($string) {
+
+    function strlen(string $string): int {
         return strlen($string);
     }
-    
-    function strpos($haystack, $needle, $offset = 0) {
+
+    /** @return int|false */
+    function strpos(string $haystack, string $needle, int $offset = 0) {
         if ($offset == 0) {
             return strpos($haystack, $needle);
         }
         return strpos($haystack, $needle, $offset);
     }
-    
-    function substr($str, $start, $length = null) {
-        if ($length == null) {
+
+    function substr(string $str, int $start, ?int $length = null): string {
+        if ($length === null) {
             return substr($str, $start);
         }
         return substr($str, $start, $length);
     }
 
-    function regexMatch($pattern, $string, &$regs = null) {
+    /**
+     * @param array<int, string>|null $regs
+     * @return bool|int
+     */
+    function regexMatch(string $pattern, string $string, ?array &$regs = null) {
         // find a character to use for quotes
         $delimiterA = "{";
         $delimiterB = "}";
@@ -57,8 +63,12 @@ class ABJ_404_Solution_FunctionsPreg extends ABJ_404_Solution_Functions {
         }
         return preg_match($delimiterA . $pattern . $delimiterB, $string, $regs);
     }
-    
-    function regexMatchi($pattern, $string, &$regs = null) {
+
+    /**
+     * @param array<int, string>|null $regs
+     * @return bool|int
+     */
+    function regexMatchi(string $pattern, string $string, ?array &$regs = null) {
         // find a character to use for quotes
         $delimiterA = "{";
         $delimiterB = "}";
@@ -67,7 +77,8 @@ class ABJ_404_Solution_FunctionsPreg extends ABJ_404_Solution_Functions {
         }
         return preg_match($delimiterA . $pattern . $delimiterB . 'i', $string, $regs);
     }
-    
+
+    /** @return string|null */
     function regexReplace($pattern, $replacement, $string) {
         // find a character to use for quotes
         $delimiterA = "{";
@@ -76,29 +87,30 @@ class ABJ_404_Solution_FunctionsPreg extends ABJ_404_Solution_Functions {
             $delimiterA = $delimiterB = $this->findADelimiter($pattern);
         }
         $replacementDelimiter = $this->findADelimiter($replacement);
-        $replacement = preg_replace($replacementDelimiter . '\\\\' . $replacementDelimiter, '\$', $replacement);
+        $replacement = preg_replace($replacementDelimiter . '\\\\' . $replacementDelimiter, '\$', $replacement) ?? $replacement;
         return preg_replace($delimiterA . $pattern . $delimiterB, $replacement, $string);
     }
-    
-    function findADelimiter($pattern) {
+
+    function findADelimiter(string $pattern): string {
         if ($pattern == '') {
             return $this->delimiterChars[0];
         }
-        
+
         $charToUse = null;
         foreach ($this->delimiterChars as $char) {
+            if ($char === '') { continue; }
             $anArray = explode($char, $pattern);
             if (sizeof($anArray) == 1) {
                 $charToUse = $char;
                 break;
             }
         }
-        
+
         if ($charToUse == null) {
             throw new Exception("I can't find a valid delimiter character to use for the regular expression: "
                     . esc_html($pattern));
         }
-        
+
         return $charToUse;
     }
 
@@ -116,7 +128,7 @@ class ABJ_404_Solution_FunctionsPreg extends ABJ_404_Solution_Functions {
      * @param string|null $string The string to sanitize
      * @return string The sanitized string with only valid UTF-8 characters
      */
-    function sanitizeInvalidUTF8($string) {
+    function sanitizeInvalidUTF8(?string $string): string {
         // Handle null and empty cases
         if ($string === null || $string === '') {
             return '';
@@ -136,7 +148,7 @@ class ABJ_404_Solution_FunctionsPreg extends ABJ_404_Solution_Functions {
             // iconv returns false on error, fall through to preg approach
             if ($sanitized !== false) {
                 // Remove null bytes and problematic control characters
-                $sanitized = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/u', '', $sanitized);
+                $sanitized = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/u', '', $sanitized) ?? $sanitized;
                 return $sanitized;
             }
         }
@@ -152,20 +164,20 @@ class ABJ_404_Solution_FunctionsPreg extends ABJ_404_Solution_Functions {
             // - C0, C1 (overlong 2-byte sequences)
             // - F5-FF (invalid lead bytes beyond UTF-8 range)
             // Keep valid ranges: C2-DF (2-byte), E0-EF (3-byte), F0-F4 (4-byte)
-            $sanitized = preg_replace('/[\xC0\xC1\xF5-\xFF][\x80-\xBF]*/', '', $string);
+            $sanitized = preg_replace('/[\xC0\xC1\xF5-\xFF][\x80-\xBF]*/', '', $string) ?? $string;
 
             // Remove incomplete sequences (continuation bytes without lead byte)
-            $sanitized = preg_replace('/[\x80-\xBF]+/', '', $sanitized);
+            $sanitized = preg_replace('/[\x80-\xBF]+/', '', $sanitized) ?? $sanitized;
 
             // Verify the result is now valid UTF-8 by attempting a UTF-8 match
             if (@preg_match('//u', $sanitized) === false) {
                 // Still invalid - fall back to ASCII-only (safe but lossy)
-                $sanitized = preg_replace('/[^\x09\x0A\x0D\x20-\x7E]/', '', $string);
+                $sanitized = preg_replace('/[^\x09\x0A\x0D\x20-\x7E]/', '', $string) ?? '';
             }
         }
 
         // Remove null bytes and other problematic control characters
-        $sanitized = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $sanitized);
+        $sanitized = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $sanitized) ?? $sanitized;
 
         return $sanitized;
     }

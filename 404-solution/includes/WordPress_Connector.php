@@ -9,6 +9,7 @@ if (!defined('ABSPATH')) {
 
 class ABJ_404_Solution_WordPress_Connector {
 
+	/** @var self|null */
 	private static $instance = null;
     private const REVIEW_INITIAL_DELAY_DAYS = 30;
     private const REVIEW_ASK_LATER_DELAY_DAYS = 7;
@@ -70,6 +71,7 @@ class ABJ_404_Solution_WordPress_Connector {
 		return $this->frontendPipeline;
 	}
 
+	/** @return self */
 	public static function getInstance() {
 		if (self::$instance !== null) {
 			return self::$instance;
@@ -80,22 +82,25 @@ class ABJ_404_Solution_WordPress_Connector {
 			try {
 				$c = ABJ_404_Solution_ServiceContainer::getInstance();
 				if (is_object($c) && method_exists($c, 'has') && $c->has('wordpress_connector')) {
-					self::$instance = $c->get('wordpress_connector');
-					return self::$instance;
+					$svc = $c->get('wordpress_connector');
+					if ($svc instanceof self) {
+						self::$instance = $svc;
+						return self::$instance;
+					}
 				}
 			} catch (Throwable $e) {
 				// fall back
 			}
 		}
 
-		if (self::$instance == null) {
-			self::$instance = new ABJ_404_Solution_WordPress_Connector();
-		}
+		self::$instance = new ABJ_404_Solution_WordPress_Connector();
 
 		return self::$instance;
 	}
 	
-	/** Setup. */
+	/** Setup.
+	 * @return void
+	 */
     static function init() {
         self::registerLifecycleHooks();
         self::registerAdminHooks();
@@ -103,6 +108,7 @@ class ABJ_404_Solution_WordPress_Connector {
         ABJ_404_Solution_PluginLogic::doRegisterCrons();
     }
 
+    /** @return void */
     private static function registerLifecycleHooks() {
         if (!is_admin()) {
             return;
@@ -118,6 +124,7 @@ class ABJ_404_Solution_WordPress_Connector {
         }
     }
 
+    /** @return void */
     private static function registerAdminHooks() {
         if (!is_admin()) {
             return;
@@ -147,6 +154,7 @@ class ABJ_404_Solution_WordPress_Connector {
         }
     }
 
+    /** @return void */
     private static function registerAsyncSuggestionHooks() {
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404_compute_suggestions', 'ABJ_404_Solution_Ajax_SuggestionCompute::computeSuggestions');
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_nopriv_abj404_compute_suggestions', 'ABJ_404_Solution_Ajax_SuggestionCompute::computeSuggestions');
@@ -154,7 +162,10 @@ class ABJ_404_Solution_WordPress_Connector {
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_nopriv_abj404_poll_suggestions', 'ABJ_404_Solution_Ajax_SuggestionPolling::pollSuggestions');
     }
 
-    /** Include things necessary for ajax. */
+    /** Include things necessary for ajax.
+     * @param string $hook
+     * @return void
+     */
     static function add_scripts($hook) {
         // only load this stuff for this plugin. 
         // thanks to https://pippinsplugins.com/loading-scripts-correctly-in-the-wordpress-admin/
@@ -281,9 +292,9 @@ class ABJ_404_Solution_WordPress_Connector {
         );
 
         ABJ_404_Solution_WPUtils::my_wp_enq_style('abj404solution-styles', ABJ404_URL . 'includes/html/404solutionStyles.css',
-                null);
+                array());
         ABJ_404_Solution_WPUtils::my_wp_enq_style('abj404solution-themes', ABJ404_URL . 'includes/html/adminThemes.css',
-                null);
+                array());
 
         // Load RTL styles for Arabic, Hebrew, and other right-to-left languages
         if (is_rtl()) {
@@ -348,6 +359,7 @@ class ABJ_404_Solution_WordPress_Connector {
      * Additionally, this sets the data-theme attribute on both HTML and body elements
      * via a synchronous script, ensuring the attribute exists before CSS is parsed.
      */
+    /** @return void */
     static function outputCriticalThemeCSS() {
         // Only run on our plugin pages
         if (!array_key_exists('abj404_settingsPageName', $GLOBALS) ||
@@ -358,7 +370,7 @@ class ABJ_404_Solution_WordPress_Connector {
 
         $logic = ABJ_404_Solution_PluginLogic::getInstance();
         $options = $logic->getOptions();
-        $theme = isset($options['admin_theme']) ? $options['admin_theme'] : 'default';
+        $theme = (isset($options['admin_theme']) && is_string($options['admin_theme'])) ? $options['admin_theme'] : 'default';
 
         // Check if auto dark mode detection is enabled (default: enabled)
         $auto_dark_mode = !isset($options['disable_auto_dark_mode']) || $options['disable_auto_dark_mode'] != '1';
@@ -482,10 +494,12 @@ class ABJ_404_Solution_WordPress_Connector {
         );
 
         // Output inline critical CSS if theme is selected
-        if (isset($themeVariables[$theme])) {
+        /** @var string $themeKey */
+        $themeKey = $theme;
+        if (isset($themeVariables[$themeKey])) {
             // Build CSS variables string
             $cssVars = '';
-            foreach ($themeVariables[$theme] as $var => $value) {
+            foreach ($themeVariables[$themeKey] as $var => $value) {
                 $cssVars .= esc_html($var) . ':' . esc_html($value) . ';';
             }
 
@@ -497,13 +511,17 @@ class ABJ_404_Solution_WordPress_Connector {
         }
     }
 
+    /**
+     * @param string $content
+     * @return string
+     */
     static function remove_admin_footer_text($content) {
         return '';
     }
 
     /** Add the "Settings" link to the WordPress plugins page (next to activate/deactivate and edit).
-     * @param array $links
-     * @return array
+     * @param array<int|string, string> $links
+     * @return array<int|string, string>
      */
     static function addSettingsLinkToPluginPage($links) {
         $instance = self::getInstance();
@@ -537,6 +555,7 @@ class ABJ_404_Solution_WordPress_Connector {
      * Code: <?php if (!empty($abj404connector)) {$abj404connector->suggestions(); } ?>
      * @global type $abj404shortCode
      */
+    /** @return void */
     function suggestions() {
         $abj404shortCode = ABJ_404_Solution_ShortCode::getInstance();
 
@@ -547,41 +566,42 @@ class ABJ_404_Solution_WordPress_Connector {
         }
     }
 
+    /** @return void */
     function processRedirectAllRequests() {
         $this->getFrontendPipeline()->processRedirectAllRequests();
     }
     /**
      * Process the 404s
      */
+    /** @return void */
     function process404() {
-        return $this->getFrontendPipeline()->process404();
+        $this->getFrontendPipeline()->process404();
     }
 
-    /** 
-     * 
-     * @param $options
-     * @param $requestedURL
-     * @return boolean true if the user is sent to the default 404 page.
+    /**
+     * @param array<string, mixed> $options
+     * @param string $requestedURL
+     * @return bool true if the user is sent to the default 404 page.
      */
     function tryRegexRedirect($options, $requestedURL) {
         return $this->getFrontendPipeline()->tryRegexRedirect($options, $requestedURL);
     }
     
 	/**
-	 * @param options
+	 * @param array<string, mixed> $options
+	 * @param string $requestedURL
+	 * @param array<string, mixed> $redirect
+	 * @return void
 	 */
     function logAReallyLongDebugMessage($options, $requestedURL, $redirect) {
         $this->getFrontendPipeline()->logAReallyLongDebugMessage($options, $requestedURL, $redirect);
 	}
     
-    /** Redirect to the page specified. 
-     * @global type $abj404dao
-     * @global type $abj404logging
-     * @global type $abj404logic
-     * #param type $requestedURL
-     * @param array $redirect
-     * #param type $matchReason
-     * @return boolean true if the user is sent to the default 404 page.
+    /** Redirect to the page specified.
+     * @param string $requestedURL
+     * @param array<string, mixed> $redirect
+     * @param string $matchReason
+     * @return bool true if the user is sent to the default 404 page.
      */
     function processRedirect($requestedURL, $redirect, $matchReason) {
         return $this->getFrontendPipeline()->processRedirect($requestedURL, $redirect, $matchReason);
@@ -594,6 +614,7 @@ class ABJ_404_Solution_WordPress_Connector {
      * @global type $abj404logic
      * @global type $abj404view
      */
+    /** @return void */
     static function echoDashboardNotification() {
         $instance = self::getInstance();
 
@@ -605,18 +626,16 @@ class ABJ_404_Solution_WordPress_Connector {
         global $pagenow;
         global $abj404view;
 
-        if ($instance->logic->userIsPluginAdmin()) {
-            if ( (array_key_exists('page', $_GET) && $_GET['page'] == ABJ404_PP) ||
-                 ($pagenow == 'index.php' && !isset($_GET['page'])) ) {
-                $captured404Count = $instance->dao->getCapturedCountForNotification();
-                if ($instance->logic->shouldNotifyAboutCaptured404s($captured404Count)) {
-                    $msg = $abj404view->getDashboardNotificationCaptured($captured404Count);
-                    echo $msg;
-                }
-
-                // Show review request after 7 days of use
-                self::maybeShowReviewRequest();
+        if ( (array_key_exists('page', $_GET) && $_GET['page'] == ABJ404_PP) ||
+             ($pagenow == 'index.php' && !isset($_GET['page'])) ) {
+            $captured404Count = $instance->dao->getCapturedCountForNotification();
+            if ($instance->logic->shouldNotifyAboutCaptured404s($captured404Count)) {
+                $msg = $abj404view->getDashboardNotificationCaptured($captured404Count);
+                echo $msg;
             }
+
+            // Show review request after 7 days of use
+            self::maybeShowReviewRequest();
         }
     }
 
@@ -631,6 +650,7 @@ class ABJ_404_Solution_WordPress_Connector {
      * - Shows again in 7 days after "Ask again later"
      * - Shows again in 14 days after close "X"
      */
+    /** @return void */
     static function maybeShowReviewRequest() {
         // Only show on 404 Solution plugin pages
         if (!isset($_GET['page']) || $_GET['page'] !== ABJ404_PP) {
@@ -753,7 +773,8 @@ class ABJ_404_Solution_WordPress_Connector {
             );
 
             // Store feedback in database
-            $all_feedback = get_option('abj404_user_feedback', array());
+            $all_feedback_raw = get_option('abj404_user_feedback', array());
+            $all_feedback = is_array($all_feedback_raw) ? $all_feedback_raw : array();
             $all_feedback[] = $feedback_data;
             update_option('abj404_user_feedback', $all_feedback);
 
@@ -786,7 +807,10 @@ class ABJ_404_Solution_WordPress_Connector {
         }
     }
 
-    /** Email feedback to plugin author */
+    /** Email feedback to plugin author.
+     * @param array<string, mixed> $feedback_data
+     * @return void
+     */
     private static function emailFeedback($feedback_data) {
         $to = '404solution@ajexperience.com';
         $subject = '404 Solution Feedback from ' . get_bloginfo('name');
@@ -799,9 +823,11 @@ class ABJ_404_Solution_WordPress_Connector {
         $message .= "PHP Version: " . $feedback_data['php_version'] . "\n\n";
 
         $message .= "Issues Selected:\n";
-        if (!empty($feedback_data['issues'])) {
-            foreach ($feedback_data['issues'] as $issue) {
-                $message .= "  - " . ucfirst(str_replace('_', ' ', $issue)) . "\n";
+        $feedbackIssues = isset($feedback_data['issues']) && is_array($feedback_data['issues']) ? $feedback_data['issues'] : array();
+        if (!empty($feedbackIssues)) {
+            foreach ($feedbackIssues as $issue) {
+                $issueStr = is_string($issue) ? $issue : (string)$issue;
+                $message .= "  - " . ucfirst(str_replace('_', ' ', $issueStr)) . "\n";
             }
         } else {
             $message .= "  None selected\n";
@@ -815,7 +841,9 @@ class ABJ_404_Solution_WordPress_Connector {
         wp_mail($to, $subject, $message, $headers);
     }
 
-    /** Step 1: Show the initial qualification question */
+    /** Step 1: Show the initial qualification question.
+     * @return void
+     */
     private static function showQualificationQuestion() {
         $yes_url = wp_nonce_url(
             add_query_arg('abj404_review_response', 'yes'),
@@ -848,7 +876,9 @@ class ABJ_404_Solution_WordPress_Connector {
         echo $html;
     }
 
-    /** Step 2a: User said YES - show review link and thank you */
+    /** Step 2a: User said YES - show review link and thank you.
+     * @return void
+     */
     private static function showReviewLinkNotice() {
         // URL that marks as done when they click to go leave review
         $review_link_url = wp_nonce_url(
@@ -873,7 +903,9 @@ class ABJ_404_Solution_WordPress_Connector {
         echo $html;
     }
 
-    /** Step 2b: User said NOT YET - show feedback form */
+    /** Step 2b: User said NOT YET - show feedback form.
+     * @return void
+     */
     private static function showFeedbackFormNotice() {
         $never_url = wp_nonce_url(
             add_query_arg('abj404_review_response', 'never'),
@@ -888,6 +920,7 @@ class ABJ_404_Solution_WordPress_Connector {
         ob_start();
         wp_nonce_field('abj404_submit_feedback', 'abj404_feedback_nonce');
         $nonce_field = ob_get_clean();
+        if ($nonce_field === false) { $nonce_field = ''; }
 
         $html = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/html/feedbackFormNotice.html");
         $f = ABJ_404_Solution_Functions::getInstance();
@@ -924,7 +957,7 @@ class ABJ_404_Solution_WordPress_Connector {
      */
     private static function normalizeRequestScalar($value) {
         $value = self::safeWpUnslash($value);
-        if (is_array($value) || is_object($value)) {
+        if (!is_scalar($value)) {
             return '';
         }
         return (string)$value;
@@ -961,6 +994,7 @@ class ABJ_404_Solution_WordPress_Connector {
      * @global type $abj404logic
      * @global type $abj404logging
      */
+    /** @return void */
     static function addMainSettingsPageLink() {
         global $menu;
         $instance = self::getInstance();
@@ -976,8 +1010,8 @@ class ABJ_404_Solution_WordPress_Connector {
         // Admin notice
         if (isset($options['admin_notification']) && $options['admin_notification'] != '0') {
             $captured = $instance->dao->getCapturedCountForNotification();
-            if (isset($options['admin_notification']) && $captured >= $options['admin_notification']) {
-                $pageName .= " <span class='update-plugins count-1'><span class='update-count'>" . esc_html($captured) . "</span></span>";
+            if ($captured >= $options['admin_notification']) {
+                $pageName .= " <span class='update-plugins count-1'><span class='update-count'>" . esc_html((string)$captured) . "</span></span>";
                 $pos = $instance->f->strpos($menu[80][0], 'update-plugins');
                 if ($pos === false) {
                     $menu[80][0] = $menu[80][0] . " <span class='update-plugins count-1'><span class='update-count'>1</span></span>";

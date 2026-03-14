@@ -15,15 +15,17 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
     /**
      * Compute suggestions for a 404 URL and store results in transient.
      * This runs in a background HTTP request.
+     * @return void
      */
-    public static function computeSuggestions() {
+    public static function computeSuggestions(): void {
         // Sanitize inputs
         $f = ABJ_404_Solution_Functions::getInstance();
         if (function_exists('abj_service') && class_exists('ABJ_404_Solution_ServiceContainer')) {
             try {
                 $c = ABJ_404_Solution_ServiceContainer::getInstance();
                 if (is_object($c) && method_exists($c, 'has') && $c->has('functions')) {
-                    $f = $c->get('functions');
+                    $svc = $c->get('functions');
+                    if ($svc instanceof ABJ_404_Solution_Functions) { $f = $svc; }
                 }
             } catch (Throwable $e) {
                 // fall back to singleton
@@ -46,7 +48,9 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
         $transientKey = 'abj404_suggest_' . $urlKey;
 
         // Double-check we should compute (might already be done or in progress)
-        $existing = get_transient($transientKey);
+        $existingRaw = get_transient($transientKey);
+        /** @var array<string, mixed>|false $existing */
+        $existing = is_array($existingRaw) ? $existingRaw : false;
 
         // Get provided token from request
         $providedToken = isset($_POST['token']) ? sanitize_text_field($_POST['token']) : '';
@@ -60,7 +64,8 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
 
         $storedToken = $existing['token'];
 
-        if ($existing['status'] === 'complete') {
+        $existingStatus = isset($existing['status']) && is_string($existing['status']) ? $existing['status'] : '';
+        if ($existingStatus === 'complete') {
             wp_die(); // Already done, nothing to do
         }
 
@@ -72,15 +77,16 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
         // Check if we should compute or skip (handles duplicate workers)
         // started=0 means no worker has claimed yet (trigger sets this)
         // started>0 means a worker has claimed the work
-        if ($existing['status'] === 'pending') {
-            $startedAt = isset($existing['started']) ? (int)$existing['started'] : 0;
+        if ($existingStatus === 'pending') {
+            $startedAt = isset($existing['started']) && is_scalar($existing['started']) ? (int)$existing['started'] : 0;
 
             if ($startedAt === 0) {
                 // First worker - claim the work by setting started=time()
                 // TTL of 120s gives slow hosts enough time to complete computation
+                $existingUrl = isset($existing['url']) ? $existing['url'] : '';
                 set_transient($transientKey, array(
                     'status' => 'pending',
-                    'url' => $existing['url'],
+                    'url' => $existingUrl,
                     'started' => time(),  // Claim the work
                     'token' => $storedToken
                 ), 120);
@@ -110,9 +116,9 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
             try {
                 $c = ABJ_404_Solution_ServiceContainer::getInstance();
                 if (is_object($c) && method_exists($c, 'has')) {
-                    if ($c->has('plugin_logic')) { $abj404logic = $c->get('plugin_logic'); }
-                    if ($c->has('spell_checker')) { $spellChecker = $c->get('spell_checker'); }
-                    if ($c->has('logging')) { $logger = $c->get('logging'); }
+                    if ($c->has('plugin_logic')) { $svc = $c->get('plugin_logic'); if ($svc instanceof ABJ_404_Solution_PluginLogic) { $abj404logic = $svc; } }
+                    if ($c->has('spell_checker')) { $svc = $c->get('spell_checker'); if ($svc instanceof ABJ_404_Solution_SpellChecker) { $spellChecker = $svc; } }
+                    if ($c->has('logging')) { $svc = $c->get('logging'); if ($svc instanceof ABJ_404_Solution_Logging) { $logger = $svc; } }
                 }
             } catch (Throwable $e) {
                 // fall back to singletons
@@ -128,10 +134,12 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
         $options = $abj404logic->getOptions();
 
         // Perform the expensive computation
+        $suggestCatsRaw = isset($options['suggest_cats']) ? $options['suggest_cats'] : '';
+        $suggestTagsRaw = isset($options['suggest_tags']) ? $options['suggest_tags'] : '';
         $suggestionsPacket = $spellChecker->findMatchingPosts(
             $urlSlugOnly,
-            isset($options['suggest_cats']) ? $options['suggest_cats'] : '',
-            isset($options['suggest_tags']) ? $options['suggest_tags'] : ''
+            is_string($suggestCatsRaw) ? $suggestCatsRaw : (is_scalar($suggestCatsRaw) ? (string)$suggestCatsRaw : ''),
+            is_string($suggestTagsRaw) ? $suggestTagsRaw : (is_scalar($suggestTagsRaw) ? (string)$suggestTagsRaw : '')
         );
 
         // Store results in transient (preserve token for audit trail)
@@ -168,8 +176,10 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
      * @param string $transientKey The transient key for this computation
      * @param string $token The security token for this computation
      * @param string $requestedURL The URL being processed (for logging)
+     * @param array{type: int, message: string, file: string, line: int}|null $error
+     * @return void
      */
-    public static function handleComputationCrash($transientKey, $token, $requestedURL, $error = null) {
+    public static function handleComputationCrash(string $transientKey, string $token, string $requestedURL, $error = null): void {
         // Use provided error for testing, otherwise get from PHP
         if ($error === null) {
             $error = error_get_last();
@@ -183,8 +193,8 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
         }
 
         // Check current transient state - don't overwrite if already complete
-        $existing = get_transient($transientKey);
-        if ($existing && isset($existing['status']) && $existing['status'] === 'complete') {
+        $existingData = get_transient($transientKey);
+        if (is_array($existingData) && isset($existingData['status']) && $existingData['status'] === 'complete') {
             return; // Another worker completed successfully - don't mark as error
         }
 

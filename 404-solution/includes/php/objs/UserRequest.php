@@ -8,14 +8,16 @@ if (!defined('ABSPATH')) {
 /** Stores a message and its importance. */
 class ABJ_404_Solution_UserRequest {
     
+    /** @var self|null */
     private static $instance = null;
-    
+
+    /** @var string|null */
     private $requestURIWithoutCommentsPage = null;
     
     /** @var string */
     private $requestURI = null;
     
-    /** @var array */
+    /** @var array<string, int|string>|null */
     private $urlParts = null;
     
     /** @var string */
@@ -24,6 +26,7 @@ class ABJ_404_Solution_UserRequest {
     /** @var string */
     private $commentPagePart = null;
     
+    /** @return self|null */
     public static function getInstance() {
         if (self::$instance == null) {
             if (!self::initialize()) {
@@ -36,7 +39,8 @@ class ABJ_404_Solution_UserRequest {
         return self::$instance;
     }
     
-    public static function initialize() {
+    /** @return bool */
+    public static function initialize(): bool {
         global $wp_rewrite;
         
         $abj404logging = ABJ_404_Solution_Logging::getInstance();
@@ -52,7 +56,7 @@ class ABJ_404_Solution_UserRequest {
         	if ($matches != null && $f->strlen($matches[0]) > 0) {
         		$instrPattern = $matches[0];
         		$truncateHere = $f->strpos($urlToParse, $instrPattern);
-        		$truncatedRequest = $f->substr($urlToParse, 0, $truncateHere);
+        		$truncatedRequest = $f->substr($urlToParse, 0, ($truncateHere !== false ? $truncateHere : null));
         		$urlToParse = $truncatedRequest;
         	}
         	
@@ -87,7 +91,7 @@ class ABJ_404_Solution_UserRequest {
                 // For query strings, preserve reserved characters while removing invalid bytes.
                 parse_str($value, $queryArray);
                 $safeQueryArray = $f->sanitizeUrlComponent($queryArray);
-                $urlParts[$key] = http_build_query($safeQueryArray);
+                $urlParts[$key] = http_build_query(is_array($safeQueryArray) ? $safeQueryArray : $queryArray);
             } else {
                 // Sanitize path/host/etc. without stripping reserved URL characters.
                 $urlParts[$key] = $f->sanitizeUrlComponent($value);
@@ -95,12 +99,13 @@ class ABJ_404_Solution_UserRequest {
         }
 
         // remove a pointless trailing /amp
-        if (isset($urlParts['path']) &&
-        	($f->endsWithCaseInsensitive($urlParts['path'], '/amp') ||
-        	 $f->endsWithCaseInsensitive($urlParts['path'], '/amp/')
+        $urlPath = isset($urlParts['path']) && is_string($urlParts['path']) ? $urlParts['path'] : '';
+        if ($urlPath !== '' &&
+        	($f->endsWithCaseInsensitive($urlPath, '/amp') ||
+        	 $f->endsWithCaseInsensitive($urlPath, '/amp/')
         	)
-        	&& $f->strlen($urlParts['path']) >= 6) {
-        	$urlParts['path'] = substr($urlParts['path'], 0, $f->strlen($urlParts['path']) - 4);
+        	&& $f->strlen($urlPath) >= 6) {
+        	$urlParts['path'] = substr($urlPath, 0, $f->strlen($urlPath) - 4);
         }
         
         // remove any "/comment-page-???/" if there is one.
@@ -111,7 +116,7 @@ class ABJ_404_Solution_UserRequest {
          * http://localhost:8888/404solution-site/2019/02/hello-world2/comment-page-2/?quer=true
          */
         // Fix for PHP 8.2: Handle URLs with no path component (e.g., http://example.com)
-        $urlWithoutCommentPage = isset($urlParts['path']) ? $urlParts['path'] : '/';
+        $urlWithoutCommentPage = (isset($urlParts['path']) && is_string($urlParts['path'])) ? $urlParts['path'] : '/';
         $commentPagePart = '';
         $results = array();
         if (isset($wp_rewrite) && isset($wp_rewrite->comments_pagination_base)) {
@@ -132,13 +137,22 @@ class ABJ_404_Solution_UserRequest {
             $queryString = $urlParts['query'];
         }
         
-        self::$instance = new ABJ_404_Solution_UserRequest($urlToParse, $urlParts, $urlWithoutCommentPage, 
+        /** @var array<string, int|string> $urlPartsSafe */
+        $urlPartsSafe = $urlParts;
+        self::$instance = new ABJ_404_Solution_UserRequest($urlToParse, $urlPartsSafe, $urlWithoutCommentPage,
                 $commentPagePart, $queryString);
             
         return true;
     }
     
-    private function __construct($requestURI, $urlParts, $urlWithoutCommentPage, $commentPagePart, $queryString) {
+    /**
+     * @param string $requestURI
+     * @param array<string, int|string> $urlParts
+     * @param string $urlWithoutCommentPage
+     * @param string $commentPagePart
+     * @param string $queryString
+     */
+    private function __construct(string $requestURI, array $urlParts, string $urlWithoutCommentPage, string $commentPagePart, string $queryString) {
         $this->requestURI = $requestURI;
         $this->urlParts = $urlParts;
         $this->requestURIWithoutCommentsPage = $urlWithoutCommentPage;
@@ -147,10 +161,12 @@ class ABJ_404_Solution_UserRequest {
         $this->queryString = $queryString;
     }
  
+    /** @return string|null */
     function getRequestURI() {
         return $this->requestURI;
     }
     
+    /** @return string|null */
     function getRequestURIWithoutCommentsPage() {
         return $this->requestURIWithoutCommentsPage;
     }
@@ -160,18 +176,21 @@ class ABJ_404_Solution_UserRequest {
      * @return string
      */
     function getPath() {
-    	if (!array_key_exists('path', $this->urlParts)) {
+    	if ($this->urlParts === null || !array_key_exists('path', $this->urlParts)) {
     		// this happens for a request with no path. like http://example.com
     		return '';
     	}
-    	
-        return $this->urlParts['path'] ?? '';
+
+        return (string)($this->urlParts['path']);
     }
     
-    function getPathWithSortedQueryString() {
+    /** @return string */
+    function getPathWithSortedQueryString(): string {
         $f = ABJ_404_Solution_Functions::getInstance();
         $requestedURL = $this->getPath();
-        $urlParts = $f->sortQueryString($this->getUrlParts());
+        /** @var array<string, string> $urlPartsForSort */
+        $urlPartsForSort = $this->getUrlParts() ?? array();
+        $urlParts = $f->sortQueryString($urlPartsForSort);
         if ($urlParts != null && trim($urlParts) != '') {
         	$requestedURL .= '?' . $urlParts;
         }
@@ -179,7 +198,7 @@ class ABJ_404_Solution_UserRequest {
         // otherwise various queries break.
         $requestedURL = $f->urlencodeEmojis($requestedURL);
 
-        return $requestedURL ?? '';
+        return $requestedURL;
     }
     
     /**  http://s.com/404solution-site/hello-world/comment-page-2/#comment-26?query_info=true becomes
@@ -192,14 +211,17 @@ class ABJ_404_Solution_UserRequest {
         return $abj404logic->removeHomeDirectory($path);
     }
 
+    /** @return array<string, int|string>|null */
     function getUrlParts() {
         return $this->urlParts;
     }
 
+    /** @return string|null */
     function getQueryString() {
         return $this->queryString;
     }
 
+    /** @return string|null */
     function getCommentPagePart() {
         return $this->commentPagePart;
     }

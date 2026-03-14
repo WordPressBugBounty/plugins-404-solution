@@ -15,8 +15,9 @@ class ABJ_404_Solution_UninstallModal {
 
     /**
      * Initialize the deactivation modal functionality
+     * @return void
      */
-    public static function init() {
+    public static function init(): void {
         // Enqueue assets only on plugins.php page
         add_action('admin_enqueue_scripts', array(__CLASS__, 'enqueueAssets'));
 
@@ -28,8 +29,9 @@ class ABJ_404_Solution_UninstallModal {
      * Enqueue modal assets (JavaScript, CSS) on plugins.php page
      *
      * @param string $hook Current admin page hook
+     * @return void
      */
-    public static function enqueueAssets($hook) {
+    public static function enqueueAssets(string $hook): void {
         // Only load on plugins.php page
         if ($hook !== 'plugins.php') {
             return;
@@ -143,8 +145,9 @@ class ABJ_404_Solution_UninstallModal {
 
     /**
      * Output the modal HTML structure
+     * @return void
      */
-    public static function outputModalHTML() {
+    public static function outputModalHTML(): void {
         $redirectCount = self::getRedirectCount();
 
         ?>
@@ -352,19 +355,20 @@ class ABJ_404_Solution_UninstallModal {
 
     /**
      * Handle AJAX request to save uninstall preferences
+     * @return void
      */
-    public static function handleAjaxSavePreferences() {
+    public static function handleAjaxSavePreferences(): void {
         // Security: Verify nonce
         $nonceOk = check_ajax_referer('abj404_uninstall_nonce', 'nonce', false);
         if (!$nonceOk) {
             wp_send_json_error(array('message' => __('Invalid security token', '404-solution')), 403);
-            return;
+            return; // @phpstan-ignore deadCode.unreachable
         }
 
         // Security: Check user capabilities
         if (!current_user_can('activate_plugins')) {
             wp_send_json_error(array('message' => __('Insufficient permissions', '404-solution')), 403);
-            return;
+            return; // @phpstan-ignore deadCode.unreachable
         }
 
         // Get preferences from AJAX request
@@ -419,7 +423,6 @@ class ABJ_404_Solution_UninstallModal {
                 wp_send_json_error(array(
                     'message' => __('Could not save preferences. Your choices may not be preserved.', '404-solution')
                 ), 500);
-                return;
             }
             // If values match, the false return was just because value was unchanged (which is OK)
         }
@@ -512,9 +515,9 @@ class ABJ_404_Solution_UninstallModal {
      * Get comprehensive plugin statistics for diagnostics.
      * Includes redirect counts by type, captured 404s, log entries, and storage sizes.
      *
-     * @return array Array with detailed plugin statistics
+     * @return array{redirects: array<string, int>, captured: array<string, int>, log_count: int, log_table_size_mb: float, debug_file_size_mb: float}
      */
-    private static function getPluginStatistics() {
+    private static function getPluginStatistics(): array {
         $stats = array(
             'redirects' => array('all' => 0, 'manual' => 0, 'auto' => 0, 'regex' => 0, 'trash' => 0),
             'captured' => array('all' => 0, 'captured' => 0, 'ignored' => 0, 'later' => 0, 'trash' => 0),
@@ -580,9 +583,9 @@ class ABJ_404_Solution_UninstallModal {
      * Get counts of categories, tags, pages, and posts for diagnostics.
      * These counts help identify if memory issues are caused by large content volume.
      *
-     * @return array Array with 'categories', 'tags', 'pages', 'posts' keys
+     * @return array{categories: int, tags: int, pages: int, posts: int}
      */
-    private static function getContentCounts() {
+    private static function getContentCounts(): array {
         $counts = array(
             'categories' => 0,
             'tags' => 0,
@@ -625,20 +628,20 @@ class ABJ_404_Solution_UninstallModal {
 
         // Count pages
         $page_counts = wp_count_posts('page');
-        if ($page_counts && isset($page_counts->publish)) {
+        if (isset($page_counts->publish)) {
             $counts['pages'] = intval($page_counts->publish);
         }
 
         // Count posts
         $post_counts = wp_count_posts('post');
-        if ($post_counts && isset($post_counts->publish)) {
+        if (isset($post_counts->publish)) {
             $counts['posts'] = intval($post_counts->publish);
         }
 
         // Also count WooCommerce products if they exist
         if (function_exists('post_type_exists') && post_type_exists('product')) {
             $product_counts = wp_count_posts('product');
-            if ($product_counts && isset($product_counts->publish)) {
+            if (isset($product_counts->publish)) {
                 $counts['posts'] += intval($product_counts->publish);
             }
         }
@@ -649,10 +652,10 @@ class ABJ_404_Solution_UninstallModal {
     /**
      * Send feedback email to plugin author
      *
-     * @param array $preferences User preferences including feedback
+     * @param array<string, mixed> $preferences User preferences including feedback
      * @return bool True if email sent successfully, false otherwise
      */
-    private static function sendFeedbackEmail($preferences) {
+    private static function sendFeedbackEmail(array $preferences): bool {
         // Get site information
         global $wp_version;
 
@@ -705,14 +708,16 @@ class ABJ_404_Solution_UninstallModal {
         $body .= "USER FEEDBACK\n";
         $body .= "═══════════════════════════════════════\n\n";
 
-        if (!empty($preferences['uninstall_reason'])) {
-            $body .= "Reason: " . ucfirst(str_replace('-', ' ', $preferences['uninstall_reason'])) . "\n\n";
+        $uninstallReason = isset($preferences['uninstall_reason']) && is_string($preferences['uninstall_reason']) ? $preferences['uninstall_reason'] : '';
+        if (!empty($uninstallReason)) {
+            $body .= "Reason: " . ucfirst(str_replace('-', ' ', $uninstallReason)) . "\n\n";
         }
 
         // Show selected issues (checkboxes)
-        if (!empty($preferences['selected_issues'])) {
+        $selectedIssues = isset($preferences['selected_issues']) && is_string($preferences['selected_issues']) ? $preferences['selected_issues'] : '';
+        if (!empty($selectedIssues)) {
             $body .= "Specific Issues:\n";
-            $issues = explode(',', $preferences['selected_issues']);
+            $issues = explode(',', $selectedIssues);
             foreach ($issues as $issue) {
                 $body .= "  ☑ " . ucfirst(str_replace('-', ' ', $issue)) . "\n";
             }
@@ -850,9 +855,9 @@ class ABJ_404_Solution_UninstallModal {
      * Get database version and charset info for diagnostics.
      * Uses fallback chain for locked-down hosts.
      *
-     * @return array Array with 'version', 'charset', and 'collation' keys
+     * @return array{version: string, charset: string, collation: string}
      */
-    private static function getDatabaseInfo() {
+    private static function getDatabaseInfo(): array {
         global $wpdb;
 
         $info = array(
@@ -944,15 +949,14 @@ class ABJ_404_Solution_UninstallModal {
         $targetTable = $wpdb->prefix . 'posts';
         $targetInfo = self::getTableInfo($targetTable);
 
-        if ($targetInfo === null || isset($targetInfo['error'])) {
-            $errorMsg = isset($targetInfo['error']) ? $targetInfo['error'] : 'table not found';
-            $summaryLines[] = "Could not read collation for {$targetTable} (baseline): {$errorMsg}";
+        if (isset($targetInfo['error'])) {
+            $summaryLines[] = "Could not read collation for {$targetTable} (baseline): " . $targetInfo['error'];
             return implode("\n", $summaryLines);
         }
 
-        $targetCollation = $targetInfo['collation'];
-        $targetCharset = $targetInfo['charset'];
-        $targetEngine = $targetInfo['engine'];
+        $targetCollation = isset($targetInfo['collation']) ? $targetInfo['collation'] : '';
+        $targetCharset = isset($targetInfo['charset']) ? $targetInfo['charset'] : '';
+        $targetEngine = isset($targetInfo['engine']) ? $targetInfo['engine'] : '';
 
         $summaryLines[] = sprintf(
             "%s -> %s / %s / %s (baseline)",
@@ -973,15 +977,6 @@ class ABJ_404_Solution_UninstallModal {
         foreach ($pluginTables as $label => $tableName) {
             $tableInfo = self::getTableInfo($tableName);
 
-            if ($tableInfo === null) {
-                $summaryLines[] = sprintf(
-                    "%s (%s) -> unavailable (table not found)",
-                    $label,
-                    $tableName
-                );
-                continue;
-            }
-
             if (isset($tableInfo['error'])) {
                 $summaryLines[] = sprintf(
                     "%s (%s) -> unavailable (%s)",
@@ -992,12 +987,12 @@ class ABJ_404_Solution_UninstallModal {
                 continue;
             }
 
-            $collation = $tableInfo['collation'];
-            $charset = $tableInfo['charset'];
-            $engine = $tableInfo['engine'];
+            $collation = isset($tableInfo['collation']) ? $tableInfo['collation'] : '';
+            $charset = isset($tableInfo['charset']) ? $tableInfo['charset'] : '';
+            $engine = isset($tableInfo['engine']) ? $tableInfo['engine'] : '';
 
             $matchesBaseline = ($collation === $targetCollation && $charset === $targetCharset);
-            $utf8mb4Note = (stripos($charset, 'utf8mb4') === false) ? ' [non-utf8mb4]' : '';
+            $utf8mb4Note = (is_string($charset) && stripos($charset, 'utf8mb4') === false) ? ' [non-utf8mb4]' : '';
             $matchNote = $matchesBaseline ? 'matches' : 'DIFFERS';
 
             $summaryLines[] = sprintf(
@@ -1025,9 +1020,9 @@ class ABJ_404_Solution_UninstallModal {
      * 4. WordPress globals (connection-level defaults)
      *
      * @param string $tableName Table name to look up
-     * @return array Array with 'charset', 'collation', 'engine' keys
+     * @return array{charset?: string|null, collation?: string|null, engine?: string, error?: string, source?: string}
      */
-    private static function getTableInfo($tableName) {
+    private static function getTableInfo(string $tableName): array {
         // Try information_schema first (most complete data)
         $result = self::tryInformationSchema($tableName);
         if ($result !== null && !isset($result['error'])) {
@@ -1054,9 +1049,10 @@ class ABJ_404_Solution_UninstallModal {
      * Try to get table info from information_schema.
      *
      * @param string $tableName Table name to look up
-     * @return array|null Array with 'charset', 'collation', 'engine' keys, or null/error array on failure
+     * @return array{charset?: string|null, collation?: string|null, engine?: string, error?: string}|null
      */
-    private static function tryInformationSchema($tableName) {
+    private static function tryInformationSchema(string $tableName) {
+        /** @var \wpdb $wpdb */
         global $wpdb;
 
         // Guard for test environment where wpdb may be a minimal mock
@@ -1092,9 +1088,9 @@ class ABJ_404_Solution_UninstallModal {
         // Handle case variations in column names
         $result = array_change_key_case($result, CASE_UPPER);
 
-        $collation = $result['TABLE_COLLATION'] ?? null;
-        $engine = $result['ENGINE'] ?? 'Unknown';
-        $charset = $result['TABLE_CHARSET'] ?? null;
+        $collation = isset($result['TABLE_COLLATION']) && is_string($result['TABLE_COLLATION']) ? $result['TABLE_COLLATION'] : null;
+        $engine = isset($result['ENGINE']) && is_string($result['ENGINE']) ? $result['ENGINE'] : 'Unknown';
+        $charset = isset($result['TABLE_CHARSET']) && is_string($result['TABLE_CHARSET']) ? $result['TABLE_CHARSET'] : null;
 
         // Fallback charset extraction from collation
         if (empty($charset) && !empty($collation)) {
@@ -1116,9 +1112,10 @@ class ABJ_404_Solution_UninstallModal {
      * Try to get table info using SHOW TABLE STATUS.
      *
      * @param string $tableName Table name to look up
-     * @return array|null Array with 'charset', 'collation', 'engine' keys, or null/error on failure
+     * @return array{charset?: string|null, collation?: string|null, engine?: string, error?: string}|null
      */
-    private static function tryShowTableStatus($tableName) {
+    private static function tryShowTableStatus(string $tableName) {
+        /** @var \wpdb $wpdb */
         global $wpdb;
 
         if (!method_exists($wpdb, 'get_row')) {
@@ -1139,9 +1136,9 @@ class ABJ_404_Solution_UninstallModal {
             return null;
         }
 
-        $collation = $result['Collation'] ?? null;
-        $engine = $result['Engine'] ?? 'Unknown';
-        $charset = $collation ? explode('_', $collation)[0] : null;
+        $collation = isset($result['Collation']) && is_string($result['Collation']) ? $result['Collation'] : null;
+        $engine = isset($result['Engine']) && is_string($result['Engine']) ? $result['Engine'] : 'Unknown';
+        $charset = (is_string($collation) && $collation !== '') ? explode('_', $collation)[0] : null;
 
         if (empty($collation)) {
             return null;
@@ -1158,12 +1155,13 @@ class ABJ_404_Solution_UninstallModal {
      * Try to get table info by parsing SHOW CREATE TABLE output.
      *
      * @param string $tableName Table name to look up
-     * @return array|null Array with 'charset', 'collation', 'engine' keys, or null on failure
+     * @return array{charset?: string|null, collation?: string|null, engine?: string, error?: string}|null
      */
-    private static function tryShowCreateTable($tableName) {
+    private static function tryShowCreateTable(string $tableName) {
+        /** @var \wpdb $wpdb */
         global $wpdb;
 
-        if (!method_exists($wpdb, 'get_row')) {
+        if (!is_object($wpdb) || !method_exists($wpdb, 'get_row')) {
             return null;
         }
 
@@ -1174,7 +1172,7 @@ class ABJ_404_Solution_UninstallModal {
             return null;
         }
 
-        $ddl = $result[1];
+        $ddl = is_string($result[1]) ? $result[1] : '';
 
         // Match charset: CHARSET=utf8mb4, DEFAULT CHARSET=utf8mb4, CHARACTER SET utf8mb4
         preg_match('/(?:DEFAULT\s+)?(?:CHARSET|CHARACTER\s+SET)(?:\s*=\s*|\s+)([\w\d]+)/i', $ddl, $charsetMatch);
@@ -1209,9 +1207,9 @@ class ABJ_404_Solution_UninstallModal {
     /**
      * Get WordPress connection-level charset/collation as final fallback.
      *
-     * @return array Array with 'charset', 'collation', 'engine', 'source' keys
+     * @return array{charset: string, collation: string, engine: string, source: string}
      */
-    private static function getWpdbDefaults() {
+    private static function getWpdbDefaults(): array {
         global $wpdb;
 
         $charset = 'utf8mb4';
