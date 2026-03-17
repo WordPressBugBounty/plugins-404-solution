@@ -778,7 +778,7 @@ class ABJ_404_Solution_PluginLogic {
                 $defaultRedirect = is_scalar($options['default_redirect']) ? (string)$options['default_redirect'] : '301';
                 if (!isset($redirect['id']) || $redirect['id'] == 0) {
                     $this->dao->setupRedirect($fromURL, (string)ABJ404_STATUS_AUTO, (string)ABJ404_TYPE_POST,
-                            (string)$pageid, $defaultRedirect, 0);
+                            (string)$pageid, $defaultRedirect, 0, 'page ID');
                 }
                 $this->dao->logRedirectHit($fromURL, $permalink, 'page ID');
                 $this->forceRedirect($permalink, (int)$defaultRedirect);
@@ -970,8 +970,7 @@ class ABJ_404_Solution_PluginLogic {
 
 	            // the 404 page...
 	            $abj404logic->forceRedirect(esc_url($pLink),
-	            	(int)$defRedir,
-	            	(int)ABJ404_TYPE_404_DISPLAYED);
+	            	(int)$defRedir);
 	            exit;
             }
         }
@@ -1291,6 +1290,9 @@ class ABJ_404_Solution_PluginLogic {
             'auto_redirects' => '1',
             'auto_slugs' => '1',
             'auto_score' => '90',
+            'auto_score_title' => '',
+            'auto_score_category_tag' => '',
+            'auto_score_content' => '',
             'template_redirect_priority' => '9',
             'auto_deletion' => '1095',
             'auto_cats' => '1',
@@ -2345,7 +2347,7 @@ class ABJ_404_Solution_PluginLogic {
         $response['message'] = "";
         $userEnteredURL = '';
 
-        if (!isset($_POST['redirect_to_data_field_id'])) {
+        if (!isset($_POST['redirect_to_data_field_id']) || $_POST['redirect_to_data_field_id'] === '') {
             $response['message'] = __('Error: Redirect destination is required.', '404-solution') . "<BR/>";
             return $response;
         }
@@ -2926,6 +2928,22 @@ class ABJ_404_Solution_PluginLogic {
                 $options['auto_score'] = absint($postData['auto_score']);
             } else {
                 $message .= __('Error: Auto match score value must be a number between 0 and 99', '404-solution') . ".<BR/>";
+            }
+        }
+
+        // Per-engine score overrides: accept empty string (use global) or numeric 0–99
+        $engineScoreKeys = ['auto_score_title', 'auto_score_category_tag', 'auto_score_content'];
+        foreach ($engineScoreKeys as $key) {
+            if (isset($postData[$key])) {
+                $raw = $postData[$key];
+                $val = is_string($raw) ? trim($raw) : (is_numeric($raw) ? trim(strval($raw)) : '');
+                if ($val === '') {
+                    $options[$key] = '';
+                } elseif (is_numeric($val) && $val >= 0 && $val <= 99) {
+                    $options[$key] = absint($val);
+                } else {
+                    $message .= __('Error: Per-engine score override must be empty or a number between 0 and 99', '404-solution') . ".<BR/>";
+                }
             }
         }
 

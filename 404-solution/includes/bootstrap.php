@@ -139,6 +139,99 @@ function abj_404_solution_init_services() {
         );
     });
 
+    // =========================================================================
+    // Matching Engines
+    // =========================================================================
+
+    /**
+     * Slug matching engine - exact slug lookup via SpellChecker.
+     * Dependencies: spell_checker
+     */
+    $container->set('engine_slug', function($c) {
+        return new ABJ_404_Solution_SlugMatchingEngine($c->get('spell_checker'));
+    });
+
+    /**
+     * URL fix engine - strips file extensions and trailing punctuation, then
+     * checks if the cleaned slug resolves to a real page.
+     * Dependencies: spell_checker, functions, logging
+     */
+    $container->set('engine_url_fix', function($c) {
+        return new ABJ_404_Solution_UrlFixEngine(
+            $c->get('spell_checker'),
+            $c->get('functions'),
+            $c->get('logging')
+        );
+    });
+
+    /**
+     * Title matching engine - keyword overlap between URL slug and post titles.
+     * Dependencies: data_access, functions, logging
+     */
+    $container->set('engine_title', function($c) {
+        return new ABJ_404_Solution_TitleMatchingEngine(
+            $c->get('data_access'),
+            $c->get('functions'),
+            $c->get('logging')
+        );
+    });
+
+    /**
+     * Category/tag matching engine - hierarchical path resolution and taxonomy keyword matching.
+     * Dependencies: data_access, functions, logging
+     */
+    $container->set('engine_category_tag', function($c) {
+        return new ABJ_404_Solution_CategoryTagMatchingEngine(
+            $c->get('data_access'),
+            $c->get('functions'),
+            $c->get('logging')
+        );
+    });
+
+    /**
+     * Content matching engine - keyword overlap between URL slug and post content.
+     * Dependencies: data_access, functions, logging
+     */
+    $container->set('engine_content', function($c) {
+        return new ABJ_404_Solution_ContentMatchingEngine(
+            $c->get('data_access'),
+            $c->get('functions'),
+            $c->get('logging')
+        );
+    });
+
+    /**
+     * Spelling matching engine - Levenshtein/N-gram matching via SpellChecker.
+     * Dependencies: spell_checker
+     */
+    $container->set('engine_spelling', function($c) {
+        return new ABJ_404_Solution_SpellingMatchingEngine($c->get('spell_checker'));
+    });
+
+    /**
+     * Archive fallback engine - redirects to post type archive pages.
+     * Dependencies: functions, logging
+     */
+    $container->set('engine_archive_fallback', function($c) {
+        return new ABJ_404_Solution_ArchiveFallbackEngine(
+            $c->get('functions'),
+            $c->get('logging')
+        );
+    });
+
+    /**
+     * Ordered list of matching engines for the frontend pipeline.
+     * Filterable via 'abj404_matching_engines' to add/remove/reorder engines.
+     */
+    $container->set('matching_engines', function($c) {
+        $engines = [$c->get('engine_slug'), $c->get('engine_url_fix'), $c->get('engine_title'), $c->get('engine_category_tag'), $c->get('engine_content'), $c->get('engine_spelling'), $c->get('engine_archive_fallback')];
+        if (function_exists('apply_filters')) {
+            $filtered = apply_filters('abj404_matching_engines', $engines);
+            $engines = is_array($filtered) ? $filtered : [];
+        }
+        return $engines;
+    });
+
     /**
      * WordPress connector - interfaces with WordPress core APIs.
      * Dependencies: plugin_logic, data_access, logging, functions, spell_checker

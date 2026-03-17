@@ -20,7 +20,6 @@ msgstr ""
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-SearchPath-0: .\n"
 
-
 msgid "404 Solution - Deactivation Options"
 msgstr "404 Solution - Opsi Penonaktifan"
 
@@ -314,7 +313,6 @@ msgstr "Hapus pengalihan otomatis setelah"
 
 msgid "Auto Redirects"
 msgstr "Pengalihan Otomatis"
-
 
 msgid "Automatic 301 Redirects"
 msgstr "Pengalihan 301 Otomatis"
@@ -1022,7 +1020,6 @@ msgstr "Menyimpan pengaturan..."
 msgid "Section filters"
 msgstr "Filter bagian"
 
-
 msgid "Search engine user agents should not go here so that they will be redirected when the slug structure changes."
 msgstr "User agent mesin pencari tidak boleh masuk ke sini sehingga mereka akan dialihkan ketika struktur slug berubah."
 
@@ -1041,12 +1038,8 @@ msgstr "Khusus"
 msgid "Stats"
 msgstr "Statistik"
 
-msgid "Status"
-msgstr "Status *"
-
 msgid "Suggestions"
 msgstr "Saran"
-
 
 msgid "Supported formats are: <B>from_url,status,type,to_url,wp_type</B>"
 msgstr "Format yang didukung adalah: <B>from_url,status,type,to_url,wp_type</B>"
@@ -1066,8 +1059,6 @@ msgstr "TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING *"
 msgid "TOOLTIP_POPUP_EXPLANATION_EMPTY"
 msgstr "TOOLTIP_POPUP_EXPLANATION_EMPTY *"
 
-msgid "TOOLTIP_POPUP_EXPLANATION_EMTPY"
-msgstr "TOOLTIP_POPUP_EXPLANATION_EMTPY *"
 
 msgid "TOOLTIP_POPUP_EXPLANATION_PAGE"
 msgstr "TOOLTIP_POPUP_EXPLANATION_PAGE *"
@@ -1183,7 +1174,7 @@ msgstr "Perlakukan URL ini sebagai regular expression"
 msgid "Type"
 msgstr "Tipe"
 
-msgid "Type a page name here and select it to add it to the exlusion list"
+msgid "Type a page name here and select it to add it to the exclusion list"
 msgstr "Ketik nama halaman di sini dan pilih untuk menambahkannya ke daftar pengecualian"
 
 msgid "URL"
@@ -1527,7 +1518,6 @@ msgstr "Bantu meningkatkan plugin (Opsional)"
 
 msgid "Share why you're deactivating. Your feedback helps us improve."
 msgstr "Bagikan alasan Anda menonaktifkan. Masukan Anda membantu kami meningkatkan plugin."
-
 
 msgid "Email Feedback & Deactivate"
 msgstr "Kirimkan Masukan dan Nonaktifkan"
@@ -2049,7 +2039,6 @@ msgstr "Kunjungi URL"
 msgid "This page doesn't exist or is not published so the redirect won't work."
 msgstr "Halaman ini tidak ada atau tidak dipublikasikan sehingga pengalihan tidak berfungsi."
 
-
 #: includes/DataAccess.php
 msgid "Just now"
 msgstr "Baru saja"
@@ -2076,7 +2065,6 @@ msgstr "Penyegaran berjalan"
 #: includes/View.php
 msgid "Refresh paused"
 msgstr "Penyegaran dijeda"
-
 
 #: includes/WordPress_Connector.php
 msgid "second"
@@ -2248,7 +2236,6 @@ msgstr "data-pagination-current-paged"
 msgid "data-pagination-current-logsid"
 msgstr "data-pagination-current-logsid"
 
-
 #: includes/View.php
 msgid "Select all"
 msgstr "Pilih semua"
@@ -2264,7 +2251,6 @@ msgstr "Memerlukan kualitas kecocokan minimum"
 #: includes/html/viewSuggestions.html
 msgid "Only show suggestions that closely match the requested URL. This filters out weak matches that may confuse visitors."
 msgstr "Hanya tampilkan saran yang sangat cocok dengan URL yang diminta. Ini menyaring kecocokan lemah yang mungkin membingungkan pengunjung."
-
 
 msgid "404 Solution Logs"
 msgstr "Log 404 Solution"
@@ -2479,3 +2465,153 @@ msgstr "Kuota kueri basis data Anda telah terlampaui. Biasanya akan direset seca
 
 msgid "Show database error details"
 msgstr "Tampilkan detail kesalahan basis data"
+
+msgid "Exclude from 404 redirect suggestions"
+msgstr "Kecualikan dari saran pengalihan 404"
+
+msgid "When checked, this post will not be suggested as a redirect target for 404 errors."
+msgstr "Jika dicentang, pos ini tidak akan disarankan sebagai tujuan pengalihan untuk kesalahan 404."
+
+msgid "When checked, this term will not be suggested as a redirect target for 404 errors."
+msgstr "Jika dicentang, istilah ini tidak akan disarankan sebagai tujuan pengalihan untuk kesalahan 404."
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Title engine score override"
+msgstr "Ambang skor mesin judul"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Override for the title keyword engine (blank inherits the global score above)"
+msgstr "Penggantian untuk mesin judul (kosong mewarisi skor global di atas)"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Category/tag engine score override"
+msgstr "Ambang skor mesin kategori/tag"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Override for the category/tag keyword engine (blank inherits the global score above)"
+msgstr "Penggantian untuk mesin kategori/tag (kosong mewarisi skor global di atas)"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Content engine score override"
+msgstr "Ambang skor mesin konten"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Override for the content keyword engine (blank inherits the global score above)"
+msgstr "Penggantian untuk mesin konten (kosong mewarisi skor global di atas)"
+
+#: includes/PluginLogic.php
+msgid "Error: Per-engine score override must be empty or a number between 0 and 99"
+msgstr "Kesalahan: ambang skor per mesin harus kosong atau angka antara 0 dan 99"
+
+msgid "Engine"
+msgstr "Mesin"
+
+msgid "Status"
+msgstr "Status"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "exact slug"
+msgstr "slug persis"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "url fix"
+msgstr "perbaikan URL"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "title keywords"
+msgstr "kata kunci judul"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "category/tag keywords"
+msgstr "kata kunci kategori/tag"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "content keywords"
+msgstr "kata kunci konten"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "spell check"
+msgstr "pemeriksaan ejaan"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "archive fallback"
+msgstr "cadangan arsip"
+
+#: includes/ImportExport.php
+msgid "Error: Native export file does not exist."
+msgstr "Kesalahan: file ekspor bawaan tidak ditemukan."
+
+#: includes/ImportExport.php
+msgid "Error: Could not read native export file."
+msgstr "Kesalahan: tidak dapat membaca file ekspor bawaan."
+
+#: includes/ImportExport.php
+msgid "Error: Could not create Redirection export file."
+msgstr "Kesalahan: tidak dapat membuat file ekspor Redirection."
+
+#: includes/ImportExport.php
+msgid "File upload error."
+msgstr "Kesalahan pengunggahan file."
+
+#: includes/ImportExport.php
+msgid "Error: Invalid file type. Only CSV/TXT files are allowed."
+msgstr "Kesalahan: jenis file tidak valid. Hanya file CSV/TXT yang diizinkan."
+
+#: includes/ImportExport.php
+msgid "Error: File too large. Maximum size is 5MB."
+msgstr "Kesalahan: file terlalu besar. Ukuran maksimal adalah 5MB."
+
+#: includes/ImportExport.php
+msgid "Error: Unable to determine file type."
+msgstr "Kesalahan: tidak dapat menentukan jenis file."
+
+#: includes/ImportExport.php
+msgid "Error: Invalid file type. Only CSV files are allowed."
+msgstr "Kesalahan: jenis file tidak valid. Hanya file CSV yang diizinkan."
+
+#: includes/ImportExport.php
+msgid "Error opening the file."
+msgstr "Kesalahan saat membuka file."
+
+#: includes/ImportExport.php
+#, php-format
+msgid "Dry run complete. Valid redirects: %d. Invalid rows: %d. Total rows processed: %d."
+msgstr "Uji coba selesai. Pengalihan valid: %d. Baris tidak valid: %d. Total baris diproses: %d."
+
+#: includes/ImportExport.php
+msgid "Preview issues:"
+msgstr "Masalah pratinjau:"
+
+#: includes/ImportExport.php
+msgid "Error:"
+msgstr "Kesalahan:"
+
+#: includes/ImportExport.php
+msgid "Ignored importing redirect because a redirect with the same from URL already exists. URL:"
+msgstr "Mengabaikan impor pengalihan karena pengalihan dengan URL asal yang sama sudah ada. URL:"
+
+#: includes/ImportExport.php
+msgid "Unrecognized destination type while importing file. Destination:"
+msgstr "Jenis tujuan tidak dikenali saat mengimpor file. Tujuan:"
+
+#: includes/ImportExport.php
+msgid "Couldn't find post from slug. slug:"
+msgstr "Tidak dapat menemukan pos dari slug. slug:"
+
+#: includes/ImportExport.php
+#, php-format
+msgid "Invalid CSV format. %d columns found but 2 or 5 expected."
+msgstr "Format CSV tidak valid. %d kolom ditemukan, tetapi 2 atau 5 yang diharapkan."
+
+#: includes/ImportExport.php
+msgid "Invalid CSV format. Could not map source/destination columns."
+msgstr "Format CSV tidak valid. Tidak dapat memetakan kolom sumber/tujuan."
+
+#: includes/ImportExport.php
+#, php-format
+msgid "Invalid CSV format. %d columns found but 2, 5, or 6 expected."
+msgstr "Format CSV tidak valid. %d kolom ditemukan, tetapi 2, 5, atau 6 yang diharapkan."
+
+#: includes/ShortCode.php
+msgid "Loading page suggestions..."
+msgstr "Memuat saran halaman..."

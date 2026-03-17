@@ -53,6 +53,11 @@ class ABJ_404_Solution_SpellChecker {
 
 	// Performance counters (for testing efficiency - disabled by default)
 	private bool $enablePerformanceCounters = false;
+
+	// When true, skip the N-gram gate 4 early return so the full Levenshtein
+	// scan runs.  The async page-suggestions worker sets this because the
+	// 5-second scan is acceptable in a background process.
+	private bool $skipNgramGate4 = false;
 	private int $levenshteinCallCount = 0;
 	private int $totalPagesConsidered = 0;
 
@@ -146,6 +151,14 @@ class ABJ_404_Solution_SpellChecker {
 		if ($enable) {
 			$this->resetPerformanceCounters();
 		}
+	}
+
+	/**
+	 * Skip the N-gram gate 4 early return so the full Levenshtein scan runs.
+	 * Used by the async page-suggestions worker where the scan time is acceptable.
+	 */
+	public function setSkipNgramGate4(bool $skip = true): void {
+		$this->skipNgramGate4 = $skip;
 	}
 
 	/**
@@ -689,19 +702,19 @@ class ABJ_404_Solution_SpellChecker {
 	function findMatchingPosts(string $requestedURLRaw, string $includeCats = '1', string $includeTags = '1') {
 
 		$options = $this->logic->getOptions();
-		// the number of pages to cache is (max suggestions) + (the number of exlude pages).
+		// the number of pages to cache is (max suggestions) + (the number of exclude pages).
 		// (if either of these numbers increases then we need to clear the spelling cache.)
-		$excluePagesCount = 0;
+		$excludePagesCount = 0;
 		$excludePagesRaw = isset($options['excludePages[]']) && is_string($options['excludePages[]']) ? $options['excludePages[]'] : '';
-		if (!trim($excludePagesRaw) == '') {
+		if (trim($excludePagesRaw) !== '') {
 			$jsonResult = json_decode($excludePagesRaw);
 			if (!is_array($jsonResult)) {
 				$jsonResult = array($jsonResult);
 			}
-			$excluePagesCount = count($jsonResult);
+			$excludePagesCount = count($jsonResult);
 		}
 		$suggestMaxRaw = isset($options['suggest_max']) && is_scalar($options['suggest_max']) ? $options['suggest_max'] : 5;
-		$maxCacheCount = absint($suggestMaxRaw) + $excluePagesCount;
+		$maxCacheCount = absint($suggestMaxRaw) + $excludePagesCount;
 
 		$requestedURLSpaces = $this->f->str_replace($this->separatingCharacters, " ", $requestedURLRaw);
 		$requestedURLCleaned = $this->getLastURLPart($requestedURLSpaces);
@@ -779,11 +792,9 @@ class ABJ_404_Solution_SpellChecker {
 			if ($excludePage == null || trim($excludePage) == '') {
 				continue;
 			}
-			$items = explode("|\\|", $excludePage);
-			$idAndTypeToExclude = $items[0];
-
 			// remove it from the results list.
-			unset($permalinks[$idAndTypeToExclude]);
+			// Entry format matches permalink key format: "id|type" (e.g. "42|1").
+			unset($permalinks[(string)$excludePage]);
 		}
 
 		return $permalinks;
@@ -1351,12 +1362,19 @@ class ABJ_404_Solution_SpellChecker {
 							$coverageRatio
 						));
 					} else {
-						// Zero results from N-gram filter on a populated cache means
-						// no pages are similar enough. Skip prefiltering for this edge case
-						// to allow Levenshtein a chance (N-gram might have missed borderline matches).
-						$this->logger->debugMessage(
-							"N-gram prefilter skipped (gate 4: zero results): allowing fallback to full scan"
-						);
+						if ($this->skipNgramGate4) {
+							// Async path (page suggestions worker): skip gate 4 and
+							// fall through to the full Levenshtein scan.
+							$this->logger->debugMessage(
+								"N-gram prefilter: zero candidates at Dice >= 0.3 — skipNgramGate4 is set, falling through to full scan"
+							);
+						} else {
+							// Synchronous 404 handling: return early to avoid a ~5s scan.
+							$this->logger->debugMessage(
+								"N-gram prefilter: zero candidates at Dice >= 0.3 — no similar pages exist, returning early"
+							);
+							return array();
+						}
 					}
 				}
 			}
@@ -1782,6 +1800,7 @@ class ABJ_404_Solution_SpellChecker {
 			'status' => 'pending',
 			'url' => $normalizedURL,
 			'started' => 0,  // 0 = no worker has claimed yet; worker sets time() when claiming
+			'created' => time(),  // track creation time to detect worker no-show
 			'token' => $token
 		), 120); // 2 minute TTL (allows slow wp_remote_post)
 

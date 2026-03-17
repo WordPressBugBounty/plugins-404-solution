@@ -61,12 +61,28 @@ class ABJ_404_Solution_WordPress_Connector {
 			require_once dirname(__FILE__) . '/FrontendRequestPipeline.php';
 		}
 
+		$matchingEngines = [];
+		if (class_exists('ABJ_404_Solution_ServiceContainer')) {
+			try {
+				$container = ABJ_404_Solution_ServiceContainer::getInstance();
+				if ($container->has('matching_engines')) {
+					$engines = $container->get('matching_engines');
+					if (is_array($engines)) {
+						$matchingEngines = $engines;
+					}
+				}
+			} catch (\Throwable $e) {
+				// Fall back to empty engines; pipeline works without them.
+			}
+		}
+
 		$this->frontendPipeline = new ABJ_404_Solution_FrontendRequestPipeline(
 			$this->logic,
 			$this->dao,
 			$this->logger,
 			$this->f,
-			$this->spellChecker
+			$this->spellChecker,
+			$matchingEngines
 		);
 		return $this->frontendPipeline;
 	}
@@ -188,7 +204,7 @@ class ABJ_404_Solution_WordPress_Connector {
         $isCardAccordionPage = in_array($subpage, array('abj404_options', 'abj404_tools', 'abj404_stats'), true);
         $isLogsPage = ($subpage === 'abj404_logs');
         $isListPage = in_array($subpage, array('abj404_redirects', 'abj404_captured', 'abj404_logs'), true);
-        $needsDestinationAutocomplete = in_array($subpage, array('abj404_redirects', 'abj404_captured', 'abj404_options'), true);
+        $needsDestinationAutocomplete = in_array($subpage, array('abj404_redirects', 'abj404_captured', 'abj404_options', 'abj404_edit'), true);
 
         // remove the "thank you for creating with wordpress" message
         add_filter('admin_footer_text',

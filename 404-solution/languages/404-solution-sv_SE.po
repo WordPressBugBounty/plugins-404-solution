@@ -20,7 +20,6 @@ msgstr ""
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-SearchPath-0: .\n"
 
-
 msgid "404 Solution - Deactivation Options"
 msgstr "404 Solution - Avaktiveringsalternativ"
 
@@ -1039,9 +1038,6 @@ msgstr "Speciell"
 msgid "Stats"
 msgstr "Statistik"
 
-msgid "Status"
-msgstr "Status ·"
-
 msgid "Suggestions"
 msgstr "Förslag"
 
@@ -1063,8 +1059,6 @@ msgstr "TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING ·"
 msgid "TOOLTIP_POPUP_EXPLANATION_EMPTY"
 msgstr "TOOLTIP_POPUP_EXPLANATION_EMPTY ·"
 
-msgid "TOOLTIP_POPUP_EXPLANATION_EMTPY"
-msgstr "TOOLTIP_POPUP_EXPLANATION_EMTPY ·"
 
 msgid "TOOLTIP_POPUP_EXPLANATION_PAGE"
 msgstr "TOOLTIP_POPUP_EXPLANATION_PAGE ·"
@@ -1180,7 +1174,7 @@ msgstr "Behandla denna URL som ett reguljärt uttryck"
 msgid "Type"
 msgstr "Typ"
 
-msgid "Type a page name here and select it to add it to the exlusion list"
+msgid "Type a page name here and select it to add it to the exclusion list"
 msgstr "Skriv ett sidnamn här och välj det för att lägga till det i exkluderingslistan"
 
 msgid "URL"
@@ -1461,7 +1455,6 @@ msgid_plural "%s redirect entries were moved to the trash."
 msgstr[0] "%s omdirigeringspost flyttades till papperskorgen."
 msgstr[1] "%s omdirigeringsposter flyttades till papperskorgen."
 
-
 #: includes/DatabaseUpgradesEtc.php:119
 msgid "404 Solution: N-gram spell check cache is being built in the background to optimize performance. This may take a few minutes on large sites."
 msgstr "404 Solution: N-gram stavningskontrollcache byggs i bakgrunden för att optimera prestanda. Detta kan ta några minuter på stora webbplatser."
@@ -1531,7 +1524,6 @@ msgstr "Hjälp till att förbättra plugin:et (Valfritt)"
 
 msgid "Share why you're deactivating. Your feedback helps us improve."
 msgstr "Dela varför du avaktiverar. Din feedback hjälper oss att förbättra."
-
 
 msgid "Email Feedback & Deactivate"
 msgstr "Skicka feedback och avaktivera"
@@ -2049,7 +2041,6 @@ msgstr "Visit URL ·"
 msgid "This page doesn't exist or is not published so the redirect won't work."
 msgstr "This page doesn't exist or is not published so the redirect won't work. ·"
 
-
 #: includes/DataAccess.php
 msgid "Just now"
 msgstr "Just now ·"
@@ -2076,7 +2067,6 @@ msgstr "Uppdatering paagar"
 #: includes/View.php
 msgid "Refresh paused"
 msgstr "Uppdatering pausad"
-
 
 #: includes/WordPress_Connector.php
 msgid "second"
@@ -2248,7 +2238,6 @@ msgstr "data-pagination-current-paged"
 msgid "data-pagination-current-logsid"
 msgstr "data-pagination-current-logsid"
 
-
 #: includes/View.php
 msgid "Select all"
 msgstr "Välj alla"
@@ -2264,7 +2253,6 @@ msgstr "Kräv minsta matchningskvalitet"
 #: includes/html/viewSuggestions.html
 msgid "Only show suggestions that closely match the requested URL. This filters out weak matches that may confuse visitors."
 msgstr "Visa endast förslag som nära matchar den begärda URL:en. Detta filtrerar bort svaga matchningar som kan förvirra besökare."
-
 
 msgid "404 Solution Logs"
 msgstr "404 Solution-loggar"
@@ -2482,3 +2470,153 @@ msgstr "Din databasfrågekontot har överskridits. Det återställs vanligtvis a
 
 msgid "Show database error details"
 msgstr "Visa databasfeldetaljer"
+
+msgid "Exclude from 404 redirect suggestions"
+msgstr "Exkludera från 404-omdirigeringsförslag"
+
+msgid "When checked, this post will not be suggested as a redirect target for 404 errors."
+msgstr "Om markerad kommer detta inlägg inte att föreslås som omdirigeringsmål för 404-fel."
+
+msgid "When checked, this term will not be suggested as a redirect target for 404 errors."
+msgstr "Om markerad kommer denna term inte att föreslås som omdirigeringsmål för 404-fel."
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Title engine score override"
+msgstr "Poängtröskel för titelmotorn"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Override for the title keyword engine (blank inherits the global score above)"
+msgstr "Åsidosättning för titelsökmotorn (tomt ärver den globala poängen ovan)"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Category/tag engine score override"
+msgstr "Poängtröskel för kategori-/taggmotorn"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Override for the category/tag keyword engine (blank inherits the global score above)"
+msgstr "Åsidosättning för kategori/tagg-sökmotorn (tomt ärver den globala poängen ovan)"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Content engine score override"
+msgstr "Poängtröskel för innehållsmotorn"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Override for the content keyword engine (blank inherits the global score above)"
+msgstr "Åsidosättning för innehållssökmotorn (tomt ärver den globala poängen ovan)"
+
+#: includes/PluginLogic.php
+msgid "Error: Per-engine score override must be empty or a number between 0 and 99"
+msgstr "Fel: poängtröskeln per motor måste vara tom eller ett tal mellan 0 och 99"
+
+msgid "Engine"
+msgstr "Motor"
+
+msgid "Status"
+msgstr "Status"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "exact slug"
+msgstr "exakt slug"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "url fix"
+msgstr "URL-korrigering"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "title keywords"
+msgstr "titelnyckelord"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "category/tag keywords"
+msgstr "kategori-/taggnyckelord"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "content keywords"
+msgstr "innehållsnyckelord"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "spell check"
+msgstr "stavningskontroll"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "archive fallback"
+msgstr "arkivreserv"
+
+#: includes/ImportExport.php
+msgid "Error: Native export file does not exist."
+msgstr "Fel: den inbyggda exportfilen finns inte."
+
+#: includes/ImportExport.php
+msgid "Error: Could not read native export file."
+msgstr "Fel: kunde inte läsa den inbyggda exportfilen."
+
+#: includes/ImportExport.php
+msgid "Error: Could not create Redirection export file."
+msgstr "Fel: kunde inte skapa Redirection-exportfilen."
+
+#: includes/ImportExport.php
+msgid "File upload error."
+msgstr "Fel vid filuppladdning."
+
+#: includes/ImportExport.php
+msgid "Error: Invalid file type. Only CSV/TXT files are allowed."
+msgstr "Fel: ogiltig filtyp. Endast CSV/TXT-filer är tillåtna."
+
+#: includes/ImportExport.php
+msgid "Error: File too large. Maximum size is 5MB."
+msgstr "Fel: filen är för stor. Maximal storlek är 5MB."
+
+#: includes/ImportExport.php
+msgid "Error: Unable to determine file type."
+msgstr "Fel: kunde inte fastställa filtypen."
+
+#: includes/ImportExport.php
+msgid "Error: Invalid file type. Only CSV files are allowed."
+msgstr "Fel: ogiltig filtyp. Endast CSV-filer är tillåtna."
+
+#: includes/ImportExport.php
+msgid "Error opening the file."
+msgstr "Fel vid öppning av filen."
+
+#: includes/ImportExport.php
+#, php-format
+msgid "Dry run complete. Valid redirects: %d. Invalid rows: %d. Total rows processed: %d."
+msgstr "Testkörning slutförd. Giltiga omdirigeringar: %d. Ogiltiga rader: %d. Totalt bearbetade rader: %d."
+
+#: includes/ImportExport.php
+msgid "Preview issues:"
+msgstr "Förhandsgranskningsproblem:"
+
+#: includes/ImportExport.php
+msgid "Error:"
+msgstr "Fel:"
+
+#: includes/ImportExport.php
+msgid "Ignored importing redirect because a redirect with the same from URL already exists. URL:"
+msgstr "Ignorerade import av omdirigering eftersom en omdirigering med samma käll-URL redan finns. URL:"
+
+#: includes/ImportExport.php
+msgid "Unrecognized destination type while importing file. Destination:"
+msgstr "Okänd destinationstyp vid import av fil. Destination:"
+
+#: includes/ImportExport.php
+msgid "Couldn't find post from slug. slug:"
+msgstr "Kunde inte hitta inlägg utifrån slug. slug:"
+
+#: includes/ImportExport.php
+#, php-format
+msgid "Invalid CSV format. %d columns found but 2 or 5 expected."
+msgstr "Ogiltigt CSV-format. %d kolumner hittades men 2 eller 5 förväntades."
+
+#: includes/ImportExport.php
+msgid "Invalid CSV format. Could not map source/destination columns."
+msgstr "Ogiltigt CSV-format. Kunde inte mappa käll-/destinationskolumner."
+
+#: includes/ImportExport.php
+#, php-format
+msgid "Invalid CSV format. %d columns found but 2, 5, or 6 expected."
+msgstr "Ogiltigt CSV-format. %d kolumner hittades men 2, 5 eller 6 förväntades."
+
+#: includes/ShortCode.php
+msgid "Loading page suggestions..."
+msgstr "Laddar sidförslag..."

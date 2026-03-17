@@ -20,7 +20,6 @@ msgstr ""
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-SearchPath-0: .\n"
 
-
 msgid "404 Solution - Deactivation Options"
 msgstr "404 Solution - Opções de desativação"
 
@@ -314,7 +313,6 @@ msgstr "Excluir redirecionamentos automáticos após"
 
 msgid "Auto Redirects"
 msgstr "Redirecionamentos automáticos"
-
 
 msgid "Automatic 301 Redirects"
 msgstr "Redirecionamentos 301 Automáticos"
@@ -1022,7 +1020,6 @@ msgstr "Salvando configurações..."
 msgid "Section filters"
 msgstr "Filtros de seção"
 
-
 msgid "Search engine user agents should not go here so that they will be redirected when the slug structure changes."
 msgstr "User agents de mecanismos de busca não devem ir aqui para que sejam redirecionados quando a estrutura do slug mudar."
 
@@ -1041,12 +1038,8 @@ msgstr "Especial"
 msgid "Stats"
 msgstr "Estatísticas"
 
-msgid "Status"
-msgstr "Status *"
-
 msgid "Suggestions"
 msgstr "Sugestões"
-
 
 msgid "Supported formats are: <B>from_url,status,type,to_url,wp_type</B>"
 msgstr "Os formatos suportados são: <B>from_url,status,type,to_url,wp_type</B>"
@@ -1066,8 +1059,6 @@ msgstr "TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING *"
 msgid "TOOLTIP_POPUP_EXPLANATION_EMPTY"
 msgstr "TOOLTIP_POPUP_EXPLANATION_EMPTY *"
 
-msgid "TOOLTIP_POPUP_EXPLANATION_EMTPY"
-msgstr "TOOLTIP_POPUP_EXPLANATION_EMTPY *"
 
 msgid "TOOLTIP_POPUP_EXPLANATION_PAGE"
 msgstr "TOOLTIP_POPUP_EXPLANATION_PAGE *"
@@ -1183,7 +1174,7 @@ msgstr "Tratar esta URL como uma expressão regular"
 msgid "Type"
 msgstr "Tipo"
 
-msgid "Type a page name here and select it to add it to the exlusion list"
+msgid "Type a page name here and select it to add it to the exclusion list"
 msgstr "Digite um nome de página aqui e selecione-o para adicioná-lo à lista de exclusão"
 
 msgid "URL"
@@ -1529,7 +1520,6 @@ msgstr "Ajudar a melhorar o plugin (Opcional)"
 
 msgid "Share why you're deactivating. Your feedback helps us improve."
 msgstr "Compartilhe por que você está desativando. Seu feedback nos ajuda a melhorar."
-
 
 msgid "Email Feedback & Deactivate"
 msgstr "Enviar feedback e desativar"
@@ -2051,7 +2041,6 @@ msgstr "Visitar URL"
 msgid "This page doesn't exist or is not published so the redirect won't work."
 msgstr "Esta página não existe ou não está publicada, portanto o redirecionamento não funcionará."
 
-
 #: includes/DataAccess.php
 msgid "Just now"
 msgstr "Agora mesmo"
@@ -2078,7 +2067,6 @@ msgstr "Atualizacao em andamento"
 #: includes/View.php
 msgid "Refresh paused"
 msgstr "Atualizacao pausada"
-
 
 #: includes/WordPress_Connector.php
 msgid "second"
@@ -2250,7 +2238,6 @@ msgstr "data-pagination-current-paged"
 msgid "data-pagination-current-logsid"
 msgstr "data-pagination-current-logsid"
 
-
 #: includes/View.php
 msgid "Select all"
 msgstr "Selecionar tudo"
@@ -2266,7 +2253,6 @@ msgstr "Exigir qualidade mínima de correspondência"
 #: includes/html/viewSuggestions.html
 msgid "Only show suggestions that closely match the requested URL. This filters out weak matches that may confuse visitors."
 msgstr "Mostrar apenas sugestões que correspondam de perto à URL solicitada. Isso filtra correspondências fracas que podem confundir os visitantes."
-
 
 msgid "404 Solution Logs"
 msgstr "Registros do 404 Solution"
@@ -2484,3 +2470,153 @@ msgstr "A cota de consultas do seu banco de dados foi excedida. Geralmente é re
 
 msgid "Show database error details"
 msgstr "Mostrar detalhes do erro do banco de dados"
+
+msgid "Exclude from 404 redirect suggestions"
+msgstr "Excluir das sugestões de redirecionamento 404"
+
+msgid "When checked, this post will not be suggested as a redirect target for 404 errors."
+msgstr "Quando marcado, este post não será sugerido como destino de redirecionamento para erros 404."
+
+msgid "When checked, this term will not be suggested as a redirect target for 404 errors."
+msgstr "Quando marcado, este termo não será sugerido como destino de redirecionamento para erros 404."
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Title engine score override"
+msgstr "Limiar de pontuação do motor de títulos"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Override for the title keyword engine (blank inherits the global score above)"
+msgstr "Substituição para o motor de título (em branco herda a pontuação global acima)"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Category/tag engine score override"
+msgstr "Limiar de pontuação do motor de categorias/tags"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Override for the category/tag keyword engine (blank inherits the global score above)"
+msgstr "Substituição para o motor de categoria/tag (em branco herda a pontuação global acima)"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Content engine score override"
+msgstr "Limiar de pontuação do motor de conteúdo"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Override for the content keyword engine (blank inherits the global score above)"
+msgstr "Substituição para o motor de conteúdo (em branco herda a pontuação global acima)"
+
+#: includes/PluginLogic.php
+msgid "Error: Per-engine score override must be empty or a number between 0 and 99"
+msgstr "Erro: o limiar de pontuação por motor deve estar vazio ou ser um número entre 0 e 99"
+
+msgid "Engine"
+msgstr "Motor"
+
+msgid "Status"
+msgstr "Status"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "exact slug"
+msgstr "slug exato"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "url fix"
+msgstr "correção de URL"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "title keywords"
+msgstr "palavras-chave do título"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "category/tag keywords"
+msgstr "palavras-chave de categoria/tag"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "content keywords"
+msgstr "palavras-chave do conteúdo"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "spell check"
+msgstr "verificação ortográfica"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "archive fallback"
+msgstr "fallback de arquivo"
+
+#: includes/ImportExport.php
+msgid "Error: Native export file does not exist."
+msgstr "Erro: o arquivo de exportação nativo não existe."
+
+#: includes/ImportExport.php
+msgid "Error: Could not read native export file."
+msgstr "Erro: não foi possível ler o arquivo de exportação nativo."
+
+#: includes/ImportExport.php
+msgid "Error: Could not create Redirection export file."
+msgstr "Erro: não foi possível criar o arquivo de exportação do Redirection."
+
+#: includes/ImportExport.php
+msgid "File upload error."
+msgstr "Erro no envio do arquivo."
+
+#: includes/ImportExport.php
+msgid "Error: Invalid file type. Only CSV/TXT files are allowed."
+msgstr "Erro: tipo de arquivo inválido. Somente arquivos CSV/TXT são permitidos."
+
+#: includes/ImportExport.php
+msgid "Error: File too large. Maximum size is 5MB."
+msgstr "Erro: arquivo muito grande. O tamanho máximo é 5MB."
+
+#: includes/ImportExport.php
+msgid "Error: Unable to determine file type."
+msgstr "Erro: não foi possível determinar o tipo de arquivo."
+
+#: includes/ImportExport.php
+msgid "Error: Invalid file type. Only CSV files are allowed."
+msgstr "Erro: tipo de arquivo inválido. Somente arquivos CSV são permitidos."
+
+#: includes/ImportExport.php
+msgid "Error opening the file."
+msgstr "Erro ao abrir o arquivo."
+
+#: includes/ImportExport.php
+#, php-format
+msgid "Dry run complete. Valid redirects: %d. Invalid rows: %d. Total rows processed: %d."
+msgstr "Simulação concluída. Redirecionamentos válidos: %d. Linhas inválidas: %d. Total de linhas processadas: %d."
+
+#: includes/ImportExport.php
+msgid "Preview issues:"
+msgstr "Problemas na pré-visualização:"
+
+#: includes/ImportExport.php
+msgid "Error:"
+msgstr "Erro:"
+
+#: includes/ImportExport.php
+msgid "Ignored importing redirect because a redirect with the same from URL already exists. URL:"
+msgstr "Importação de redirecionamento ignorada porque já existe um redirecionamento com a mesma URL de origem. URL:"
+
+#: includes/ImportExport.php
+msgid "Unrecognized destination type while importing file. Destination:"
+msgstr "Tipo de destino não reconhecido ao importar arquivo. Destino:"
+
+#: includes/ImportExport.php
+msgid "Couldn't find post from slug. slug:"
+msgstr "Não foi possível encontrar o post a partir do slug. slug:"
+
+#: includes/ImportExport.php
+#, php-format
+msgid "Invalid CSV format. %d columns found but 2 or 5 expected."
+msgstr "Formato CSV inválido. %d colunas encontradas, mas 2 ou 5 esperadas."
+
+#: includes/ImportExport.php
+msgid "Invalid CSV format. Could not map source/destination columns."
+msgstr "Formato CSV inválido. Não foi possível mapear as colunas de origem/destino."
+
+#: includes/ImportExport.php
+#, php-format
+msgid "Invalid CSV format. %d columns found but 2, 5, or 6 expected."
+msgstr "Formato CSV inválido. %d colunas encontradas, mas 2, 5 ou 6 esperadas."
+
+#: includes/ShortCode.php
+msgid "Loading page suggestions..."
+msgstr "Carregando sugestões de páginas..."

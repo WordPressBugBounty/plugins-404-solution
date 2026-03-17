@@ -20,7 +20,6 @@ msgstr ""
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-SearchPath-0: .\n"
 
-
 msgid "404 Solution - Deactivation Options"
 msgstr "404 Solution - Deactivation Options"
 
@@ -1058,9 +1057,6 @@ msgstr "Special"
 msgid "Stats"
 msgstr "Stats"
 
-msgid "Status"
-msgstr "Status"
-
 msgid "Suggestions"
 msgstr "Suggestions"
 
@@ -1082,8 +1078,6 @@ msgstr "TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING"
 msgid "TOOLTIP_POPUP_EXPLANATION_EMPTY"
 msgstr "TOOLTIP_POPUP_EXPLANATION_EMPTY"
 
-msgid "TOOLTIP_POPUP_EXPLANATION_EMTPY"
-msgstr "TOOLTIP_POPUP_EXPLANATION_EMTPY"
 
 msgid "TOOLTIP_POPUP_EXPLANATION_PAGE"
 msgstr "TOOLTIP_POPUP_EXPLANATION_PAGE"
@@ -1199,8 +1193,8 @@ msgstr "Treat this URL as a regular expression"
 msgid "Type"
 msgstr "Type"
 
-msgid "Type a page name here and select it to add it to the exlusion list"
-msgstr "Type a page name here and select it to add it to the exlusion list"
+msgid "Type a page name here and select it to add it to the exclusion list"
+msgstr "Type a page name here and select it to add it to the exclusion list"
 
 msgid "URL"
 msgstr "URL"
@@ -1480,7 +1474,6 @@ msgid_plural "%s redirect entries were moved to the trash."
 msgstr[0] "%s redirect entry was moved to the trash."
 msgstr[1] "%s redirect entries were moved to the trash."
 
-
 #: includes/DatabaseUpgradesEtc.php:119
 msgid "404 Solution: N-gram spell check cache is being built in the background to optimize performance. This may take a few minutes on large sites."
 msgstr "404 Solution: N-gram spell check cache is being built in the background to optimize performance. This may take a few minutes on large sites."
@@ -1550,7 +1543,6 @@ msgstr "Help improve the plugin (Optional)"
 
 msgid "Share why you're deactivating. Your feedback helps us improve."
 msgstr "Share why you're deactivating. Your feedback helps us improve."
-
 
 msgid "Email Feedback & Deactivate"
 msgstr "Email Feedback & Deactivate"
@@ -2476,3 +2468,150 @@ msgstr "Your database query quota was exceeded. This usually resets automaticall
 
 msgid "Show database error details"
 msgstr "Show database error details"
+
+msgid "Exclude from 404 redirect suggestions"
+msgstr "Exclude from 404 redirect suggestions"
+
+msgid "When checked, this post will not be suggested as a redirect target for 404 errors."
+msgstr "When checked, this post will not be suggested as a redirect target for 404 errors."
+
+msgid "When checked, this term will not be suggested as a redirect target for 404 errors."
+msgstr "When checked, this term will not be suggested as a redirect target for 404 errors."
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Title engine score override"
+msgstr "Title engine score override"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Override for the title keyword engine (blank inherits the global score above)"
+msgstr "Override for the title keyword engine (blank inherits the global score above)"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Category/tag engine score override"
+msgstr "Category/tag engine score override"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Override for the category/tag keyword engine (blank inherits the global score above)"
+msgstr "Override for the category/tag keyword engine (blank inherits the global score above)"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Content engine score override"
+msgstr "Content engine score override"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Override for the content keyword engine (blank inherits the global score above)"
+msgstr "Override for the content keyword engine (blank inherits the global score above)"
+
+#: includes/PluginLogic.php
+msgid "Error: Per-engine score override must be empty or a number between 0 and 99"
+msgstr "Error: Per-engine score override must be empty or a number between 0 and 99"
+
+msgid "Engine"
+msgstr "Engine"
+
+msgid "Status"
+msgstr "Status"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "exact slug"
+msgstr "exact slug"
+
+#: includes/engine/UrlFixEngine.php
+msgid "url fix"
+msgstr "url fix"
+
+#: includes/engine/TitleMatchingEngine.php
+msgid "title keywords"
+msgstr "title keywords"
+
+#: includes/engine/CategoryTagMatchingEngine.php
+msgid "category/tag keywords"
+msgstr "category/tag keywords"
+
+#: includes/engine/ContentMatchingEngine.php
+msgid "content keywords"
+msgstr "content keywords"
+
+#: includes/engine/SpellingMatchingEngine.php
+msgid "spell check"
+msgstr "spell check"
+
+#: includes/engine/ArchiveFallbackEngine.php
+msgid "archive fallback"
+msgstr "archive fallback"
+
+#: includes/ImportExportService.php
+msgid "Error: Native export file does not exist."
+msgstr "Error: Native export file does not exist."
+
+#: includes/ImportExportService.php
+msgid "Error: Could not read native export file."
+msgstr "Error: Could not read native export file."
+
+#: includes/ImportExportService.php
+msgid "Error: Could not create Redirection export file."
+msgstr "Error: Could not create Redirection export file."
+
+#: includes/ImportExportService.php
+msgid "File upload error."
+msgstr "File upload error."
+
+#: includes/ImportExportService.php
+msgid "Error: Invalid file type. Only CSV/TXT files are allowed."
+msgstr "Error: Invalid file type. Only CSV/TXT files are allowed."
+
+#: includes/ImportExportService.php
+msgid "Error: File too large. Maximum size is 5MB."
+msgstr "Error: File too large. Maximum size is 5MB."
+
+#: includes/ImportExportService.php
+msgid "Error: Unable to determine file type."
+msgstr "Error: Unable to determine file type."
+
+#: includes/ImportExportService.php
+msgid "Error: Invalid file type. Only CSV files are allowed."
+msgstr "Error: Invalid file type. Only CSV files are allowed."
+
+#: includes/ImportExportService.php
+msgid "Error opening the file."
+msgstr "Error opening the file."
+
+#: includes/ImportExportService.php
+msgid "Dry run complete. Valid redirects: %d. Invalid rows: %d. Total rows processed: %d."
+msgstr "Dry run complete. Valid redirects: %d. Invalid rows: %d. Total rows processed: %d."
+
+#: includes/ImportExportService.php
+msgid "Preview issues:"
+msgstr "Preview issues:"
+
+#: includes/ImportExportService.php
+msgid "Error:"
+msgstr "Error:"
+
+#: includes/ImportExportService.php
+msgid "Ignored importing redirect because a redirect with the same from URL already exists. URL:"
+msgstr "Ignored importing redirect because a redirect with the same from URL already exists. URL:"
+
+#: includes/ImportExportService.php
+msgid "Unrecognized destination type while importing file. Destination:"
+msgstr "Unrecognized destination type while importing file. Destination:"
+
+#: includes/ImportExportService.php
+msgid "Couldn't find post from slug. slug:"
+msgstr "Couldn't find post from slug. slug:"
+
+#: includes/ImportExportService.php
+msgid "Invalid CSV format. %d columns found but 2 or 5 expected."
+msgstr "Invalid CSV format. %d columns found but 2 or 5 expected."
+
+#: includes/ImportExportService.php
+msgid "Invalid CSV format. Could not map source/destination columns."
+msgstr "Invalid CSV format. Could not map source/destination columns."
+
+#: includes/ImportExportService.php
+msgid "Invalid CSV format. %d columns found but 2, 5, or 6 expected."
+msgstr "Invalid CSV format. %d columns found but 2, 5, or 6 expected."
+
+#: includes/ShortCode.php
+msgid "Loading page suggestions..."
+msgstr "Loading page suggestions..."

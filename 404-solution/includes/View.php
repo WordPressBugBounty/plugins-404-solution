@@ -1632,7 +1632,7 @@ class ABJ_404_Solution_View {
 
         $link = wp_nonce_url("?page=" . ABJ404_PP . "&subpage=abj404_edit", "abj404editRedirect");
 
-        echo '<form method="POST" name="admin-edit-redirect" action="' . esc_attr($link) . '">';
+        echo '<form method="POST" name="admin-edit-redirect" action="' . esc_attr($link) . '" onsubmit="return validateAddManualRedirectForm(event);">';
         echo "<input type=\"hidden\" name=\"action\" value=\"editRedirect\">";
 
         // Capture source page and table options to return user to the same place after saving
@@ -1716,6 +1716,15 @@ class ABJ_404_Solution_View {
             echo '<label class="abj404-form-label" for="url">' . esc_html__('URL', '404-solution') . ' *</label>';
             echo '<input type="text" id="url" name="url" class="abj404-form-input" value="' . esc_attr($redirectUrl) . '" required>';
             echo '</div>';
+
+            // Engine (read-only, shown only if set)
+            $redirectEngine = is_string($redirect['engine'] ?? '') ? trim((string)($redirect['engine'] ?? '')) : '';
+            if ($redirectEngine !== '') {
+                echo '<div class="abj404-form-group">';
+                echo '<label class="abj404-form-label">' . esc_html__('Engine', '404-solution') . '</label>';
+                echo '<span class="abj404-engine-label">' . esc_html($redirectEngine) . '</span>';
+                echo '</div>';
+            }
 
             // Regex checkbox
             echo '<div class="abj404-form-group">';
@@ -2246,6 +2255,9 @@ class ABJ_404_Solution_View {
             $tempHtml = $this->f->str_replace('{statusBadgeClass}', $statusBadgeClass, $tempHtml);
             $tempHtml = $this->f->str_replace('{statusTitle}', esc_attr($statusTitle), $tempHtml);
             $tempHtml = $this->f->str_replace('{status}', $statusText, $tempHtml);
+            $capturedEngine = is_string($row['engine'] ?? '') ? trim((string)($row['engine'] ?? '')) : '';
+            $capturedEngineHTML = ($capturedEngine !== '') ? '<br><span class="abj404-engine-label">' . esc_html($capturedEngine) . '</span>' : '';
+            $tempHtml = $this->f->str_replace('{engineHTML}', $capturedEngineHTML, $tempHtml);
             $tempHtml = $this->f->str_replace('{hits}', esc_html((string)$hits), $tempHtml);
             $tempHtml = $this->f->str_replace('{created_date}',
                     esc_html(date("Y/m/d h:i:s A", abs(is_scalar($row['timestamp'] ?? 0) ? intval($row['timestamp'] ?? 0) : 0))), $tempHtml);
@@ -2263,7 +2275,7 @@ class ABJ_404_Solution_View {
         }
 
         if ($displayed == 0) {
-            $html .= '<tr><td colspan="7" class="abj404-empty-message">' . __('No Captured 404 Records To Display', '404-solution') . '</td></tr>';
+            $html .= '<tr><td colspan="6" class="abj404-empty-message">' . __('No Captured 404 Records To Display', '404-solution') . '</td></tr>';
         }
 
         $html .= '</tbody></table>';
@@ -2486,8 +2498,6 @@ class ABJ_404_Solution_View {
         $redirectHtml = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/html/addManualRedirectPageSearchDropdown.html");
         $redirectHtml = $this->f->str_replace('{redirect_to_label}', '', $redirectHtml);
         $redirectHtml = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_EMPTY}',
-            __('(Type a page name or an external URL)', '404-solution'), $redirectHtml);
-        $redirectHtml = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_EMTPY}',
             __('(Type a page name or an external URL)', '404-solution'), $redirectHtml);
         $redirectHtml = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_PAGE}',
             __('(A page has been selected.)', '404-solution'), $redirectHtml);
@@ -2924,6 +2934,9 @@ class ABJ_404_Solution_View {
             $typeForView = is_string($row['type_for_view'] ?? '') ? (string)($row['type_for_view'] ?? '') : '';
             $htmlTemp = $this->f->str_replace('{status}', $statusForView, $htmlTemp);
             $htmlTemp = $this->f->str_replace('{statusTitle}', $statusTitle, $htmlTemp);
+            $rowEngine = is_string($row['engine'] ?? '') ? trim((string)($row['engine'] ?? '')) : '';
+            $engineHTML = ($rowEngine !== '') ? '<br><span class="abj404-engine-label">' . esc_html($rowEngine) . '</span>' : '';
+            $htmlTemp = $this->f->str_replace('{engineHTML}', $engineHTML, $htmlTemp);
             $htmlTemp = $this->f->str_replace('{type}', $typeForView, $htmlTemp);
             $htmlTemp = $this->f->str_replace('{rowCode}', $rowCode, $htmlTemp);
             $htmlTemp = $this->f->str_replace('{hits}', esc_html((string)$hits), $htmlTemp);
@@ -2941,7 +2954,7 @@ class ABJ_404_Solution_View {
         }
         if ($displayed == 0) {
             $html .= "<tr>\n" .
-                "<td colspan=\"10\" class=\"abj404-empty-state\">" .
+                "<td colspan=\"9\" class=\"abj404-empty-state\">" .
                 "<div class=\"abj404-empty-state-icon\">📋</div>" .
                 "<h3>" . __('No Redirect Records To Display', '404-solution') . "</h3>" .
                 "<p>" . __('Redirects will appear here once created.', '404-solution') . "</p>" .
@@ -3244,10 +3257,13 @@ class ABJ_404_Solution_View {
         $html = $this->f->str_replace('{plugin_admin_users}', wp_kses_post($pluginAdminUsers), $html);
         
         $html = $this->f->str_replace('{OPTION_MIN_AUTO_SCORE}', esc_attr($this->optStr($options, 'auto_score')), $html);
+        $html = $this->f->str_replace('{OPTION_AUTO_SCORE_TITLE}', esc_attr($this->optStr($options, 'auto_score_title')), $html);
+        $html = $this->f->str_replace('{OPTION_AUTO_SCORE_CATEGORY_TAG}', esc_attr($this->optStr($options, 'auto_score_category_tag')), $html);
+        $html = $this->f->str_replace('{OPTION_AUTO_SCORE_CONTENT}', esc_attr($this->optStr($options, 'auto_score_content')), $html);
         $html = $this->f->str_replace('{OPTION_TEMPLATE_REDIRECT_PRIORITY}', esc_attr($this->optStr($options, 'template_redirect_priority')), $html);
-        
+
         $html = $this->f->str_replace('{disallow-redirect-all-requests}', $hideRedirectAllRequests, $html);
-        
+
         $html = $this->f->str_replace('{add-exclude-page-data-url}',
         	"admin-ajax.php?action=echoRedirectToPages&includeDefault404Page=false&includeSpecial=false&nonce=" . wp_create_nonce('abj404_ajax'), $html);
         $html = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_EMPTY}',
@@ -3377,6 +3393,9 @@ class ABJ_404_Solution_View {
         $html = $this->f->str_replace('{disallow-redirect-all-requests}', $hideRedirectAllRequests, $html);
 
         $html = $this->f->str_replace('{OPTION_MIN_AUTO_SCORE}', esc_attr($this->optStr($options, 'auto_score')), $html);
+        $html = $this->f->str_replace('{OPTION_AUTO_SCORE_TITLE}', esc_attr($this->optStr($options, 'auto_score_title')), $html);
+        $html = $this->f->str_replace('{OPTION_AUTO_SCORE_CATEGORY_TAG}', esc_attr($this->optStr($options, 'auto_score_category_tag')), $html);
+        $html = $this->f->str_replace('{OPTION_AUTO_SCORE_CONTENT}', esc_attr($this->optStr($options, 'auto_score_content')), $html);
         $html = $this->f->str_replace('{OPTION_TEMPLATE_REDIRECT_PRIORITY}', esc_attr($this->optStr($options, 'template_redirect_priority')), $html);
         $html = $this->f->str_replace('{days_wait_before_major_update}', $this->optStr($options, 'days_wait_before_major_update'), $html);
 
@@ -3610,13 +3629,13 @@ class ABJ_404_Solution_View {
         $tableOptions = $this->logic->getTableOptions($sub);
 
         // Build column headers with sorting
+        // Engine is displayed inside the Action cell; User is displayed inside the Date cell
         $columns = array(
             'url' => array('title' => __('URL', '404-solution'), 'orderby' => 'url'),
             'host' => array('title' => __('IP Address', '404-solution'), 'orderby' => 'remote_host'),
             'refer' => array('title' => __('Referrer', '404-solution'), 'orderby' => 'referrer'),
             'dest' => array('title' => __('Action', '404-solution'), 'orderby' => 'action'),
             'timestamp' => array('title' => __('Date', '404-solution'), 'orderby' => 'timestamp'),
-            'username' => array('title' => __('User', '404-solution'), 'orderby' => 'username'),
         );
 
         $html = '<table class="abj404-table abj404-logs-table">';
@@ -3652,11 +3671,12 @@ class ABJ_404_Solution_View {
 	            // URL column
 	            $url = is_string($row['url'] ?? '') ? (string)($row['url'] ?? '') : '';
 	            $urlDetail = is_string($row['url_detail'] ?? '') ? (string)($row['url_detail'] ?? '') : '';
-	            $urlDisplay = esc_html($url);
+	            $fullVisitorURL = esc_url(home_url($url));
+	            $urlDisplay = '<a href="' . $fullVisitorURL . '" target="_blank" title="' . esc_attr($url) . '">' . esc_html($url) . '</a>';
 	            if ($urlDetail !== '' && trim($urlDetail) !== '') {
 	                $urlDisplay .= ' <span class="abj404-url-detail">(' . esc_html(trim($urlDetail)) . ')</span>';
 	            }
-	            $html .= '<td class="abj404-url-cell" title="' . esc_attr($url) . '">' . $urlDisplay . '</td>';
+	            $html .= '<td class="abj404-url-cell">' . $urlDisplay . '</td>';
 
 	            // IP Address
 	            $remoteHost = is_string($row['remote_host'] ?? '') ? (string)($row['remote_host'] ?? '') : '';
@@ -3672,30 +3692,29 @@ class ABJ_404_Solution_View {
 	            }
 	            $html .= '</td>';
 
-	            // Action Taken
+	            // Action Taken (with engine on second line)
 	            $action = trim(is_string($row['action'] ?? '') ? (string)($row['action'] ?? '') : '');
+	            $engineVal = is_string($row['engine'] ?? '') ? (string)($row['engine'] ?? '') : '';
 	            $html .= '<td>';
 	            if ($action === '' || $action == "404" || $action == "http://404") {
 	                $html .= '<span class="abj404-badge abj404-badge-404">' . __('404', '404-solution') . '</span>';
 	            } else {
-	                $html .= '<span class="abj404-badge abj404-badge-redirect">' . __('Redirect', '404-solution') . '</span><br>';
-	                $html .= '<a href="' . esc_url($action) . '" title="' . esc_attr($action) . '" target="_blank" class="abj404-action-url">' . esc_html($action) . '</a>';
+	                $html .= '<span class="abj404-badge abj404-badge-redirect">' . __('Redirect', '404-solution') . '</span>';
+	                $html .= '<br><a href="' . esc_url($action) . '" title="' . esc_attr($action) . '" target="_blank" class="abj404-action-url">' . esc_html($action) . '</a>';
+	            }
+	            if ($engineVal !== '') {
+	                $html .= '<br><span class="abj404-engine-label">' . esc_html($engineVal) . '</span>';
 	            }
 	            $html .= '</td>';
 
-	            // Date
+	            // Date (with user on second line)
 	            $timeToDisplay = abs(is_scalar($row['timestamp'] ?? 0) ? intval($row['timestamp'] ?? 0) : 0);
-	            $html .= '<td class="abj404-date-cell">' . date('Y/m/d', $timeToDisplay) . '<br>' . date('h:i:s A', $timeToDisplay) . '</td>';
-
-            // User
-            $html .= '<td>';
-            $rowUsername = is_string($row['username'] ?? '') ? (string)($row['username'] ?? '') : '';
-            if ($rowUsername !== '') {
-                $html .= esc_html($rowUsername);
-            } else {
-                $html .= '<span class="abj404-text-muted">-</span>';
-            }
-            $html .= '</td>';
+	            $rowUsername = is_string($row['username'] ?? '') ? (string)($row['username'] ?? '') : '';
+	            $html .= '<td class="abj404-date-cell">' . date('Y/m/d', $timeToDisplay) . '<br>' . date('h:i:s A', $timeToDisplay);
+	            if ($rowUsername !== '') {
+	                $html .= '<br><span class="abj404-username-label">' . esc_html($rowUsername) . '</span>';
+	            }
+	            $html .= '</td>';
 
             $html .= '</tr>';
             $logRecordsDisplayed++;
@@ -3704,7 +3723,7 @@ class ABJ_404_Solution_View {
         $this->logger->debugMessage($logRecordsDisplayed . " log records displayed on the page.");
 
         if ($logRecordsDisplayed == 0) {
-            $html .= '<tr><td colspan="6" class="abj404-empty-message">' . __('No Results To Display', '404-solution') . '</td></tr>';
+            $html .= '<tr><td colspan="5" class="abj404-empty-message">' . __('No Results To Display', '404-solution') . '</td></tr>';
         }
 
         $html .= '</tbody></table>';

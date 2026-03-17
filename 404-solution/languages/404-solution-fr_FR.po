@@ -20,7 +20,6 @@ msgstr ""
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-SearchPath-0: .\n"
 
-
 msgid "404 Solution - Deactivation Options"
 msgstr "404 Solution - Options de désactivation"
 
@@ -1042,9 +1041,6 @@ msgstr "Spécial"
 msgid "Stats"
 msgstr "Statistiques"
 
-msgid "Status"
-msgstr "Statut"
-
 msgid "Suggestions"
 msgstr "Suggestions ·"
 
@@ -1066,8 +1062,6 @@ msgstr "INFO-BULLE_POPUP_EXPLICATION_CHAÎNE_PERSONNALISÉE"
 msgid "TOOLTIP_POPUP_EXPLANATION_EMPTY"
 msgstr "INFO-BULLE_POPUP_EXPLICATION_VIDE"
 
-msgid "TOOLTIP_POPUP_EXPLANATION_EMTPY"
-msgstr "INFO-BULLE_POPUP_EXPLICATION_EMTPY"
 
 msgid "TOOLTIP_POPUP_EXPLANATION_PAGE"
 msgstr "INFO-BULLE_POPUP_EXPLICATION_PAGE"
@@ -1183,7 +1177,7 @@ msgstr "Traiter cette URL comme une expression régulière"
 msgid "Type"
 msgstr "Type "
 
-msgid "Type a page name here and select it to add it to the exlusion list"
+msgid "Type a page name here and select it to add it to the exclusion list"
 msgstr "Saisir un nom de page ici et sélectionnez-le pour l'ajouter à la liste d'exclusion"
 
 msgid "URL"
@@ -1533,7 +1527,6 @@ msgstr "Aider à améliorer l'extension (Facultatif)"
 
 msgid "Share why you're deactivating. Your feedback helps us improve."
 msgstr "Partagez pourquoi vous désactivez. Votre retour nous aide à nous améliorer."
-
 
 msgid "Email Feedback & Deactivate"
 msgstr "Envoyer retour et désactiver"
@@ -2075,7 +2068,6 @@ msgstr "Actualisation en cours"
 msgid "Refresh paused"
 msgstr "Actualisation en pause"
 
-
 #: includes/WordPress_Connector.php
 msgid "second"
 msgstr "seconde"
@@ -2246,7 +2238,6 @@ msgstr "data-pagination-current-paged"
 msgid "data-pagination-current-logsid"
 msgstr "data-pagination-current-logsid"
 
-
 #: includes/View.php
 msgid "Select all"
 msgstr "Tout sélectionner"
@@ -2262,7 +2253,6 @@ msgstr "Exiger une qualité de correspondance minimale"
 #: includes/html/viewSuggestions.html
 msgid "Only show suggestions that closely match the requested URL. This filters out weak matches that may confuse visitors."
 msgstr "N'afficher que les suggestions qui correspondent étroitement à l'URL demandée. Cela filtre les correspondances faibles qui pourraient dérouter les visiteurs."
-
 
 msgid "404 Solution Logs"
 msgstr "Journaux 404 Solution"
@@ -2477,3 +2467,150 @@ msgstr "Le quota de requêtes de votre base de données a été dépassé. Il se
 
 msgid "Show database error details"
 msgstr "Afficher les détails de l'erreur de base de données"
+
+msgid "Exclude from 404 redirect suggestions"
+msgstr "Exclure des suggestions de redirection 404"
+
+msgid "When checked, this post will not be suggested as a redirect target for 404 errors."
+msgstr "Lorsque cette option est cochée, cet article ne sera pas suggéré comme cible de redirection pour les erreurs 404."
+
+msgid "When checked, this term will not be suggested as a redirect target for 404 errors."
+msgstr "Lorsque cette option est cochée, ce terme ne sera pas suggéré comme cible de redirection pour les erreurs 404."
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Title engine score override"
+msgstr "Seuil de score du moteur de titre"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Override for the title keyword engine (blank inherits the global score above)"
+msgstr "Remplacement pour le moteur de titre (vide hérite du score global ci-dessus)"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Category/tag engine score override"
+msgstr "Seuil de score du moteur de catégorie/étiquette"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Override for the category/tag keyword engine (blank inherits the global score above)"
+msgstr "Remplacement pour le moteur catégorie/étiquette (vide hérite du score global ci-dessus)"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Content engine score override"
+msgstr "Seuil de score du moteur de contenu"
+
+#: includes/html/settingsAdvanced.html includes/html/settingsAdvancedSystem.html
+msgid "Override for the content keyword engine (blank inherits the global score above)"
+msgstr "Remplacement pour le moteur de contenu (vide hérite du score global ci-dessus)"
+
+#: includes/PluginLogic.php
+msgid "Error: Per-engine score override must be empty or a number between 0 and 99"
+msgstr "Erreur : le seuil de score par moteur doit être vide ou un nombre entre 0 et 99"
+
+msgid "Engine"
+msgstr "Moteur"
+
+msgid "Status"
+msgstr "Statut"
+
+#: includes/engine/SlugMatchingEngine.php
+msgid "exact slug"
+msgstr "slug exact"
+
+#: includes/engine/UrlFixEngine.php
+msgid "url fix"
+msgstr "correction d'URL"
+
+#: includes/engine/TitleMatchingEngine.php
+msgid "title keywords"
+msgstr "mots-clés du titre"
+
+#: includes/engine/CategoryTagMatchingEngine.php
+msgid "category/tag keywords"
+msgstr "mots-clés de catégorie/étiquette"
+
+#: includes/engine/ContentMatchingEngine.php
+msgid "content keywords"
+msgstr "mots-clés du contenu"
+
+#: includes/engine/SpellingMatchingEngine.php
+msgid "spell check"
+msgstr "vérification orthographique"
+
+#: includes/engine/ArchiveFallbackEngine.php
+msgid "archive fallback"
+msgstr "repli sur l'archive"
+
+#: includes/ImportExportService.php
+msgid "Error: Native export file does not exist."
+msgstr "Erreur : le fichier d'export natif n'existe pas."
+
+#: includes/ImportExportService.php
+msgid "Error: Could not read native export file."
+msgstr "Erreur : impossible de lire le fichier d'export natif."
+
+#: includes/ImportExportService.php
+msgid "Error: Could not create Redirection export file."
+msgstr "Erreur : impossible de créer le fichier d'export Redirection."
+
+#: includes/ImportExportService.php
+msgid "File upload error."
+msgstr "Erreur de téléversement du fichier."
+
+#: includes/ImportExportService.php
+msgid "Error: Invalid file type. Only CSV/TXT files are allowed."
+msgstr "Erreur : type de fichier non valide. Seuls les fichiers CSV/TXT sont autorisés."
+
+#: includes/ImportExportService.php
+msgid "Error: File too large. Maximum size is 5MB."
+msgstr "Erreur : fichier trop volumineux. La taille maximale est de 5 Mo."
+
+#: includes/ImportExportService.php
+msgid "Error: Unable to determine file type."
+msgstr "Erreur : impossible de déterminer le type de fichier."
+
+#: includes/ImportExportService.php
+msgid "Error: Invalid file type. Only CSV files are allowed."
+msgstr "Erreur : type de fichier non valide. Seuls les fichiers CSV sont autorisés."
+
+#: includes/ImportExportService.php
+msgid "Error opening the file."
+msgstr "Erreur lors de l'ouverture du fichier."
+
+#: includes/ImportExportService.php
+msgid "Dry run complete. Valid redirects: %d. Invalid rows: %d. Total rows processed: %d."
+msgstr "Essai terminé. Redirections valides : %d. Lignes non valides : %d. Total de lignes traitées : %d."
+
+#: includes/ImportExportService.php
+msgid "Preview issues:"
+msgstr "Problèmes de l'aperçu :"
+
+#: includes/ImportExportService.php
+msgid "Error:"
+msgstr "Erreur :"
+
+#: includes/ImportExportService.php
+msgid "Ignored importing redirect because a redirect with the same from URL already exists. URL:"
+msgstr "Redirection ignorée à l'import car une redirection avec la même URL source existe déjà. URL :"
+
+#: includes/ImportExportService.php
+msgid "Unrecognized destination type while importing file. Destination:"
+msgstr "Type de destination non reconnu lors de l'import du fichier. Destination :"
+
+#: includes/ImportExportService.php
+msgid "Couldn't find post from slug. slug:"
+msgstr "Impossible de trouver l'article à partir du slug. slug :"
+
+#: includes/ImportExportService.php
+msgid "Invalid CSV format. %d columns found but 2 or 5 expected."
+msgstr "Format CSV non valide. %d colonnes trouvées mais 2 ou 5 attendues."
+
+#: includes/ImportExportService.php
+msgid "Invalid CSV format. Could not map source/destination columns."
+msgstr "Format CSV non valide. Impossible de mapper les colonnes source/destination."
+
+#: includes/ImportExportService.php
+msgid "Invalid CSV format. %d columns found but 2, 5, or 6 expected."
+msgstr "Format CSV non valide. %d colonnes trouvées mais 2, 5 ou 6 attendues."
+
+#: includes/ShortCode.php
+msgid "Loading page suggestions..."
+msgstr "Chargement des suggestions de pages..."

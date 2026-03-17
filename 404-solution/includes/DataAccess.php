@@ -1769,6 +1769,39 @@ class ABJ_404_Solution_DataAccess {
     function invalidateStatusCountsCache(): void {
         delete_transient(self::CACHE_KEY_REDIRECT_STATUS);
         delete_transient(self::CACHE_KEY_CAPTURED_STATUS);
+        $this->invalidateViewSnapshotCache();
+    }
+
+    /**
+     * Clear the view snapshot cache so the admin redirect/captured tables
+     * reflect newly created, updated, trashed, or deleted redirects immediately.
+     *
+     * This clears both the custom wp_abj404_view_cache table and the
+     * WordPress transients used as a secondary cache layer.
+     *
+     * @return void
+     */
+    function invalidateViewSnapshotCache(): void {
+        try {
+            // Clear all rows from the view cache table.
+            $query = "DELETE FROM {wp_abj404_view_cache} WHERE 1=1";
+            $this->queryAndGetResults($query, array('log_errors' => false));
+        } catch (\Throwable $e) {
+            // Best-effort: cache will expire naturally via TTL if this fails.
+        }
+
+        // Clear WordPress transients for view row and count snapshots.
+        // The transient keys are hashed (e.g. abj404_view_rows_<md5>), so
+        // we delete by prefix from wp_options directly.
+        global $wpdb;
+        if (isset($wpdb->options) && method_exists($wpdb, 'query')) {
+            /** @var string $optionsTable */
+            $optionsTable = esc_sql($wpdb->options);
+            $wpdb->query(
+                "DELETE FROM `{$optionsTable}` WHERE option_name LIKE '_transient_abj404_view_%'"
+                . " OR option_name LIKE '_transient_timeout_abj404_view_%'"
+            );
+        }
     }
 
     /**
@@ -1839,18 +1872,23 @@ class ABJ_404_Solution_DataAccess {
     	// everything in memory all at once.
     	$result = mysqli_query($wpdb->dbh, $query);
     	if ($result instanceof \mysqli_result) {
-    		// write the header
-    		$line = 'from_url,status,type,to_url,wp_type';
-    		file_put_contents($tempFile, $line . "\n", FILE_APPEND);
-    		
-    		while (($row = mysqli_fetch_array($result, MYSQLI_ASSOC))) {
-    			$line = $row['from_url'] . ',' .
-     			$row['status'] . ',' .
-     			$row['type'] . ',' .
-     			$row['to_url'] . ', ' .
-    			$row['type_wp'];
-     			file_put_contents($tempFile, $line . "\n", FILE_APPEND);
+    		$fh = fopen($tempFile, 'w');
+    		if ($fh === false) {
+    			return;
     		}
+    		fputcsv($fh, array('from_url', 'status', 'type', 'to_url', 'wp_type', 'engine'));
+
+    		while (($row = mysqli_fetch_array($result, MYSQLI_ASSOC))) {
+    			fputcsv($fh, array(
+    				$row['from_url'],
+    				$row['status'],
+    				$row['type'],
+    				$row['to_url'],
+    				$row['type_wp'],
+    				isset($row['engine']) ? $row['engine'] : ''
+    			));
+    		}
+    		fclose($fh);
     		mysqli_free_result($result);
     	}
     }
@@ -3142,6 +3180,7 @@ class ABJ_404_Solution_DataAccess {
             'remote_host',
             'user_ip',
             'username',
+            'engine',
         );
         $rawOrderByVal = $tableOptions['orderby'];
         $orderby = sanitize_text_field($abj404logic->sanitizeForSQL(is_string($rawOrderByVal) ? $rawOrderByVal : ''));
@@ -3476,6 +3515,7 @@ class ABJ_404_Solution_DataAccess {
             'requested_url_detail' => $requestedURLDetail,
             'username' => $usernameLookupID,
             'min_log_id' => $minLogID,
+            'engine' => substr($matchReason, 0, 64),
         ]);
     }
 
@@ -3816,7 +3856,7 @@ class ABJ_404_Solution_DataAccess {
      */
     private function sanitizeLogEntry(array $entry): ?array {
         // Required fields
-        $required = array('timestamp', 'user_ip', 'referrer', 'dest_url', 'requested_url', 'requested_url_detail', 'username', 'min_log_id');
+        $required = array('timestamp', 'user_ip', 'referrer', 'dest_url', 'requested_url', 'requested_url_detail', 'username', 'min_log_id', 'engine');
         foreach ($required as $key) {
             if (!array_key_exists($key, $entry)) {
                 return null;
@@ -3848,6 +3888,7 @@ class ABJ_404_Solution_DataAccess {
         $minLogIdVal = $entry['min_log_id'] ?? null;
         $sanitized['min_log_id'] = ($minLogIdVal === null || !is_scalar($minLogIdVal))
             ? null : absint($minLogIdVal);
+        $sanitized['engine'] = $normalizeString($entry['engine'], 64);
 
         // Drop rows without required URL data
         if ($sanitized['requested_url'] === '' || $sanitized['dest_url'] === '') {
@@ -3918,6 +3959,34 @@ class ABJ_404_Solution_DataAccess {
         }
     }
 
+    /**
+     * Remove auto-created redirects whose destination post no longer exists or is not published.
+     *
+     * @return int Number of orphaned redirects deleted.
+     */
+    public function cleanupOrphanedAutoRedirects(): int {
+        $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getOrphanedAutoRedirects.sql");
+        $query = $this->f->doNormalReplacements($query);
+
+        $results = $this->queryAndGetResults($query);
+        $rows = is_array($results['rows']) ? $results['rows'] : [];
+        $deletedCount = 0;
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = isset($row['id']) && is_scalar($row['id']) ? (string)$row['id'] : '0';
+            $url = isset($row['url']) && is_string($row['url']) ? $row['url'] : '';
+            $this->logger->debugMessage('Orphaned auto redirect deleted: "' . $url . '" (dest post ' .
+                (isset($row['final_dest']) && is_scalar($row['final_dest']) ? (string)$row['final_dest'] : '?') . ' missing/unpublished).');
+            $this->deleteRedirect($id);
+            $deletedCount++;
+        }
+
+        return $deletedCount;
+    }
+
     /** Helper method to delete old redirects of a specific type.
      * Extracted common logic from deleteOldRedirectsCron() to eliminate duplication.
      *
@@ -3977,6 +4046,49 @@ class ABJ_404_Solution_DataAccess {
         return $deletedCount;
     }
 
+    /**
+     * Delete old rows from the logs/protocol table based on age.
+     *
+     * Uses batch deletes to avoid a long-running single table lock.
+     *
+     * @param int $daysToKeep
+     * @param int $now
+     * @return int
+     */
+    private function deleteOldLogsByAge(int $daysToKeep, int $now): int {
+        if ($daysToKeep <= 0) {
+            return 0;
+        }
+
+        $cutoffTimestamp = max(0, $now - ($daysToKeep * 86400));
+        $deletedTotal = 0;
+        $batchSize = 2000;
+        $maxBatches = 200;
+
+        for ($i = 0; $i < $maxBatches; $i++) {
+            $result = $this->queryAndGetResults(
+                "DELETE FROM {wp_abj404_logsv2} WHERE timestamp <= %d LIMIT %d",
+                array(
+                    'query_params' => array($cutoffTimestamp, $batchSize),
+                    'log_errors' => true,
+                )
+            );
+            $rowsDeletedRaw = $result['rows_affected'] ?? 0;
+            $rowsDeleted = (is_int($rowsDeletedRaw) || is_float($rowsDeletedRaw) || is_string($rowsDeletedRaw))
+                ? (int)$rowsDeletedRaw
+                : 0;
+            if ($rowsDeleted <= 0) {
+                break;
+            }
+            $deletedTotal += $rowsDeleted;
+            if ($rowsDeleted < $batchSize) {
+                break;
+            }
+        }
+
+        return $deletedTotal;
+    }
+
     /** Delete old redirects based on how old they are. This runs daily.
      * @return string
      */
@@ -3990,7 +4102,8 @@ class ABJ_404_Solution_DataAccess {
         $capturedURLsCount = 0;
         $autoRedirectsCount = 0;
         $manualRedirectsCount = 0;
-        $oldLogRowsDeleted = 0;
+        $oldLogRowsDeletedBySize = 0;
+        $oldLogRowsDeletedByAge = 0;
 
         // If true then the user clicked the button to execute the mantenance.
         $manually_fired = $abj404dao->getPostOrGetSanitize('manually_fired', 'false');
@@ -4023,6 +4136,8 @@ class ABJ_404_Solution_DataAccess {
         if (array_key_exists('capture_deletion', $options) && $options['capture_deletion'] != '0') {
             $status_list = ABJ404_STATUS_CAPTURED . ", " . ABJ404_STATUS_IGNORED . ", " . ABJ404_STATUS_LATER;
             $capturedURLsCount = $this->deleteOldRedirectsByType($options, $now, 'capture_deletion', $status_list, 'Captured 404');
+            $captureDeletionDays = intval(is_scalar($options['capture_deletion']) ? $options['capture_deletion'] : 0);
+            $oldLogRowsDeletedByAge = $this->deleteOldLogsByAge($captureDeletionDays, $now);
         }
 
         // Remove Automatic Redirects
@@ -4036,7 +4151,10 @@ class ABJ_404_Solution_DataAccess {
             $status_list = ABJ404_STATUS_MANUAL . ", " . ABJ404_STATUS_REGEX;
             $manualRedirectsCount = $this->deleteOldRedirectsByType($options, $now, 'manual_deletion', $status_list, 'Manual redirect');
         }
-        
+
+        // Remove orphaned auto redirects (destination post deleted/unpublished)
+        $orphanedCount = $this->cleanupOrphanedAutoRedirects();
+
         //Clean up old logs. prepare the query. get the disk usage in bytes. compare to the max requested
         // disk usage (MB to bytes). delete 1k rows at a time until the size is acceptable.
         $logsSizeBytes = $abj404dao->getLogDiskUsage();
@@ -4053,7 +4171,10 @@ class ABJ_404_Solution_DataAccess {
 	        $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/deleteOldLogs.sql");
 	        $query = $this->f->str_replace('{lines_to_delete}', (string)$logLinesToDelete, $query);
 	        $results = $this->queryAndGetResults($query);
-	        $oldLogRowsDeleted = $results['rows_affected'];
+            $oldLogRowsDeletedBySizeRaw = $results['rows_affected'] ?? 0;
+            $oldLogRowsDeletedBySize = (is_int($oldLogRowsDeletedBySizeRaw) || is_float($oldLogRowsDeletedBySizeRaw) || is_string($oldLogRowsDeletedBySizeRaw))
+                ? (int)$oldLogRowsDeletedBySizeRaw
+                : 0;
         }
         
         $logsSizeBytes = $abj404dao->getLogDiskUsage();
@@ -4062,11 +4183,16 @@ class ABJ_404_Solution_DataAccess {
         $renamed = $abj404dao->limitDebugFileSize();
         $renamed = $renamed ? "true" : "false";
         
-        $message = "deleteOldRedirectsCron. Old captured URLs removed: " . 
+        $oldLogRowsDeleted = $oldLogRowsDeletedByAge + $oldLogRowsDeletedBySize;
+
+        $message = "deleteOldRedirectsCron. Old captured URLs removed: " .
                 $capturedURLsCount . ", Old automatic redirects removed: " . $autoRedirectsCount .
-                ", Old manual redirects removed: " . $manualRedirectsCount . 
-                ", Old log lines removed: " . $oldLogRowsDeleted . ", New log size: " . $logSizeMB . "MB" . 
-                ", Duplicate rows deleted: " . $duplicateRowsDeleted . ", Debug file size limited: " . 
+                ", Old manual redirects removed: " . $manualRedirectsCount .
+                ", Orphaned auto redirects removed: " . $orphanedCount .
+                ", Old log lines removed: " . $oldLogRowsDeleted .
+                " (age: " . $oldLogRowsDeletedByAge . ", size: " . $oldLogRowsDeletedBySize . ")" .
+                ", New log size: " . $logSizeMB . "MB" .
+                ", Duplicate rows deleted: " . $duplicateRowsDeleted . ", Debug file size limited: " .
                 $renamed;
         
         // only send a 404 notification email during daily maintenance.
@@ -4178,9 +4304,10 @@ class ABJ_404_Solution_DataAccess {
      * @param string $final_dest
      * @param string $code
      * @param int $disabled
+     * @param string|null $engine  The matching engine that created this redirect (null for manual/unknown)
      * @return int
      */
-    function setupRedirect($fromURL, $status, $type, $final_dest, $code, $disabled = 0) {
+    function setupRedirect($fromURL, $status, $type, $final_dest, $code, $disabled = 0, $engine = null) {
         global $wpdb;
 
         // nonce is verified outside of this method. We can't verify here because 
@@ -4221,24 +4348,21 @@ class ABJ_404_Solution_DataAccess {
             $fromURL = $abj404logic->normalizeToRelativePath($fromURL);
 
             // Fix HIGH #1 (3rd review): Remove esc_sql() - wpdb->insert handles escaping
-            $wpdb->insert($redirectsTable, array(
+            $insertData = array(
                 'url' => $fromURL,
                 'status' => $status,
                 'type' => $type,
                 'final_dest' => $final_dest,
                 'code' => $code,
                 'disabled' => $disabled,
-                'timestamp' => $now
-                    ), array(
-                '%s',
-                '%d',
-                '%d',
-                '%s',
-                '%d',
-                '%d',
-                '%d'
-                    )
+                'timestamp' => $now,
             );
+            $insertFormats = array('%s', '%d', '%d', '%s', '%d', '%d', '%d');
+            if ($engine !== null) {
+                $insertData['engine'] = substr((string)$engine, 0, 64);
+                $insertFormats[] = '%s';
+            }
+            $wpdb->insert($redirectsTable, $insertData, $insertFormats);
 
             // Invalidate caches
             $this->invalidateStatusCountsCache();
@@ -4794,8 +4918,12 @@ class ABJ_404_Solution_DataAccess {
             $query = "update {wp_abj404_redirects} set disabled = 1 where status in (" . $typesForSQL . ")";
             $query = $this->doTableNameReplacements($query);
             $redirectCount = $wpdb->query($query);
-            
-            $message .= sprintf( _n( '%s redirect entry was moved to the trash.', 
+
+            // Invalidate caches so the admin table reflects the purge immediately
+            $this->invalidateStatusCountsCache();
+            $this->clearRegexRedirectsCache();
+
+            $message .= sprintf( _n( '%s redirect entry was moved to the trash.',
                     '%s redirect entries were moved to the trash.', $redirectCount, '404-solution'), $redirectCount);
         }
 
@@ -5321,7 +5449,7 @@ class ABJ_404_Solution_DataAccess {
         $validids = array_map('absint', $ids);
         $multipleIds = implode(',', $validids);
     
-        $query = "select id, url, type, status, final_dest, code from {wp_abj404_redirects} " .
+        $query = "select id, url, type, status, final_dest, code, COALESCE(engine, '') as engine from {wp_abj404_redirects} " .
                 "where id in (" . $multipleIds . ")";
         $query = $this->doTableNameReplacements($query);
         $rows = $wpdb->get_results($query, ARRAY_A);
@@ -5467,5 +5595,54 @@ class ABJ_404_Solution_DataAccess {
         $abj404dao = ABJ_404_Solution_DataAccess::getInstance();
         return $abj404dao->getRecordCount(array(ABJ404_STATUS_CAPTURED));
     }
-    
+
+    /**
+     * Get posts whose permalink cache rows have NULL content_keywords.
+     *
+     * @param int $limit Maximum rows to return.
+     * @return array<int, object> Each object has ->id and ->post_content.
+     */
+    function getPostsNeedingContentKeywords(int $limit = 500): array {
+        global $wpdb;
+
+        $limitResults = " */\n  limit " . absint($limit);
+
+        $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getPostsNeedingContentKeywords.sql");
+        $query = $this->doTableNameReplacements($query);
+        $query = $this->f->str_replace('{limit-results}', $limitResults, $query);
+
+        $rows = $wpdb->get_results($query);
+
+        if ($wpdb->last_error) {
+            $this->logger->errorMessage("Error fetching posts for content keywords: " . $wpdb->last_error);
+            return array();
+        }
+
+        return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * Store extracted content keywords for a permalink cache entry.
+     *
+     * @param int    $id       The post ID (permalink cache primary key).
+     * @param string $keywords Space-separated lowercase keywords.
+     * @return void
+     */
+    function updateContentKeywordsForId(int $id, string $keywords): void {
+        global $wpdb;
+
+        $table = $this->doTableNameReplacements('{wp_abj404_permalink_cache}');
+        $wpdb->update(
+            $table,
+            array('content_keywords' => $keywords),
+            array('id' => $id),
+            array('%s'),
+            array('%d')
+        );
+
+        if ($wpdb->last_error) {
+            $this->logger->errorMessage("Error updating content_keywords for id $id: " . $wpdb->last_error);
+        }
+    }
+
 }
