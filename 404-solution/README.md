@@ -80,6 +80,15 @@ Other stuff is here.
 
 ## Changelog ##
 
+## Version 3.3.4 (Mar 19, 2026) ##
+* FIX: Fixed an upgrade bug introduced in 3.3.3 that accidentally cleared the admin page view cache. No redirect data was affected — the cache rebuilds automatically on the next page load.
+* FIX: Schema comparison now refuses to drop columns when the target schema parses to zero columns, preventing a whole class of accidental data-wipe bugs.
+* FIX: One-time repair detects and drops any `view_cache` table left in a stripped state by the 3.3.3 bug, so it is cleanly recreated on the next plugin load.
+
+## Version 3.3.3 (Mar 19, 2026) ##
+* FIX: Uninstaller no longer produces a PHPStan type error when `$wpdb->get_results()` returns null on edge-case database configurations.
+* Improvement: Plugin table cleanup on blog deletion, uninstall, and collation repair now uses dynamic discovery, ensuring any future tables are automatically included.
+
 ## Version 3.3.1 (Mar 18, 2026) ##
 * FIX: Resolved "Table wp_abj404_view_cache doesn't exist" errors on some v3.3.0 upgrades where the cache table was not created.
 * FIX: Best-effort database queries (cache operations, invalidations) no longer leak errors to debug.log when WP_DEBUG is enabled.
