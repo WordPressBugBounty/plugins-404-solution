@@ -80,6 +80,10 @@ Other stuff is here.
 
 ## Changelog ##
 
+## Version 3.3.3 (Mar 19, 2026) ##
+* FIX: Uninstaller no longer produces a PHPStan type error when `$wpdb->get_results()` returns null on edge-case database configurations.
+* Improvement: Plugin table cleanup on blog deletion, uninstall, and collation repair now uses dynamic discovery, ensuring any future tables are automatically included.
+
 ## Version 3.3.1 (Mar 18, 2026) ##
 * FIX: Resolved "Table wp_abj404_view_cache doesn't exist" errors on some v3.3.0 upgrades where the cache table was not created.
 * FIX: Best-effort database queries (cache operations, invalidations) no longer leak errors to debug.log when WP_DEBUG is enabled.
