@@ -80,6 +80,13 @@ Other stuff is here.
 
 ## Changelog ##
 
+## Version 3.3.6 (Mar 20, 2026) ##
+* Fix: Prevented a spurious database error during schema upgrades where a comment in an internal SQL file was mistakenly interpreted as a column definition, causing a malformed ALTER TABLE statement to be logged. No data was affected.
+
+## Version 3.3.5 (Mar 20, 2026) ##
+* Improvement: Large source files refactored into focused trait files — no functional changes, but the codebase is easier to navigate and maintain.
+* Improvement: Strict type checking (PHPStan level 9) enforced throughout the codebase, catching and fixing potential type-mismatch errors before they could affect users.
+
 ## Version 3.3.4 (Mar 19, 2026) ##
 * FIX: Fixed an upgrade bug introduced in 3.3.3 that accidentally cleared the admin page view cache. No redirect data was affected — the cache rebuilds automatically on the next page load.
 * FIX: Schema comparison now refuses to drop columns when the target schema parses to zero columns, preventing a whole class of accidental data-wipe bugs.
