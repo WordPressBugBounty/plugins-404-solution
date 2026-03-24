@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 	Author:      Aaron J
 	Author URI:  https://www.ajexperience.com/404-solution/
 
-	Version: 3.3.7
+	Version: 4.0.0
 	Requires at least: 5.0
 	Requires PHP: 7.4
 
@@ -126,6 +126,13 @@ function abj404_autoloader($class) {
 	require_once $abj404_autoLoaderClassMap[$class];
 }
 spl_autoload_register('abj404_autoloader');
+
+// Load Composer vendor autoloader for production packages (e.g. Dompdf).
+// Guards with file_exists so the plugin degrades gracefully if vendor is absent.
+$abj404_vendor_autoload = plugin_dir_path(__FILE__) . 'vendor/autoload.php';
+if (file_exists($abj404_vendor_autoload)) {
+    require_once $abj404_vendor_autoload;
+}
 
 add_action('doing_it_wrong_run', function($function_name, $message, $version) {
 	if (strpos($message, '404-solution') !== false &&
@@ -321,11 +328,37 @@ if (!function_exists('abj404_shortCodeListener')) {
 	}
 }
 
+// Always load Loader.php to ensure plugin constants (ABJ404_TYPE_404_DISPLAYED,
+// ABJ404_STATUS_MANUAL, etc.) are defined in all contexts: admin, REST API, WP-CLI
+// eval, and template_redirect. Without this, direct calls to plugin classes via
+// wp eval fail with "Undefined constant" errors because Loader.php was previously
+// only loaded inside is_admin() — leaving WP-CLI and other non-admin contexts
+// without the constants they need.
+require_once(plugin_dir_path( __FILE__ ) . "includes/Loader.php");
+
 // admin
 if (is_admin()) {
-	require_once(plugin_dir_path( __FILE__ ) . "includes/Loader.php");
 	ABJ_404_Solution_WordPress_Connector::init();
 	ABJ_404_Solution_ViewUpdater::init();
+}
+
+// REST API — deferred to rest_api_init so DataAccess/PluginLogic are only loaded on actual REST requests.
+// Note: We call registerRoutes() directly here (not register()), because register() itself calls
+// add_action('rest_api_init', ...) which would queue routes AFTER rest_api_init has already fired.
+// Loader.php is already required unconditionally above, so constants are always defined.
+add_action('rest_api_init', function() {
+	$dao   = ABJ_404_Solution_DataAccess::getInstance();
+	$logic = ABJ_404_Solution_PluginLogic::getInstance();
+	$restController = new ABJ_404_Solution_RestApiController($dao, $logic);
+	$restController->registerRoutes();
+});
+
+// WP-CLI commands.
+// Loader.php is already required unconditionally above, so constants and classes are available.
+if (defined('WP_CLI') && WP_CLI) {
+	add_action('init', function() {
+		\WP_CLI::add_command('abj404', 'ABJ_404_Solution_WPCLICommands');
+	}, 1);
 }
 
 // ----
@@ -517,6 +550,17 @@ function abj404_networkUpgradeBackgroundListener() {
 add_action('abj404_cleanupCronAction', 'abj404_dailyMaintenanceCronJobListener');
 add_action('abj404_updateLogsHitsTableAction', 'abj404_updateLogsHitsTableListener');
 add_action('abj404_updatePermalinkCacheAction', 'abj404_updatePermalinkCacheListener', 10, 2);
+add_action('abj404_send_digest', 'abj404_sendDigestCronListener');
+if (!function_exists('abj404_sendDigestCronListener')) {
+/** @return void */
+function abj404_sendDigestCronListener() {
+	require_once(plugin_dir_path( __FILE__ ) . "includes/Loader.php");
+	$dao = ABJ_404_Solution_DataAccess::getInstance();
+	$logger = ABJ_404_Solution_Logging::getInstance();
+	$emailDigest = new ABJ_404_Solution_EmailDigest($dao, $logger);
+	$emailDigest->onCronSendDigest();
+}
+}
 	add_action('abj404_rebuild_ngram_cache_hook', 'abj404_rebuildNGramCacheListener', 10, 1);
 	add_action('abj404_network_activation_hook', 'abj404_networkActivationListener');
 	add_action('abj404_network_activation_background', 'abj404_networkActivationBackgroundListener');
@@ -538,13 +582,12 @@ if (!function_exists('abj404_override_plugin_locale')) {
  * @return string
  */
 function abj404_override_plugin_locale($locale, $domain) {
-	// Only override for our plugin's text domain
+	// Only override for our plugin's text domain.
+	// Use the value cached in $GLOBALS at plugin boot to avoid a redundant get_option() call.
 	if ($domain === '404-solution') {
-		$options = abj404_get_settings_options();
-
-		// Check if language override is set and not empty
-		if (is_array($options) && !empty($options['plugin_language_override']) && is_string($options['plugin_language_override'])) {
-			return $options['plugin_language_override'];
+		$override = isset($GLOBALS['abj404_plugin_language_override']) && is_string($GLOBALS['abj404_plugin_language_override']) ? $GLOBALS['abj404_plugin_language_override'] : '';
+		if ($override !== '') {
+			return $override;
 		}
 	}
 	return $locale;
@@ -603,6 +646,10 @@ if (!function_exists('abj404_show_plugin_db_notice')) {
 			$guidance = __('A temporary MySQL table was corrupted, usually caused by disk or hardware issues. The plugin cannot repair it. Please contact your hosting provider.', '404-solution');
 		} elseif ($type === 'log_table_full') {
 			$guidance = __('The 404 Solution log table is full. The plugin automatically trimmed the oldest 1,000 log entries to free space, but logging may still be limited. Please contact your hosting provider about disk space.', '404-solution');
+		} elseif ($type === 'stale_permalink_cache') {
+			$guidance = __('The permalink cache appears to be empty. Try rebuilding it from the Tools tab, or check that your site has enough disk space.', '404-solution');
+		} elseif ($type === 'lock_timeout') {
+			$guidance = __('A database lock wait timeout occurred. This is usually caused by another process holding a table lock on your database. It may resolve itself automatically, or contact your hosting provider if it persists.', '404-solution');
 		}
 		echo '<div class="notice notice-error"><p><strong>404 Solution:</strong> ' . esc_html($notice['message']) . '</p>';
 		if ($guidance !== '') {

@@ -40,6 +40,13 @@ class ABJ_404_Solution_ImportExportService {
     /** @return void */
     function doExport() {
         $format = isset($_REQUEST['export_format']) ? sanitize_text_field((string)$_REQUEST['export_format']) : 'native';
+
+        $serverFormats = array('htaccess', 'nginx', 'cloudflare', 'netlify', 'vercel');
+        if (in_array($format, $serverFormats, true)) {
+            $this->doServerFormatExport($format);
+            return;
+        }
+
         $tempFile = $this->getExportFilename($format);
 
         if ($format === 'redirection') {
@@ -67,6 +74,323 @@ class ABJ_404_Solution_ImportExportService {
         }
 
         $this->logger->infoMessage("I don't see any data to export.");
+    }
+
+    /**
+     * Serve a server-level or edge/CDN format export directly (no temp file needed).
+     *
+     * @param string $format One of: htaccess, nginx, cloudflare, netlify, vercel.
+     * @return void
+     */
+    private function doServerFormatExport($format) {
+        switch ($format) {
+            case 'htaccess':
+                $content  = $this->generateHtaccessRules();
+                $filename = 'redirects.htaccess';
+                $mime     = 'text/plain; charset=utf-8';
+                break;
+            case 'nginx':
+                $content  = $this->generateNginxRules();
+                $filename = 'redirects-nginx.conf';
+                $mime     = 'text/plain; charset=utf-8';
+                break;
+            case 'cloudflare':
+                $content  = $this->generateCloudflareWorkerScript();
+                $filename = 'redirects-worker.js';
+                $mime     = 'application/javascript; charset=utf-8';
+                break;
+            case 'netlify':
+                $content  = $this->generateNetlifyRedirects();
+                $filename = '_redirects';
+                $mime     = 'text/plain; charset=utf-8';
+                break;
+            case 'vercel':
+                $content  = $this->generateVercelRedirects();
+                $filename = 'vercel-redirects.json';
+                $mime     = 'application/json; charset=utf-8';
+                break;
+            default:
+                $this->logger->warn('Unknown server export format: ' . $format);
+                return;
+        }
+
+        header('Content-Description: File Transfer');
+        header('Content-Disposition: attachment; filename=' . $filename);
+        header('Expires: 0');
+        header('Cache-Control: must-revalidate');
+        header('Pragma: public');
+        header('Content-Length: ' . strlen($content));
+        header('Content-Type: ' . $mime);
+        echo $content;
+        exit();
+    }
+
+    /**
+     * Fetch all exportable (manual + regex, non-trashed) redirects and resolve
+     * destination URLs.
+     *
+     * Each returned element has:
+     *   source   string  The from-URL stored in the DB (relative path or full URL).
+     *   dest     string  Resolved destination URL or path.
+     *   code     int     HTTP status code (301, 302, 410, …).
+     *   is_regex bool    Whether this is a regex redirect.
+     *
+     * @return array<int, array{source: string, dest: string, code: int, is_regex: bool}>
+     */
+    function getExportableRedirects() {
+        global $wpdb;
+
+        $redirectsTable = $wpdb->prefix . 'abj404_redirects';
+        $cacheTable     = $wpdb->prefix . 'abj404_permalink_cache';
+
+        $manualStatus = defined('ABJ404_STATUS_MANUAL') ? (int)ABJ404_STATUS_MANUAL : 1;
+        $regexStatus  = defined('ABJ404_STATUS_REGEX')  ? (int)ABJ404_STATUS_REGEX  : 6;
+        $typeExternal = defined('ABJ404_TYPE_EXTERNAL') ? (int)ABJ404_TYPE_EXTERNAL : 4;
+        $typeHome     = defined('ABJ404_TYPE_HOME')     ? (int)ABJ404_TYPE_HOME     : 5;
+
+        $query = $wpdb->prepare(
+            "SELECT r.url, r.status, r.type, r.final_dest, r.code, r.disabled,
+                    pc.url AS cached_url
+             FROM {$redirectsTable} r
+             LEFT JOIN {$cacheTable} pc ON r.final_dest = pc.id
+             WHERE r.status IN (%d, %d)
+               AND (r.disabled IS NULL OR r.disabled = 0)
+               AND r.url IS NOT NULL AND r.url != ''
+             ORDER BY r.url",
+            $manualStatus,
+            $regexStatus
+        );
+
+        $rows = $wpdb->get_results($query, ARRAY_A);
+        if (!is_array($rows)) {
+            return array();
+        }
+
+        $result = array();
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $source   = isset($row['url']) ? (string)$row['url'] : '';
+            $isRegex  = (isset($row['status']) && (int)$row['status'] === $regexStatus);
+            $code     = isset($row['code']) ? (int)$row['code'] : 301;
+            $type     = isset($row['type']) ? (int)$row['type'] : 0;
+            $finalDest = isset($row['final_dest']) ? (string)$row['final_dest'] : '';
+
+            // Resolve destination
+            if ($code === 410 || $code === 451) {
+                $dest = $source;
+            } elseif (!empty($row['cached_url'])) {
+                $dest = (string)$row['cached_url'];
+            } elseif ($type === $typeExternal) {
+                $dest = $finalDest;
+            } elseif ($type === $typeHome) {
+                $dest = function_exists('home_url') ? home_url('/') : '/';
+            } elseif (is_numeric($finalDest) && (int)$finalDest > 0) {
+                // Post/page/term ID — try get_permalink
+                if (function_exists('get_permalink')) {
+                    $url = get_permalink((int)$finalDest);
+                    $dest = ($url !== false && is_string($url)) ? $url : ('/?p=' . $finalDest);
+                } else {
+                    $dest = '/?p=' . $finalDest;
+                }
+            } elseif ($finalDest !== '') {
+                $dest = $finalDest;
+            } else {
+                // No destination — skip
+                continue;
+            }
+
+            $result[] = array(
+                'source'   => $source,
+                'dest'     => $dest,
+                'code'     => $code,
+                'is_regex' => $isRegex,
+            );
+        }
+
+        return $result;
+    }
+
+    /**
+     * Generate Apache .htaccess redirect rules.
+     *
+     * @return string
+     */
+    function generateHtaccessRules() {
+        $redirects = $this->getExportableRedirects();
+        $lines = array('# 404 Solution redirects', 'RewriteEngine On', '');
+
+        foreach ($redirects as $r) {
+            $source = $r['source'];
+            $dest   = $r['dest'];
+            $code   = $r['code'];
+
+            // Strip leading slash for RewriteRule pattern (anchored with ^)
+            $pattern = ltrim($source, '/');
+
+            if (!$r['is_regex']) {
+                // Escape regex metacharacters in literal paths
+                $pattern = preg_quote($pattern, '/');
+                $pattern = $pattern . '/?';
+            }
+
+            if ($code === 410 || $code === 451) {
+                // Apache [G] flag sends a 410 Gone response; it is the closest equivalent for 451.
+                $lines[] = 'RewriteRule ^' . $pattern . '$ - [G,L]';
+            } elseif ($code === 0) {
+                // Meta Refresh requires serving an HTML response — not supported in .htaccess.
+                $lines[] = '# Meta Refresh: ' . $source . ' → ' . $dest . ' (serve HTML; not representable as a RewriteRule)';
+            } else {
+                $flag    = ($code === 301) ? 'R=301' : 'R=' . $code;
+                $lines[] = 'RewriteRule ^' . $pattern . '$ ' . $dest . ' [' . $flag . ',L]';
+            }
+        }
+
+        if (count($redirects) === 0) {
+            $lines[] = '# No manual redirects found.';
+        }
+
+        return implode("\n", $lines) . "\n";
+    }
+
+    /**
+     * Generate Nginx location block redirect rules.
+     *
+     * @return string
+     */
+    function generateNginxRules() {
+        $redirects = $this->getExportableRedirects();
+        $lines = array('# 404 Solution redirects', '');
+
+        foreach ($redirects as $r) {
+            $source = $r['source'];
+            $dest   = $r['dest'];
+            $code   = $r['code'];
+
+            if ($r['is_regex']) {
+                $directive = 'location ~* ' . $source;
+            } else {
+                $directive = 'location = ' . $source;
+            }
+
+            if ($code === 410 || $code === 451) {
+                $lines[] = $directive . ' { return ' . $code . '; }';
+            } elseif ($code === 0) {
+                // Meta Refresh requires serving an HTML response — not representable as a return directive.
+                $lines[] = '# Meta Refresh: ' . $source . ' → ' . $dest . ' (serve HTML; not representable as a return directive)';
+            } else {
+                $lines[] = $directive . ' { return ' . $code . ' ' . $dest . '; }';
+            }
+        }
+
+        if (count($redirects) === 0) {
+            $lines[] = '# No manual redirects found.';
+        }
+
+        return implode("\n", $lines) . "\n";
+    }
+
+    /**
+     * Generate a Cloudflare Workers JavaScript snippet for handling redirects.
+     *
+     * @return string
+     */
+    function generateCloudflareWorkerScript() {
+        $redirects = $this->getExportableRedirects();
+
+        $entries = array();
+        foreach ($redirects as $r) {
+            $sourceJson = json_encode($r['source'], JSON_UNESCAPED_SLASHES);
+            $destJson   = json_encode($r['dest'], JSON_UNESCAPED_SLASHES);
+            // Fall back to UTF-8 sanitization if json_encode fails on invalid bytes
+            if ($sourceJson === false) {
+                $sourceJson = json_encode(mb_convert_encoding($r['source'], 'UTF-8', 'UTF-8'), JSON_UNESCAPED_SLASHES);
+            }
+            if ($destJson === false) {
+                $destJson = json_encode(mb_convert_encoding($r['dest'], 'UTF-8', 'UTF-8'), JSON_UNESCAPED_SLASHES);
+            }
+            if ($sourceJson === false || $destJson === false) {
+                continue;
+            }
+            $code = (int)$r['code'];
+            $entries[] = "  " . $sourceJson . ": { dest: " . $destJson . ", status: " . $code . " }";
+        }
+
+        $map = implode(",\n", $entries);
+
+        $script  = "const REDIRECTS = {\n";
+        $script .= ($map !== '' ? $map . "\n" : '');
+        $script .= "};\n";
+        $script .= "\n";
+        $script .= "addEventListener('fetch', event => {\n";
+        $script .= "  event.respondWith(handleRequest(event.request));\n";
+        $script .= "});\n";
+        $script .= "\n";
+        $script .= "async function handleRequest(request) {\n";
+        $script .= "  const url = new URL(request.url);\n";
+        $script .= "  const rule = REDIRECTS[url.pathname] || REDIRECTS[url.pathname.replace(/\\/$/, '')];\n";
+        $script .= "  if (rule) {\n";
+        $script .= "    if (rule.status === 410 || rule.status === 451) return new Response(null, { status: rule.status });\n";
+        $script .= "    if (rule.status === 0) return new Response('<meta http-equiv=\"refresh\" content=\"0;url=' + rule.dest + '\">', { status: 200, headers: { 'Content-Type': 'text/html' } });\n";
+        $script .= "    return Response.redirect(rule.dest.startsWith('http') ? rule.dest : url.origin + rule.dest, rule.status);\n";
+        $script .= "  }\n";
+        $script .= "  return fetch(request);\n";
+        $script .= "}\n";
+
+        return $script;
+    }
+
+    /**
+     * Generate a Netlify _redirects file.
+     *
+     * @return string
+     */
+    function generateNetlifyRedirects() {
+        $redirects = $this->getExportableRedirects();
+        $lines = array('# 404 Solution redirects');
+
+        foreach ($redirects as $r) {
+            $source = $r['source'];
+            $dest   = $r['dest'];
+            $code   = (int)$r['code'];
+            $lines[] = $source . '  ' . $dest . '  ' . $code;
+        }
+
+        if (count($redirects) === 0) {
+            $lines[] = '# No manual redirects found.';
+        }
+
+        return implode("\n", $lines) . "\n";
+    }
+
+    /**
+     * Generate a Vercel redirects JSON array (for use in vercel.json).
+     *
+     * Note: Vercel does not natively support 410 Gone responses; those redirects
+     * are omitted from this export.
+     *
+     * @return string JSON array string.
+     */
+    function generateVercelRedirects() {
+        $redirects = $this->getExportableRedirects();
+        $entries = array();
+
+        foreach ($redirects as $r) {
+            if ($r['code'] === 410 || $r['code'] === 451 || $r['code'] === 0) {
+                // Vercel has no native 410/451/meta-refresh support; skip.
+                continue;
+            }
+            $entries[] = array(
+                'source'      => $r['source'],
+                'destination' => $r['dest'],
+                'permanent'   => ($r['code'] === 301),
+            );
+        }
+
+        $encoded = json_encode($entries, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        return is_string($encoded) ? $encoded : '[]';
     }
 
     /**
@@ -106,7 +430,11 @@ class ABJ_404_Solution_ImportExportService {
             }
 
             $regexFlag = (strtolower($status) === 'regex') ? '1' : '0';
-            fputcsv($out, array($from, $to, $regexFlag, '301'), ',', '"', '\\');
+            $code = isset($row[6]) ? trim((string)$row[6]) : '301';
+            if ($code === '' || !is_numeric($code)) {
+                $code = '301';
+            }
+            fputcsv($out, array($from, $to, $regexFlag, $code), ',', '"', '\\');
         }
 
         fclose($in);
@@ -299,6 +627,11 @@ class ABJ_404_Solution_ImportExportService {
                 $type = $typeTag;
                 $final_dest = (string)$postFromTag->term_id;
             } else {
+                // Slug doesn't resolve to any post/category/tag — use EXTERNAL
+                // so the path is used as-is by the redirect pipeline. Storing a
+                // non-numeric final_dest with TYPE_POST would cause the redirect
+                // to silently 404 (get_permalink() expects a numeric ID).
+                $type = ABJ404_TYPE_EXTERNAL;
                 $this->logger->warn(__("Couldn't find post from slug. slug:", '404-solution') . ' ' . $slug);
             }
         }
@@ -306,7 +639,9 @@ class ABJ_404_Solution_ImportExportService {
         if (!$dryRun) {
             $engine = isset($dataArray['engine']) && is_string($dataArray['engine']) && $dataArray['engine'] !== ''
                 ? $dataArray['engine'] : 'import';
-            $this->dao->setupRedirect($fromURL, (string)$status, (string)$type, (string)$final_dest, (string)301, 0, $engine);
+            $code = isset($dataArray['code']) && is_numeric($dataArray['code'])
+                ? (string)(int)$dataArray['code'] : '301';
+            $this->dao->setupRedirect($fromURL, (string)$status, (string)$type, (string)$final_dest, $code, 0, $engine);
         }
 
         return $anyIssuesToNote;
@@ -433,6 +768,11 @@ class ABJ_404_Solution_ImportExportService {
             $result['engine'] = trim((string)$row[$engineIndex]);
         }
 
+        $codeIndex = $this->findImportHeaderIndex($normalizedHeaders, array('code', 'redirect_code', 'http_code'));
+        if ($codeIndex !== -1 && array_key_exists($codeIndex, $row)) {
+            $result['code'] = trim((string)$row[$codeIndex]);
+        }
+
         return $result;
     }
 
@@ -455,8 +795,19 @@ class ABJ_404_Solution_ImportExportService {
      * @param array<int, string> $columns Already parsed CSV columns for one row.
      * @return array<string, string>
      */
-    private function mapImportRowWithoutHeaders($columns) {
+    function mapImportRowWithoutHeaders($columns) {
         $columns = array_values($columns);
+        if (count($columns) === 7) {
+            return array(
+                'from_url' => trim((string)$columns[0]),
+                'status'   => trim((string)$columns[1]),
+                'type'     => trim((string)$columns[2]),
+                'to_url'   => trim((string)$columns[3]),
+                'wp_type'  => trim((string)$columns[4]),
+                'engine'   => trim((string)$columns[5]),
+                'code'     => trim((string)$columns[6]),
+            );
+        }
         if (count($columns) === 6) {
             return array(
                 'from_url' => trim((string)$columns[0]),
@@ -482,7 +833,7 @@ class ABJ_404_Solution_ImportExportService {
                 'to_url'   => trim((string)$columns[1]),
             );
         }
-        return array('error' => sprintf(__('Invalid CSV format. %d columns found but 2, 5, or 6 expected.', '404-solution'), count($columns)));
+        return array('error' => sprintf(__('Invalid CSV format. %d columns found but 2, 5, 6, or 7 expected.', '404-solution'), count($columns)));
     }
 
     /**
@@ -491,7 +842,7 @@ class ABJ_404_Solution_ImportExportService {
      * @param resource $fileHandle
      * @return string
      */
-    private function detectCsvDelimiterFromFile($fileHandle) {
+    function detectCsvDelimiterFromFile($fileHandle) {
         while (($line = fgets($fileHandle)) !== false) {
             if (trim($line) === '') {
                 continue;

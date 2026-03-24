@@ -76,7 +76,11 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         $deletedCount = 0;
 
         // Calculate time threshold
-        $deletionDays = $options[$optionKey];
+        $rawDays = $options[$optionKey] ?? 0;
+        $deletionDays = intval(is_scalar($rawDays) ? $rawDays : 0);
+        if ($deletionDays <= 0) {
+            return 0;
+        }
         $deletionTime = $deletionDays * 86400;
         $then = $now - $deletionTime;
 
@@ -200,8 +204,9 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         	ABJ_404_Solution_Functions::safeUnlink($tempFile);
         }
         
-        // reset the crashed table count
+        // reset the crashed table count (both legacy scalar and per-table map)
         $options['repaired_count'] = 0;
+        $options['repaired_counts'] = array();
         $abj404logic->updateOptions($options);
 
         $duplicateRowsDeleted = $abj404dao->removeDuplicatesCron();
@@ -291,6 +296,11 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
             }
         }
         
+        // Flag redirects whose destination URL is generating 404s (dead-destination detection).
+        // This drives the "suspended redirect" warning in the admin table and allows
+        // the frontend pipeline to skip known-bad destinations.
+        $abj404dao->flagDeadDestinationRedirects();
+
         // add some entries to the permalink cache if necessary
         $abj404permalinkCache = ABJ_404_Solution_PermalinkCache::getInstance();
         $rowsUpdated = $abj404permalinkCache->updatePermalinkCache(15);
@@ -356,8 +366,10 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
                     "delete from {wp_abj404_redirects} where url = {url} and id != {original}",
                     array("url" => $url, "original" => $original)
                 );
-                $this->queryAndGetResults($queryl);
-                $rowsDeleted++;
+                $deleteResult = $this->queryAndGetResults($queryl);
+                $affected = isset($deleteResult['rows_affected']) && is_numeric($deleteResult['rows_affected'])
+                    ? (int)$deleteResult['rows_affected'] : 1;
+                $rowsDeleted += max($affected, 1);
             }
         }
 
@@ -379,9 +391,10 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
      * @param string $code
      * @param int $disabled
      * @param string|null $engine  The matching engine that created this redirect (null for manual/unknown)
+     * @param float|null $score   Match confidence score (0-100), NULL for manual redirects
      * @return int
      */
-    function setupRedirect($fromURL, $status, $type, $final_dest, $code, $disabled = 0, $engine = null) {
+    function setupRedirect($fromURL, $status, $type, $final_dest, $code, $disabled = 0, $engine = null, $score = null) {
         global $wpdb;
 
         // nonce is verified outside of this method. We can't verify here because 
@@ -435,6 +448,10 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
             if ($engine !== null) {
                 $insertData['engine'] = substr((string)$engine, 0, 64);
                 $insertFormats[] = '%s';
+            }
+            if ($score !== null) {
+                $insertData['score'] = round((float)$score, 2);
+                $insertFormats[] = '%f';
             }
             $wpdb->insert($redirectsTable, $insertData, $insertFormats);
 
@@ -492,6 +509,11 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
                 return false;
             }
             return is_object($term);
+        }
+
+        // Homepage is always a valid auto redirect destination.
+        if ($type === ABJ404_TYPE_HOME) {
+            return true;
         }
 
         // Auto redirects should not target other types.
@@ -662,6 +684,9 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
             $recognizedPostTypes .= "'" . trim($this->f->strtolower($postType)) . "', ";
         }
         $recognizedPostTypes = rtrim($recognizedPostTypes, ", ");
+        if ($recognizedPostTypes === '') {
+            return array();
+        }
         // ----------------
 
         if ($slug != "") {
@@ -756,9 +781,17 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
 
         // check for errors
         if ($wpdb->last_error) {
-            $this->logger->errorMessage("Error executing query. Err: " . $wpdb->last_error . ", Query: " . $query);
+            // "Unknown column 'plc.content_keywords'" occurs during the DB migration window
+            // when the column hasn't been added yet (e.g. sync lock was stuck for ~24h).
+            // Degrade to warning so it doesn't generate email reports for every 404 hit.
+            if (stripos($wpdb->last_error, 'unknown column') !== false &&
+                    stripos($wpdb->last_error, 'content_keywords') !== false) {
+                $this->logger->warn("content_keywords column not yet available (DB migration pending): " . $wpdb->last_error);
+            } else {
+                $this->logger->errorMessage("Error executing query. Err: " . $wpdb->last_error . ", Query: " . $query);
+            }
         }
-        
+
         return $rows;
     }
 
@@ -778,6 +811,9 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
             $recognizedPostTypes .= "'" . trim($this->f->strtolower($postType)) . "', ";
         }
         $recognizedPostTypes = rtrim($recognizedPostTypes, ", ");
+        if ($recognizedPostTypes === '') {
+            return array();
+        }
         // ----------------
 
         // load the query and do the replacements.
@@ -1021,4 +1057,134 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
      * @param array<int, mixed> $valueParams values to use to prepare the query.
      * @return int the count (result) of the query.
      */
+
+    /**
+     * Get all conditions for a redirect, ordered by sort_order.
+     *
+     * Returns an empty array when the redirect has no conditions or when the
+     * conditions table does not yet exist (graceful degradation).
+     *
+     * @param int $redirectId
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRedirectConditions(int $redirectId): array {
+        global $wpdb;
+
+        $table = $this->doTableNameReplacements('{wp_abj404_redirect_conditions}');
+
+        // Guard: conditions table may not exist on older installs before upgrade runs.
+        if (!$this->tableExists($table)) {
+            return [];
+        }
+
+        $sql = $wpdb->prepare(
+            "SELECT id, redirect_id, logic, condition_type, operator, value, sort_order
+             FROM {$table}
+             WHERE redirect_id = %d
+             ORDER BY sort_order ASC, id ASC",
+            $redirectId
+        );
+
+        $rows = $wpdb->get_results($sql, ARRAY_A);
+
+        if ($wpdb->last_error) {
+            $this->logger->warn("getRedirectConditions: DB error for redirect_id={$redirectId}: " . $wpdb->last_error);
+            return [];
+        }
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * Save conditions for a redirect (replaces all existing conditions).
+     *
+     * Passes through empty arrays safely — all existing conditions are deleted
+     * and nothing is inserted, which is the correct behaviour for "no conditions".
+     *
+     * @param int   $redirectId
+     * @param array<int, array<string, mixed>> $conditions  Array of condition arrays.
+     *              Each must contain: logic, condition_type, operator, value, sort_order.
+     * @return void
+     */
+    public function saveRedirectConditions(int $redirectId, array $conditions): void {
+        global $wpdb;
+
+        $table = $this->doTableNameReplacements('{wp_abj404_redirect_conditions}');
+
+        // Guard: conditions table may not exist yet.
+        if (!$this->tableExists($table)) {
+            $this->logger->warn("saveRedirectConditions: conditions table missing — skipping save for redirect_id={$redirectId}.");
+            return;
+        }
+
+        // Delete existing conditions for this redirect.
+        $wpdb->delete($table, ['redirect_id' => $redirectId], ['%d']);
+
+        if ($wpdb->last_error) {
+            $this->logger->warn("saveRedirectConditions: error deleting old conditions for redirect_id={$redirectId}: " . $wpdb->last_error);
+        }
+
+        if (empty($conditions)) {
+            return;
+        }
+
+        $allowedTypes = [
+            'login_status', 'user_role', 'referrer',
+            'user_agent', 'ip_range', 'http_header',
+        ];
+        $allowedOperators = [
+            'equals', 'contains', 'regex',
+            'not_equals', 'not_contains', 'cidr',
+        ];
+        $allowedLogic = ['AND', 'OR'];
+
+        foreach ($conditions as $index => $cond) {
+            if (!is_array($cond)) {
+                continue;
+            }
+
+            $logic    = isset($cond['logic']) && is_string($cond['logic'])
+                ? strtoupper(trim($cond['logic'])) : 'AND';
+            $type     = isset($cond['condition_type']) && is_string($cond['condition_type'])
+                ? trim($cond['condition_type']) : '';
+            $operator = isset($cond['operator']) && is_string($cond['operator'])
+                ? trim($cond['operator']) : 'equals';
+            $value    = isset($cond['value']) && is_string($cond['value'])
+                ? trim($cond['value']) : '';
+            $sortOrder = isset($cond['sort_order']) ? absint(is_scalar($cond['sort_order']) ? $cond['sort_order'] : 0) : $index;
+
+            // Validate required fields.
+            if (!in_array($logic, $allowedLogic, true)) {
+                $logic = 'AND';
+            }
+            if (!in_array($type, $allowedTypes, true)) {
+                $this->logger->warn("saveRedirectConditions: unknown condition_type '{$type}' — skipping.");
+                continue;
+            }
+            if (!in_array($operator, $allowedOperators, true)) {
+                $operator = 'equals';
+            }
+            // Truncate value to column max (1024 chars).
+            if (strlen($value) > 1024) {
+                $value = substr($value, 0, 1024);
+            }
+
+            $wpdb->insert(
+                $table,
+                [
+                    'redirect_id'    => $redirectId,
+                    'logic'          => $logic,
+                    'condition_type' => $type,
+                    'operator'       => $operator,
+                    'value'          => $value,
+                    'sort_order'     => $sortOrder,
+                ],
+                ['%d', '%s', '%s', '%s', '%s', '%d']
+            );
+
+            if ($wpdb->last_error) {
+                $this->logger->warn("saveRedirectConditions: error inserting condition #{$index} for redirect_id={$redirectId}: " . $wpdb->last_error);
+            }
+        }
+    }
 }

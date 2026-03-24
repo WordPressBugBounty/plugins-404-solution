@@ -798,6 +798,33 @@ msgstr "Beberapa alamat email dapat dipisahkan dengan koma (,). Alamat email \"d
 msgid "Never Used"
 msgstr "Tidak Pernah Digunakan"
 
+msgid "Confidence"
+msgstr "Kepercayaan"
+
+msgid "Confidence:"
+msgstr "Kepercayaan:"
+
+msgid "Match Confidence"
+msgstr "Kepercayaan Cocok"
+
+msgid "High (≥80%)"
+msgstr "Tinggi (≥80%)"
+
+msgid "Medium (50–79%)"
+msgstr "Sedang (50–79%)"
+
+msgid "Low (<50%)"
+msgstr "Rendah (<50%)"
+
+msgid "Manual (no score)"
+msgstr "Manual (tanpa skor)"
+
+msgid "Avg confidence: %s%%"
+msgstr "Kepercayaan rata-rata: %s%%"
+
+msgid "Manual redirect — no confidence score"
+msgstr "Pengalihan manual — tidak ada skor kepercayaan"
+
 msgid "New Redirect Added Successfully!"
 msgstr "Pengalihan Baru Berhasil Ditambahkan!"
 
@@ -2609,8 +2636,8 @@ msgstr "Format CSV tidak valid. Tidak dapat memetakan kolom sumber/tujuan."
 
 #: includes/ImportExport.php
 #, php-format
-msgid "Invalid CSV format. %d columns found but 2, 5, or 6 expected."
-msgstr "Format CSV tidak valid. %d kolom ditemukan, tetapi 2, 5, atau 6 yang diharapkan."
+msgid "Invalid CSV format. %d columns found but 2, 5, 6, or 7 expected."
+msgstr "Format CSV tidak valid. %d kolom ditemukan, tetapi 2, 5, 6, atau 7 yang diharapkan."
 
 #: includes/ShortCode.php
 msgid "Loading page suggestions..."
@@ -2632,3 +2659,738 @@ msgstr "Tabel sementara database rusak — ini biasanya disebabkan oleh disk yan
 msgid "The 404 Solution log table is full and cannot accept new entries. This is usually caused by a full disk. Please contact your host or manually prune the logs table."
 msgstr "Tabel log 404 Solution penuh dan tidak dapat menerima entri baru. Ini biasanya disebabkan oleh disk yang penuh. Hubungi penyedia hosting Anda atau hapus tabel log secara manual."
 
+
+#: includes/PermalinkCache.php
+msgid "Permalink cache appears empty after rebuild — suggestions may be degraded. Try rebuilding again or check available disk space."
+msgstr "Cache permalink tampak kosong setelah pembangunan ulang — saran mungkin terdegradasi. Coba bangun ulang lagi atau periksa ruang disk yang tersedia."
+
+#: 404-solution.php
+msgid "The permalink cache appears to be empty. Try rebuilding it from the Tools tab, or check that your site has enough disk space."
+msgstr "Cache permalink tampak kosong. Coba bangun ulang dari tab Alat, atau periksa apakah situs Anda memiliki ruang disk yang cukup."
+
+#: includes/ViewTrait_RedirectsTable.php
+msgid "Destination returned 404 recently — redirect suspended until destination is restored."
+msgstr "Tujuan mengembalikan 404 baru-baru ini — pengalihan ditangguhkan sampai tujuan dipulihkan."
+
+# Strings added for new features (3.3.8)
+
+msgid "A database lock wait timeout occurred. If this persists, contact your host — another process may be holding a long-running lock."
+msgstr "A database lock wait timeout occurred. If this persists, contact your host — another process may be holding a long-running lock."
+
+msgid "The InnoDB tablespace appears to be exhausted. Deleting plugin data will NOT free this space. Contact your hosting provider to expand the InnoDB tablespace (ibdata1)."
+msgstr "The InnoDB tablespace appears to be exhausted. Deleting plugin data will NOT free this space. Contact your hosting provider to expand the InnoDB tablespace (ibdata1)."
+
+msgid "Email notification frequency"
+msgstr "Email notification frequency"
+
+msgid "Instant (when threshold exceeded)"
+msgstr "Instant (when threshold exceeded)"
+
+msgid "Daily digest"
+msgstr "Daily digest"
+
+msgid "Weekly digest"
+msgstr "Weekly digest"
+
+msgid "Choose how often to receive email notifications about captured 404s."
+msgstr "Choose how often to receive email notifications about captured 404s."
+
+msgid "Attach PDF report to digest email"
+msgstr "Attach PDF report to digest email"
+
+msgid "When enabled, a PDF summary is attached to each digest email (daily or weekly digests only)."
+msgstr "When enabled, a PDF summary is attached to each digest email (daily or weekly digests only)."
+
+msgid "Temporary 307 (preserve method)"
+msgstr "Temporary 307 (preserve method)"
+
+msgid "Permanent 308 (preserve method)"
+msgstr "Permanent 308 (preserve method)"
+
+msgid "Loading chart data…"
+msgstr "Loading chart data…"
+
+msgid "Could not load chart data."
+msgstr "Could not load chart data."
+
+msgid "404 Hits per Day"
+msgstr "404 Hits per Day"
+
+msgid "Redirects per Day"
+msgstr "Redirects per Day"
+
+msgid "New Captures per Day"
+msgstr "New Captures per Day"
+
+msgid "Trends (Last 30 Days)"
+msgstr "Trends (Last 30 Days)"
+
+msgid "Trend Analytics"
+msgstr "Analitik Tren"
+
+msgid "7 days"
+msgstr "7 hari"
+
+msgid "30 days"
+msgstr "30 hari"
+
+msgid "90 days"
+msgstr "90 hari"
+
+msgid "Period"
+msgstr "Periode"
+
+msgid "No broken internal links found."
+msgstr "No broken internal links found."
+
+msgid "Found %1$d broken internal link(s) across %2$d post(s)/page(s)."
+msgstr "Found %1$d broken internal link(s) across %2$d post(s)/page(s)."
+
+msgid "Post/Page"
+msgstr "Post/Page"
+
+msgid "Broken URL"
+msgstr "Broken URL"
+
+msgid "404 Hits"
+msgstr "404 Hits"
+
+msgid "Broken Internal Links"
+msgstr "Broken Internal Links"
+
+
+msgid "Migrate from Another Plugin"
+msgstr "Migrate from Another Plugin"
+
+msgid "Rank Math"
+msgstr "Rank Math"
+
+msgid "Yoast SEO Premium"
+msgstr "Yoast SEO Premium"
+
+msgid "AIOSEO"
+msgstr "AIOSEO"
+
+msgid "Safe Redirect Manager"
+msgstr "Safe Redirect Manager"
+
+msgid "Redirection Plugin"
+msgstr "Redirection Plugin"
+
+msgid "No supported redirect plugins detected on this site."
+msgstr "No supported redirect plugins detected on this site."
+
+msgid "Supported plugins: Rank Math, Yoast SEO Premium, AIOSEO, Safe Redirect Manager, Redirection."
+msgstr "Supported plugins: Rank Math, Yoast SEO Premium, AIOSEO, Safe Redirect Manager, Redirection."
+
+msgid "Detected redirect plugins:"
+msgstr "Detected redirect plugins:"
+
+msgid "Source plugin:"
+msgstr "Source plugin:"
+
+msgid "Import Redirects"
+msgstr "Import Redirects"
+
+msgid "This will import all active redirects from the selected plugin into 404 Solution. Regex and redirect codes are preserved."
+msgstr "This will import all active redirects from the selected plugin into 404 Solution. Regex and redirect codes are preserved."
+
+msgid "Temporary Redirect (preserve method)"
+msgstr "Temporary Redirect (preserve method)"
+
+msgid "Permanent Redirect (preserve method)"
+msgstr "Permanent Redirect (preserve method)"
+
+msgid "Gone (resource permanently removed)"
+msgstr "Gone (resource permanently removed)"
+
+msgid "Conditions (optional)"
+msgstr "Conditions (optional)"
+
+msgid "This redirect only fires when all conditions are met. Leave empty to always redirect."
+msgstr "This redirect only fires when all conditions are met. Leave empty to always redirect."
+
+msgid "+ Add Condition"
+msgstr "+ Add Condition"
+
+msgid "Logic"
+msgstr "Logic"
+
+msgid "AND"
+msgstr "AND"
+
+msgid "OR"
+msgstr "OR"
+
+msgid "Login Status"
+msgstr "Login Status"
+
+msgid "User Role"
+msgstr "User Role"
+
+msgid "Referrer URL"
+msgstr "Referrer URL"
+
+msgid "User Agent"
+msgstr "User Agent"
+
+msgid "IP Range (CIDR)"
+msgstr "IP Range (CIDR)"
+
+msgid "HTTP Header"
+msgstr "HTTP Header"
+
+msgid "Condition type"
+msgstr "Condition type"
+
+msgid "— Select type —"
+msgstr "— Select type —"
+
+msgid "equals"
+msgstr "equals"
+
+msgid "not equals"
+msgstr "not equals"
+
+msgid "contains"
+msgstr "contains"
+
+msgid "does not contain"
+msgstr "does not contain"
+
+msgid "matches regex"
+msgstr "matches regex"
+
+msgid "Operator"
+msgstr "Operator"
+
+msgid "Value"
+msgstr "Value"
+
+msgid "Condition value"
+msgstr "Condition value"
+
+msgid "Remove condition"
+msgstr "Remove condition"
+
+msgid "Remove"
+msgstr "Remove"
+
+msgid "Auto-matched by:"
+msgstr "Auto-matched by:"
+
+msgid "Error: Invalid email notification frequency selected"
+msgstr "Error: Invalid email notification frequency selected"
+
+msgid "Error: Digest limit must be a number greater than or equal to 1"
+msgstr "Error: Digest limit must be a number greater than or equal to 1"
+
+msgid "Google Search Console credentials saved."
+msgstr "Google Search Console credentials saved."
+
+msgid "Error: No source plugin specified."
+msgstr "Error: No source plugin specified."
+
+msgid "Error: Unknown source plugin \"%s\"."
+msgstr "Error: Unknown source plugin \"%s\"."
+
+msgid "Insufficient permissions."
+msgstr "Insufficient permissions."
+
+msgid "Security check failed."
+msgstr "Security check failed."
+
+msgid "OAuth token exchange failed."
+msgstr "OAuth token exchange failed."
+
+msgid "Google Search Console"
+msgstr "Google Search Console"
+
+msgid "Google Search Console Integration"
+msgstr "Google Search Console Integration"
+
+msgid "Connect to Google Search Console to see which broken URLs were getting real search traffic."
+msgstr "Connect to Google Search Console to see which broken URLs were getting real search traffic."
+
+msgid "Setup steps:"
+msgstr "Setup steps:"
+
+msgid "Create a project in %s."
+msgstr "Create a project in %s."
+
+msgid "Enable the \"Google Search Console API\"."
+msgstr "Enable the \"Google Search Console API\"."
+
+msgid "Create OAuth 2.0 credentials (Web application type)."
+msgstr "Create OAuth 2.0 credentials (Web application type)."
+
+msgid "Add this Authorized Redirect URI: %s"
+msgstr "Add this Authorized Redirect URI: %s"
+
+msgid "Enter your Client ID and Client Secret below."
+msgstr "Enter your Client ID and Client Secret below."
+
+msgid "Client ID"
+msgstr "Client ID"
+
+msgid "Client Secret"
+msgstr "Client Secret"
+
+msgid "Search Console Site URL"
+msgstr "Search Console Site URL"
+
+msgid "The site URL as registered in Search Console (e.g. https://example.com/)."
+msgstr "The site URL as registered in Search Console (e.g. https://example.com/)."
+
+msgid "Save Credentials"
+msgstr "Save Credentials"
+
+msgid "Credentials saved."
+msgstr "Credentials saved."
+
+msgid "Click the button below to authorize access to your Search Console data."
+msgstr "Click the button below to authorize access to your Search Console data."
+
+msgid "Authorize with Google"
+msgstr "Authorize with Google"
+
+msgid "Remove Credentials"
+msgstr "Remove Credentials"
+
+msgid "Connected to Google Search Console."
+msgstr "Connected to Google Search Console."
+
+msgid "Search traffic data for your captured 404 URLs is shown below. Data is cached for 1 hour."
+msgstr "Search traffic data for your captured 404 URLs is shown below. Data is cached for 1 hour."
+
+msgid "Disconnect"
+msgstr "Disconnect"
+
+msgid "Connected to Google Search Console"
+msgstr "Terhubung ke Google Search Console"
+
+msgid "Credentials saved — authorization required"
+msgstr "Kredensial disimpan — otorisasi diperlukan"
+
+msgid "Authorization failed"
+msgstr "Otorisasi gagal"
+
+msgid "Authorization was denied or cancelled."
+msgstr "Otorisasi ditolak atau dibatalkan."
+
+msgid "Try Again"
+msgstr "Coba lagi"
+
+msgid "Copy"
+msgstr "Salin"
+
+msgid "Copied!"
+msgstr "Disalin!"
+
+msgid "Add this Authorized Redirect URI to your OAuth client:"
+msgstr "Tambahkan URI Redirect Resmi ini ke klien OAuth Anda:"
+
+msgid "Click 'Try Again' to retry authorization, or 'Remove Credentials' to start over."
+msgstr "Klik 'Coba lagi' untuk mencoba ulang otorisasi, atau 'Hapus Kredensial' untuk memulai ulang."
+
+msgid "404 URLs with Search Traffic (last 90 days)"
+msgstr "404 URLs with Search Traffic (last 90 days)"
+
+msgid "Clicks"
+msgstr "Clicks"
+
+msgid "Impressions"
+msgstr "Impressions"
+
+msgid "No search traffic data found for your captured 404 URLs in the last 90 days."
+msgstr "Tidak ada data lalu lintas penelusuran yang ditemukan untuk URL 404 yang ditangkap dalam 90 hari terakhir."
+
+msgid "Avg. Position"
+msgstr "Avg. Position"
+
+msgid "The \"from\" URL is required."
+msgstr "The \"from\" URL is required."
+
+msgid "The \"to\" URL is required."
+msgstr "The \"to\" URL is required."
+
+msgid "Failed to create redirect."
+msgstr "Failed to create redirect."
+
+msgid "Invalid redirect ID."
+msgstr "Invalid redirect ID."
+
+msgid "Both \"from\" and \"to\" parameters are required."
+msgstr "Both \"from\" and \"to\" parameters are required."
+
+msgid "Invalid captured 404 ID."
+msgstr "Invalid captured 404 ID."
+
+msgid "Captured 404 not found."
+msgstr "Captured 404 not found."
+
+msgid "The captured 404 record has no URL."
+msgstr "The captured 404 record has no URL."
+
+msgid "The \"url\" parameter is required."
+msgstr "The \"url\" parameter is required."
+
+msgid "No captured 404s in this period."
+msgstr "No captured 404s in this period."
+
+msgid "404 Solution Digest"
+msgstr "404 Solution Digest"
+
+msgid "Digest Report"
+msgstr "Laporan Ringkasan"
+
+msgid "404 URLs"
+msgstr "URL 404"
+
+msgid "Redirected"
+msgstr "Dialihkan"
+
+msgid "Configured"
+msgstr "Dikonfigurasi"
+
+msgid "Resolution Rate"
+msgstr "Tingkat Penyelesaian"
+
+#. translators: 1: number of resolved URLs, 2: total number of URLs
+msgid "%1$d of %2$d URLs handled"
+msgstr "%1$d dari %2$d URL ditangani"
+
+msgid "Summary"
+msgstr "Summary"
+
+msgid "Top Captured 404 URLs"
+msgstr "Top Captured 404 URLs"
+
+msgid "First Seen"
+msgstr "First Seen"
+
+msgid "View Captured 404s"
+msgstr "View Captured 404s"
+
+msgid "Manage Settings"
+msgstr "Kelola Pengaturan"
+
+msgid "To stop these emails, update your notification settings."
+msgstr "Untuk menghentikan email ini, perbarui pengaturan notifikasi Anda."
+
+msgid "To stop receiving these emails, update your notification settings."
+msgstr "To stop receiving these emails, update your notification settings."
+
+msgid "Manage settings"
+msgstr "Manage settings"
+
+msgid "Sent"
+msgstr "Sent"
+
+msgid "Plugin"
+msgstr "Plugin"
+
+msgid "404 Solution Digest — %s"
+msgstr "404 Solution Digest — %s"
+
+msgid "Advanced Options"
+msgstr "Opsi Lanjutan"
+
+msgid "Active From (optional)"
+msgstr "Active From (optional)"
+
+msgid "Leave blank to activate immediately"
+msgstr "Leave blank to activate immediately"
+
+msgid "Active Until (optional)"
+msgstr "Active Until (optional)"
+
+msgid "Leave blank to never expire"
+msgstr "Leave blank to never expire"
+
+msgid "A database lock wait timeout occurred. This is usually caused by another process holding a table lock on your database. It may resolve itself automatically, or contact your hosting provider if it persists."
+msgstr "A database lock wait timeout occurred. This is usually caused by another process holding a table lock on your database. It may resolve itself automatically, or contact your hosting provider if it persists."
+
+msgid "Expire auto-redirects after"
+msgstr "Expire auto-redirects after"
+
+msgid "days (0 to disable)"
+msgstr "days (0 to disable)"
+
+msgid "Auto-created redirects older than this many days will be automatically moved to trash."
+msgstr "Auto-created redirects older than this many days will be automatically moved to trash."
+
+msgid "Export format:"
+msgstr "Export format:"
+
+msgid "Native CSV (404 Solution)"
+msgstr "Native CSV (404 Solution)"
+
+msgid "Redirection Plugin CSV"
+msgstr "Redirection Plugin CSV"
+
+msgid "Apache .htaccess"
+msgstr "Apache .htaccess"
+
+msgid "Nginx config"
+msgstr "Nginx config"
+
+msgid "Cloudflare Workers script"
+msgstr "Cloudflare Workers script"
+
+msgid "Netlify _redirects"
+msgstr "Netlify _redirects"
+
+msgid "Vercel vercel.json"
+msgstr "Vercel vercel.json"
+
+# 410 Gone page strings
+msgid "This content has been permanently removed."
+msgstr "Konten ini telah dihapus secara permanen."
+
+msgid "The page you requested no longer exists and has not been moved to a new location."
+msgstr "Halaman yang Anda minta tidak lagi ada dan tidak dipindahkan ke lokasi baru."
+
+msgid "Back to home page"
+msgstr "Kembali ke beranda"
+
+# 451 Unavailable For Legal Reasons strings
+msgid "451 Unavailable For Legal Reasons"
+msgstr "451 Tidak Tersedia karena Alasan Hukum"
+
+msgid "This content is unavailable due to a legal demand."
+msgstr "Konten ini tidak tersedia karena tuntutan hukum."
+
+msgid "Unavailable For Legal Reasons"
+msgstr "Tidak Tersedia karena Alasan Hukum"
+
+# Trash/deletion redirect strings
+msgid "Create redirect when a page is trashed or deleted"
+msgstr "Buat redirect saat halaman dihapus ke sampah atau dihapus permanen"
+
+msgid "When a published page is moved to trash or permanently deleted, create a redirect from its old URL to the homepage."
+msgstr "Ketika halaman yang diterbitkan dipindahkan ke sampah atau dihapus secara permanen, buat redirect dari URL lamanya ke halaman utama."
+
+# Meta Refresh redirect strings
+msgid "0 Meta Refresh"
+msgstr "0 Meta Refresh"
+
+msgid "Meta Refresh"
+msgstr "Meta Refresh"
+
+msgid "Redirecting…"
+msgstr "Redirecting…"
+
+msgid "You are being redirected. Click the link if not redirected automatically."
+msgstr "You are being redirected. Click the link if not redirected automatically."
+
+# Engine Profile admin section strings
+msgid "Engine Profiles"
+msgstr "Profil Mesin"
+
+msgid "By default, when a visitor hits a 404 URL, all suggestion methods run: slug matching, spelling correction, title matching, content search, category/tag matching, URL fixing, and archive fallback. Engine Profiles let you override this for specific sections of your site — choose exactly which methods run when a 404 URL falls within a URL pattern you define."
+msgstr "Secara default, ketika pengunjung mengakses URL 404, semua metode saran akan berjalan: pencocokan slug, koreksi ejaan, pencocokan judul, pencarian konten, pencocokan kategori/tag, perbaikan URL, dan fallback arsip. Profil Mesin memungkinkan Anda mengganti perilaku ini untuk bagian tertentu dari situs Anda — pilih dengan tepat metode mana yang berjalan ketika URL 404 berada dalam pola URL yang Anda tentukan."
+
+msgid "Example 1:"
+msgstr "Contoh 1:"
+
+msgid "Your store lives at /products/. Spelling correction works great on blog posts, but on a product section you want only exact slug matching and URL fixing — fuzzy spelling suggestions might point to the wrong product. Create a profile with the URL pattern /products/* and check only \"Slug Matching\" and \"URL Fix\"."
+msgstr "Toko Anda berada di /products/. Koreksi ejaan bekerja dengan baik untuk artikel blog, tetapi di bagian produk Anda hanya menginginkan pencocokan slug yang tepat dan perbaikan URL — saran ejaan yang tidak tepat dapat mengarah ke produk yang salah. Buat profil dengan pola URL /products/* dan centang hanya \"Pencocokan Slug\" dan \"Perbaikan URL\"."
+
+msgid "Example 2:"
+msgstr "Contoh 2:"
+
+msgid "You have a documentation archive at /docs/ that you recently restructured. The content is too technical for spelling suggestions to be useful, so you enable only the Archive Fallback engine there."
+msgstr "Anda memiliki arsip dokumentasi di /docs/ yang baru-baru ini Anda restrukturisasi. Kontennya terlalu teknis agar saran ejaan berguna, jadi Anda hanya mengaktifkan mesin fallback arsip di sana."
+
+msgid "How profiles are applied:"
+msgstr "Cara profil diterapkan:"
+
+msgid "Each profile has a URL pattern (e.g. /products/*) that is tested against the incoming 404 URL."
+msgstr "Setiap profil memiliki pola URL (mis. /products/*) yang diuji terhadap URL 404 yang masuk."
+
+msgid "Profiles are checked in priority order — lower number means checked first."
+msgstr "Profil diperiksa dalam urutan prioritas — nomor yang lebih kecil diperiksa lebih dulu."
+
+msgid "The first profile whose URL pattern matches the 404 URL wins. Only the engines you selected in that profile will run."
+msgstr "Profil pertama yang pola URL-nya cocok dengan URL 404 akan menang. Hanya mesin yang Anda pilih dalam profil tersebut yang akan berjalan."
+
+msgid "If none of your profiles match the 404 URL, the default behavior applies: all engines run."
+msgstr "Jika tidak ada profil Anda yang cocok dengan URL 404, perilaku default berlaku: semua mesin berjalan."
+
+msgid "Most sites do not need Engine Profiles. They are for advanced scenarios where one section of your site needs different suggestion logic than the rest."
+msgstr "Sebagian besar situs tidak memerlukan Profil Mesin. Profil ini untuk skenario lanjutan di mana satu bagian situs Anda memerlukan logika saran yang berbeda dari bagian lainnya."
+
+msgid "Name"
+msgstr "Name"
+
+msgid "URL Pattern"
+msgstr "URL Pattern"
+
+msgid "Regex"
+msgstr "Regex"
+
+msgid "Engines"
+msgstr "Engines"
+
+msgid "Priority"
+msgstr "Priority"
+
+msgid "Active"
+msgstr "Active"
+
+msgid "Actions"
+msgstr "Actions"
+
+msgid "No engine profiles defined."
+msgstr "Tidak ada profil mesin yang ditentukan."
+
+msgid "Add Engine Profile"
+msgstr "Tambah Profil Mesin"
+
+msgid "Edit Engine Profile"
+msgstr "Edit Profil Mesin"
+
+msgid "e.g. Products section"
+msgstr "mis. Bagian produk"
+
+msgid "e.g. /products/* or ^/products/"
+msgstr "mis. /products/* atau ^/products/"
+
+msgid "Use * as wildcard for simple patterns. Check &quot;Regex&quot; for full regex patterns."
+msgstr "Gunakan * sebagai wildcard untuk pola sederhana. Centang \"Regex\" untuk pola ekspresi reguler penuh."
+
+msgid "Pattern is a regular expression"
+msgstr "Pola adalah ekspresi reguler"
+
+msgid "Enabled Engines"
+msgstr "Mesin Aktif"
+
+msgid "Select which engines should run for URLs matching this profile. Leave all unchecked to run all engines."
+msgstr "Pilih mesin mana yang harus berjalan untuk URL yang cocok dengan profil ini. Biarkan semua tidak dicentang untuk menjalankan semua mesin."
+
+msgid "Slug Matching"
+msgstr "Pencocokan Slug"
+
+msgid "Spelling Matching"
+msgstr "Pencocokan Ejaan"
+
+msgid "Title Matching"
+msgstr "Pencocokan Judul"
+
+msgid "Content Matching"
+msgstr "Pencocokan Konten"
+
+msgid "Category/Tag Matching"
+msgstr "Pencocokan Kategori/Tag"
+
+msgid "URL Fix"
+msgstr "Perbaikan URL"
+
+msgid "Archive Fallback"
+msgstr "Cadangan Arsip"
+
+msgid "Lower number = higher priority. First matching profile wins."
+msgstr "Angka lebih kecil = prioritas lebih tinggi. Profil yang cocok pertama menang."
+
+msgid "Profile is active"
+msgstr "Profil aktif"
+
+msgid "Save Profile"
+msgstr "Simpan Profil"
+
+msgid "Profile name is required."
+msgstr "Nama profil diperlukan."
+
+msgid "URL pattern is required."
+msgstr "Pola URL diperlukan."
+
+msgid "Profile saved."
+msgstr "Profil disimpan."
+
+msgid "Failed to save profile."
+msgstr "Gagal menyimpan profil."
+
+msgid "Delete this engine profile?"
+msgstr "Hapus profil mesin ini?"
+
+msgid "Invalid regular expression pattern."
+msgstr "Pola ekspresi reguler tidak valid."
+
+msgid "Failed to save engine profile."
+msgstr "Gagal menyimpan profil mesin."
+
+msgid "Invalid profile ID."
+msgstr "ID profil tidak valid."
+
+msgid "Failed to delete engine profile."
+msgstr "Gagal menghapus profil mesin."
+
+msgid "Send Feedback"
+msgstr "Kirim Masukan"
+
+msgid "301"
+msgstr "301"
+
+msgid "Permanent"
+msgstr "Permanen"
+
+msgid "302"
+msgstr "302"
+
+msgid "Temporary"
+msgstr "Sementara"
+
+msgid "307"
+msgstr "307"
+
+msgid "Temp, method-safe"
+msgstr "Temp, aman metode"
+
+msgid "308"
+msgstr "308"
+
+msgid "Perm, method-safe"
+msgstr "Perm, aman metode"
+
+msgid "410"
+msgstr "410"
+
+msgid "Gone"
+msgstr "Hilang"
+
+msgid "451"
+msgstr "451"
+
+msgid "Legal reasons"
+msgstr "Alasan hukum"
+
+msgid "HTTP 200 + meta tag"
+msgstr "HTTP 200 + tag meta"
+
+msgid "Use 301 for permanent page moves. Use 302 for A/B tests or seasonal pages."
+msgstr "Gunakan 301 untuk pemindahan permanen. Gunakan 302 untuk pengujian A/B atau halaman musiman."
+
+msgid "Back to Redirects"
+msgstr "Kembali ke pengalihan"
+
+msgid "Preview Import"
+msgstr "Pratinjau Impor"
+
+msgid "Confirm Import"
+msgstr "Konfirmasi Impor"
+
+msgid "Back"
+msgstr "Kembali"
+
+msgid "Found %d redirect(s) from %s — proceed with import?"
+msgstr "Ditemukan %d pengalihan dari %s — lanjutkan impor?"
+
+msgid "No redirects found in %s. Nothing to import."
+msgstr "Tidak ada pengalihan ditemukan di %s. Tidak ada yang diimpor."
+
+msgid "Could not fetch preview. Please try again."
+msgstr "Tidak dapat mengambil pratinjau. Silakan coba lagi."
+
+msgid "Invalid source plugin."
+msgstr "Plugin sumber tidak valid."

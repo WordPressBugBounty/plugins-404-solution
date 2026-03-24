@@ -6,6 +6,59 @@ if (!defined('ABSPATH')) {
 
 trait ABJ_404_Solution_DataAccess_MaintenanceTrait {
 
+    /**
+     * Tables that may be safely dropped and recreated after repeated repair failures.
+     * Tables NOT in this list (e.g. redirects, engine_profiles, redirect_conditions,
+     * ngram_cache) will never be auto-dropped because they contain user-configured
+     * data or are expensive to rebuild.
+     *
+     * New tables default to NOT droppable (safe-by-default).
+     *
+     * @var array<int, string>
+     */
+    private static $droppableTables = array(
+        'logsv2', 'permalink_cache', 'spelling_cache',
+        'lookup', 'logs_hits', 'view_cache',
+    );
+
+    /**
+     * Check whether a table name matches one of the droppable table suffixes.
+     *
+     * @param string $tableName Sanitized table name.
+     * @return bool
+     */
+    private function isDroppableTable(string $tableName): bool {
+        foreach (self::$droppableTables as $suffix) {
+            if (substr($tableName, -strlen($suffix)) === $suffix) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Validate and sanitize a table name extracted from error messages or SQL.
+     * Only allows alphanumeric characters and underscores, and requires 'abj404' in the name.
+     *
+     * @param string $name Raw table name
+     * @return string|null Sanitized name, or null if invalid
+     */
+    private function sanitizeTableName(string $name): ?string {
+        // Strip any backticks that may already be present
+        $name = trim($name, '`');
+        // Only allow safe characters
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', $name)) {
+            $this->logger->warn("sanitizeTableName: rejected invalid table name: " . substr($name, 0, 100));
+            return null;
+        }
+        // Must be a plugin table
+        if (strpos($name, 'abj404') === false) {
+            $this->logger->warn("sanitizeTableName: rejected non-plugin table name: " . $name);
+            return null;
+        }
+        return $name;
+    }
+
     /** @param string $errorMessage @return void */
     function repairTable(string $errorMessage): void {
 
@@ -29,40 +82,57 @@ trait ABJ_404_Solution_DataAccess_MaintenanceTrait {
         }
 
         if (!empty($matches) && count($matches) > 2 && $this->f->strlen($matches[2]) > 0) {
-            $tableToRepair = $matches[2];
-            if ($this->f->strpos($tableToRepair, "abj404") !== false) {
-                $query = "repair table " . $tableToRepair;
+            $rawTableName = $matches[2];
+            $tableToRepair = $this->sanitizeTableName($rawTableName);
+            if ($tableToRepair !== null) {
+                $query = "REPAIR TABLE `{$tableToRepair}`";
                 $result = $this->queryAndGetResults($query, array('log_errors' => false));
                 $this->logger->infoMessage("Attempted to repair table " . $tableToRepair . ". Result: " .
                         json_encode($result));
 
-                // track how many times we've tried to repair something.
-                // only for the certain tables. Exclude the redirects table because people
-                // may have spent time creating entries there. Other tables are generated
-                // automatically.
-                if (strpos($tableToRepair, 'redirects') === false) {
+                // Track repair attempts only for tables that are safe to drop+recreate.
+                // Tables not in the droppable whitelist (e.g. redirects, engine_profiles,
+                // redirect_conditions, ngram_cache) are never auto-dropped because they
+                // contain user data or are expensive to rebuild.
+                if ($this->isDroppableTable($tableToRepair)) {
 	                $abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
 	                $options = $abj404logic->getOptions();
-	                if (!array_key_exists('repaired_count', $options)) {
-	                	$options['repaired_count'] = 0;
+
+	                // Migrate from old global scalar to per-table counts
+	                if (isset($options['repaired_count']) && is_scalar($options['repaired_count'])) {
+	                	unset($options['repaired_count']);
 	                }
-	                $options['repaired_count'] = (is_scalar($options['repaired_count']) ? intval($options['repaired_count']) : 0) + 1;
+	                if (!isset($options['repaired_counts']) || !is_array($options['repaired_counts'])) {
+	                	$options['repaired_counts'] = array();
+	                }
+
+	                $tableKey = $tableToRepair;
+	                $prevCount = isset($options['repaired_counts'][$tableKey]) ? intval($options['repaired_counts'][$tableKey]) : 0;
+	                $options['repaired_counts'][$tableKey] = $prevCount + 1;
 	                $abj404logic->updateOptions($options);
 
-	                if (intval($options['repaired_count']) > 3 &&
-	                		intval($options['repaired_count']) < 7) {
-
-	                	$upgradesEtc = ABJ_404_Solution_DatabaseUpgradesEtc::getInstance();
-	                	$this->queryAndGetResults('drop table ' . $tableToRepair);
-	                	$upgradesEtc->createDatabaseTables(false);
+	                if ($prevCount + 1 > 3 && $prevCount + 1 < 7) {
+	                	// Before dropping, check if the last error was disk-full.
+	                	// Dropping + recreating on a full disk will just fail again.
+	                	$lowerError = strtolower($errorMessage);
+	                	if (strpos($lowerError, 'is full') !== false ||
+	                		strpos($lowerError, 'no space left') !== false ||
+	                		strpos($lowerError, 'table full') !== false) {
+	                		$this->logger->warn("Skipping drop+recreate for " . $tableToRepair .
+	                			" — disk appears full. Repair count: " . ($prevCount + 1));
+	                	} else {
+	                		$upgradesEtc = ABJ_404_Solution_DatabaseUpgradesEtc::getInstance();
+	                		$this->queryAndGetResults("DROP TABLE `{$tableToRepair}`");
+	                		$upgradesEtc->createDatabaseTables(false);
+	                	}
 	                }
                 }
 
             } else {
-                // Non-plugin table: the plugin cannot repair it, but we can notify the admin
-                // once per day so they can contact their host.
-                $this->logger->warn("The table " . $tableToRepair . " needs to be " .
-                    "repaired with something like: repair table " . $tableToRepair);
+                // Non-plugin table or invalid name: the plugin cannot repair it,
+                // but we can notify the admin once per day so they can contact their host.
+                $this->logger->warn("The table " . $rawTableName . " needs to be " .
+                    "repaired with something like: repair table " . $rawTableName);
 
                 $cooldownKey = 'abj404_corrupted_temp_table_notice_until';
                 $alreadyNotified = function_exists('get_transient') ? get_transient($cooldownKey) : false;
@@ -98,7 +168,11 @@ trait ABJ_404_Solution_DataAccess_MaintenanceTrait {
     			is_array($matchesForTableName) && isset($matchesForTableName[1]) && $this->f->strlen($matchesForTableName[1]) > 0) {
 
     		$idWithDuplicate = $matchesForID[1];
-    		$tableName = $matchesForTableName[1];
+    		$tableName = $this->sanitizeTableName($matchesForTableName[1]);
+    		if ($tableName === null) {
+    			$this->logger->warn("repairDuplicateIDs: rejected invalid table name from SQL: " . substr($matchesForTableName[1], 0, 100));
+    			return;
+    		}
 
     		// Validate that ID is numeric to prevent SQL injection
     		if (!is_numeric($idWithDuplicate)) {
@@ -111,7 +185,7 @@ trait ABJ_404_Solution_DataAccess_MaintenanceTrait {
     		}
 
     		// Use prepared statement to prevent SQL injection
-    		$result = $this->queryAndGetResults("delete from " . $tableName . " where id = %d",
+    		$result = $this->queryAndGetResults("DELETE FROM `{$tableName}` where id = %d",
     			array('log_errors' => false, 'query_params' => array(absint($idWithDuplicate))));
    			$this->logger->infoMessage("Attempted to fix a duplicate entry issue. Table: " .
    				$tableName . ", Result: " . json_encode($result));
@@ -234,6 +308,9 @@ trait ABJ_404_Solution_DataAccess_MaintenanceTrait {
             $recognizedPostTypes .= "'" . trim($this->f->strtolower($postType)) . "', ";
         }
         $recognizedPostTypes = rtrim($recognizedPostTypes, ", ");
+        if ($recognizedPostTypes === '') {
+            return null;
+        }
 
         $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getIDsNeededForPermalinkCache.sql");
         $query = $this->f->str_replace('{recognizedPostTypes}', $recognizedPostTypes, $query);
@@ -316,6 +393,103 @@ trait ABJ_404_Solution_DataAccess_MaintenanceTrait {
     }
 
     /**
+     * Find redirects whose destination URL appears in the 404 log as a recent 404.
+     * Only internal URL destinations can be detected this way (external 404s are not
+     * logged by this plugin). Stores flagged redirect IDs in a transient for fast
+     * lookup at redirect-processing time.
+     *
+     * @return void
+     */
+    function flagDeadDestinationRedirects(): void {
+        $cutoff         = time() - 7 * 86400;
+        $redirectsTable = $this->doTableNameReplacements('{wp_abj404_redirects}');
+        $logsTable      = $this->doTableNameReplacements('{wp_abj404_logsv2}');
+
+        global $wpdb;
+        $rows = $wpdb->get_col($wpdb->prepare(
+            "SELECT DISTINCT r.id
+             FROM `{$redirectsTable}` r
+             INNER JOIN `{$logsTable}` l ON l.requested_url = r.final_dest
+             WHERE l.timestamp > %d
+               AND (l.dest_url = '' OR l.dest_url IS NULL)
+               AND r.disabled = 0
+               AND r.final_dest != ''
+               AND r.final_dest != '0'",
+            $cutoff
+        ));
+
+        $flaggedIds = is_array($rows) ? array_map('strval', $rows) : array();
+
+        if (function_exists('set_transient')) {
+            $ttl = defined('HOUR_IN_SECONDS') ? 25 * (int) HOUR_IN_SECONDS : 90000;
+            set_transient('abj404_dead_dest_ids', $flaggedIds, $ttl);
+        }
+
+        if (!empty($flaggedIds)) {
+            $this->logger->infoMessage(
+                __CLASS__ . '/' . __FUNCTION__ . ': Flagged ' . count($flaggedIds) .
+                ' redirect(s) with dead destinations: ' . implode(', ', $flaggedIds)
+            );
+        }
+    }
+
+    /**
+     * Move auto-created redirects to trash if they are older than the configured expiration.
+     *
+     * Uses the `timestamp` column (creation time) of the redirects table. Only affects
+     * redirects with status = ABJ404_STATUS_AUTO that are not already disabled. The
+     * threshold is controlled by the `auto_302_expiration_days` option (0 = disabled).
+     *
+     * @return int Number of redirects moved to trash
+     */
+    public function expireOldAutoRedirects(): int {
+        $options = ABJ_404_Solution_PluginLogic::getInstance()->getOptions();
+        $daysRaw = isset($options['auto_302_expiration_days']) ? $options['auto_302_expiration_days'] : 0;
+        $days = is_numeric($daysRaw) ? (int)$daysRaw : 0;
+        if ($days <= 0) {
+            return 0;
+        }
+
+        $redirectsTable = $this->doTableNameReplacements('{wp_abj404_redirects}');
+        if (!$this->tableExists($redirectsTable)) {
+            $this->logger->warn("expireOldAutoRedirects: redirects table missing, skipping.");
+            return 0;
+        }
+
+        $cutoff = time() - ($days * 86400);
+        global $wpdb;
+
+        // Fetch IDs to expire so we can use the existing moveRedirectsToTrash path
+        $ids = $wpdb->get_col($wpdb->prepare(
+            "SELECT id FROM `{$redirectsTable}`
+             WHERE status = %d
+               AND disabled = 0
+               AND `timestamp` > 0
+               AND `timestamp` < %d",
+            ABJ404_STATUS_AUTO,
+            $cutoff
+        ));
+
+        if ($wpdb->last_error) {
+            $this->logger->warn("expireOldAutoRedirects: DB error fetching old auto-redirects: " . $wpdb->last_error);
+            return 0;
+        }
+
+        if (empty($ids)) {
+            return 0;
+        }
+
+        $moved = 0;
+        foreach ($ids as $id) {
+            $this->moveRedirectsToTrash(absint($id), 1);
+            $moved++;
+        }
+
+        $this->logger->infoMessage("expireOldAutoRedirects: moved {$moved} expired auto-redirect(s) to trash (threshold: {$days} days).");
+        return $moved;
+    }
+
+    /**
      * @param string $requestedURLRaw
      * @return mixed
      */
@@ -333,7 +507,7 @@ trait ABJ_404_Solution_DataAccess_MaintenanceTrait {
 
         $row = is_array($rows[0] ?? null) ? $rows[0] : array();
         $json = isset($row['matchdata']) && is_string($row['matchdata']) ? $row['matchdata'] : '';
-        $returnValue = json_decode($json);
+        $returnValue = json_decode($json, true);
 
         return $returnValue;
     }

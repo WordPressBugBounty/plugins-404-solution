@@ -116,6 +116,11 @@ trait ABJ_404_Solution_PluginLogicTrait_SettingsUpdate {
             }
         }
 
+        // Score range filter (high / medium / low / manual / all).
+        $rawScoreRange = (string)$this->dao->getPostOrGetSanitize('score_range', 'all');
+        $allowedScoreRanges = array('all', 'high', 'medium', 'low', 'manual');
+        $tableOptions['score_range'] = in_array($rawScoreRange, $allowedScoreRanges, true) ? $rawScoreRange : 'all';
+
         // sanitize all values.
         $sanitizedTableOptions = $this->sanitizePostData($tableOptions);
 
@@ -273,7 +278,8 @@ trait ABJ_404_Solution_PluginLogicTrait_SettingsUpdate {
         $message = "";
 
         if (isset($postData['default_redirect'])) {
-            if ($postData['default_redirect'] == "301" || $postData['default_redirect'] == "302") {
+            $validDefaultCodes = array('301', '302', '307', '308');
+            if (in_array((string)(is_scalar($postData['default_redirect']) ? $postData['default_redirect'] : ''), $validDefaultCodes, true)) {
                 $options['default_redirect'] = is_scalar($postData['default_redirect']) ? intval($postData['default_redirect']) : 301;
             } else {
                 $message .= __('Error: Invalid value specified for default redirect type', '404-solution') . ".<BR/>";
@@ -383,6 +389,27 @@ trait ABJ_404_Solution_PluginLogicTrait_SettingsUpdate {
             $options['admin_notification_email'] = trim(wp_kses_post(is_string($postData['admin_notification_email']) ? $postData['admin_notification_email'] : ''));
         }
 
+        if (isset($postData['admin_notification_frequency'])) {
+            $allowed_frequencies = array('instant', 'daily', 'weekly');
+            $freq = sanitize_text_field(is_string($postData['admin_notification_frequency']) ? $postData['admin_notification_frequency'] : '');
+            if (in_array($freq, $allowed_frequencies, true)) {
+                $options['admin_notification_frequency'] = $freq;
+                // Reschedule digest cron whenever frequency changes.
+                $emailDigest = new ABJ_404_Solution_EmailDigest($this->dao, $this->logger);
+                $emailDigest->scheduleNextDigest();
+            } else {
+                $message .= __('Error: Invalid email notification frequency selected', '404-solution') . ".<BR/>";
+            }
+        }
+
+        if (isset($postData['admin_notification_digest_limit'])) {
+            if (is_numeric($postData['admin_notification_digest_limit']) && $postData['admin_notification_digest_limit'] >= 1) {
+                $options['admin_notification_digest_limit'] = absint($postData['admin_notification_digest_limit']);
+            } else {
+                $message .= __('Error: Digest limit must be a number greater than or equal to 1', '404-solution') . ".<BR/>";
+            }
+        }
+
         return $message;
     }
 
@@ -441,6 +468,9 @@ trait ABJ_404_Solution_PluginLogicTrait_SettingsUpdate {
 
         $message .= $this->validateAndSetNumericField($options, $postData, 'auto_deletion',
             'Error: Auto redirect deletion value must be a number greater than or equal to zero');
+
+        $message .= $this->validateAndSetNumericField($options, $postData, 'auto_302_expiration_days',
+            'Error: Auto-redirect expiration days must be a number greater than or equal to zero');
 
         $message .= $this->validateAndSetNumericField($options, $postData, 'maximum_log_disk_usage',
             'Error: Maximum log disk usage must be a number greater than zero', 0, true);
@@ -514,8 +544,10 @@ trait ABJ_404_Solution_PluginLogicTrait_SettingsUpdate {
 
         // All boolean options that could be in forms
         $allBooleanOptions = array('remove_matches', 'debug_mode', 'suggest_cats', 'suggest_tags',
-            'auto_redirects', 'auto_slugs', 'auto_cats', 'auto_tags', 'capture_404', 'send_error_logs', 'log_raw_ips',
-        	'redirect_all_requests', 'update_suggest_url', 'suggest_minscore_enabled'
+            'auto_redirects', 'auto_slugs', 'auto_cats', 'auto_tags', 'auto_trash_redirect',
+            'capture_404', 'send_error_logs', 'log_raw_ips',
+        	'redirect_all_requests', 'update_suggest_url', 'suggest_minscore_enabled',
+            'pdf_email_reports'
         );
 
         // Options that appear in Simple Mode form

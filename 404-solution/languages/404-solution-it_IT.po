@@ -798,6 +798,33 @@ msgstr "Più indirizzi email possono essere separati da virgole (,). L'indirizzo
 msgid "Never Used"
 msgstr "Mai utilizzato"
 
+msgid "Confidence"
+msgstr "Attendibilità"
+
+msgid "Confidence:"
+msgstr "Attendibilità:"
+
+msgid "Match Confidence"
+msgstr "Attendibilità corrispondenza"
+
+msgid "High (≥80%)"
+msgstr "Alta (≥80%)"
+
+msgid "Medium (50–79%)"
+msgstr "Media (50–79%)"
+
+msgid "Low (<50%)"
+msgstr "Bassa (<50%)"
+
+msgid "Manual (no score)"
+msgstr "Manuale (nessun punteggio)"
+
+msgid "Avg confidence: %s%%"
+msgstr "Attendibilità media: %s%%"
+
+msgid "Manual redirect — no confidence score"
+msgstr "Reindirizzamento manuale — nessun punteggio di attendibilità"
+
 msgid "New Redirect Added Successfully!"
 msgstr "Nuovo redirect aggiunto con successo!"
 
@@ -2611,8 +2638,8 @@ msgid "Invalid CSV format. Could not map source/destination columns."
 msgstr "Formato CSV non valido. Impossibile mappare le colonne sorgente/destinazione."
 
 #: includes/ImportExportService.php
-msgid "Invalid CSV format. %d columns found but 2, 5, or 6 expected."
-msgstr "Formato CSV non valido. Trovate %d colonne, ma previste 2, 5 o 6."
+msgid "Invalid CSV format. %d columns found but 2, 5, 6, or 7 expected."
+msgstr "Formato CSV non valido. Trovate %d colonne, ma previste 2, 5, 6 o 7."
 
 #: includes/ShortCode.php
 msgid "Loading page suggestions..."
@@ -2634,3 +2661,738 @@ msgstr "Una tabella temporanea del database è danneggiata — questo è solitam
 msgid "The 404 Solution log table is full and cannot accept new entries. This is usually caused by a full disk. Please contact your host or manually prune the logs table."
 msgstr "La tabella log di 404 Solution è piena e non può accettare nuove voci. Questo è solitamente causato da un disco pieno. Contattare il proprio provider di hosting o eliminare manualmente la tabella log."
 
+
+#: includes/PermalinkCache.php
+msgid "Permalink cache appears empty after rebuild — suggestions may be degraded. Try rebuilding again or check available disk space."
+msgstr "La cache dei permalink sembra vuota dopo la ricostruzione — i suggerimenti potrebbero essere degradati. Prova a ricostruirla o controlla lo spazio disponibile su disco."
+
+#: 404-solution.php
+msgid "The permalink cache appears to be empty. Try rebuilding it from the Tools tab, or check that your site has enough disk space."
+msgstr "La cache dei permalink sembra essere vuota. Prova a ricostruirla dalla scheda Strumenti o verifica che il tuo sito abbia spazio su disco sufficiente."
+
+#: includes/ViewTrait_RedirectsTable.php
+msgid "Destination returned 404 recently — redirect suspended until destination is restored."
+msgstr "La destinazione ha restituito 404 di recente — il reindirizzamento è sospeso fino al ripristino della destinazione."
+
+# Strings added for new features (3.3.8)
+
+msgid "A database lock wait timeout occurred. If this persists, contact your host — another process may be holding a long-running lock."
+msgstr "A database lock wait timeout occurred. If this persists, contact your host — another process may be holding a long-running lock."
+
+msgid "The InnoDB tablespace appears to be exhausted. Deleting plugin data will NOT free this space. Contact your hosting provider to expand the InnoDB tablespace (ibdata1)."
+msgstr "The InnoDB tablespace appears to be exhausted. Deleting plugin data will NOT free this space. Contact your hosting provider to expand the InnoDB tablespace (ibdata1)."
+
+msgid "Email notification frequency"
+msgstr "Email notification frequency"
+
+msgid "Instant (when threshold exceeded)"
+msgstr "Instant (when threshold exceeded)"
+
+msgid "Daily digest"
+msgstr "Daily digest"
+
+msgid "Weekly digest"
+msgstr "Weekly digest"
+
+msgid "Choose how often to receive email notifications about captured 404s."
+msgstr "Choose how often to receive email notifications about captured 404s."
+
+msgid "Attach PDF report to digest email"
+msgstr "Attach PDF report to digest email"
+
+msgid "When enabled, a PDF summary is attached to each digest email (daily or weekly digests only)."
+msgstr "When enabled, a PDF summary is attached to each digest email (daily or weekly digests only)."
+
+msgid "Temporary 307 (preserve method)"
+msgstr "Temporary 307 (preserve method)"
+
+msgid "Permanent 308 (preserve method)"
+msgstr "Permanent 308 (preserve method)"
+
+msgid "Loading chart data…"
+msgstr "Loading chart data…"
+
+msgid "Could not load chart data."
+msgstr "Could not load chart data."
+
+msgid "404 Hits per Day"
+msgstr "404 Hits per Day"
+
+msgid "Redirects per Day"
+msgstr "Redirects per Day"
+
+msgid "New Captures per Day"
+msgstr "New Captures per Day"
+
+msgid "Trends (Last 30 Days)"
+msgstr "Trends (Last 30 Days)"
+
+msgid "Trend Analytics"
+msgstr "Analisi dei trend"
+
+msgid "7 days"
+msgstr "7 giorni"
+
+msgid "30 days"
+msgstr "30 giorni"
+
+msgid "90 days"
+msgstr "90 giorni"
+
+msgid "Period"
+msgstr "Periodo"
+
+msgid "No broken internal links found."
+msgstr "No broken internal links found."
+
+msgid "Found %1$d broken internal link(s) across %2$d post(s)/page(s)."
+msgstr "Found %1$d broken internal link(s) across %2$d post(s)/page(s)."
+
+msgid "Post/Page"
+msgstr "Post/Page"
+
+msgid "Broken URL"
+msgstr "Broken URL"
+
+msgid "404 Hits"
+msgstr "404 Hits"
+
+msgid "Broken Internal Links"
+msgstr "Broken Internal Links"
+
+
+msgid "Migrate from Another Plugin"
+msgstr "Migrate from Another Plugin"
+
+msgid "Rank Math"
+msgstr "Rank Math"
+
+msgid "Yoast SEO Premium"
+msgstr "Yoast SEO Premium"
+
+msgid "AIOSEO"
+msgstr "AIOSEO"
+
+msgid "Safe Redirect Manager"
+msgstr "Safe Redirect Manager"
+
+msgid "Redirection Plugin"
+msgstr "Redirection Plugin"
+
+msgid "No supported redirect plugins detected on this site."
+msgstr "No supported redirect plugins detected on this site."
+
+msgid "Supported plugins: Rank Math, Yoast SEO Premium, AIOSEO, Safe Redirect Manager, Redirection."
+msgstr "Supported plugins: Rank Math, Yoast SEO Premium, AIOSEO, Safe Redirect Manager, Redirection."
+
+msgid "Detected redirect plugins:"
+msgstr "Detected redirect plugins:"
+
+msgid "Source plugin:"
+msgstr "Source plugin:"
+
+msgid "Import Redirects"
+msgstr "Import Redirects"
+
+msgid "This will import all active redirects from the selected plugin into 404 Solution. Regex and redirect codes are preserved."
+msgstr "This will import all active redirects from the selected plugin into 404 Solution. Regex and redirect codes are preserved."
+
+msgid "Temporary Redirect (preserve method)"
+msgstr "Temporary Redirect (preserve method)"
+
+msgid "Permanent Redirect (preserve method)"
+msgstr "Permanent Redirect (preserve method)"
+
+msgid "Gone (resource permanently removed)"
+msgstr "Gone (resource permanently removed)"
+
+msgid "Conditions (optional)"
+msgstr "Conditions (optional)"
+
+msgid "This redirect only fires when all conditions are met. Leave empty to always redirect."
+msgstr "This redirect only fires when all conditions are met. Leave empty to always redirect."
+
+msgid "+ Add Condition"
+msgstr "+ Add Condition"
+
+msgid "Logic"
+msgstr "Logic"
+
+msgid "AND"
+msgstr "AND"
+
+msgid "OR"
+msgstr "OR"
+
+msgid "Login Status"
+msgstr "Login Status"
+
+msgid "User Role"
+msgstr "User Role"
+
+msgid "Referrer URL"
+msgstr "Referrer URL"
+
+msgid "User Agent"
+msgstr "User Agent"
+
+msgid "IP Range (CIDR)"
+msgstr "IP Range (CIDR)"
+
+msgid "HTTP Header"
+msgstr "HTTP Header"
+
+msgid "Condition type"
+msgstr "Condition type"
+
+msgid "— Select type —"
+msgstr "— Select type —"
+
+msgid "equals"
+msgstr "equals"
+
+msgid "not equals"
+msgstr "not equals"
+
+msgid "contains"
+msgstr "contains"
+
+msgid "does not contain"
+msgstr "does not contain"
+
+msgid "matches regex"
+msgstr "matches regex"
+
+msgid "Operator"
+msgstr "Operator"
+
+msgid "Value"
+msgstr "Value"
+
+msgid "Condition value"
+msgstr "Condition value"
+
+msgid "Remove condition"
+msgstr "Remove condition"
+
+msgid "Remove"
+msgstr "Remove"
+
+msgid "Auto-matched by:"
+msgstr "Auto-matched by:"
+
+msgid "Error: Invalid email notification frequency selected"
+msgstr "Error: Invalid email notification frequency selected"
+
+msgid "Error: Digest limit must be a number greater than or equal to 1"
+msgstr "Error: Digest limit must be a number greater than or equal to 1"
+
+msgid "Google Search Console credentials saved."
+msgstr "Google Search Console credentials saved."
+
+msgid "Error: No source plugin specified."
+msgstr "Error: No source plugin specified."
+
+msgid "Error: Unknown source plugin \"%s\"."
+msgstr "Error: Unknown source plugin \"%s\"."
+
+msgid "Insufficient permissions."
+msgstr "Insufficient permissions."
+
+msgid "Security check failed."
+msgstr "Security check failed."
+
+msgid "OAuth token exchange failed."
+msgstr "OAuth token exchange failed."
+
+msgid "Google Search Console"
+msgstr "Google Search Console"
+
+msgid "Google Search Console Integration"
+msgstr "Google Search Console Integration"
+
+msgid "Connect to Google Search Console to see which broken URLs were getting real search traffic."
+msgstr "Connect to Google Search Console to see which broken URLs were getting real search traffic."
+
+msgid "Setup steps:"
+msgstr "Setup steps:"
+
+msgid "Create a project in %s."
+msgstr "Create a project in %s."
+
+msgid "Enable the \"Google Search Console API\"."
+msgstr "Enable the \"Google Search Console API\"."
+
+msgid "Create OAuth 2.0 credentials (Web application type)."
+msgstr "Create OAuth 2.0 credentials (Web application type)."
+
+msgid "Add this Authorized Redirect URI: %s"
+msgstr "Add this Authorized Redirect URI: %s"
+
+msgid "Enter your Client ID and Client Secret below."
+msgstr "Enter your Client ID and Client Secret below."
+
+msgid "Client ID"
+msgstr "Client ID"
+
+msgid "Client Secret"
+msgstr "Client Secret"
+
+msgid "Search Console Site URL"
+msgstr "Search Console Site URL"
+
+msgid "The site URL as registered in Search Console (e.g. https://example.com/)."
+msgstr "The site URL as registered in Search Console (e.g. https://example.com/)."
+
+msgid "Save Credentials"
+msgstr "Save Credentials"
+
+msgid "Credentials saved."
+msgstr "Credentials saved."
+
+msgid "Click the button below to authorize access to your Search Console data."
+msgstr "Click the button below to authorize access to your Search Console data."
+
+msgid "Authorize with Google"
+msgstr "Authorize with Google"
+
+msgid "Remove Credentials"
+msgstr "Remove Credentials"
+
+msgid "Connected to Google Search Console."
+msgstr "Connected to Google Search Console."
+
+msgid "Search traffic data for your captured 404 URLs is shown below. Data is cached for 1 hour."
+msgstr "Search traffic data for your captured 404 URLs is shown below. Data is cached for 1 hour."
+
+msgid "Disconnect"
+msgstr "Disconnect"
+
+msgid "Connected to Google Search Console"
+msgstr "Connesso a Google Search Console"
+
+msgid "Credentials saved — authorization required"
+msgstr "Credenziali salvate — autorizzazione richiesta"
+
+msgid "Authorization failed"
+msgstr "Autorizzazione fallita"
+
+msgid "Authorization was denied or cancelled."
+msgstr "L'autorizzazione è stata negata o annullata."
+
+msgid "Try Again"
+msgstr "Riprova"
+
+msgid "Copy"
+msgstr "Copia"
+
+msgid "Copied!"
+msgstr "Copiato!"
+
+msgid "Add this Authorized Redirect URI to your OAuth client:"
+msgstr "Aggiungi questo URI di reindirizzamento autorizzato al tuo client OAuth:"
+
+msgid "Click 'Try Again' to retry authorization, or 'Remove Credentials' to start over."
+msgstr "Fai clic su 'Riprova' per riprovare l'autorizzazione, o su 'Rimuovi credenziali' per ricominciare."
+
+msgid "404 URLs with Search Traffic (last 90 days)"
+msgstr "404 URLs with Search Traffic (last 90 days)"
+
+msgid "Clicks"
+msgstr "Clicks"
+
+msgid "Impressions"
+msgstr "Impressions"
+
+msgid "No search traffic data found for your captured 404 URLs in the last 90 days."
+msgstr "Nessun dato di traffico di ricerca trovato per gli URL 404 acquisiti negli ultimi 90 giorni."
+
+msgid "Avg. Position"
+msgstr "Avg. Position"
+
+msgid "The \"from\" URL is required."
+msgstr "The \"from\" URL is required."
+
+msgid "The \"to\" URL is required."
+msgstr "The \"to\" URL is required."
+
+msgid "Failed to create redirect."
+msgstr "Failed to create redirect."
+
+msgid "Invalid redirect ID."
+msgstr "Invalid redirect ID."
+
+msgid "Both \"from\" and \"to\" parameters are required."
+msgstr "Both \"from\" and \"to\" parameters are required."
+
+msgid "Invalid captured 404 ID."
+msgstr "Invalid captured 404 ID."
+
+msgid "Captured 404 not found."
+msgstr "Captured 404 not found."
+
+msgid "The captured 404 record has no URL."
+msgstr "The captured 404 record has no URL."
+
+msgid "The \"url\" parameter is required."
+msgstr "The \"url\" parameter is required."
+
+msgid "No captured 404s in this period."
+msgstr "No captured 404s in this period."
+
+msgid "404 Solution Digest"
+msgstr "404 Solution Digest"
+
+msgid "Digest Report"
+msgstr "Rapporto digest"
+
+msgid "404 URLs"
+msgstr "URL 404"
+
+msgid "Redirected"
+msgstr "Reindirizzato"
+
+msgid "Configured"
+msgstr "Configurato"
+
+msgid "Resolution Rate"
+msgstr "Tasso di risoluzione"
+
+#. translators: 1: number of resolved URLs, 2: total number of URLs
+msgid "%1$d of %2$d URLs handled"
+msgstr "%1$d di %2$d URL gestiti"
+
+msgid "Summary"
+msgstr "Summary"
+
+msgid "Top Captured 404 URLs"
+msgstr "Top Captured 404 URLs"
+
+msgid "First Seen"
+msgstr "First Seen"
+
+msgid "View Captured 404s"
+msgstr "View Captured 404s"
+
+msgid "Manage Settings"
+msgstr "Gestisci impostazioni"
+
+msgid "To stop these emails, update your notification settings."
+msgstr "Per interrompere queste email, aggiorna le impostazioni di notifica."
+
+msgid "To stop receiving these emails, update your notification settings."
+msgstr "To stop receiving these emails, update your notification settings."
+
+msgid "Manage settings"
+msgstr "Manage settings"
+
+msgid "Sent"
+msgstr "Sent"
+
+msgid "Plugin"
+msgstr "Plugin"
+
+msgid "404 Solution Digest — %s"
+msgstr "404 Solution Digest — %s"
+
+msgid "Advanced Options"
+msgstr "Opzioni avanzate"
+
+msgid "Active From (optional)"
+msgstr "Active From (optional)"
+
+msgid "Leave blank to activate immediately"
+msgstr "Leave blank to activate immediately"
+
+msgid "Active Until (optional)"
+msgstr "Active Until (optional)"
+
+msgid "Leave blank to never expire"
+msgstr "Leave blank to never expire"
+
+msgid "A database lock wait timeout occurred. This is usually caused by another process holding a table lock on your database. It may resolve itself automatically, or contact your hosting provider if it persists."
+msgstr "A database lock wait timeout occurred. This is usually caused by another process holding a table lock on your database. It may resolve itself automatically, or contact your hosting provider if it persists."
+
+msgid "Expire auto-redirects after"
+msgstr "Expire auto-redirects after"
+
+msgid "days (0 to disable)"
+msgstr "days (0 to disable)"
+
+msgid "Auto-created redirects older than this many days will be automatically moved to trash."
+msgstr "Auto-created redirects older than this many days will be automatically moved to trash."
+
+msgid "Export format:"
+msgstr "Export format:"
+
+msgid "Native CSV (404 Solution)"
+msgstr "Native CSV (404 Solution)"
+
+msgid "Redirection Plugin CSV"
+msgstr "Redirection Plugin CSV"
+
+msgid "Apache .htaccess"
+msgstr "Apache .htaccess"
+
+msgid "Nginx config"
+msgstr "Nginx config"
+
+msgid "Cloudflare Workers script"
+msgstr "Cloudflare Workers script"
+
+msgid "Netlify _redirects"
+msgstr "Netlify _redirects"
+
+msgid "Vercel vercel.json"
+msgstr "Vercel vercel.json"
+
+# 410 Gone page strings
+msgid "This content has been permanently removed."
+msgstr "Questo contenuto è stato rimosso definitivamente."
+
+msgid "The page you requested no longer exists and has not been moved to a new location."
+msgstr "La pagina richiesta non esiste più e non è stata spostata in un nuovo percorso."
+
+msgid "Back to home page"
+msgstr "Torna alla home page"
+
+# 451 Unavailable For Legal Reasons strings
+msgid "451 Unavailable For Legal Reasons"
+msgstr "451 Non disponibile per motivi legali"
+
+msgid "This content is unavailable due to a legal demand."
+msgstr "Questo contenuto non è disponibile a causa di una richiesta legale."
+
+msgid "Unavailable For Legal Reasons"
+msgstr "Non disponibile per motivi legali"
+
+# Trash/deletion redirect strings
+msgid "Create redirect when a page is trashed or deleted"
+msgstr "Crea reindirizzamento quando una pagina viene spostata nel cestino o eliminata"
+
+msgid "When a published page is moved to trash or permanently deleted, create a redirect from its old URL to the homepage."
+msgstr "Quando una pagina pubblicata viene spostata nel cestino o eliminata definitivamente, crea un reindirizzamento dal suo vecchio URL alla home page."
+
+# Meta Refresh redirect strings
+msgid "0 Meta Refresh"
+msgstr "0 Meta Refresh"
+
+msgid "Meta Refresh"
+msgstr "Meta Refresh"
+
+msgid "Redirecting…"
+msgstr "Redirecting…"
+
+msgid "You are being redirected. Click the link if not redirected automatically."
+msgstr "You are being redirected. Click the link if not redirected automatically."
+
+# Engine Profile admin section strings
+msgid "Engine Profiles"
+msgstr "Profili motore"
+
+msgid "By default, when a visitor hits a 404 URL, all suggestion methods run: slug matching, spelling correction, title matching, content search, category/tag matching, URL fixing, and archive fallback. Engine Profiles let you override this for specific sections of your site — choose exactly which methods run when a 404 URL falls within a URL pattern you define."
+msgstr "Per impostazione predefinita, quando un visitatore accede a un URL 404, vengono eseguiti tutti i metodi di suggerimento: corrispondenza dello slug, correzione ortografica, corrispondenza del titolo, ricerca nel contenuto, corrispondenza categoria/tag, correzione URL e fallback all'archivio. I profili motore consentono di ignorare questo comportamento per sezioni specifiche del sito — scegliere esattamente quali metodi vengono eseguiti quando un URL 404 corrisponde a un pattern URL definito dall'utente."
+
+msgid "Example 1:"
+msgstr "Esempio 1:"
+
+msgid "Your store lives at /products/. Spelling correction works great on blog posts, but on a product section you want only exact slug matching and URL fixing — fuzzy spelling suggestions might point to the wrong product. Create a profile with the URL pattern /products/* and check only \"Slug Matching\" and \"URL Fix\"."
+msgstr "Il negozio si trova in /products/. La correzione ortografica funziona bene nei post del blog, ma in una sezione prodotti si desidera solo la corrispondenza esatta dello slug e la correzione URL — i suggerimenti ortografici approssimativi potrebbero puntare al prodotto sbagliato. Creare un profilo con il pattern URL /products/* e selezionare solo \"Corrispondenza slug\" e \"Correzione URL\"."
+
+msgid "Example 2:"
+msgstr "Esempio 2:"
+
+msgid "You have a documentation archive at /docs/ that you recently restructured. The content is too technical for spelling suggestions to be useful, so you enable only the Archive Fallback engine there."
+msgstr "Si dispone di un archivio di documentazione in /docs/ che è stato recentemente ristrutturato. Il contenuto è troppo tecnico per cui i suggerimenti ortografici siano utili, quindi si abilita solo il motore di fallback all'archivio."
+
+msgid "How profiles are applied:"
+msgstr "Come vengono applicati i profili:"
+
+msgid "Each profile has a URL pattern (e.g. /products/*) that is tested against the incoming 404 URL."
+msgstr "Ogni profilo ha un pattern URL (ad es. /products/*) che viene confrontato con l'URL 404 in arrivo."
+
+msgid "Profiles are checked in priority order — lower number means checked first."
+msgstr "I profili vengono controllati in ordine di priorità — il numero più basso viene controllato per primo."
+
+msgid "The first profile whose URL pattern matches the 404 URL wins. Only the engines you selected in that profile will run."
+msgstr "Il primo profilo il cui pattern URL corrisponde all'URL 404 vince. Verranno eseguiti solo i motori selezionati in quel profilo."
+
+msgid "If none of your profiles match the 404 URL, the default behavior applies: all engines run."
+msgstr "Se nessuno dei profili corrisponde all'URL 404, viene applicato il comportamento predefinito: vengono eseguiti tutti i motori."
+
+msgid "Most sites do not need Engine Profiles. They are for advanced scenarios where one section of your site needs different suggestion logic than the rest."
+msgstr "La maggior parte dei siti non necessita di profili motore. Sono destinati a scenari avanzati in cui una sezione del sito richiede una logica di suggerimento diversa dal resto."
+
+msgid "Name"
+msgstr "Name"
+
+msgid "URL Pattern"
+msgstr "URL Pattern"
+
+msgid "Regex"
+msgstr "Regex"
+
+msgid "Engines"
+msgstr "Engines"
+
+msgid "Priority"
+msgstr "Priority"
+
+msgid "Active"
+msgstr "Active"
+
+msgid "Actions"
+msgstr "Actions"
+
+msgid "No engine profiles defined."
+msgstr "Nessun profilo motore definito."
+
+msgid "Add Engine Profile"
+msgstr "Aggiungi profilo motore"
+
+msgid "Edit Engine Profile"
+msgstr "Modifica profilo motore"
+
+msgid "e.g. Products section"
+msgstr "es. Sezione prodotti"
+
+msgid "e.g. /products/* or ^/products/"
+msgstr "es. /products/* o ^/products/"
+
+msgid "Use * as wildcard for simple patterns. Check &quot;Regex&quot; for full regex patterns."
+msgstr "Usa * come carattere jolly per pattern semplici. Seleziona \"Regex\" per pattern di espressione regolare completi."
+
+msgid "Pattern is a regular expression"
+msgstr "Il pattern è un'espressione regolare"
+
+msgid "Enabled Engines"
+msgstr "Motori abilitati"
+
+msgid "Select which engines should run for URLs matching this profile. Leave all unchecked to run all engines."
+msgstr "Seleziona i motori da eseguire per gli URL corrispondenti a questo profilo. Lascia tutto deselezionato per eseguire tutti i motori."
+
+msgid "Slug Matching"
+msgstr "Corrispondenza slug"
+
+msgid "Spelling Matching"
+msgstr "Corrispondenza ortografica"
+
+msgid "Title Matching"
+msgstr "Corrispondenza titolo"
+
+msgid "Content Matching"
+msgstr "Corrispondenza contenuto"
+
+msgid "Category/Tag Matching"
+msgstr "Corrispondenza categoria/tag"
+
+msgid "URL Fix"
+msgstr "Correzione URL"
+
+msgid "Archive Fallback"
+msgstr "Fallback archivio"
+
+msgid "Lower number = higher priority. First matching profile wins."
+msgstr "Numero inferiore = priorità più alta. Vince il primo profilo corrispondente."
+
+msgid "Profile is active"
+msgstr "Il profilo è attivo"
+
+msgid "Save Profile"
+msgstr "Salva profilo"
+
+msgid "Profile name is required."
+msgstr "Il nome del profilo è obbligatorio."
+
+msgid "URL pattern is required."
+msgstr "Il pattern URL è obbligatorio."
+
+msgid "Profile saved."
+msgstr "Profilo salvato."
+
+msgid "Failed to save profile."
+msgstr "Impossibile salvare il profilo."
+
+msgid "Delete this engine profile?"
+msgstr "Eliminare questo profilo motore?"
+
+msgid "Invalid regular expression pattern."
+msgstr "Pattern di espressione regolare non valido."
+
+msgid "Failed to save engine profile."
+msgstr "Impossibile salvare il profilo motore."
+
+msgid "Invalid profile ID."
+msgstr "ID profilo non valido."
+
+msgid "Failed to delete engine profile."
+msgstr "Impossibile eliminare il profilo motore."
+
+msgid "Send Feedback"
+msgstr "Invia feedback"
+
+msgid "301"
+msgstr "301"
+
+msgid "Permanent"
+msgstr "Permanente"
+
+msgid "302"
+msgstr "302"
+
+msgid "Temporary"
+msgstr "Temporaneo"
+
+msgid "307"
+msgstr "307"
+
+msgid "Temp, method-safe"
+msgstr "Temp, sicuro per metodo"
+
+msgid "308"
+msgstr "308"
+
+msgid "Perm, method-safe"
+msgstr "Perm, sicuro per metodo"
+
+msgid "410"
+msgstr "410"
+
+msgid "Gone"
+msgstr "Rimosso"
+
+msgid "451"
+msgstr "451"
+
+msgid "Legal reasons"
+msgstr "Motivi legali"
+
+msgid "HTTP 200 + meta tag"
+msgstr "HTTP 200 + tag meta"
+
+msgid "Use 301 for permanent page moves. Use 302 for A/B tests or seasonal pages."
+msgstr "Usa 301 per spostamenti permanenti. Usa 302 per test A/B o pagine stagionali."
+
+msgid "Back to Redirects"
+msgstr "Torna ai reindirizzamenti"
+
+msgid "Preview Import"
+msgstr "Anteprima importazione"
+
+msgid "Confirm Import"
+msgstr "Conferma importazione"
+
+msgid "Back"
+msgstr "Indietro"
+
+msgid "Found %d redirect(s) from %s — proceed with import?"
+msgstr "Trovati %d reindirizzamento(i) da %s — procedere con l'importazione?"
+
+msgid "No redirects found in %s. Nothing to import."
+msgstr "Nessun reindirizzamento trovato in %s. Niente da importare."
+
+msgid "Could not fetch preview. Please try again."
+msgstr "Impossibile recuperare l'anteprima. Si prega di riprovare."
+
+msgid "Invalid source plugin."
+msgstr "Plugin di origine non valido."

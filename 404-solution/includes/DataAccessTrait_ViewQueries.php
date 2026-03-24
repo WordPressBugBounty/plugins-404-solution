@@ -379,7 +379,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
     		if ($fh === false) {
     			return;
     		}
-    		fputcsv($fh, array('from_url', 'status', 'type', 'to_url', 'wp_type', 'engine'));
+    		fputcsv($fh, array('from_url', 'status', 'type', 'to_url', 'wp_type', 'engine', 'code'), ',', '"', '\\');
 
     		while (($row = mysqli_fetch_array($result, MYSQLI_ASSOC))) {
     			fputcsv($fh, array(
@@ -388,8 +388,9 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
     				$row['type'],
     				$row['to_url'],
     				$row['type_wp'],
-    				isset($row['engine']) ? $row['engine'] : ''
-    			));
+    				isset($row['engine']) ? $row['engine'] : '',
+    				isset($row['code']) ? $row['code'] : '301'
+    			), ',', '"', '\\');
     		}
     		fclose($fh);
     		mysqli_free_result($result);
@@ -799,6 +800,26 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
                 ", wp_abj404_redirects.url ASC, wp_abj404_redirects.id " . $order;
         }
 
+        // Score range filter clause.
+        $rawScoreRange = is_string($tableOptions['score_range'] ?? '') ? ($tableOptions['score_range'] ?? 'all') : 'all';
+        switch ($rawScoreRange) {
+            case 'high':
+                $scoreRangeClause = 'AND wp_abj404_redirects.score >= 80';
+                break;
+            case 'medium':
+                $scoreRangeClause = 'AND wp_abj404_redirects.score >= 50 AND wp_abj404_redirects.score < 80';
+                break;
+            case 'low':
+                $scoreRangeClause = 'AND wp_abj404_redirects.score IS NOT NULL AND wp_abj404_redirects.score < 50';
+                break;
+            case 'manual':
+                $scoreRangeClause = 'AND wp_abj404_redirects.score IS NULL';
+                break;
+            default:
+                $scoreRangeClause = '';
+                break;
+        }
+
         $searchFilterForRedirectsExists = "no redirects fiter text found";
         $searchFilterForCapturedExists = "no captured 404s filter text found";
         $filterText = '';
@@ -859,6 +880,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         $query = $this->f->str_replace('{logsTableColumns}', $logsTableColumns, $query);
         $query = $this->f->str_replace('{logsTableJoin}', $logsTableJoin, $query);
         $query = $this->f->str_replace('{trashValue}', (string)$trashValue, $query);
+        $query = $this->f->str_replace('{scoreRangeClause}', $scoreRangeClause, $query);
         $query = $this->doTableNameReplacements($query);
         
         if (array_key_exists('translations', $tableOptions) && is_array($tableOptions['translations'])) {

@@ -149,18 +149,42 @@ class ABJ_404_Solution_FrontendRequestPipeline {
         $this->logAReallyLongDebugMessage($options, $requestedURL, $redirect);
 
         if ($requestedURL != "") {
-            if ($redirect['id'] != '0' && $redirect['final_dest'] != '0') {
-                $this->processRedirect($requestedURL, $redirect, 'existing');
-                exit;
+            // A redirect is actionable when it has an id AND either has a real destination
+            // (final_dest != '0') OR is a homepage redirect (TYPE_HOME always uses final_dest=0).
+            $typeHomeInt = defined('ABJ404_TYPE_HOME') ? (int)ABJ404_TYPE_HOME : 5;
+            $redirectTypeInt1 = isset($redirect['type']) && is_scalar($redirect['type']) ? (int)$redirect['type'] : 0;
+            if ($redirect['id'] != '0' && ($redirect['final_dest'] != '0' || $redirectTypeInt1 === $typeHomeInt)) {
+                $deadIds = function_exists('get_transient') ? get_transient('abj404_dead_dest_ids') : false;
+                $redirectIdStr = isset($redirect['id']) && is_scalar($redirect['id']) ? (string) $redirect['id'] : '0';
+                if (!is_array($deadIds) || !in_array($redirectIdStr, $deadIds, true)) {
+                    $condEvaluator = new ABJ_404_Solution_RedirectConditionEvaluator($this->dao);
+                    $redirectIdForCond = is_scalar($redirect['id']) ? (int)$redirect['id'] : 0;
+                    if ($condEvaluator->shouldApplyRedirect($redirectIdForCond)) {
+                        $this->processRedirect($requestedURL, $redirect, 'existing');
+                        exit;
+                    }
+                    // Conditions not met — fall through as if no redirect found.
+                }
+                // Destination is known-dead — fall through to suggestions logic
             }
 
             if ($requestedURLWithoutComments != $requestedURL) {
                 $lookupStart = microtime(true);
                 $redirect = $this->dao->getActiveRedirectForURL($requestedURLWithoutComments);
                 $this->recordRedirectLookupTiming($lookupStart);
-                if ($redirect['id'] != '0' && $redirect['final_dest'] != '0') {
-                    $this->processRedirect($requestedURL, $redirect, 'existing');
-                    exit;
+                $redirectTypeInt2 = isset($redirect['type']) && is_scalar($redirect['type']) ? (int)$redirect['type'] : 0;
+                if ($redirect['id'] != '0' && ($redirect['final_dest'] != '0' || $redirectTypeInt2 === $typeHomeInt)) {
+                    $deadIds = function_exists('get_transient') ? get_transient('abj404_dead_dest_ids') : false;
+                    $redirectIdStr = isset($redirect['id']) && is_scalar($redirect['id']) ? (string) $redirect['id'] : '0';
+                    if (!is_array($deadIds) || !in_array($redirectIdStr, $deadIds, true)) {
+                        $condEvaluator = new ABJ_404_Solution_RedirectConditionEvaluator($this->dao);
+                        $redirectIdForCond = is_scalar($redirect['id']) ? (int)$redirect['id'] : 0;
+                        if ($condEvaluator->shouldApplyRedirect($redirectIdForCond)) {
+                            $this->processRedirect($requestedURL, $redirect, 'existing');
+                            exit;
+                        }
+                        // Conditions not met — fall through as if no redirect found.
+                    }
                 }
             }
 
@@ -178,7 +202,7 @@ class ABJ_404_Solution_FrontendRequestPipeline {
                 $matchResult = $this->runMatchingEngines($matchRequest);
                 if ($matchResult !== null) {
                     $defaultRedirect = isset($options['default_redirect']) && is_scalar($options['default_redirect']) ? (string)$options['default_redirect'] : '';
-                    $this->dao->setupRedirect($requestedURL, (string)ABJ404_STATUS_AUTO, $matchResult->getType(), $matchResult->getId(), $defaultRedirect, 0, $matchResult->getEngineName());
+                    $this->dao->setupRedirect($requestedURL, (string)ABJ404_STATUS_AUTO, $matchResult->getType(), $matchResult->getId(), $defaultRedirect, 0, $matchResult->getEngineName(), $matchResult->getScore());
 
                     // Resolve link via WordPress API to ensure correct site prefix
                     // (cached URLs from permalink_cache may omit subdirectory prefix)
@@ -279,7 +303,10 @@ class ABJ_404_Solution_FrontendRequestPipeline {
      * @return ABJ_404_Solution_MatchResult|null
      */
     private function runMatchingEngines(ABJ_404_Solution_MatchRequest $request): ?ABJ_404_Solution_MatchResult {
-        foreach ($this->matchingEngines as $engine) {
+        $enginesToRun = ABJ_404_Solution_EngineProfileResolver::getInstance()
+            ->resolve($request->getRequestedURL(), $this->matchingEngines);
+
+        foreach ($enginesToRun as $engine) {
             if (!($engine instanceof ABJ_404_Solution_MatchingEngine)) {
                 $this->logger->warn('Matching engine is not an instance of ABJ_404_Solution_MatchingEngine: ' .
                     (is_object($engine) ? get_class($engine) : gettype($engine)));
@@ -403,10 +430,12 @@ class ABJ_404_Solution_FrontendRequestPipeline {
             $regexAction = isset($regexPermalink['link']) && is_string($regexPermalink['link']) ? $regexPermalink['link'] : '';
             $regexType = isset($regexPermalink['type']) && (is_int($regexPermalink['type']) || is_string($regexPermalink['type'])) ? $regexPermalink['type'] : -1;
             $regexDefaultRedirect = isset($options['default_redirect']) && is_scalar($options['default_redirect']) ? (int)$options['default_redirect'] : 0;
+            $regexCode = isset($regexPermalink['code']) && is_numeric($regexPermalink['code']) && (int)$regexPermalink['code'] > 0
+                ? (int)$regexPermalink['code'] : $regexDefaultRedirect;
             $this->dao->logRedirectHit($regexMatchingUrl, $regexAction, 'regex match', $requestedURL);
             $sentTo404Page = $this->logic->forceRedirect(
                 $regexLink,
-                $regexDefaultRedirect,
+                $regexCode,
                 $regexType,
                 $requestedURL
             );
@@ -487,6 +516,21 @@ class ABJ_404_Solution_FrontendRequestPipeline {
         $redirectFinalDest = isset($redirect['final_dest']) && is_scalar($redirect['final_dest']) ? (string)$redirect['final_dest'] : '';
         $redirectCode = isset($redirect['code']) && is_scalar($redirect['code']) ? (int)$redirect['code'] : 0;
         $redirectId = isset($redirect['id']) && is_scalar($redirect['id']) ? (string)$redirect['id'] : '0';
+
+        // 410 Gone: send HTTP 410 status and let WordPress render the suggestions page normally.
+        if ($redirectCode === 410) {
+            $this->dao->logRedirectHit($redirectUrl, '410', $matchReason);
+            $this->logic->forceRedirect('', 410);
+            // forceRedirect returns false for 410 without exiting — page continues to render.
+            return false;
+        }
+
+        // 451 Unavailable For Legal Reasons: render template and exit.
+        if ($redirectCode === 451) {
+            $this->dao->logRedirectHit($redirectUrl, '451', $matchReason);
+            $this->logic->forceRedirect('', 451);
+            return false;
+        }
 
         if ($redirect['type'] == ABJ404_TYPE_404_DISPLAYED) {
             $this->dao->logRedirectHit($redirectUrl, '404', $matchReason);

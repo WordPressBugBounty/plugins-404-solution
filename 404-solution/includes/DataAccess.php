@@ -426,6 +426,7 @@ class ABJ_404_Solution_DataAccess {
             'paged' => is_scalar($tableOptions['paged'] ?? 1) ? (int)($tableOptions['paged'] ?? 1) : 1,
             'perpage' => is_scalar($tableOptions['perpage'] ?? ABJ404_OPTION_DEFAULT_PERPAGE) ? (int)($tableOptions['perpage'] ?? ABJ404_OPTION_DEFAULT_PERPAGE) : ABJ404_OPTION_DEFAULT_PERPAGE,
             'filterText' => is_scalar($tableOptions['filterText'] ?? '') ? (string)($tableOptions['filterText'] ?? '') : '',
+            'score_range' => (function ($v) { return is_string($v) ? $v : 'all'; })($tableOptions['score_range'] ?? 'all'),
             'blog' => function_exists('get_current_blog_id') ? (int)get_current_blog_id() : 1,
         );
         $encoded = function_exists('wp_json_encode') ? wp_json_encode($cacheShape) : json_encode($cacheShape);
@@ -856,6 +857,22 @@ class ABJ_404_Solution_DataAccess {
             $this->attemptInvalidDataRetry($query, $result);
         }
 
+        // Lock wait timeout (errno 1205) and deadlock (errno 1213): retry once after a
+        // brief pause. Both errors are transient on shared hosting and usually resolve
+        // on the first retry. If the retry also fails, the error is surfaced below.
+        if ($result['last_error'] !== '' && $this->isDeadlockOrLockTimeoutError($result['last_error'])) {
+            /** @var wpdb $wpdb */
+            usleep(50000); // 50 ms — enough for most short-lived locks to release
+            $result['rows'] = $wpdb->get_results($query, ARRAY_A);
+            $result['last_error'] = (string)$wpdb->last_error;
+            $result['last_result'] = $wpdb->last_result;
+            $result['rows_affected'] = $wpdb->rows_affected;
+            $result['insert_id'] = $wpdb->insert_id;
+            if ($result['last_error'] !== '' && $this->isDeadlockOrLockTimeoutError($result['last_error'])) {
+                $this->setPluginDbNotice('lock_timeout', $this->localizeOrDefault('A database lock wait timeout occurred. If this persists, contact your host — another process may be holding a long-running lock.'), $result['last_error']);
+            }
+        }
+
         if ($result['last_error'] !== '') {
             $this->noteDatabaseIssueFromError($result['last_error']);
         }
@@ -889,16 +906,21 @@ class ABJ_404_Solution_DataAccess {
             	}
             }
 
-            // Disk-full, read-only, and quota errors are server-side issues, not
-            // plugin bugs.  They are already handled by noteDatabaseIssueFromError()
-            // (admin notice + write-block cooldown), so log as WARN instead of ERROR
-            // to avoid triggering dev email reports.
+            // Server-side and infrastructure errors are not plugin bugs.  They are
+            // already handled by dedicated repair/retry handlers above or by
+            // noteDatabaseIssueFromError() (admin notice + write-block cooldown).
+            // Log as WARN instead of ERROR to avoid triggering dev email reports.
             if ($reportError && (
                 $this->isDiskFullError($result['last_error']) ||
                 $this->isReadOnlyError($result['last_error']) ||
                 $this->isQuotaLimitError($result['last_error']) ||
                 $this->isInvalidDataError($result['last_error']) ||
-                $this->isCollationError($result['last_error'])
+                $this->isCollationError($result['last_error']) ||
+                $this->isMissingPluginTableError($result['last_error']) ||
+                $this->isIncorrectKeyFileError($result['last_error']) ||
+                $this->isCrashedTableError($result['last_error']) ||
+                $this->isDeadlockOrLockTimeoutError($result['last_error']) ||
+                $this->isTransientConnectionError($result['last_error'])
             )) {
                 $this->logger->warn("Server-side DB issue (handled): " . $result['last_error']);
                 $reportError = false;
@@ -1040,6 +1062,14 @@ class ABJ_404_Solution_DataAccess {
     }
 
     /** @param string $errorText @return bool */
+    private function isCrashedTableError(string $errorText): bool {
+        if (!is_string($errorText) || $errorText === '') {
+            return false;
+        }
+        return stripos($errorText, 'is marked as crashed') !== false;
+    }
+
+    /** @param string $errorText @return bool */
     private function isIncorrectKeyFileError(string $errorText): bool {
         if (!is_string($errorText) || $errorText === '') {
             return false;
@@ -1124,6 +1154,42 @@ class ABJ_404_Solution_DataAccess {
     }
 
     /** @param string $errorText @return void */
+    /**
+     * Extract a table name from a MySQL "table is full" error message.
+     * MySQL formats this as: The table 'table_name' is full
+     * @param string $errorText
+     * @return string|null The table name, or null if not parseable.
+     */
+    private function extractTableNameFromFullError(string $errorText): ?string {
+        if (preg_match("/table '([^']+)' is full/i", $errorText, $m)) {
+            return $m[1];
+        }
+        return null;
+    }
+
+    /**
+     * Check if a given table uses the InnoDB storage engine.
+     * Returns false on any query failure (safe default).
+     * @param string $tableName
+     * @return bool
+     */
+    private function isInnoDBTable(string $tableName): bool {
+        global $wpdb;
+        /** @var wpdb $wpdb */
+        if (!method_exists($wpdb, 'get_var') || !method_exists($wpdb, 'prepare')) {
+            return false; // Safe default when $wpdb is a partial stub
+        }
+        $dbName = defined('DB_NAME') ? (string)DB_NAME : '';
+        $engine = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
+                $dbName,
+                $tableName
+            )
+        );
+        return is_string($engine) && strtolower($engine) === 'innodb';
+    }
+
     private function noteDatabaseIssueFromError(string $errorText): void {
         if (!is_string($errorText) || trim($errorText) === '') {
             return;
@@ -1131,6 +1197,19 @@ class ABJ_404_Solution_DataAccess {
         if ($this->isDiskFullError($errorText)) {
             $this->serverSideIssueNoted = true;
             $this->setRuntimeFlag('abj404_db_disk_full_until', time() + self::DB_WRITE_BLOCK_COOLDOWN_SECONDS, self::DB_WRITE_BLOCK_COOLDOWN_SECONDS);
+
+            // Disambiguate InnoDB tablespace exhaustion from actual disk full or MyISAM limit.
+            // "table is full" for InnoDB means the shared tablespace (ibdata1) is at capacity —
+            // trimming plugin rows will NOT free space; the host must expand the tablespace.
+            $tableFull = stripos($errorText, 'table') !== false && stripos($errorText, 'is full') !== false;
+            if ($tableFull) {
+                $tableName = $this->extractTableNameFromFullError($errorText);
+                if ($tableName !== null && $this->isInnoDBTable($tableName)) {
+                    $this->setPluginDbNotice('disk_full', $this->localizeOrDefault('The InnoDB tablespace appears to be exhausted. Deleting plugin data will NOT free this space. Contact your hosting provider to expand the InnoDB tablespace (ibdata1).'), $errorText);
+                    return;
+                }
+            }
+
             $this->setPluginDbNotice('disk_full', $this->localizeOrDefault('Database storage appears full (disk/engine space). Plugin write-heavy tasks are temporarily paused.'), $errorText);
             return;
         }
@@ -1197,6 +1276,20 @@ class ABJ_404_Solution_DataAccess {
             return;
         }
 
+        // Rate-limit repeated failures: after a failed repair, downgrade subsequent
+        // occurrences to WARNING for 24 hours so cron-per-run error storms don't
+        // generate email reports. The first failure still logs ERROR and attempts repair.
+        $repairCooldownKey = 'abj404_missing_table_repair_cooldown';
+        $cooldownUntil = $this->getRuntimeFlag($repairCooldownKey);
+        if (is_scalar($cooldownUntil) && (int)$cooldownUntil > time()) {
+            $this->logger->warn("Missing plugin table (repair previously failed, cooldown active): "
+                . $result['last_error']);
+            // Clear last_error so the caller (queryAndGetResults) does not
+            // double-report this error as "Ugh. SQL query error" ERROR.
+            $result['last_error'] = '';
+            return;
+        }
+
         // During upgrades and nightly maintenance, createDatabaseTables() runs
         // proactively before any queries.  If we reach this point, a plugin table
         // went missing during normal usage — always worth an ERROR so it appears
@@ -1216,7 +1309,13 @@ class ABJ_404_Solution_DataAccess {
 
             global $wpdb;
             $wpdb->flush();
+            // Suppress WP's own error output for the retry — if it also fails, we
+            // report it ourselves below.  Without this, WP logs a second
+            // "WordPress database error" entry on top of the first, producing
+            // duplicate noise in debug.log for every failed cron run.
+            $prevSuppressState = $wpdb->suppress_errors(true);
             $result['rows'] = $wpdb->get_results($query, ARRAY_A);
+            $wpdb->suppress_errors($prevSuppressState);
             $result['last_error'] = (string)($wpdb->last_error ?? '');
             $result['last_result'] = $wpdb->last_result ?? array();
             $result['rows_affected'] = $wpdb->rows_affected ?? 0;
@@ -1224,9 +1323,31 @@ class ABJ_404_Solution_DataAccess {
 
             if ($result['last_error'] === '') {
                 $this->logger->infoMessage("Missing-table auto-repair succeeded.");
+                // Clear any active cooldown — repair is now working.
+                if (function_exists('delete_transient')) {
+                    delete_transient($repairCooldownKey);
+                } elseif (function_exists('delete_option')) {
+                    delete_option($repairCooldownKey);
+                }
+            } else {
+                // Repair failed. Engage 24h cooldown and surface a single admin notice on
+                // the plugin screen so the admin knows to investigate (e.g. missing CREATE
+                // privilege or wrong DB user).  Never email; never show on all wp-admin pages.
+                $this->setRuntimeFlag($repairCooldownKey, time() + 86400, 86400);
+                $noticePayload = array(
+                    'type'         => 'missing_table',
+                    'message'      => $this->localizeOrDefault(
+                        'A plugin database table is missing and could not be repaired automatically. '
+                        . 'Try deactivating and reactivating 404 Solution, or verify that your database user has CREATE TABLE privileges.'
+                    ),
+                    'timestamp'    => time(),
+                    'error_string' => $result['last_error'],
+                );
+                $this->setRuntimeFlag('abj404_plugin_db_notice', $noticePayload, 86400);
             }
         } catch (Throwable $e) {
             $this->logger->warn("Missing-table auto-repair failed: " . $e->getMessage());
+            $this->setRuntimeFlag($repairCooldownKey, time() + 86400, 86400);
         } finally {
             self::$tableRepairInProgress = false;
         }

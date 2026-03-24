@@ -32,7 +32,7 @@ class ABJ_404_Solution_UserRequest {
             if (!self::initialize()) {
                 $abj404logging = ABJ_404_Solution_Logging::getInstance();
                 $abj404logging->errorMessage('Issue initializing ' . __CLASS__, 
-                        new Exception("Issue initializing ' . __CLASS__"));
+                        new Exception('Issue initializing ' . __CLASS__));
             }
         }
         
@@ -105,7 +105,7 @@ class ABJ_404_Solution_UserRequest {
         	 $f->endsWithCaseInsensitive($urlPath, '/amp/')
         	)
         	&& $f->strlen($urlPath) >= 6) {
-        	$urlParts['path'] = substr($urlPath, 0, $f->strlen($urlPath) - 4);
+        	$urlParts['path'] = $f->substr($urlPath, 0, $f->strlen($urlPath) - 4);
         }
         
         // remove any "/comment-page-???/" if there is one.
@@ -120,7 +120,8 @@ class ABJ_404_Solution_UserRequest {
         $commentPagePart = '';
         $results = array();
         if (isset($wp_rewrite) && isset($wp_rewrite->comments_pagination_base)) {
-        	$commentregex = '(.*)\/(' . $wp_rewrite->comments_pagination_base . '-[0-9]{1,})(\/|\z)?(.*)';
+        	$safeBase = preg_quote($wp_rewrite->comments_pagination_base);
+        	$commentregex = '(.*)\/(' . $safeBase . '-[0-9]{1,})(\/|\z)?(.*)';
         	$f->regexMatch($commentregex, $urlWithoutCommentPage, $results);
         	
         	if (!empty($results)) {

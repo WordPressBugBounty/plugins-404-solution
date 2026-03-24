@@ -798,6 +798,33 @@ msgstr "Flera e-postadresser kan separeras med kommatecken (,). Avsändarens e-p
 msgid "Never Used"
 msgstr "Aldrig använd"
 
+msgid "Confidence"
+msgstr "Konfidens"
+
+msgid "Confidence:"
+msgstr "Konfidens:"
+
+msgid "Match Confidence"
+msgstr "Träffsäkerhet"
+
+msgid "High (≥80%)"
+msgstr "Hög (≥80%)"
+
+msgid "Medium (50–79%)"
+msgstr "Medel (50–79%)"
+
+msgid "Low (<50%)"
+msgstr "Låg (<50%)"
+
+msgid "Manual (no score)"
+msgstr "Manuell (ingen poäng)"
+
+msgid "Avg confidence: %s%%"
+msgstr "Genomsn. konfidens: %s%%"
+
+msgid "Manual redirect — no confidence score"
+msgstr "Manuell omdirigering — inget konfidenspoäng"
+
 msgid "New Redirect Added Successfully!"
 msgstr "Ny omdirigering har lagts till."
 
@@ -2614,8 +2641,8 @@ msgstr "Ogiltigt CSV-format. Kunde inte mappa käll-/destinationskolumner."
 
 #: includes/ImportExport.php
 #, php-format
-msgid "Invalid CSV format. %d columns found but 2, 5, or 6 expected."
-msgstr "Ogiltigt CSV-format. %d kolumner hittades men 2, 5 eller 6 förväntades."
+msgid "Invalid CSV format. %d columns found but 2, 5, 6, or 7 expected."
+msgstr "Ogiltigt CSV-format. %d kolumner hittades men 2, 5, 6 eller 7 förväntades."
 
 #: includes/ShortCode.php
 msgid "Loading page suggestions..."
@@ -2637,3 +2664,738 @@ msgstr "En tillfällig databastabell är skadad — detta orsakas vanligtvis av 
 msgid "The 404 Solution log table is full and cannot accept new entries. This is usually caused by a full disk. Please contact your host or manually prune the logs table."
 msgstr "404 Solutions loggtabell är full och kan inte acceptera nya poster. Detta orsakas vanligtvis av en full disk. Kontakta din hosting-leverantör eller rensa loggtabellen manuellt."
 
+
+#: includes/PermalinkCache.php
+msgid "Permalink cache appears empty after rebuild — suggestions may be degraded. Try rebuilding again or check available disk space."
+msgstr "Permalink-cachen verkar tom efter ombyggnad — förslag kan vara försämrade. Försök att bygga om igen eller kontrollera tillgängligt diskutrymme."
+
+#: 404-solution.php
+msgid "The permalink cache appears to be empty. Try rebuilding it from the Tools tab, or check that your site has enough disk space."
+msgstr "Permalink-cachen verkar vara tom. Försök att bygga om den från fliken Verktyg eller kontrollera att din webbplats har tillräckligt med diskutrymme."
+
+#: includes/ViewTrait_RedirectsTable.php
+msgid "Destination returned 404 recently — redirect suspended until destination is restored."
+msgstr "Destinationen returnerade 404 nyligen — omdirigeringen är pausad tills destinationen är återställd."
+
+# Strings added for new features (3.3.8)
+
+msgid "A database lock wait timeout occurred. If this persists, contact your host — another process may be holding a long-running lock."
+msgstr "A database lock wait timeout occurred. If this persists, contact your host — another process may be holding a long-running lock."
+
+msgid "The InnoDB tablespace appears to be exhausted. Deleting plugin data will NOT free this space. Contact your hosting provider to expand the InnoDB tablespace (ibdata1)."
+msgstr "The InnoDB tablespace appears to be exhausted. Deleting plugin data will NOT free this space. Contact your hosting provider to expand the InnoDB tablespace (ibdata1)."
+
+msgid "Email notification frequency"
+msgstr "Email notification frequency"
+
+msgid "Instant (when threshold exceeded)"
+msgstr "Instant (when threshold exceeded)"
+
+msgid "Daily digest"
+msgstr "Daily digest"
+
+msgid "Weekly digest"
+msgstr "Weekly digest"
+
+msgid "Choose how often to receive email notifications about captured 404s."
+msgstr "Choose how often to receive email notifications about captured 404s."
+
+msgid "Attach PDF report to digest email"
+msgstr "Attach PDF report to digest email"
+
+msgid "When enabled, a PDF summary is attached to each digest email (daily or weekly digests only)."
+msgstr "When enabled, a PDF summary is attached to each digest email (daily or weekly digests only)."
+
+msgid "Temporary 307 (preserve method)"
+msgstr "Temporary 307 (preserve method)"
+
+msgid "Permanent 308 (preserve method)"
+msgstr "Permanent 308 (preserve method)"
+
+msgid "Loading chart data…"
+msgstr "Loading chart data…"
+
+msgid "Could not load chart data."
+msgstr "Could not load chart data."
+
+msgid "404 Hits per Day"
+msgstr "404 Hits per Day"
+
+msgid "Redirects per Day"
+msgstr "Redirects per Day"
+
+msgid "New Captures per Day"
+msgstr "New Captures per Day"
+
+msgid "Trends (Last 30 Days)"
+msgstr "Trends (Last 30 Days)"
+
+msgid "Trend Analytics"
+msgstr "Trendanalys"
+
+msgid "7 days"
+msgstr "7 dagar"
+
+msgid "30 days"
+msgstr "30 dagar"
+
+msgid "90 days"
+msgstr "90 dagar"
+
+msgid "Period"
+msgstr "Period"
+
+msgid "No broken internal links found."
+msgstr "No broken internal links found."
+
+msgid "Found %1$d broken internal link(s) across %2$d post(s)/page(s)."
+msgstr "Found %1$d broken internal link(s) across %2$d post(s)/page(s)."
+
+msgid "Post/Page"
+msgstr "Post/Page"
+
+msgid "Broken URL"
+msgstr "Broken URL"
+
+msgid "404 Hits"
+msgstr "404 Hits"
+
+msgid "Broken Internal Links"
+msgstr "Broken Internal Links"
+
+
+msgid "Migrate from Another Plugin"
+msgstr "Migrate from Another Plugin"
+
+msgid "Rank Math"
+msgstr "Rank Math"
+
+msgid "Yoast SEO Premium"
+msgstr "Yoast SEO Premium"
+
+msgid "AIOSEO"
+msgstr "AIOSEO"
+
+msgid "Safe Redirect Manager"
+msgstr "Safe Redirect Manager"
+
+msgid "Redirection Plugin"
+msgstr "Redirection Plugin"
+
+msgid "No supported redirect plugins detected on this site."
+msgstr "No supported redirect plugins detected on this site."
+
+msgid "Supported plugins: Rank Math, Yoast SEO Premium, AIOSEO, Safe Redirect Manager, Redirection."
+msgstr "Supported plugins: Rank Math, Yoast SEO Premium, AIOSEO, Safe Redirect Manager, Redirection."
+
+msgid "Detected redirect plugins:"
+msgstr "Detected redirect plugins:"
+
+msgid "Source plugin:"
+msgstr "Source plugin:"
+
+msgid "Import Redirects"
+msgstr "Import Redirects"
+
+msgid "This will import all active redirects from the selected plugin into 404 Solution. Regex and redirect codes are preserved."
+msgstr "This will import all active redirects from the selected plugin into 404 Solution. Regex and redirect codes are preserved."
+
+msgid "Temporary Redirect (preserve method)"
+msgstr "Temporary Redirect (preserve method)"
+
+msgid "Permanent Redirect (preserve method)"
+msgstr "Permanent Redirect (preserve method)"
+
+msgid "Gone (resource permanently removed)"
+msgstr "Gone (resource permanently removed)"
+
+msgid "Conditions (optional)"
+msgstr "Conditions (optional)"
+
+msgid "This redirect only fires when all conditions are met. Leave empty to always redirect."
+msgstr "This redirect only fires when all conditions are met. Leave empty to always redirect."
+
+msgid "+ Add Condition"
+msgstr "+ Add Condition"
+
+msgid "Logic"
+msgstr "Logic"
+
+msgid "AND"
+msgstr "AND"
+
+msgid "OR"
+msgstr "OR"
+
+msgid "Login Status"
+msgstr "Login Status"
+
+msgid "User Role"
+msgstr "User Role"
+
+msgid "Referrer URL"
+msgstr "Referrer URL"
+
+msgid "User Agent"
+msgstr "User Agent"
+
+msgid "IP Range (CIDR)"
+msgstr "IP Range (CIDR)"
+
+msgid "HTTP Header"
+msgstr "HTTP Header"
+
+msgid "Condition type"
+msgstr "Condition type"
+
+msgid "— Select type —"
+msgstr "— Select type —"
+
+msgid "equals"
+msgstr "equals"
+
+msgid "not equals"
+msgstr "not equals"
+
+msgid "contains"
+msgstr "contains"
+
+msgid "does not contain"
+msgstr "does not contain"
+
+msgid "matches regex"
+msgstr "matches regex"
+
+msgid "Operator"
+msgstr "Operator"
+
+msgid "Value"
+msgstr "Value"
+
+msgid "Condition value"
+msgstr "Condition value"
+
+msgid "Remove condition"
+msgstr "Remove condition"
+
+msgid "Remove"
+msgstr "Remove"
+
+msgid "Auto-matched by:"
+msgstr "Auto-matched by:"
+
+msgid "Error: Invalid email notification frequency selected"
+msgstr "Error: Invalid email notification frequency selected"
+
+msgid "Error: Digest limit must be a number greater than or equal to 1"
+msgstr "Error: Digest limit must be a number greater than or equal to 1"
+
+msgid "Google Search Console credentials saved."
+msgstr "Google Search Console credentials saved."
+
+msgid "Error: No source plugin specified."
+msgstr "Error: No source plugin specified."
+
+msgid "Error: Unknown source plugin \"%s\"."
+msgstr "Error: Unknown source plugin \"%s\"."
+
+msgid "Insufficient permissions."
+msgstr "Insufficient permissions."
+
+msgid "Security check failed."
+msgstr "Security check failed."
+
+msgid "OAuth token exchange failed."
+msgstr "OAuth token exchange failed."
+
+msgid "Google Search Console"
+msgstr "Google Search Console"
+
+msgid "Google Search Console Integration"
+msgstr "Google Search Console Integration"
+
+msgid "Connect to Google Search Console to see which broken URLs were getting real search traffic."
+msgstr "Connect to Google Search Console to see which broken URLs were getting real search traffic."
+
+msgid "Setup steps:"
+msgstr "Setup steps:"
+
+msgid "Create a project in %s."
+msgstr "Create a project in %s."
+
+msgid "Enable the \"Google Search Console API\"."
+msgstr "Enable the \"Google Search Console API\"."
+
+msgid "Create OAuth 2.0 credentials (Web application type)."
+msgstr "Create OAuth 2.0 credentials (Web application type)."
+
+msgid "Add this Authorized Redirect URI: %s"
+msgstr "Add this Authorized Redirect URI: %s"
+
+msgid "Enter your Client ID and Client Secret below."
+msgstr "Enter your Client ID and Client Secret below."
+
+msgid "Client ID"
+msgstr "Client ID"
+
+msgid "Client Secret"
+msgstr "Client Secret"
+
+msgid "Search Console Site URL"
+msgstr "Search Console Site URL"
+
+msgid "The site URL as registered in Search Console (e.g. https://example.com/)."
+msgstr "The site URL as registered in Search Console (e.g. https://example.com/)."
+
+msgid "Save Credentials"
+msgstr "Save Credentials"
+
+msgid "Credentials saved."
+msgstr "Credentials saved."
+
+msgid "Click the button below to authorize access to your Search Console data."
+msgstr "Click the button below to authorize access to your Search Console data."
+
+msgid "Authorize with Google"
+msgstr "Authorize with Google"
+
+msgid "Remove Credentials"
+msgstr "Remove Credentials"
+
+msgid "Connected to Google Search Console."
+msgstr "Connected to Google Search Console."
+
+msgid "Search traffic data for your captured 404 URLs is shown below. Data is cached for 1 hour."
+msgstr "Search traffic data for your captured 404 URLs is shown below. Data is cached for 1 hour."
+
+msgid "Disconnect"
+msgstr "Disconnect"
+
+msgid "Connected to Google Search Console"
+msgstr "Ansluten till Google Search Console"
+
+msgid "Credentials saved — authorization required"
+msgstr "Uppgifter sparade — auktorisering krävs"
+
+msgid "Authorization failed"
+msgstr "Auktorisering misslyckades"
+
+msgid "Authorization was denied or cancelled."
+msgstr "Auktoriseringen nekades eller avbröts."
+
+msgid "Try Again"
+msgstr "Försök igen"
+
+msgid "Copy"
+msgstr "Kopiera"
+
+msgid "Copied!"
+msgstr "Kopierat!"
+
+msgid "Add this Authorized Redirect URI to your OAuth client:"
+msgstr "Lägg till denna auktoriserade omdirigerings-URI i din OAuth-klient:"
+
+msgid "Click 'Try Again' to retry authorization, or 'Remove Credentials' to start over."
+msgstr "Klicka på 'Försök igen' för att försöka auktorisera igen, eller 'Ta bort uppgifter' för att börja om."
+
+msgid "404 URLs with Search Traffic (last 90 days)"
+msgstr "404 URLs with Search Traffic (last 90 days)"
+
+msgid "Clicks"
+msgstr "Clicks"
+
+msgid "Impressions"
+msgstr "Impressions"
+
+msgid "No search traffic data found for your captured 404 URLs in the last 90 days."
+msgstr "Ingen söktrafik hittades för dina registrerade 404-URL:er under de senaste 90 dagarna."
+
+msgid "Avg. Position"
+msgstr "Avg. Position"
+
+msgid "The \"from\" URL is required."
+msgstr "The \"from\" URL is required."
+
+msgid "The \"to\" URL is required."
+msgstr "The \"to\" URL is required."
+
+msgid "Failed to create redirect."
+msgstr "Failed to create redirect."
+
+msgid "Invalid redirect ID."
+msgstr "Invalid redirect ID."
+
+msgid "Both \"from\" and \"to\" parameters are required."
+msgstr "Both \"from\" and \"to\" parameters are required."
+
+msgid "Invalid captured 404 ID."
+msgstr "Invalid captured 404 ID."
+
+msgid "Captured 404 not found."
+msgstr "Captured 404 not found."
+
+msgid "The captured 404 record has no URL."
+msgstr "The captured 404 record has no URL."
+
+msgid "The \"url\" parameter is required."
+msgstr "The \"url\" parameter is required."
+
+msgid "No captured 404s in this period."
+msgstr "No captured 404s in this period."
+
+msgid "404 Solution Digest"
+msgstr "404 Solution Digest"
+
+msgid "Digest Report"
+msgstr "Sammanfattningsrapport"
+
+msgid "404 URLs"
+msgstr "404-URL:er"
+
+msgid "Redirected"
+msgstr "Omdirigerad"
+
+msgid "Configured"
+msgstr "Konfigurerad"
+
+msgid "Resolution Rate"
+msgstr "Lösningsgrad"
+
+#. translators: 1: number of resolved URLs, 2: total number of URLs
+msgid "%1$d of %2$d URLs handled"
+msgstr "%1$d av %2$d URL:er hanterade"
+
+msgid "Summary"
+msgstr "Summary"
+
+msgid "Top Captured 404 URLs"
+msgstr "Top Captured 404 URLs"
+
+msgid "First Seen"
+msgstr "First Seen"
+
+msgid "View Captured 404s"
+msgstr "View Captured 404s"
+
+msgid "Manage Settings"
+msgstr "Hantera inställningar"
+
+msgid "To stop these emails, update your notification settings."
+msgstr "För att sluta ta emot dessa e-postmeddelanden, uppdatera dina aviseringsinställningar."
+
+msgid "To stop receiving these emails, update your notification settings."
+msgstr "To stop receiving these emails, update your notification settings."
+
+msgid "Manage settings"
+msgstr "Manage settings"
+
+msgid "Sent"
+msgstr "Sent"
+
+msgid "Plugin"
+msgstr "Plugin"
+
+msgid "404 Solution Digest — %s"
+msgstr "404 Solution Digest — %s"
+
+msgid "Advanced Options"
+msgstr "Avancerade alternativ"
+
+msgid "Active From (optional)"
+msgstr "Active From (optional)"
+
+msgid "Leave blank to activate immediately"
+msgstr "Leave blank to activate immediately"
+
+msgid "Active Until (optional)"
+msgstr "Active Until (optional)"
+
+msgid "Leave blank to never expire"
+msgstr "Leave blank to never expire"
+
+msgid "A database lock wait timeout occurred. This is usually caused by another process holding a table lock on your database. It may resolve itself automatically, or contact your hosting provider if it persists."
+msgstr "A database lock wait timeout occurred. This is usually caused by another process holding a table lock on your database. It may resolve itself automatically, or contact your hosting provider if it persists."
+
+msgid "Expire auto-redirects after"
+msgstr "Expire auto-redirects after"
+
+msgid "days (0 to disable)"
+msgstr "days (0 to disable)"
+
+msgid "Auto-created redirects older than this many days will be automatically moved to trash."
+msgstr "Auto-created redirects older than this many days will be automatically moved to trash."
+
+msgid "Export format:"
+msgstr "Export format:"
+
+msgid "Native CSV (404 Solution)"
+msgstr "Native CSV (404 Solution)"
+
+msgid "Redirection Plugin CSV"
+msgstr "Redirection Plugin CSV"
+
+msgid "Apache .htaccess"
+msgstr "Apache .htaccess"
+
+msgid "Nginx config"
+msgstr "Nginx config"
+
+msgid "Cloudflare Workers script"
+msgstr "Cloudflare Workers script"
+
+msgid "Netlify _redirects"
+msgstr "Netlify _redirects"
+
+msgid "Vercel vercel.json"
+msgstr "Vercel vercel.json"
+
+# 410 Gone page strings
+msgid "This content has been permanently removed."
+msgstr "Det här innehållet har tagits bort permanent."
+
+msgid "The page you requested no longer exists and has not been moved to a new location."
+msgstr "Sidan du begärde finns inte längre och har inte flyttats till en ny plats."
+
+msgid "Back to home page"
+msgstr "Tillbaka till startsidan"
+
+# 451 Unavailable For Legal Reasons strings
+msgid "451 Unavailable For Legal Reasons"
+msgstr "451 Ej tillgänglig av juridiska skäl"
+
+msgid "This content is unavailable due to a legal demand."
+msgstr "Det här innehållet är inte tillgängligt på grund av ett rättsligt krav."
+
+msgid "Unavailable For Legal Reasons"
+msgstr "Ej tillgänglig av juridiska skäl"
+
+# Trash/deletion redirect strings
+msgid "Create redirect when a page is trashed or deleted"
+msgstr "Skapa omdirigering när en sida skickas till papperskorgen eller raderas"
+
+msgid "When a published page is moved to trash or permanently deleted, create a redirect from its old URL to the homepage."
+msgstr "När en publicerad sida flyttas till papperskorgen eller raderas permanent skapas en omdirigering från dess gamla URL till startsidan."
+
+# Meta Refresh redirect strings
+msgid "0 Meta Refresh"
+msgstr "0 Meta Refresh"
+
+msgid "Meta Refresh"
+msgstr "Meta Refresh"
+
+msgid "Redirecting…"
+msgstr "Redirecting…"
+
+msgid "You are being redirected. Click the link if not redirected automatically."
+msgstr "You are being redirected. Click the link if not redirected automatically."
+
+# Engine Profile admin section strings
+msgid "Engine Profiles"
+msgstr "Motorprofiler"
+
+msgid "By default, when a visitor hits a 404 URL, all suggestion methods run: slug matching, spelling correction, title matching, content search, category/tag matching, URL fixing, and archive fallback. Engine Profiles let you override this for specific sections of your site — choose exactly which methods run when a 404 URL falls within a URL pattern you define."
+msgstr "Som standard körs alla förslagsmetoder när en besökare träffar en 404-URL: slug-matchning, stavningskorrektion, titelmatchning, innehållssökning, kategori-/taggmatchning, URL-korrigering och arkivfallback. Med Engine-profiler kan du åsidosätta detta för specifika delar av din webbplats — välj exakt vilka metoder som körs när en 404-URL faller inom ett URL-mönster du definierar."
+
+msgid "Example 1:"
+msgstr "Exempel 1:"
+
+msgid "Your store lives at /products/. Spelling correction works great on blog posts, but on a product section you want only exact slug matching and URL fixing — fuzzy spelling suggestions might point to the wrong product. Create a profile with the URL pattern /products/* and check only \"Slug Matching\" and \"URL Fix\"."
+msgstr "Din butik finns på /products/. Stavningskorrektion fungerar bra för blogginlägg, men i en produktsektion vill du bara ha exakt slug-matchning och URL-korrigering — otydliga stavningsförslag kan peka på fel produkt. Skapa en profil med URL-mönstret /products/* och bocka bara i \"Slug-matchning\" och \"URL-korrigering\"."
+
+msgid "Example 2:"
+msgstr "Exempel 2:"
+
+msgid "You have a documentation archive at /docs/ that you recently restructured. The content is too technical for spelling suggestions to be useful, so you enable only the Archive Fallback engine there."
+msgstr "Du har ett dokumentationsarkiv på /docs/ som du nyligen omstrukturerat. Innehållet är för tekniskt för att stavningsförslag ska vara användbara, så du aktiverar bara arkivfallback-motorn där."
+
+msgid "How profiles are applied:"
+msgstr "Hur profiler tillämpas:"
+
+msgid "Each profile has a URL pattern (e.g. /products/*) that is tested against the incoming 404 URL."
+msgstr "Varje profil har ett URL-mönster (t.ex. /products/*) som testas mot den inkommande 404-URL:en."
+
+msgid "Profiles are checked in priority order — lower number means checked first."
+msgstr "Profiler kontrolleras i prioritetsordning — lägre nummer kontrolleras först."
+
+msgid "The first profile whose URL pattern matches the 404 URL wins. Only the engines you selected in that profile will run."
+msgstr "Den första profilen vars URL-mönster matchar 404-URL:en vinner. Endast de motorer du valt i den profilen kommer att köras."
+
+msgid "If none of your profiles match the 404 URL, the default behavior applies: all engines run."
+msgstr "Om ingen av dina profiler matchar 404-URL:en gäller standardbeteendet: alla motorer körs."
+
+msgid "Most sites do not need Engine Profiles. They are for advanced scenarios where one section of your site needs different suggestion logic than the rest."
+msgstr "De flesta webbplatser behöver inga Engine-profiler. De är för avancerade scenarier där en del av din webbplats behöver en annan förslagslogik än resten."
+
+msgid "Name"
+msgstr "Name"
+
+msgid "URL Pattern"
+msgstr "URL Pattern"
+
+msgid "Regex"
+msgstr "Regex"
+
+msgid "Engines"
+msgstr "Engines"
+
+msgid "Priority"
+msgstr "Priority"
+
+msgid "Active"
+msgstr "Active"
+
+msgid "Actions"
+msgstr "Actions"
+
+msgid "No engine profiles defined."
+msgstr "Inga motorprofiler definierade."
+
+msgid "Add Engine Profile"
+msgstr "Lägg till motorprofil"
+
+msgid "Edit Engine Profile"
+msgstr "Redigera motorprofil"
+
+msgid "e.g. Products section"
+msgstr "t.ex. Produktsektion"
+
+msgid "e.g. /products/* or ^/products/"
+msgstr "t.ex. /products/* eller ^/products/"
+
+msgid "Use * as wildcard for simple patterns. Check &quot;Regex&quot; for full regex patterns."
+msgstr "Använd * som jokertecken för enkla mönster. Markera \"Regex\" för fullständiga regex-mönster."
+
+msgid "Pattern is a regular expression"
+msgstr "Mönstret är ett reguljärt uttryck"
+
+msgid "Enabled Engines"
+msgstr "Aktiverade motorer"
+
+msgid "Select which engines should run for URLs matching this profile. Leave all unchecked to run all engines."
+msgstr "Välj vilka motorer som ska köras för URL:er som matchar den här profilen. Lämna alla avmarkerade för att köra alla motorer."
+
+msgid "Slug Matching"
+msgstr "Slug-matchning"
+
+msgid "Spelling Matching"
+msgstr "Stavningsmatchning"
+
+msgid "Title Matching"
+msgstr "Titelmatchning"
+
+msgid "Content Matching"
+msgstr "Innehållsmatchning"
+
+msgid "Category/Tag Matching"
+msgstr "Kategori/tagg-matchning"
+
+msgid "URL Fix"
+msgstr "URL-korrigering"
+
+msgid "Archive Fallback"
+msgstr "Arkivfallback"
+
+msgid "Lower number = higher priority. First matching profile wins."
+msgstr "Lägre nummer = högre prioritet. Den första matchande profilen vinner."
+
+msgid "Profile is active"
+msgstr "Profil är aktiv"
+
+msgid "Save Profile"
+msgstr "Spara profil"
+
+msgid "Profile name is required."
+msgstr "Profilnamn krävs."
+
+msgid "URL pattern is required."
+msgstr "URL-mönster krävs."
+
+msgid "Profile saved."
+msgstr "Profil sparad."
+
+msgid "Failed to save profile."
+msgstr "Det gick inte att spara profilen."
+
+msgid "Delete this engine profile?"
+msgstr "Ta bort den här motorprofilen?"
+
+msgid "Invalid regular expression pattern."
+msgstr "Ogiltigt mönster för reguljärt uttryck."
+
+msgid "Failed to save engine profile."
+msgstr "Det gick inte att spara motorprofilen."
+
+msgid "Invalid profile ID."
+msgstr "Ogiltigt profil-ID."
+
+msgid "Failed to delete engine profile."
+msgstr "Det gick inte att ta bort motorprofilen."
+
+msgid "Send Feedback"
+msgstr "Skicka feedback"
+
+msgid "301"
+msgstr "301"
+
+msgid "Permanent"
+msgstr "Permanent"
+
+msgid "302"
+msgstr "302"
+
+msgid "Temporary"
+msgstr "Tillfällig"
+
+msgid "307"
+msgstr "307"
+
+msgid "Temp, method-safe"
+msgstr "Temp, metodsäker"
+
+msgid "308"
+msgstr "308"
+
+msgid "Perm, method-safe"
+msgstr "Perm, metodsäker"
+
+msgid "410"
+msgstr "410"
+
+msgid "Gone"
+msgstr "Borttagen"
+
+msgid "451"
+msgstr "451"
+
+msgid "Legal reasons"
+msgstr "Juridiska skäl"
+
+msgid "HTTP 200 + meta tag"
+msgstr "HTTP 200 + meta-tagg"
+
+msgid "Use 301 for permanent page moves. Use 302 for A/B tests or seasonal pages."
+msgstr "Använd 301 för permanenta sidflyttningar. Använd 302 för A/B-tester eller säsongssidor."
+
+msgid "Back to Redirects"
+msgstr "Tillbaka till omdirigeringar"
+
+msgid "Preview Import"
+msgstr "Förhandsgranska import"
+
+msgid "Confirm Import"
+msgstr "Bekräfta import"
+
+msgid "Back"
+msgstr "Tillbaka"
+
+msgid "Found %d redirect(s) from %s — proceed with import?"
+msgstr "%d omdirigering(ar) hittades från %s — fortsätta med import?"
+
+msgid "No redirects found in %s. Nothing to import."
+msgstr "Inga omdirigeringar hittades i %s. Inget att importera."
+
+msgid "Could not fetch preview. Please try again."
+msgstr "Det gick inte att hämta förhandsgranskningen. Försök igen."
+
+msgid "Invalid source plugin."
+msgstr "Ogiltig källplugin."

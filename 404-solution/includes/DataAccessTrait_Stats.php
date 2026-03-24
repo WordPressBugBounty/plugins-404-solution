@@ -520,10 +520,13 @@ trait ABJ_404_Solution_DataAccess_StatsTrait {
      */
     function getRedirectsByIDs($ids) {
         global $wpdb;
+        if (!is_array($ids) || empty($ids)) {
+            return array();
+        }
         $validids = array_map('absint', $ids);
         $multipleIds = implode(',', $validids);
     
-        $query = "select id, url, type, status, final_dest, code, COALESCE(engine, '') as engine from {wp_abj404_redirects} " .
+        $query = "select id, url, type, status, final_dest, code, COALESCE(engine, '') as engine, start_ts, end_ts from {wp_abj404_redirects} " .
                 "where id in (" . $multipleIds . ")";
         $query = $this->doTableNameReplacements($query);
         $rows = $wpdb->get_results($query, ARRAY_A);
@@ -573,7 +576,7 @@ trait ABJ_404_Solution_DataAccess_StatsTrait {
             $this->invalidateStatusCountsCache();
             $this->clearRegexRedirectsCache();
         }
-        if ($result == false) {
+        if ($result === false) {
             $message = __('Error: Unknown Database Error!', '404-solution');
         }
         return $message;
@@ -613,7 +616,15 @@ trait ABJ_404_Solution_DataAccess_StatsTrait {
     	return $results;
     }
 
-    /** 
+    /** @return int */
+    function getPermalinkCacheCount(): int {
+        $table = $this->doTableNameReplacements('{wp_abj404_permalink_cache}');
+        global $wpdb;
+        $count = $wpdb->get_var("SELECT COUNT(*) FROM `{$table}`");
+        return is_numeric($count) ? (int) $count : 0;
+    }
+
+    /**
      * @global type $wpdb
      * @global type $abj404logging
      * @param int $type ABJ404_EXTERNAL, ABJ404_POST, ABJ404_CAT, or ABJ404_TAG.
@@ -622,37 +633,65 @@ trait ABJ_404_Solution_DataAccess_StatsTrait {
      * @param int $idForUpdate
      * @param string $redirectCode
      * @param string $statusType ABJ404_STATUS_MANUAL or ABJ404_STATUS_REGEX
+     * @param int|null $startTs Unix timestamp when redirect becomes active (null = always)
+     * @param int|null $endTs   Unix timestamp when redirect expires (null = never)
      * @return string
      */
-    function updateRedirect($type, $dest, $fromURL, $idForUpdate, $redirectCode, $statusType) {
+    function updateRedirect($type, $dest, $fromURL, $idForUpdate, $redirectCode, $statusType, $startTs = null, $endTs = null) {
         global $wpdb;
-        
+
         if (($type < 0) || ($idForUpdate <= 0)) {
             $this->logger->errorMessage("Bad data passed for update redirect request. Type: " .
                 esc_html((string)$type) . ", Dest: " . esc_html($dest) . ", ID(s): " . esc_html((string)$idForUpdate));
             echo __('Error: Bad data passed for update redirect request.', '404-solution');
             return '';
         }
-        
+
         $redirectsTable = $this->doTableNameReplacements("{wp_abj404_redirects}");
-        $wpdb->update($redirectsTable, array(
-        	'url' => $fromURL,
+
+        $updateData = array(
+            'url' => $fromURL,
             'status' => $statusType,
             'type' => absint($type),
             'final_dest' => $dest,
-            'code' => esc_attr($redirectCode)
-                ), array(
-            'id' => absint($idForUpdate)
-                ), array(
-            '%s',
-            '%d',
-            '%d',
-            '%s',
-            '%d'
-                ), array(
-            '%d'
-                )
+            'code' => esc_attr($redirectCode),
         );
+        $updateFormats = array('%s', '%d', '%d', '%s', '%d');
+
+        // Include non-null timestamps in the main update.
+        if ($startTs !== null) {
+            $updateData['start_ts'] = (int)$startTs;
+            $updateFormats[] = '%d';
+        }
+        if ($endTs !== null) {
+            $updateData['end_ts'] = (int)$endTs;
+            $updateFormats[] = '%d';
+        }
+
+        $wpdb->update(
+            $redirectsTable,
+            $updateData,
+            array('id' => absint($idForUpdate)),
+            $updateFormats,
+            array('%d')
+        );
+
+        // Explicitly set timestamp columns to NULL when no schedule is set.
+        // $wpdb->update() with %d format converts null to 0 via (int)null,
+        // which breaks the SQL filter "end_ts IS NULL OR end_ts > UNIX_TIMESTAMP()"
+        // — end_ts=0 means "expired in 1970" and silently stops the redirect from matching.
+        $nullParts = [];
+        if ($startTs === null) {
+            $nullParts[] = '`start_ts` = NULL';
+        }
+        if ($endTs === null) {
+            $nullParts[] = '`end_ts` = NULL';
+        }
+        if (!empty($nullParts)) {
+            $nullSql = "UPDATE " . $redirectsTable . " SET " . implode(', ', $nullParts) .
+                " WHERE id = " . absint($idForUpdate);
+            $wpdb->query($nullSql);
+        }
 
         // Invalidate caches - status/url change affects regex redirects
         $this->invalidateStatusCountsCache();
@@ -662,6 +701,79 @@ trait ABJ_404_Solution_DataAccess_StatsTrait {
         $this->moveRedirectsToTrash(absint($idForUpdate), 0);
 
         return '';
+    }
+
+    /**
+     * Get the top N captured 404s by hit count for the digest email.
+     *
+     * @param int $limit Maximum number of rows to return.
+     * @return array<int, array<string, mixed>>
+     */
+    function getTopCapturedForDigest(int $limit): array {
+        global $wpdb;
+
+        $limit = max(1, $limit);
+        $redirectsTable = $this->doTableNameReplacements('{wp_abj404_redirects}');
+        $logsTable = $this->doTableNameReplacements('{wp_abj404_logsv2}');
+
+        $sql = $wpdb->prepare(
+            "SELECT r.url, COUNT(l.id) AS logshits, r.timestamp AS created
+             FROM {$redirectsTable} r
+             LEFT JOIN {$logsTable} l
+               ON CONCAT('/', TRIM(BOTH '/' FROM l.requested_url)) =
+                  CONCAT('/', TRIM(BOTH '/' FROM r.url))
+             WHERE r.status = %d AND r.disabled = 0
+             GROUP BY r.id, r.url, r.timestamp
+             ORDER BY logshits DESC
+             LIMIT %d",
+            ABJ404_STATUS_CAPTURED,
+            $limit
+        );
+
+        $rows = $wpdb->get_results($sql, ARRAY_A);
+        if (!is_array($rows)) {
+            return array();
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Get summary stats for the digest email.
+     *
+     * @return array{total_captured: int, total_manual: int, total_auto: int}
+     */
+    function getDigestSummaryStats(): array {
+        $zero = array(
+            'total_captured' => 0,
+            'total_manual' => 0,
+            'total_auto' => 0,
+        );
+
+        $redirectsTable = $this->doTableNameReplacements('{wp_abj404_redirects}');
+
+        try {
+            $total_captured = $this->getStatsCount(
+                "SELECT COUNT(id) FROM {$redirectsTable} WHERE status = %d AND disabled = 0",
+                array(ABJ404_STATUS_CAPTURED)
+            );
+            $total_manual = $this->getStatsCount(
+                "SELECT COUNT(id) FROM {$redirectsTable} WHERE status = %d AND disabled = 0",
+                array(ABJ404_STATUS_MANUAL)
+            );
+            $total_auto = $this->getStatsCount(
+                "SELECT COUNT(id) FROM {$redirectsTable} WHERE status = %d AND disabled = 0",
+                array(ABJ404_STATUS_AUTO)
+            );
+        } catch (Throwable $e) {
+            return $zero;
+        }
+
+        return array(
+            'total_captured' => intval($total_captured),
+            'total_manual' => intval($total_manual),
+            'total_auto' => intval($total_auto),
+        );
     }
 
     /** @return int */
@@ -688,7 +800,13 @@ trait ABJ_404_Solution_DataAccess_StatsTrait {
         $rows = $wpdb->get_results($query);
 
         if ($wpdb->last_error) {
-            $this->logger->errorMessage("Error fetching posts for content keywords: " . $wpdb->last_error);
+            // "Unknown column" means content_keywords hasn't been added yet (DB migration pending,
+            // e.g. sync lock was stuck for ~24h). Degrade to warning; the caller returns empty.
+            if (stripos($wpdb->last_error, 'unknown column') !== false) {
+                $this->logger->warn("content_keywords column not yet available (DB migration pending): " . $wpdb->last_error);
+            } else {
+                $this->logger->errorMessage("Error fetching posts for content keywords: " . $wpdb->last_error);
+            }
             return array();
         }
 

@@ -650,8 +650,8 @@ trait ABJ_404_Solution_DataAccess_LogsTrait {
 
         $now = time();
 
-        // remove ridiculous non-printable characters
-        $requested_url = preg_replace('/[^\x20-\x7E]/', '', $requested_url); // Remove non-printable ASCII characters
+        // remove non-printable control characters while preserving valid multibyte Unicode
+        $requested_url = preg_replace('/[\x00-\x1F\x7F]/u', '', $requested_url) ?? $requested_url;
 
         // Normalize to relative path before storing (Issue #24)
         $requested_url = $abj404logic->normalizeToRelativePath($requested_url);
@@ -791,9 +791,9 @@ trait ABJ_404_Solution_DataAccess_LogsTrait {
             
         // ------------ debug message begin
         $helperFunctions = ABJ_404_Solution_Functions::getInstance();
-        $reasonMessage = trim(implode(", ", 
+        $reasonMessage = trim(implode(", ",
                     array_filter(
-                    array($_REQUEST[ABJ404_PP]['ignore_doprocess'], $_REQUEST[ABJ404_PP]['ignore_donotprocess']))));
+                    array($_REQUEST[ABJ404_PP]['ignore_doprocess'] ?? '', $_REQUEST[ABJ404_PP]['ignore_donotprocess'] ?? ''))));
         $permalinksKept = '(not set)';
         if ($this->logger->isDebug() && array_key_exists(ABJ404_PP, $_REQUEST) &&
         		array_key_exists('permalinks_found', $_REQUEST[ABJ404_PP])) {
@@ -1109,6 +1109,12 @@ trait ABJ_404_Solution_DataAccess_LogsTrait {
      * @return bool True if a trim was attempted (regardless of success), false if rate-limited.
      */
     private function autoTrimLogsv2IfNeeded(string $tableName, string $errorMessage): bool {
+        // Defense-in-depth: verify the table name is valid before using in SQL
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', $tableName) || strpos($tableName, 'abj404_logsv2') === false) {
+            $this->logger->warn("autoTrimLogsv2IfNeeded: rejected unexpected table name: " . substr($tableName, 0, 100));
+            return false;
+        }
+
         $cooldownKey = 'abj404_logsv2_trim_cooldown_until';
         $alreadyTrimmed = function_exists('get_transient') ? get_transient($cooldownKey) : false;
         if ($alreadyTrimmed) {
@@ -1300,6 +1306,74 @@ trait ABJ_404_Solution_DataAccess_LogsTrait {
         ));
 
         return intval($wpdb->insert_id);
+    }
+
+    /**
+     * Get daily 404/redirect activity for the last N days.
+     *
+     * Returns array of rows, one per day (including days with zero activity),
+     * sorted ascending by date.  Each row has:
+     *   'date'          => 'YYYY-MM-DD'
+     *   'hits_404'      => int  (rows where dest_url is '' or NULL)
+     *   'hits_redirect' => int  (rows where dest_url is non-empty)
+     *   'new_captures'  => int  (same as hits_404 for trend purposes)
+     *
+     * @param int $days Number of days (default 30, clamped to 1-90)
+     * @return array<int, array<string, mixed>>
+     */
+    public function getDailyActivityTrend(int $days = 30): array {
+        $days = max(1, min(90, $days));
+
+        $logsTable = $this->doTableNameReplacements('{wp_abj404_logsv2}');
+        $cutoff = time() - ($days * 86400);
+
+        $query = "SELECT
+                    DATE(FROM_UNIXTIME(`timestamp`)) AS `date`,
+                    SUM(CASE WHEN (`dest_url` IS NULL OR `dest_url` = '') THEN 1 ELSE 0 END) AS `hits_404`,
+                    SUM(CASE WHEN (`dest_url` IS NOT NULL AND `dest_url` <> '') THEN 1 ELSE 0 END) AS `hits_redirect`
+                  FROM " . $logsTable . "
+                  WHERE `timestamp` >= " . intval($cutoff) . "
+                  GROUP BY DATE(FROM_UNIXTIME(`timestamp`))
+                  ORDER BY `date` ASC";
+
+        $result = $this->queryAndGetResults($query);
+        $rows = (isset($result['rows']) && is_array($result['rows'])) ? $result['rows'] : array();
+
+        // Build a date-keyed map from query results.
+        $byDate = array();
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $d = isset($row['date']) ? (string)$row['date'] : '';
+            if ($d === '') {
+                continue;
+            }
+            $byDate[$d] = array(
+                'date'          => $d,
+                'hits_404'      => intval($row['hits_404'] ?? 0),
+                'hits_redirect' => intval($row['hits_redirect'] ?? 0),
+                'new_captures'  => intval($row['hits_404'] ?? 0),
+            );
+        }
+
+        // Fill in days with zero activity so the chart always shows N points.
+        $output = array();
+        for ($i = $days - 1; $i >= 0; $i--) {
+            $d = date('Y-m-d', time() - ($i * 86400));
+            if (isset($byDate[$d])) {
+                $output[] = $byDate[$d];
+            } else {
+                $output[] = array(
+                    'date'          => $d,
+                    'hits_404'      => 0,
+                    'hits_redirect' => 0,
+                    'new_captures'  => 0,
+                );
+            }
+        }
+
+        return $output;
     }
 
     /**

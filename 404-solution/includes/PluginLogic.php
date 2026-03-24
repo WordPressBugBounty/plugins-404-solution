@@ -68,6 +68,7 @@ class ABJ_404_Solution_PluginLogic {
         'dest',
         'final_dest',
         'code',
+        'score',
         'timestamp',
         'created',
         'lastused',
@@ -622,7 +623,7 @@ class ABJ_404_Solution_PluginLogic {
         $defaults = $this->getDefaultOptions();
         $missing = false;
         foreach ($defaults as $key => $value) {
-            if (!isset($options[$key]) || '' == $options[$key]) {
+            if (!isset($options[$key]) || $options[$key] === '') {
                 $options[$key] = $value;
                 $missing = true;
             }
@@ -872,12 +873,14 @@ class ABJ_404_Solution_PluginLogic {
             'update_suggest_url' => '0',
             'auto_redirects' => '1',
             'auto_slugs' => '1',
+            'auto_trash_redirect' => '0',
             'auto_score' => '90',
             'auto_score_title' => '',
             'auto_score_category_tag' => '',
             'auto_score_content' => '',
             'template_redirect_priority' => '9',
             'auto_deletion' => '1095',
+            'auto_302_expiration_days' => '0',
             'auto_cats' => '1',
             'auto_tags' => '1',
             'dest404page' => '0|' . ABJ404_TYPE_404_DISPLAYED,
@@ -902,6 +905,9 @@ class ABJ_404_Solution_PluginLogic {
             'plugin_language_override' => '',
             'disable_auto_dark_mode' => '0',
             'admin_notification_email' => '',
+            'admin_notification_frequency' => 'instant',
+            'admin_notification_digest_limit' => '10',
+            'admin_notification_last_sent' => '0',
             'page_redirects_order_by' => 'url',
             'page_redirects_order' => 'ASC',
             'captured_order_by' => 'logshits',
@@ -1151,7 +1157,10 @@ class ABJ_404_Solution_PluginLogic {
                 ARRAY_N
             );
             foreach ($tables as $tableRow) {
-                $wpdb->query("DROP TABLE IF EXISTS {$tableRow[0]}");
+                $tblName = is_array($tableRow) && isset($tableRow[0]) ? $tableRow[0] : '';
+                if (preg_match('/^[a-zA-Z0-9_]+$/', $tblName) && strpos($tblName, 'abj404') !== false) {
+                    $wpdb->query("DROP TABLE IF EXISTS `{$tblName}`");
+                }
             }
 
             // Remove ALL plugin options
@@ -1212,7 +1221,7 @@ class ABJ_404_Solution_PluginLogic {
         if (!wp_next_scheduled('abj404_cleanupCronAction')) {
             // we randomize this so that when the geo2ip file is downloaded, there aren't a whole
             // lot of users that request the file at the same time.
-            $timeForEvent = '0' . rand(0, 5) . ':' . rand(10, 59) . ':' . rand(10, 59);
+            $timeForEvent = '0' . random_int(0, 5) . ':' . random_int(10, 59) . ':' . random_int(10, 59);
             $eventTimestamp = strtotime($timeForEvent);
             if ($eventTimestamp !== false) {
                 wp_schedule_event($eventTimestamp, 'daily', 'abj404_cleanupCronAction');
@@ -1258,6 +1267,81 @@ class ABJ_404_Solution_PluginLogic {
      * @return bool true if the user is sent to the default 404 page.
      */
     function forceRedirect(string $location, int $status = 302, $type = -1, string $requestedURL = '', bool $isCustom404 = false): bool {
+        // 410 Gone: send status header then render the gone410.html template and exit.
+        if ($status === 410) {
+            status_header(410);
+            $templatePath = __DIR__ . '/html/gone410.html';
+            if (file_exists($templatePath)) {
+                $siteName = function_exists('get_bloginfo') ? get_bloginfo('name') : '';
+                $siteUrl  = function_exists('home_url') ? home_url('/') : '/';
+                $templateContent = file_get_contents($templatePath);
+                if (is_string($templateContent)) {
+                    $templateContent = str_replace(
+                        array('{site_name}', '{site_url}', '{heading}', '{message}', '{back_home}'),
+                        array(
+                            esc_html($siteName),
+                            esc_url($siteUrl),
+                            esc_html__('This content has been permanently removed.', '404-solution'),
+                            esc_html__('The page you requested no longer exists and has not been moved to a new location.', '404-solution'),
+                            esc_html__('Back to home page', '404-solution'),
+                        ),
+                        $templateContent
+                    );
+                    echo $templateContent;
+                }
+            }
+            exit;
+        }
+
+        // 451 Unavailable For Legal Reasons: send status header then render the gone451.html template and exit.
+        if ($status === 451) {
+            status_header(451);
+            $templatePath = __DIR__ . '/html/gone451.html';
+            if (file_exists($templatePath)) {
+                $siteName = function_exists('get_bloginfo') ? get_bloginfo('name') : '';
+                $siteUrl  = function_exists('home_url') ? home_url('/') : '/';
+                $templateContent = file_get_contents($templatePath);
+                if (is_string($templateContent)) {
+                    $templateContent = str_replace(
+                        array('{site_name}', '{site_url}', '{heading}', '{message}', '{back_home}'),
+                        array(
+                            esc_html($siteName),
+                            esc_url($siteUrl),
+                            esc_html__('451 Unavailable For Legal Reasons', '404-solution'),
+                            esc_html__('This content is unavailable due to a legal demand.', '404-solution'),
+                            esc_html__('Back to home page', '404-solution'),
+                        ),
+                        $templateContent
+                    );
+                    echo $templateContent;
+                }
+            }
+            exit;
+        }
+
+        // Meta Refresh: emit an HTML page with <meta http-equiv="refresh"> and exit.
+        if ($status === 0 && $location !== '') {
+            status_header(200);
+            $templatePath = __DIR__ . '/html/metaRefresh.html';
+            if (file_exists($templatePath)) {
+                $templateContent = file_get_contents($templatePath);
+                if (is_string($templateContent)) {
+                    $templateContent = str_replace(
+                        array('{url}', '{delay}', '{title}', '{message}'),
+                        array(
+                            esc_url($location),
+                            '0',
+                            esc_html__('Redirecting…', '404-solution'),
+                            esc_html__('You are being redirected. Click the link if not redirected automatically.', '404-solution'),
+                        ),
+                        $templateContent
+                    );
+                    echo $templateContent;
+                }
+            }
+            exit;
+        }
+
         $finalDestination = $this->buildFinalRedirectDestination($location, $requestedURL, $isCustom404);
 
     	$previousRequest = $this->readCookieWithPreviousRqeuestShort();

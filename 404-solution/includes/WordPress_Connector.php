@@ -148,6 +148,8 @@ class ABJ_404_Solution_WordPress_Connector {
 
         add_filter("plugin_action_links_" . ABJ404_NAME,
             'ABJ_404_Solution_WordPress_Connector::addSettingsLinkToPluginPage');
+        add_filter('plugin_row_meta',
+            'ABJ_404_Solution_WordPress_Connector::addPluginRowMeta', 10, 2);
         add_action('admin_notices',
             'ABJ_404_Solution_WordPress_Connector::echoDashboardNotification');
         add_action('admin_menu',
@@ -161,7 +163,12 @@ class ABJ_404_Solution_WordPress_Connector {
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_trashLink', 'ABJ_404_Solution_Ajax_TrashLink::trashAction');
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_echoRedirectToPages', 'ABJ_404_Solution_Ajax_Php::echoRedirectToPages');
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_updateOptions', 'ABJ_404_Solution_Ajax_Php::updateOptions');
+        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404getTrendData', 'ABJ_404_Solution_Ajax_TrendData::echoTrendData');
+        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404_crossPluginPreview', 'ABJ_404_Solution_Ajax_CrossPluginImporter::handlePreview');
+        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404_gsc_oauth_callback', 'ABJ_404_Solution_WordPress_Connector::handleGscOauthCallback');
+        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404_gsc_revoke', 'ABJ_404_Solution_WordPress_Connector::handleGscRevoke');
 
+        ABJ_404_Solution_Ajax_EngineProfiles::registerActions();
         ABJ_404_Solution_Ajax_SettingsModeToggle::init();
         ABJ_404_Solution_UninstallModal::init();
         ABJ_404_Solution_SetupWizard::init();
@@ -201,9 +208,11 @@ class ABJ_404_Solution_WordPress_Connector {
 
         $isOptionsPage = ($subpage === 'abj404_options');
         $isStatsPage = ($subpage === 'abj404_stats');
+        $isToolsPage = ($subpage === 'abj404_tools');
         $isCardAccordionPage = in_array($subpage, array('abj404_options', 'abj404_tools', 'abj404_stats'), true);
         $isLogsPage = ($subpage === 'abj404_logs');
         $isListPage = in_array($subpage, array('abj404_redirects', 'abj404_captured', 'abj404_logs'), true);
+        $isEditPage = ($subpage === 'abj404_edit');
         $needsDestinationAutocomplete = in_array($subpage, array('abj404_redirects', 'abj404_captured', 'abj404_options', 'abj404_edit'), true);
 
         // remove the "thank you for creating with wordpress" message
@@ -246,6 +255,10 @@ class ABJ_404_Solution_WordPress_Connector {
             ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-enable_disable_apply_button_js');
             ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-trash_link_ajax', plugin_dir_url(__FILE__) . 'ajax/trash_link_ajax.js',
                     array('jquery'));
+        }
+        // tableInteractions.js provides abj404ToggleRegexInfo() used on both list pages
+        // and the Edit Redirect page (subpage=abj404_edit).
+        if ($isListPage || $isEditPage) {
             ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-table-interactions', plugin_dir_url(__FILE__) . 'js/tableInteractions.js',
                     array('jquery'));
 
@@ -298,6 +311,27 @@ class ABJ_404_Solution_WordPress_Connector {
             wp_localize_script('abj404-options-accordion', 'abj404Accordion', array(
                 'expandAll' => __('Expand All', '404-solution'),
                 'collapseAll' => __('Collapse All', '404-solution'),
+            ));
+        }
+
+        if ($isOptionsPage) {
+            ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-engine-profiles',
+                plugin_dir_url(__FILE__) . 'ajax/ajax-engine-profiles.js',
+                array('jquery'));
+            wp_localize_script('abj404-engine-profiles', 'abj404EngineProfiles', array(
+                'nonce'   => wp_create_nonce('abj404_engine_profiles_nonce'),
+                'ajaxUrl' => admin_url('admin-ajax.php'),
+                'i18n'    => array(
+                    'edit'            => __('Edit', '404-solution'),
+                    'delete'          => __('Delete', '404-solution'),
+                    'addProfile'      => __('Add Engine Profile', '404-solution'),
+                    'editProfile'     => __('Edit Engine Profile', '404-solution'),
+                    'nameRequired'    => __('Profile name is required.', '404-solution'),
+                    'patternRequired' => __('URL pattern is required.', '404-solution'),
+                    'saved'           => __('Profile saved.', '404-solution'),
+                    'saveFailed'      => __('Failed to save profile.', '404-solution'),
+                    'confirmDelete'   => __('Delete this engine profile?', '404-solution'),
+                ),
             ));
         }
 
@@ -567,6 +601,24 @@ class ABJ_404_Solution_WordPress_Connector {
         return $links;
     }
 
+    /**
+     * Adds a "Send Feedback" link to the plugin row on the Plugins page.
+     *
+     * @param array<int|string, string> $links
+     * @param string $file
+     * @return array<int|string, string>
+     */
+    static function addPluginRowMeta($links, $file) {
+        if ($file !== ABJ404_NAME) {
+            return $links;
+        }
+        $email   = defined('ABJ404_AUTHOR_EMAIL') ? ABJ404_AUTHOR_EMAIL : '404solution@ajexperience.com';
+        $subject = rawurlencode('Feedback: 404 Solution');
+        $links[] = '<a href="mailto:' . esc_attr($email) . '?subject=' . $subject . '">'
+            . esc_html__('Send Feedback', '404-solution') . '</a>';
+        return $links;
+    }
+
     /** This is called directly by php code inserted into the page by the user.
      * Code: <?php if (!empty($abj404connector)) {$abj404connector->suggestions(); } ?>
      * @global type $abj404shortCode
@@ -642,8 +694,24 @@ class ABJ_404_Solution_WordPress_Connector {
         global $pagenow;
         global $abj404view;
 
-        if ( (array_key_exists('page', $_GET) && $_GET['page'] == ABJ404_PP) ||
-             ($pagenow == 'index.php' && !isset($_GET['page'])) ) {
+        $isPluginPage = array_key_exists('page', $_GET) && $_GET['page'] == ABJ404_PP;
+        $isDashboard  = $pagenow == 'index.php' && !isset($_GET['page']);
+
+        // Display infrastructure notices (DB errors, stale cache, etc.) only on
+        // the plugin's own admin pages — not on the dashboard or other screens.
+        // This prevents noisy notices from appearing across all of wp-admin.
+        if ($isPluginPage) {
+            $dbNotice = get_transient('abj404_plugin_db_notice');
+            if (is_array($dbNotice) && isset($dbNotice['message']) && is_string($dbNotice['message'])) {
+                $type = isset($dbNotice['type']) && is_string($dbNotice['type']) ? $dbNotice['type'] : 'warning';
+                // Map internal type names to WP notice CSS classes.
+                $cssClass = ($type === 'stale_permalink_cache' || $type === 'warning') ? 'notice-warning' : 'notice-error';
+                echo '<div class="notice ' . esc_attr($cssClass) . '"><p>' .
+                    esc_html($dbNotice['message']) . '</p></div>';
+            }
+        }
+
+        if ($isPluginPage || $isDashboard) {
             $captured404Count = $instance->dao->getCapturedCountForNotification();
             if ($instance->logic->shouldNotifyAboutCaptured404s($captured404Count)) {
                 $msg = $abj404view->getDashboardNotificationCaptured($captured404Count);
@@ -1046,6 +1114,60 @@ class ABJ_404_Solution_WordPress_Connector {
         	$GLOBALS['abj404_settingsPageName'] = add_submenu_page('options-general.php', PLUGIN_NAME, $pageName, 'manage_options', ABJ404_PP,
                     'ABJ_404_Solution_View::handleMainAdminPageActionAndDisplay');
         }
+    }
+
+    /**
+     * AJAX handler: OAuth callback from Google. Exchanges the authorization code for tokens,
+     * then redirects back to the Tools tab.
+     * @return void
+     */
+    public static function handleGscOauthCallback() {
+        if (!current_user_can('manage_options')) {
+            wp_die(__('Insufficient permissions.', '404-solution'), 403);
+        }
+
+        $code  = isset($_GET['code'])  ? sanitize_text_field((string)$_GET['code'])  : '';
+        $state = isset($_GET['state']) ? sanitize_text_field((string)$_GET['state']) : '';
+
+        // Verify state nonce to prevent CSRF.
+        if (!wp_verify_nonce($state, 'abj404_gsc_oauth')) {
+            wp_die(__('Security check failed.', '404-solution'), 403);
+        }
+
+        $logger = ABJ_404_Solution_Logging::getInstance();
+        $gsc    = new ABJ_404_Solution_GoogleSearchConsole($logger);
+
+        if ($code === '') {
+            // User denied access or error occurred.
+            $gsc->setLastOAuthError(__('Authorization was denied or cancelled.', '404-solution'));
+            wp_safe_redirect(admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options'));
+            exit;
+        }
+
+        $error = $gsc->exchangeCodeForToken($code);
+
+        if ($error !== '') {
+            $gsc->setLastOAuthError($error);
+        }
+        wp_safe_redirect(admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options'));
+        exit;
+    }
+
+    /**
+     * AJAX handler: revoke GSC authorization.
+     * @return void
+     */
+    public static function handleGscRevoke() {
+        if (!current_user_can('manage_options') || !check_admin_referer('abj404_gsc_revoke')) {
+            wp_die(__('Security check failed.', '404-solution'), 403);
+        }
+
+        $logger = ABJ_404_Solution_Logging::getInstance();
+        $gsc    = new ABJ_404_Solution_GoogleSearchConsole($logger);
+        $gsc->revokeAuthorization();
+
+        wp_safe_redirect(admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options'));
+        exit;
     }
 
 }

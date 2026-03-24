@@ -577,5 +577,17 @@ trait ABJ_404_Solution_DatabaseUpgradesEtc_MaintenanceTrait {
 
         // Clean up expired rate limit transients to prevent wp_options bloat
         $this->cleanupExpiredRateLimitTransients();
+
+        // Flag redirects whose destination URL is generating 404s (drives redirect suspension)
+        ABJ_404_Solution_DataAccess::getInstance()->flagDeadDestinationRedirects();
+
+        // Expire auto-created redirects that exceed the configured age threshold
+        ABJ_404_Solution_DataAccess::getInstance()->expireOldAutoRedirects();
+
+        // Nightly internal-link scan: find broken internal links in published content.
+        if (class_exists('ABJ_404_Solution_InternalLinkScanner')) {
+            $scanner = new ABJ_404_Solution_InternalLinkScanner();
+            $scanner->runNightlyScan();
+        }
     }
 }

@@ -14,25 +14,32 @@ trait ViewTrait_Redirects {
 
         $options = $this->getOptionsWithDefaults();
 
+        // Compute source page early so we can use it in the back link
+        $source_page = $this->dao->getPostOrGetSanitize('source_page');
+        if ($source_page === '') {
+            $source_page = $this->dao->getPostOrGetSanitize('subpage');
+        }
+        if ($source_page === '' || $source_page == 'abj404_edit') {
+            $source_page = 'abj404_redirects';
+        }
+        $backUrl = '?page=' . ABJ404_PP . '&subpage=' . esc_attr($source_page);
+
         // Modern page container
         echo '<div class="abj404-edit-page">';
         echo '<div class="abj404-edit-container">';
+
+        // Header row: title + back link
+        echo '<div class="abj404-edit-page-header">';
         echo '<h2>' . esc_html__('Edit Redirect', '404-solution') . '</h2>';
+        echo '<a href="' . esc_url($backUrl) . '" class="abj404-back-link">&#8592; ' . esc_html__('Back to Redirects', '404-solution') . '</a>';
+        echo '</div>';
 
         $link = wp_nonce_url("?page=" . ABJ404_PP . "&subpage=abj404_edit", "abj404editRedirect");
 
         echo '<form method="POST" name="admin-edit-redirect" action="' . esc_attr($link) . '" onsubmit="return validateAddManualRedirectForm(event);">';
         echo "<input type=\"hidden\" name=\"action\" value=\"editRedirect\">";
 
-        // Capture source page and table options to return user to the same place after saving
-        $source_page = $this->dao->getPostOrGetSanitize('source_page');
-        if ($source_page === '') {
-            $source_page = $this->dao->getPostOrGetSanitize('subpage');
-        }
-        // Default to redirects page if no source specified
-        if ($source_page === '' || $source_page == 'abj404_edit') {
-            $source_page = 'abj404_redirects';
-        }
+        // Preserve source page for return navigation
         echo "<input type=\"hidden\" name=\"source_page\" value=\"" . esc_attr($source_page) . "\">";
 
         // Preserve table options so we can return to the exact same view
@@ -55,6 +62,8 @@ trait ViewTrait_Redirects {
 
         $recnum = null;
         $recnums_multiple = null;
+        $startDate = '';
+        $endDate = '';
         if (isset($_GET['id']) && $this->f->regexMatch('[0-9]+', $_GET['id'])) {
             $this->logger->debugMessage("Edit redirect page. GET ID: " .
                     wp_kses_post((string)json_encode($_GET['id'])));
@@ -100,20 +109,16 @@ trait ViewTrait_Redirects {
             $redirectUrl = is_string($redirect['url'] ?? '') ? (string)($redirect['url'] ?? '') : '';
             echo '<input type="hidden" name="id" value="' . esc_attr($redirectId) . '">';
 
-            // URL field
+            // URL field (with optional "Matched by" note for auto-created redirects)
             echo '<div class="abj404-form-group">';
             echo '<label class="abj404-form-label" for="url">' . esc_html__('URL', '404-solution') . ' *</label>';
             echo '<input type="text" id="url" name="url" class="abj404-form-input" value="' . esc_attr($redirectUrl) . '" required>';
-            echo '</div>';
-
-            // Engine (read-only, shown only if set)
             $redirectEngine = is_string($redirect['engine'] ?? '') ? trim((string)($redirect['engine'] ?? '')) : '';
             if ($redirectEngine !== '') {
-                echo '<div class="abj404-form-group">';
-                echo '<label class="abj404-form-label">' . esc_html__('Engine', '404-solution') . '</label>';
-                echo '<span class="abj404-engine-label">' . esc_html($redirectEngine) . '</span>';
-                echo '</div>';
+                $humanEngine = $this->humanizeEngineName($redirectEngine);
+                echo '<p class="abj404-form-help abj404-matched-by">' . esc_html__('Auto-matched by:', '404-solution') . ' ' . esc_html($humanEngine) . '</p>';
             }
+            echo '</div>';
 
             // Regex checkbox
             echo '<div class="abj404-form-group">';
@@ -128,6 +133,12 @@ trait ViewTrait_Redirects {
             echo '<p>' . esc_html__('/events/(.+) will match any URL that begins with /events/ and redirect to the specified page. Since a capture group is used, you can use a $1 replacement in the destination string of an external URL.', '404-solution') . '</p>';
             echo '</div>';
             echo '</div>';
+
+            // Scheduled redirect dates (rendered inside Advanced Options in echoEditRedirect)
+            $startTs = isset($redirect['start_ts']) && is_numeric($redirect['start_ts']) ? (int)$redirect['start_ts'] : 0;
+            $endTs = isset($redirect['end_ts']) && is_numeric($redirect['end_ts']) ? (int)$redirect['end_ts'] : 0;
+            $startDate = $startTs > 0 ? date('Y-m-d', $startTs) : '';
+            $endDate = $endTs > 0 ? date('Y-m-d', $endTs) : '';
 
         } else if ($recnums_multiple != null) {
             $redirects_multiple = $this->dao->getRedirectsByIDs($recnums_multiple);
@@ -204,14 +215,16 @@ trait ViewTrait_Redirects {
         $html = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_URL}',
                 __('(An external URL will be used.)', '404-solution'), $html);
         $html = $this->f->str_replace('{REDIRECT_TO_USER_FIELD_WARNING}', '', $html);
-        $html = $this->f->str_replace('{redirectPageTitle}', $pageTitle, $html);
-        $html = $this->f->str_replace('{pageIDAndType}', $pageIDAndType, $html);
+        $html = $this->f->str_replace('{redirectPageTitle}', esc_attr($pageTitle), $html);
+        $html = $this->f->str_replace('{pageIDAndType}', esc_attr($pageIDAndType), $html);
         $html = $this->f->str_replace('{data-url}',
                 "admin-ajax.php?action=echoRedirectToPages&includeDefault404Page=true&includeSpecial=true&nonce=" . wp_create_nonce('abj404_ajax'), $html);
         $html = $this->f->doNormalReplacements($html);
+        echo '<div class="abj404-form-group abj404-autocomplete-wrapper">';
         echo $html;
+        echo '</div>';
         
-        $this->echoEditRedirect($final, $codeSelected, __('Update Redirect', '404-solution'), $source_page, $filter, $orderby, $order);
+        $this->echoEditRedirect($final, $codeSelected, __('Update Redirect', '404-solution'), $source_page, $filter, $orderby, $order, $startDate, $endDate);
 
         echo '</form>';
         echo '</div>'; // end abj404-edit-container
@@ -357,6 +370,39 @@ trait ViewTrait_Redirects {
         return $content;
     }
     
+    /**
+     * Convert a raw engine class name to a human-readable label.
+     *
+     * Examples:
+     *   TitleMatchingEngine        → "Title Matching"
+     *   SpellingMatchingEngine     → "Spelling Matching"
+     *   CategoryTagMatchingEngine  → "Category/Tag Matching"
+     *   UrlFixEngine               → "URL Fix"
+     *   ArchiveFallbackEngine      → "Archive Fallback"
+     *
+     * @param string $rawName
+     * @return string
+     */
+    private function humanizeEngineName(string $rawName): string {
+        // Strip full namespace prefix if stored with it.
+        $name = preg_replace('/^ABJ_404_Solution_/', '', $rawName);
+        if (!is_string($name)) {
+            $name = $rawName;
+        }
+        // Strip "MatchingEngine" or bare "Engine" suffix.
+        $name = (string)preg_replace('/MatchingEngine$/', ' Matching', $name);
+        $name = (string)preg_replace('/Engine$/', '', $name);
+        // Insert a space before each upper-case letter that follows a lower-case letter
+        // (e.g. CategoryTag → Category Tag).
+        $name = (string)preg_replace('/(?<=[a-z])([A-Z])/', ' $1', $name);
+        $name = trim($name);
+        // Fix known abbreviations.
+        $name = str_replace(array('Url ', 'Url'), array('URL ', 'URL'), $name);
+        // Fix Category/Tag — appears as "Category Tag Matching", make the separator a slash.
+        $name = str_replace('Category Tag', 'Category/Tag', $name);
+        return $name !== '' ? $name : $rawName;
+    }
+
     /**
      * @return void
      */

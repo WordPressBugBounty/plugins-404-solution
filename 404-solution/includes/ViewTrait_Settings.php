@@ -150,10 +150,33 @@ trait ViewTrait_Settings {
             }
         }
 
-        // Sticky save bar
-        $abj404view->echoStickySaveBar();
-
         echo "</form><!-- end in admin-options-page -->";
+
+        // Engine Profiles and GSC are advanced features — hidden in simple mode
+        if ($settingsMode === 'advanced') {
+            // Engine Profiles — outside the main form (uses its own AJAX save)
+            $epHtml = ABJ_404_Solution_Functions::readFileContents(__DIR__ . '/html/engineProfilesSection.html');
+            $epHtml = $this->f->doNormalReplacements($epHtml);
+            $abj404view->echoOptionsSection('settings-engine-profiles', 'abj404-engineProfiles', __('Engine Profiles', '404-solution'), $epHtml, false, $abj404view->getCardIcon('filter'));
+
+            // Google Search Console — outside the main form (has its own form)
+            $gscLogger = ABJ_404_Solution_Logging::getInstance();
+            $gsc = new ABJ_404_Solution_GoogleSearchConsole($gscLogger);
+            // Pass captured 404 URLs so the connected state can fetch GSC data on first load.
+            $logRows = $this->dao->getLogsIDandURL();
+            $capturedUrls = array();
+            foreach ($logRows as $r) {
+                $url = isset($r['requested_url']) && is_string($r['requested_url']) ? $r['requested_url'] : '';
+                if ($url !== '') {
+                    $capturedUrls[] = $url;
+                }
+            }
+            $capturedUrls = array_values(array_unique($capturedUrls));
+            $abj404view->echoOptionsSection('settings-gsc', 'abj404-gsc-section', __('Google Search Console', '404-solution'), $gsc->renderAdminSection($capturedUrls), true, $abj404view->getCardIcon('chart'));
+        }
+
+        // Sticky save bar — outside the form but linked via form="admin-options-page" on the submit button
+        $abj404view->echoStickySaveBar();
 
         echo "</div>"; // end abj404-settings-content
         echo "</div>"; // end abj404-container
@@ -204,9 +227,9 @@ trait ViewTrait_Settings {
         		__('(An external URL will be used.)', '404-solution'), $html);
         $html = $this->f->str_replace('{REDIRECT_TO_USER_FIELD_WARNING}', $pageMissingWarning, $html);
         
-        $html = $this->f->str_replace('{redirectPageTitle}', $pageTitle, $html);
-        $html = $this->f->str_replace('{pageIDAndType}', $userSelectedDefault404Page, $html);
-        $html = $this->f->str_replace('{redirectPageTitle}', $pageTitle, $html);
+        $html = $this->f->str_replace('{redirectPageTitle}', esc_attr($pageTitle), $html);
+        $html = $this->f->str_replace('{pageIDAndType}', esc_attr($userSelectedDefault404Page), $html);
+        $html = $this->f->str_replace('{redirectPageTitle}', esc_attr($pageTitle), $html);
         $html = $this->f->str_replace('{data-url}',
                 "admin-ajax.php?action=echoRedirectToPages&includeDefault404Page=true&includeSpecial=true&nonce=" . wp_create_nonce('abj404_ajax'), $html);
         $html = $this->f->doNormalReplacements($html);
@@ -218,13 +241,16 @@ trait ViewTrait_Settings {
         $selectedAutoSlugs = $this->getCheckedAttr($options, 'auto_slugs');
         $selectedAutoCats = $this->getCheckedAttr($options, 'auto_cats');
         $selectedAutoTags = $this->getCheckedAttr($options, 'auto_tags');
+        $selectedAutoTrashRedirect = $this->getCheckedAttr($options, 'auto_trash_redirect');
 
         $html = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/html/adminOptionsAutoRedirects.html");
         $html = $this->f->str_replace('{selectedAutoRedirects}', $selectedAutoRedirects, $html);
         $html = $this->f->str_replace('{selectedAutoSlugs}', $selectedAutoSlugs, $html);
         $html = $this->f->str_replace('{selectedAutoCats}', $selectedAutoCats, $html);
         $html = $this->f->str_replace('{selectedAutoTags}', $selectedAutoTags, $html);
+        $html = $this->f->str_replace('{selectedAutoTrashRedirect}', $selectedAutoTrashRedirect, $html);
         $html = $this->f->str_replace('{auto_deletion}', esc_attr($this->optStr($options, 'auto_deletion')), $html);
+        $html = $this->f->str_replace('{auto_302_expiration_days}', esc_attr($this->optStr($options, 'auto_302_expiration_days')), $html);
         $html = $this->f->str_replace('{spaces}', $spaces, $html);
         $html = $this->f->doNormalReplacements($html);
         $content .= $html;
@@ -285,9 +311,9 @@ trait ViewTrait_Settings {
         $html = $this->f->str_replace('{recognized_post_types}', 
             str_replace('\\n', "\n", wp_kses_post($this->optStr($options, 'recognized_post_types'))), $html);
         $html = $this->f->str_replace('{all_post_types}', $allPostTypes, $html);
-        $html = $this->f->str_replace('{days_wait_before_major_update}', $this->optStr($options, 'days_wait_before_major_update'), $html);
-        
-        $html = $this->f->str_replace('{recognized_categories}', 
+        $html = $this->f->str_replace('{days_wait_before_major_update}', esc_attr($this->optStr($options, 'days_wait_before_major_update')), $html);
+
+        $html = $this->f->str_replace('{recognized_categories}',
             str_replace('\\n', "\n", wp_kses_post($this->optStr($options, 'recognized_categories'))), $html);
         $html = $this->f->str_replace('{folders_files_ignore}', 
             str_replace('\\n', "\n", wp_kses_post($this->optStr($options, 'folders_files_ignore'))), $html);
@@ -445,7 +471,7 @@ trait ViewTrait_Settings {
         $html = $this->f->str_replace('{OPTION_AUTO_SCORE_CATEGORY_TAG}', esc_attr($this->optStr($options, 'auto_score_category_tag')), $html);
         $html = $this->f->str_replace('{OPTION_AUTO_SCORE_CONTENT}', esc_attr($this->optStr($options, 'auto_score_content')), $html);
         $html = $this->f->str_replace('{OPTION_TEMPLATE_REDIRECT_PRIORITY}', esc_attr($this->optStr($options, 'template_redirect_priority')), $html);
-        $html = $this->f->str_replace('{days_wait_before_major_update}', $this->optStr($options, 'days_wait_before_major_update'), $html);
+        $html = $this->f->str_replace('{days_wait_before_major_update}', esc_attr($this->optStr($options, 'days_wait_before_major_update')), $html);
 
         // Handle plugin_admin_users - convert array to string first before sanitization
         $pluginAdminUsersRaw2 = $options['plugin_admin_users'];
@@ -470,14 +496,10 @@ trait ViewTrait_Settings {
 	    function getAdminOptionsPageGeneralSettings($options) {
 	        $options = $this->normalizeOptionsForView($options);
 	        
-	        $selectedDefaultRedirect301 = "";
-        if ($options['default_redirect'] == '301') {
-            $selectedDefaultRedirect301 = " selected";
-        }
-        $selectedDefaultRedirect302 = "";
-        if ($options['default_redirect'] == '302') {
-            $selectedDefaultRedirect302 = " selected";
-        }
+	        $selectedDefaultRedirect301 = ($options['default_redirect'] == '301') ? ' selected' : '';
+        $selectedDefaultRedirect302 = ($options['default_redirect'] == '302') ? ' selected' : '';
+        $selectedDefaultRedirect307 = ($options['default_redirect'] == '307') ? ' selected' : '';
+        $selectedDefaultRedirect308 = ($options['default_redirect'] == '308') ? ' selected' : '';
 
         $selectedCapture404 = $this->getCheckedAttr($options, 'capture_404');
         $selectedSendErrorLogs = $this->getCheckedAttr($options, 'send_error_logs');
@@ -534,16 +556,24 @@ trait ViewTrait_Settings {
 
 
         $selectedRemoveMatches = $this->getCheckedAttr($options, 'remove_matches');
-        
+
+        // Notification frequency selection
+        $notifyFrequency = isset($options['admin_notification_frequency']) ? (string)(is_scalar($options['admin_notification_frequency']) ? $options['admin_notification_frequency'] : 'instant') : 'instant';
+        $selectedNotifyInstant = ($notifyFrequency === 'instant') ? ' selected' : '';
+        $selectedNotifyDaily   = ($notifyFrequency === 'daily')   ? ' selected' : '';
+        $selectedNotifyWeekly  = ($notifyFrequency === 'weekly')  ? ' selected' : '';
+
         $html = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/html/adminOptionsGeneral.html");
         $html = $this->f->str_replace('{selectedSendErrorLogs}', $selectedSendErrorLogs, $html);
         $html = $this->f->str_replace('{selectedDefaultRedirect301}', $selectedDefaultRedirect301, $html);
         $html = $this->f->str_replace('{selectedDefaultRedirect302}', $selectedDefaultRedirect302, $html);
+        $html = $this->f->str_replace('{selectedDefaultRedirect307}', $selectedDefaultRedirect307, $html);
+        $html = $this->f->str_replace('{selectedDefaultRedirect308}', $selectedDefaultRedirect308, $html);
         $html = $this->f->str_replace('{selectedCapture404}', $selectedCapture404, $html);
-        $html = $this->f->str_replace('{admin_notification}', $this->optStr($options, 'admin_notification'), $html);
-        $html = $this->f->str_replace('{capture_deletion}', $this->optStr($options, 'capture_deletion'), $html);
-        $html = $this->f->str_replace('{manual_deletion}', $this->optStr($options, 'manual_deletion'), $html);
-        $html = $this->f->str_replace('{maximum_log_disk_usage}', $this->optStr($options, 'maximum_log_disk_usage'), $html);
+        $html = $this->f->str_replace('{admin_notification}', esc_attr($this->optStr($options, 'admin_notification')), $html);
+        $html = $this->f->str_replace('{capture_deletion}', esc_attr($this->optStr($options, 'capture_deletion')), $html);
+        $html = $this->f->str_replace('{manual_deletion}', esc_attr($this->optStr($options, 'manual_deletion')), $html);
+        $html = $this->f->str_replace('{maximum_log_disk_usage}', esc_attr($this->optStr($options, 'maximum_log_disk_usage')), $html);
         $html = $this->f->str_replace('{logCurrentSizeDiskUsage}', (string)$logSizeMB, $html);
         $html = $this->f->str_replace('{logCurrentRowCount}', (string)$totalLogLines, $html);
         $html = $this->f->str_replace('{earliestLogDate}', $earliestLogDate, $html);
@@ -570,14 +600,19 @@ trait ViewTrait_Settings {
         $html = $this->f->str_replace('{selectedLanguageIdID}', $selectedLanguageIdID, $html);
         $html = $this->f->str_replace('{selectedLanguageSvSE}', $selectedLanguageSvSE, $html);
         $html = $this->f->str_replace('{disableAutoDarkModeChecked}', $disableAutoDarkModeChecked, $html);
-        $html = $this->f->str_replace('{admin_notification_email}', $this->optStr($options, 'admin_notification_email'), $html);
+        $html = $this->f->str_replace('{admin_notification_email}', esc_attr($this->optStr($options, 'admin_notification_email')), $html);
         $adminEmail = get_option('admin_email');
         $html = $this->f->str_replace('{default_wordpress_admin_email}', is_string($adminEmail) ? $adminEmail : '', $html);
         $html = $this->f->str_replace('{PHP_VERSION}', PHP_VERSION, $html);
+        $html = $this->f->str_replace('{selectedNotifyInstant}', $selectedNotifyInstant, $html);
+        $html = $this->f->str_replace('{selectedNotifyDaily}', $selectedNotifyDaily, $html);
+        $html = $this->f->str_replace('{selectedNotifyWeekly}', $selectedNotifyWeekly, $html);
+        $selectedPdfEmailReports = $this->getCheckedAttr($options, 'pdf_email_reports');
+        $html = $this->f->str_replace('{selectedPdfEmailReports}', $selectedPdfEmailReports, $html);
 
         // constants and translations.
         $html = $this->f->doNormalReplacements($html);
-        
+
         return $html;
     }
 
