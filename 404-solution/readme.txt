@@ -1,11 +1,11 @@
 === 404 Solution ===
-Contributors: ajexperience
+Contributors: aaron13100
 Website: https://www.ajexperience.com/404-solution/
-Tags: 404, redirect, 404 redirect, broken links, spell check, smart redirect, 404 error, woocommerce
+Tags: 404, redirect, 404 redirect, broken links, spell check
 Requires at least: 5.0
 Requires PHP: 7.4
 Tested up to: 6.9
-Stable tag: 4.0.0
+Stable tag: 4.0.1
 License: GPL-3.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -75,7 +75,7 @@ The whole process adds no perceptible latency for visitors on non-404 pages. The
 **Reporting and Diagnostics**
 
 * Stats dashboard with traffic trend charts (404s, redirects, captures over time)
-* Email digest reports with optional PDF attachment
+* Email digest reports
 * Debug logging — see which engine fired and why
 * Google Search Console integration — import crawl errors and push fixes
 * Internal link scanner to find broken links before visitors do
@@ -192,14 +192,32 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 
 == Screenshots ==
 
-1. **Redirect Dashboard** — Active redirects with status code badges (301, 302, 307, 308, 410, 451) and match confidence scores. Sort, search, and bulk-edit without leaving the page.
-2. **Stats and Trends** — Traffic trend charts plotting 404 hits, redirects, and captures over time. See which URLs break most often.
-3. **Debug Mode** — Enable debug logging to see exactly which of the 7 engines fired, what score it assigned, and why it chose that destination.
-4. **Captured 404s** — Every 404 logged with URL, referrer, user agent, and timestamp. Create a redirect for any row with one click.
-5. **Settings Page** — Enable/disable individual matching engines, set per-engine confidence thresholds, configure fallback behavior.
-6. **Email Digest** — Weekly email digest with top 404 URLs, hit counts, and optional PDF attachment.
+1. **Redirect Dashboard** — Active redirects with color-coded status badges (301, 302, 307, 308, 410, 451), match confidence scores, and engine names. Filter by manual, automatic, or regex. Sort by any column.
+2. **Statistics** — Summary cards for redirects, captured URLs, and daily stats. Match confidence donut chart and 30/90-day trend analytics for 404 hits.
+3. **Debug Log** — Real-time debug output showing engine processing, spell-check scoring, candidate evaluation, and redirect decisions for every 404 request.
+4. **Captured 404s** — Every unhandled 404 logged with URL, hit count, first-seen and last-seen timestamps. Filter by captured, ignored, or later status.
+5. **Settings** — Configure automatic redirect behavior, custom 404 page, auto-deletion rules, default redirect type, and notification preferences.
+6. **Email Digest** — Weekly HTML email summarizing captured 404s, resolution rate, and a ranked table of top 404 URLs with color-coded hit badges.
 
 == Changelog ==
+
+= Version 4.0.1 (Mar 25, 2026) =
+
+**Bug Fixes**
+
+* Fixed perpetual "still differences" schema errors on the engine_profiles table caused by MySQL quoting numeric defaults differently than the goal DDL (e.g. `default '1'` vs `default 1`).
+* Fixed missing-table auto-repair flooding admins with error emails even when repair succeeded. Now only sends an email if repair actually fails.
+* Fixed blank screen after dismissing the review notice.
+* Fixed GSC integration sending unbounded API requests — added URL cap, corrected chunk size, and added a circuit-breaker.
+* Fixed full-table scan in log ID/URL query by adding LIMIT 500.
+* Fixed PHP 8.4 deprecation warning in CSV export (`fputcsv()` missing `$escape` parameter).
+* Removed dead PDF email attachment feature.
+* Fixed Logs table layout — long URLs no longer overflow into adjacent columns, and the Date column is no longer truncated.
+* Fixed redirect not firing on WordPress 6.9+ when `class-wp-font-face.php` sends output before headers.
+
+**Improvements**
+
+* Added pipeline trace for per-request detail logging in the Logs tab — click the arrow on any log row to see every step of the redirect decision process.
 
 = Version 4.0.0 (Mar 24, 2026) =
 
@@ -207,7 +225,7 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 
 * Conditional engine groups (engine profiles) — override the matching strategy for specific URL patterns.
 * Google Search Console integration with guided setup wizard — import crawl errors and push fixes.
-* Email digest reports with optional PDF attachment — weekly summary of top 404s and redirect activity.
+* Email digest reports — weekly summary of top 404s and redirect activity.
 * REST API for redirect management.
 * WP-CLI overhaul — list, create, delete, import, export, and test subcommands.
 * Cross-plugin importer — import redirects from Rank Math, Yoast SEO, AIOSEO, and Safe Redirect Manager with a preview step.

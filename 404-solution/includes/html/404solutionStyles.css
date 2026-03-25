@@ -2862,7 +2862,40 @@ html[data-theme="obsidian"] .abj404-filter-bar {
    ============================================ */
 
 .abj404-logs-table {
-    table-layout: auto;
+    table-layout: fixed;
+}
+
+/* Fixed column widths for the logs table (6 columns: toggle, URL, IP, Referrer, Action, Date) */
+.abj404-logs-table thead th:nth-child(1) { width: 32px;  } /* Trace toggle */
+.abj404-logs-table thead th:nth-child(2) { width: 28%;  } /* URL */
+.abj404-logs-table thead th:nth-child(3) { width: 10%;  } /* IP Address */
+.abj404-logs-table thead th:nth-child(4) { width: 22%;  } /* Referrer */
+.abj404-logs-table thead th:nth-child(5) { width: 22%;  } /* Action */
+.abj404-logs-table thead th:nth-child(6) { width: auto;  } /* Date (takes remaining) */
+
+/* Override the generic first-child 40px checkbox width for the narrow trace toggle */
+.abj404-logs-table th:first-child,
+.abj404-logs-table td:first-child {
+    width: 32px;
+    min-width: 32px;
+    max-width: 32px;
+}
+
+/* Prevent URL/Referrer/Action text from overflowing into adjacent columns */
+.abj404-logs-table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.abj404-logs-table .abj404-url-cell {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.abj404-logs-table .abj404-url-cell:hover {
+    white-space: normal;
+    word-break: break-all;
 }
 
 /* Logs table URL cells use same word-break as regular tables */
@@ -2908,6 +2941,62 @@ html[data-theme="obsidian"] .abj404-filter-bar {
     font-size: 11px;
     color: var(--abj404-text-muted, #646970);
     font-style: italic;
+}
+
+/* Pipeline trace detail row */
+.abj404-trace-th {
+    width: 28px;
+    padding: 4px 2px;
+}
+
+.abj404-trace-toggle-cell {
+    width: 28px;
+    padding: 4px 2px;
+    text-align: center;
+}
+
+.abj404-trace-toggle {
+    background: none;
+    border: 1px solid var(--abj404-border, #c3c4c7);
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 10px;
+    padding: 1px 4px;
+    color: var(--abj404-text-muted, #646970);
+    line-height: 1;
+}
+
+.abj404-trace-toggle:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+.abj404-trace-toggle:not(:disabled):hover {
+    background: var(--abj404-bg-hover, #f0f0f1);
+}
+
+.abj404-trace-detail td.abj404-trace-detail-cell {
+    background: var(--abj404-bg-subtle, #f6f7f7);
+    padding: 10px 16px;
+    border-top: none;
+}
+
+.abj404-trace-steps {
+    margin: 0;
+    padding-left: 20px;
+    font-family: monospace;
+    font-size: 12px;
+    color: var(--abj404-text, #1d2327);
+    line-height: 1.6;
+}
+
+.abj404-trace-steps li {
+    margin-bottom: 2px;
+}
+
+.abj404-trace-detail-text {
+    color: var(--abj404-text-muted, #646970);
+    font-style: normal;
 }
 
 .abj404-score-badge {

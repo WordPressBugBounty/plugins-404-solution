@@ -2716,11 +2716,7 @@ msgstr "Weekly digest"
 msgid "Choose how often to receive email notifications about captured 404s."
 msgstr "Choose how often to receive email notifications about captured 404s."
 
-msgid "Attach PDF report to digest email"
-msgstr "Attach PDF report to digest email"
 
-msgid "When enabled, a PDF summary is attached to each digest email (daily or weekly digests only)."
-msgstr "When enabled, a PDF summary is attached to each digest email (daily or weekly digests only)."
 
 msgid "Temporary 307 (preserve method)"
 msgstr "Temporary 307 (preserve method)"
@@ -3415,3 +3411,11 @@ msgstr "تعذر جلب المعاينة. يرجى المحاولة مرة أخ�
 
 msgid "Invalid source plugin."
 msgstr "مكوِّن المصدر غير صالح."
+
+#: includes/ViewTrait_Logs.php:159
+msgid "Show pipeline trace"
+msgstr "عرض تتبع خط الأنابيب"
+
+#: includes/ViewTrait_Logs.php:161
+msgid "No trace available"
+msgstr "لا يوجد تتبع متاح"

@@ -66,7 +66,7 @@ The whole process adds no perceptible latency for visitors on non-404 pages. The
 **Reporting and Diagnostics**
 
 * Stats dashboard with traffic trend charts (404s, redirects, captures over time)
-* Email digest reports with optional PDF attachment
+* Email digest reports
 * Debug logging — see which engine fired and why
 * Google Search Console integration — import crawl errors and push fixes
 * Internal link scanner to find broken links before visitors do
@@ -198,10 +198,28 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 5. **Settings Page** — Enable/disable individual matching engines, set per-engine confidence thresholds, configure fallback behavior.
 ![5. Settings Page](https://plugins.svn.wordpress.org/404-solution/trunk/assets/screenshot-5.jpg)
 
-6. **Email Digest** — Weekly email digest with top 404 URLs, hit counts, and optional PDF attachment.
+6. **Email Digest** — Weekly email digest with top 404 URLs and hit counts.
 ![6. Email Digest](https://plugins.svn.wordpress.org/404-solution/trunk/assets/screenshot-6.jpg)
 
 ## Changelog ##
+
+## Version 4.0.1 (Mar 25, 2026) ##
+
+**Bug Fixes**
+
+* Fixed perpetual "still differences" schema errors on the engine_profiles table caused by MySQL quoting numeric defaults differently than the goal DDL (e.g. `default '1'` vs `default 1`).
+* Fixed missing-table auto-repair flooding admins with error emails even when repair succeeded. Now only sends an email if repair actually fails.
+* Fixed blank screen after dismissing the review notice.
+* Fixed GSC integration sending unbounded API requests — added URL cap, corrected chunk size, and added a circuit-breaker.
+* Fixed full-table scan in log ID/URL query by adding LIMIT 500.
+* Fixed PHP 8.4 deprecation warning in CSV export (`fputcsv()` missing `$escape` parameter).
+* Removed dead PDF email attachment feature.
+* Fixed Logs table layout — long URLs no longer overflow into adjacent columns, and the Date column is no longer truncated.
+* Fixed redirect not firing on WordPress 6.9+ when `class-wp-font-face.php` sends output before headers.
+
+**Improvements**
+
+* Added pipeline trace for per-request detail logging in the Logs tab — click the arrow on any log row to see every step of the redirect decision process.
 
 ## Version 4.0.0 (Mar 24, 2026) ##
 
@@ -209,7 +227,7 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 
 * Conditional engine groups (engine profiles) — override the matching strategy for specific URL patterns.
 * Google Search Console integration with guided setup wizard — import crawl errors and push fixes.
-* Email digest reports with optional PDF attachment — weekly summary of top 404s and redirect activity.
+* Email digest reports — weekly summary of top 404s and redirect activity.
 * REST API for redirect management.
 * WP-CLI overhaul — list, create, delete, import, export, and test subcommands.
 * Cross-plugin importer — import redirects from Rank Math, Yoast SEO, AIOSEO, and Safe Redirect Manager with a preview step.
