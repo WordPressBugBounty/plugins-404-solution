@@ -244,22 +244,8 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      * @return void
      */
     function repairStrippedViewCacheTable() {
-    	$sqlDir = __DIR__ . '/sql';
-    	$files = glob($sqlDir . '/create*Table.sql') ?: [];
-
-    	foreach ($files as $file) {
-    		if (stripos(basename($file), 'Temp') !== false) {
-    			continue;
-    		}
-    		$ddlTemplate = ABJ_404_Solution_Functions::readFileContents($file);
-    		if (!is_string($ddlTemplate) || trim($ddlTemplate) === '') {
-    			continue;
-    		}
-    		if (!preg_match('/\{(wp_abj404_\w+)\}/', $ddlTemplate, $matches)) {
-    			continue;
-    		}
-    		$placeholder = '{' . $matches[1] . '}';
-    		$tableName = $this->dao->doTableNameReplacements($placeholder);
+    	foreach ($this->discoverPermanentDDLFiles() as $ddlEntry) {
+    		$tableName = $this->dao->doTableNameReplacements($ddlEntry['placeholder']);
     		$ddl = $this->dao->getCreateTableDDL($tableName);
 
     		// Table doesn't exist at all — nothing to repair.
@@ -289,23 +275,45 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
     /**
      * Makes all plugin table names lowercase, in case someone thought it was funny to use
-	 * the lower_case_table_names=0 setting.
+	 * the lower_case_table_names=0 setting. Also detects and adopts orphaned plugin tables
+	 * under old prefixes (from site migrations or the rename bug in v2.35.16–v3.x).
      * @return void
      */
-		function renameAbj404TablesToLowerCase() {
-			global $wpdb;
-			// Fetch all tables starting with "abj404", case-insensitive
-			$dbNameRaw = $wpdb->dbname ?? '';
-			if ($dbNameRaw === '') {
-				$this->logger->warn("Could not determine database name for lowercase rename.");
+	function renameAbj404TablesToLowerCase() {
+		global $wpdb;
+
+		// On case-insensitive MySQL (lower_case_table_names >= 1), table names
+		// are already treated as lowercase internally. Renaming is pointless and
+		// can cause issues on some hosting setups.
+		$lctnResult = $wpdb->get_row("SHOW VARIABLES LIKE 'lower_case_table_names'", ARRAY_A);
+		if (is_array($lctnResult)) {
+			$lctnValue = null;
+			foreach ($lctnResult as $key => $value) {
+				if (strtolower((string)$key) === 'value') {
+					$lctnValue = $value;
+					break;
+				}
+			}
+			if ($lctnValue !== null && (int)$lctnValue >= 1) {
+				// MySQL already handles table names case-insensitively.
+				// Still run adoption check in case of prefix mismatch.
+				$this->adoptOrphanedTables();
 				return;
 			}
-			$dbNameEscaped = esc_sql($dbNameRaw);
-			$dbName = is_array($dbNameEscaped) ? '' : $dbNameEscaped;
-			$query = "SELECT table_name
-				FROM information_schema.tables
-				WHERE table_schema = '{$dbName}'
-				AND LOWER(table_name) LIKE '%abj404%'";
+		}
+
+		// Fetch all tables containing "abj404", case-insensitive
+		$dbNameRaw = $wpdb->dbname ?? '';
+		if ($dbNameRaw === '') {
+			$this->logger->warn("Could not determine database name for lowercase rename.");
+			return;
+		}
+		$dbNameEscaped = esc_sql($dbNameRaw);
+		$dbName = is_array($dbNameEscaped) ? '' : $dbNameEscaped;
+		$query = "SELECT table_name
+			FROM information_schema.tables
+			WHERE table_schema = '{$dbName}'
+			AND LOWER(table_name) LIKE '%abj404%'";
 		$results = $this->dao->queryAndGetResults($query);
 
 		if (!is_array($results['rows'])) {
@@ -326,22 +334,409 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
 			if (!empty($tableName)) {
 				$lowercaseName = strtolower($tableName);
-		
+
 				// Check if the table name is already lowercase, skip if it is
 				if ($tableName !== $lowercaseName) {
 					// Rename the table to lowercase
 					$renameQuery = "RENAME TABLE `{$tableName}` TO `{$lowercaseName}`";
-					$this->dao->queryAndGetResults($renameQuery, 
+					$this->dao->queryAndGetResults($renameQuery,
 						['ignore_errors' => ["already exists"]]);
 					$this->logger->infoMessage("Renamed table {$tableName} to {$lowercaseName}\n");
 				}
 			} else {
-				$this->logger->warn("I didn't find a table name in the results of this row: " . 
+				$this->logger->warn("I didn't find a table name in the results of this row: " .
 					print_r($row, true));
 			}
 		}
+
+		// After renaming, check for orphaned tables under old prefixes.
+		$this->adoptOrphanedTables();
 	}
-    
+
+	/**
+	 * Known plugin table suffixes for adoption.
+	 * @var array<int, string>
+	 */
+	private const PLUGIN_TABLE_SUFFIXES = [
+		'abj404_redirects',
+		'abj404_logsv2',
+		'abj404_spelling_cache',
+		'abj404_permalink_cache',
+		'abj404_lookup',
+		'abj404_ngram_cache',
+		'abj404_logs_hits',
+		'abj404_redirect_conditions',
+		'abj404_engine_profiles',
+		'abj404_view_cache',
+	];
+
+	/**
+	 * Detect orphaned plugin tables under old prefixes and adopt their data
+	 * into the current-prefix tables. Uses slug verification against the logs
+	 * table to confirm ownership before adopting.
+	 *
+	 * @return void
+	 */
+	private function adoptOrphanedTables(): void {
+		global $wpdb;
+
+		$dbNameRaw = $wpdb->dbname ?? '';
+		if ($dbNameRaw === '') {
+			return;
+		}
+		$dbNameEscaped = esc_sql($dbNameRaw);
+		$dbName = is_array($dbNameEscaped) ? '' : $dbNameEscaped;
+
+		// Find all abj404 tables in the database, grouped by prefix.
+		$query = "SELECT table_name
+			FROM information_schema.tables
+			WHERE table_schema = '{$dbName}'
+			AND LOWER(table_name) LIKE '%abj404\\_%'";
+		$results = $this->dao->queryAndGetResults($query);
+
+		if (!is_array($results['rows']) || empty($results['rows'])) {
+			return;
+		}
+
+		$currentPrefix = $this->dao->getLowercasePrefix();
+
+		// Group tables by their prefix (everything before 'abj404_').
+		/** @var array<string, array<string>> prefix => [table_name, ...] */
+		$tablesByPrefix = [];
+		foreach ($results['rows'] as $row) {
+			$tableName = null;
+			foreach ($row as $key => $value) {
+				if (strtolower((string)$key) === 'table_name') {
+					$tableName = strtolower((string)$value);
+					break;
+				}
+			}
+			if ($tableName === null) {
+				continue;
+			}
+
+			$abj404Pos = strpos($tableName, 'abj404_');
+			if ($abj404Pos === false) {
+				continue;
+			}
+
+			$prefix = substr($tableName, 0, $abj404Pos);
+			$tablesByPrefix[$prefix][] = $tableName;
+		}
+
+		// Process each OLD prefix (not the current one).
+		foreach ($tablesByPrefix as $oldPrefix => $tables) {
+			if ($oldPrefix === $currentPrefix) {
+				continue;
+			}
+
+			$this->logger->infoMessage(
+				"Found orphaned plugin tables under prefix '{$oldPrefix}' "
+				. "(current prefix is '{$currentPrefix}'): " . implode(', ', $tables)
+			);
+
+			// Check if old tables have any data at all.
+			$totalRows = $this->countOldPrefixRows($oldPrefix);
+			if ($totalRows === 0) {
+				$this->logger->infoMessage(
+					"Orphaned tables under prefix '{$oldPrefix}' are all empty. Skipping adoption."
+				);
+				continue;
+			}
+
+			// Verify ownership via logs dest_url slug matching.
+			$matchResult = $this->verifyOwnershipViaLogs($oldPrefix);
+
+			if ($matchResult === null) {
+				// Logs verification returned no data — fall back to redirects post-ID check.
+				$matchResult = $this->verifyOwnershipViaRedirects($oldPrefix);
+			}
+
+			if ($matchResult !== true) {
+				// false = data doesn't match this site; null = insufficient data to verify.
+				// Either way, do not adopt — absence of veto is not permission.
+				$reason = ($matchResult === false)
+					? "Data does not appear to belong to this site."
+					: "Insufficient data in logs and redirects to verify ownership.";
+				$this->logger->infoMessage(
+					"Orphaned tables under prefix '{$oldPrefix}' — skipping adoption. {$reason}"
+				);
+				continue;
+			}
+
+			// Ownership positively verified — adopt the data.
+			$this->adoptDataFromPrefix($oldPrefix, $currentPrefix);
+		}
+	}
+
+	/**
+	 * Count total rows across all known plugin tables for a given prefix.
+	 *
+	 * @param string $oldPrefix
+	 * @return int
+	 */
+	private function countOldPrefixRows(string $oldPrefix): int {
+		$total = 0;
+		foreach (self::PLUGIN_TABLE_SUFFIXES as $suffix) {
+			$tableName = $oldPrefix . $suffix;
+			$result = $this->dao->queryAndGetResults(
+				"SELECT COUNT(*) AS cnt FROM `{$tableName}`",
+				['ignore_errors' => ["doesn't exist", "not found"]]
+			);
+			if (is_array($result['rows']) && !empty($result['rows'])) {
+				$row = $result['rows'][0];
+				$cnt = is_array($row) ? (int)($row['cnt'] ?? $row['CNT'] ?? 0) : 0;
+				$total += $cnt;
+			}
+		}
+		return $total;
+	}
+
+	/**
+	 * Verify ownership of orphaned tables by matching logs dest_url against
+	 * current site's published post slugs.
+	 *
+	 * @param string $oldPrefix   The old table prefix.
+	 * @return bool|null  true = verified, false = failed, null = no data to verify.
+	 */
+	private function verifyOwnershipViaLogs(string $oldPrefix): ?bool {
+		global $wpdb;
+		$logsTable = $oldPrefix . 'abj404_logsv2';
+		// WordPress core posts table uses the original $wpdb->prefix (possibly mixed-case),
+		// NOT our lowercased prefix. Only plugin tables were renamed to lowercase.
+		$postsTable = ($wpdb->prefix ?? 'wp_') . 'posts';
+
+		// Check distinct internal dest_urls against published post slugs.
+		$query = "SELECT COUNT(*) AS total,
+				SUM(CASE WHEN matched = 1 THEN 1 ELSE 0 END) AS matches
+			FROM (
+				SELECT DISTINCT dest_url,
+					EXISTS(SELECT 1 FROM `{$postsTable}` p
+						WHERE p.post_status = 'publish'
+						AND LENGTH(p.post_name) >= 3
+						AND LOCATE(p.post_name, dest_url) > 0) AS matched
+				FROM `{$logsTable}` l
+				WHERE dest_url IS NOT NULL
+					AND dest_url != ''
+					AND dest_url != '404'
+					AND dest_url NOT LIKE 'http://%'
+					AND dest_url NOT LIKE 'https://%'
+				LIMIT 500
+			) sub";
+
+		$result = $this->dao->queryAndGetResults($query,
+			['ignore_errors' => ["doesn't exist", "not found"]]);
+
+		if (!is_array($result['rows']) || empty($result['rows'])) {
+			return null;
+		}
+
+		$row = $result['rows'][0];
+		$total = 0;
+		$matches = 0;
+		foreach ($row as $key => $value) {
+			$lk = strtolower((string)$key);
+			if ($lk === 'total') { $total = (int)$value; }
+			if ($lk === 'matches') { $matches = (int)$value; }
+		}
+
+		if ($total === 0) {
+			return null; // No internal dest_urls to verify.
+		}
+
+		$matchPct = ($matches / max(1, $total)) * 100;
+		$this->logger->infoMessage(
+			"Logs ownership verification for prefix '{$oldPrefix}': "
+			. "{$matches}/{$total} distinct internal dest_urls match published post slugs "
+			. "({$matchPct}%)"
+		);
+
+		return $matchPct >= 80;
+	}
+
+	/**
+	 * Fallback ownership verification using redirects table post-ID existence.
+	 * Weaker than slug matching but useful when logs have no internal dest_urls.
+	 *
+	 * @param string $oldPrefix
+	 * @return bool|null  true = verified, false = failed, null = no data.
+	 */
+	private function verifyOwnershipViaRedirects(string $oldPrefix): ?bool {
+		global $wpdb;
+		$redirectsTable = $oldPrefix . 'abj404_redirects';
+		$postsTable = ($wpdb->prefix ?? 'wp_') . 'posts';
+
+		$query = "SELECT COUNT(*) AS total,
+				SUM(CASE WHEN p.ID IS NOT NULL THEN 1 ELSE 0 END) AS matches
+			FROM `{$redirectsTable}` r
+			LEFT JOIN `{$postsTable}` p
+				ON p.ID = CAST(r.final_dest AS UNSIGNED)
+				AND p.post_status IN ('publish', 'draft', 'private')
+			WHERE r.type IN (1, 2, 3)";
+
+		$result = $this->dao->queryAndGetResults($query,
+			['ignore_errors' => ["doesn't exist", "not found"]]);
+
+		if (!is_array($result['rows']) || empty($result['rows'])) {
+			return null;
+		}
+
+		$row = $result['rows'][0];
+		$total = 0;
+		$matches = 0;
+		foreach ($row as $key => $value) {
+			$lk = strtolower((string)$key);
+			if ($lk === 'total') { $total = (int)$value; }
+			if ($lk === 'matches') { $matches = (int)$value; }
+		}
+
+		if ($total === 0) {
+			return null;
+		}
+
+		$matchPct = ($matches / max(1, $total)) * 100;
+		$this->logger->infoMessage(
+			"Redirects fallback ownership verification for prefix '{$oldPrefix}': "
+			. "{$matches}/{$total} type 1/2/3 redirects point to existing posts ({$matchPct}%)"
+		);
+
+		return $matchPct >= 80;
+	}
+
+	/**
+	 * Adopt data from orphaned tables under an old prefix into current-prefix tables.
+	 * Uses INSERT IGNORE to avoid duplicate key conflicts.
+	 *
+	 * @param string $oldPrefix
+	 * @param string $currentPrefix
+	 * @return void
+	 */
+	private function adoptDataFromPrefix(string $oldPrefix, string $currentPrefix): void {
+		$this->logger->infoMessage(
+			"Beginning adoption of data from prefix '{$oldPrefix}' to '{$currentPrefix}'"
+		);
+
+		$totalAdopted = 0;
+
+		foreach (self::PLUGIN_TABLE_SUFFIXES as $suffix) {
+			$oldTable = $oldPrefix . $suffix;
+			$newTable = $currentPrefix . $suffix;
+
+			// Check if old table exists and has rows.
+			$countResult = $this->dao->queryAndGetResults(
+				"SELECT COUNT(*) AS cnt FROM `{$oldTable}`",
+				['ignore_errors' => ["doesn't exist", "not found"]]
+			);
+			if (!is_array($countResult['rows']) || empty($countResult['rows'])) {
+				continue;
+			}
+			$row = $countResult['rows'][0];
+			$oldCount = is_array($row) ? (int)($row['cnt'] ?? $row['CNT'] ?? 0) : 0;
+			if ($oldCount === 0) {
+				continue;
+			}
+
+			// Check if new table exists (it should — auto-repair creates them).
+			$newExists = $this->dao->queryAndGetResults(
+				"SELECT 1 FROM `{$newTable}` LIMIT 1",
+				['ignore_errors' => ["doesn't exist", "not found"]]
+			);
+			if (!empty($newExists['last_error'])) {
+				$this->logger->infoMessage(
+					"Target table '{$newTable}' does not exist yet. Skipping adoption for '{$suffix}'."
+				);
+				continue;
+			}
+
+			// Build a column-matched INSERT to handle schema drift between old and new tables.
+			// Old tables from older plugin versions may have fewer or different columns.
+			$commonColumns = $this->getCommonColumns($oldTable, $newTable);
+			if (empty($commonColumns)) {
+				$this->logger->infoMessage(
+					"No common columns found between '{$oldTable}' and '{$newTable}'. Skipping."
+				);
+				continue;
+			}
+
+			$columnList = implode('`, `', $commonColumns);
+			$insertQuery = "INSERT IGNORE INTO `{$newTable}` (`{$columnList}`) "
+				. "SELECT `{$columnList}` FROM `{$oldTable}`";
+			$insertResult = $this->dao->queryAndGetResults($insertQuery,
+				['ignore_errors' => ["doesn't exist", "not found", "Duplicate"]]);
+
+			$affectedRows = 0;
+			if (is_array($insertResult) && isset($insertResult['rows_affected'])) {
+				$rawAffected = $insertResult['rows_affected'];
+				$affectedRows = is_numeric($rawAffected) ? (int)$rawAffected : 0;
+			}
+
+			if ($affectedRows > 0) {
+				$totalAdopted += $affectedRows;
+				$this->logger->infoMessage(
+					"Adopted {$affectedRows} rows from '{$oldTable}' into '{$newTable}'"
+				);
+			}
+		}
+
+		$this->logger->infoMessage(
+			"Adoption complete: {$totalAdopted} total rows adopted from prefix '{$oldPrefix}' to '{$currentPrefix}'"
+		);
+	}
+
+	/**
+	 * Get the list of column names that exist in both tables.
+	 * Used by adoptDataFromPrefix() to build column-matched INSERTs
+	 * that survive schema drift between plugin versions.
+	 *
+	 * @param string $tableA
+	 * @param string $tableB
+	 * @return array<int, string>  Column names present in both tables (lowercase).
+	 */
+	private function getCommonColumns(string $tableA, string $tableB): array {
+		$colsA = $this->getTableColumns($tableA);
+		$colsB = $this->getTableColumns($tableB);
+
+		if (empty($colsA) || empty($colsB)) {
+			return [];
+		}
+
+		return array_values(array_intersect($colsA, $colsB));
+	}
+
+	/**
+	 * Get column names for a table via SHOW COLUMNS.
+	 *
+	 * @param string $tableName
+	 * @return array<int, string>  Column names (lowercase).
+	 */
+	private function getTableColumns(string $tableName): array {
+		$result = $this->dao->queryAndGetResults(
+			"SHOW COLUMNS FROM `{$tableName}`",
+			['ignore_errors' => ["doesn't exist", "not found"]]
+		);
+
+		if (!is_array($result['rows']) || empty($result['rows'])) {
+			return [];
+		}
+
+		$columns = [];
+		foreach ($result['rows'] as $row) {
+			// SHOW COLUMNS returns 'Field' key — case-insensitive lookup.
+			$colName = null;
+			foreach ($row as $key => $value) {
+				if (strtolower((string)$key) === 'field') {
+					$colName = strtolower((string)$value);
+					break;
+				}
+			}
+			if ($colName !== null) {
+				$columns[] = $colName;
+			}
+		}
+
+		return $columns;
+	}
+
     /** @return void */
     function correctMatchData() {
     	$this->dao->queryAndGetResults("delete from {wp_abj404_spelling_cache} " .
@@ -372,36 +767,48 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     	}
     }
     
-	    /** @return void */
-	    function runInitialCreateTables() {
-	    	// Discover all permanent table DDL files dynamically.
-	    	// Adding a new table = adding a create*Table.sql file. No other code changes needed.
+	    /**
+	     * Discover all permanent (non-Temp) DDL files and extract table metadata.
+	     *
+	     * @return array<int, array{placeholder: string, bareTableName: string, ddlContent: string}>
+	     */
+	    function discoverPermanentDDLFiles(): array {
 	    	$sqlDir = __DIR__ . '/sql';
 	    	$files = glob($sqlDir . '/create*Table.sql');
 	    	if (!is_array($files)) {
-	    		$files = array();
+	    		$files = [];
 	    	}
 	    	sort($files);
 
+	    	$result = [];
 	    	foreach ($files as $file) {
-	    		// Skip temporary tables (e.g., createLogsHitsTempTable.sql).
 	    		if (stripos(basename($file), 'Temp') !== false) {
 	    			continue;
 	    		}
-
-	    		$query = ABJ_404_Solution_Functions::readFileContents($file);
-	    		if (!is_string($query) || trim($query) === '') {
+	    		$ddlContent = ABJ_404_Solution_Functions::readFileContents($file);
+	    		if (!is_string($ddlContent) || trim($ddlContent) === '') {
 	    			continue;
 	    		}
-	    		$query = $this->applyPluginTableCharsetCollate($query);
+	    		if (!preg_match('/\{(wp_(abj404_\w+))\}/', $ddlContent, $m)) {
+	    			continue;
+	    		}
+	    		$result[] = [
+	    			'placeholder' => '{' . $m[1] . '}',
+	    			'bareTableName' => $m[2],
+	    			'ddlContent' => $ddlContent,
+	    		];
+	    	}
+	    	return $result;
+	    }
+
+	    /** @return void */
+	    function runInitialCreateTables() {
+	    	foreach ($this->discoverPermanentDDLFiles() as $ddlEntry) {
+	    		$query = $this->applyPluginTableCharsetCollate($ddlEntry['ddlContent']);
 	    		$this->dao->queryAndGetResults($query);
 
-	    		// Extract the table placeholder (e.g. "{wp_abj404_redirects}") from the DDL
-	    		// and resolve it to the actual prefixed table name for verifyColumns().
-	    		if (preg_match('/\{(wp_abj404_\w+)\}/', $query, $matches)) {
-	    			$tableName = $this->dao->doTableNameReplacements('{' . $matches[1] . '}');
-	    			$this->verifyColumns($tableName, $query);
-	    		}
+	    		$tableName = $this->dao->doTableNameReplacements($ddlEntry['placeholder']);
+	    		$this->verifyColumns($tableName, $query);
 	    	}
 
 	    	// Table-specific post-creation steps.
@@ -436,32 +843,117 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	    }
 
     /**
-     * Schedule background multisite activation to process remaining sites via WP-Cron.
+     * Schedule a background multisite batch operation.
      *
-     * @param int $alreadyProcessedBlogId Blog ID that was already processed during activation
+     * @param string $optionPrefix e.g. 'abj404_activation' or 'abj404_upgrade'
+     * @param string $hookName     e.g. 'abj404_network_activation_background'
+     * @param string $label        Human-readable label for log messages, e.g. 'activation'
+     * @param int $alreadyProcessedBlogId Blog ID already processed on this request.
      * @return void
      */
-    private function scheduleBackgroundMultisiteActivation($alreadyProcessedBlogId) {
-        // Store the processed blog ID so cron handler knows to skip it
-        update_site_option('abj404_activation_processed_blogs', array($alreadyProcessedBlogId));
-        update_site_option('abj404_activation_in_progress', true);
+    private function scheduleBackgroundMultisiteBatch(string $optionPrefix, string $hookName, string $label, int $alreadyProcessedBlogId): void {
+        update_site_option($optionPrefix . '_processed_blogs', array($alreadyProcessedBlogId));
+        update_site_option($optionPrefix . '_in_progress', true);
 
-        // Schedule immediate execution (within 30 seconds)
-        $hookName = 'abj404_network_activation_background';
-
-        // Check if already scheduled
         if (wp_next_scheduled($hookName)) {
-            $this->logger->debugMessage("Background multisite activation already scheduled.");
+            $this->logger->debugMessage("Background multisite $label already scheduled.");
             return;
         }
 
         $scheduled = wp_schedule_single_event(time() + 30, $hookName);
 
         if ($scheduled === false) {
-            $this->logger->errorMessage("Failed to schedule background multisite activation. Remaining sites will not have tables created automatically.");
+            $this->logger->errorMessage("Failed to schedule background multisite $label. Remaining sites will not be processed automatically.");
         } else {
-            $this->logger->infoMessage("Background multisite activation scheduled successfully.");
+            $this->logger->infoMessage("Background multisite $label scheduled successfully.");
         }
+    }
+
+    /**
+     * Process a batch of multisite sites with the given per-site action.
+     *
+     * @param string $optionPrefix e.g. 'abj404_activation' or 'abj404_upgrade'
+     * @param string $hookName     e.g. 'abj404_network_activation_background'
+     * @param string $label        Human-readable label for log messages, e.g. 'activation'
+     * @param callable $perSiteAction Called for each site (receives int $siteId).
+     * @return bool True if all sites are done, false if more batches needed.
+     */
+    public function processMultisiteBatch(string $optionPrefix, string $hookName, string $label, callable $perSiteAction): bool {
+        $processedBlogs = get_site_option($optionPrefix . '_processed_blogs', array());
+        if (!is_array($processedBlogs)) {
+            $processedBlogs = array();
+        }
+
+        $allSites = get_sites(array('fields' => 'ids', 'number' => 0));
+        $remainingSites = array_diff($allSites, $processedBlogs);
+
+        if (empty($remainingSites)) {
+            delete_site_option($optionPrefix . '_processed_blogs');
+            delete_site_option($optionPrefix . '_in_progress');
+            $this->logger->infoMessage("Background multisite $label complete. All sites processed.");
+            return true;
+        }
+
+        $batchSize = 10;
+        $sitesToProcess = array_slice($remainingSites, 0, $batchSize);
+
+        $this->logger->infoMessage(sprintf(
+            "Processing multisite $label batch: %d sites (of %d remaining)",
+            count($sitesToProcess),
+            count($remainingSites)
+        ));
+
+        foreach ($sitesToProcess as $siteId) {
+            try {
+                switch_to_blog($siteId);
+                $this->logger->debugMessage(sprintf("Processing $label for site ID %d...", $siteId));
+
+                $perSiteAction((int)$siteId);
+
+                $processedBlogs[] = $siteId;
+                update_site_option($optionPrefix . '_processed_blogs', $processedBlogs);
+
+                $this->logger->debugMessage(sprintf("Successfully processed $label for site ID %d", $siteId));
+            } catch (Throwable $e) {
+                $this->logger->errorMessage(sprintf(
+                    "Failed to process $label for site ID %d: %s",
+                    $siteId,
+                    $e->getMessage()
+                ));
+                $processedBlogs[] = $siteId;
+                update_site_option($optionPrefix . '_processed_blogs', $processedBlogs);
+            } finally {
+                restore_current_blog();
+            }
+        }
+
+        $stillRemaining = count($remainingSites) - count($sitesToProcess);
+        if ($stillRemaining > 0) {
+            $this->logger->infoMessage(sprintf(
+                "Batch complete. Rescheduling for %d remaining sites.",
+                $stillRemaining
+            ));
+            wp_schedule_single_event(time() + 30, $hookName);
+            return false;
+        } else {
+            delete_site_option($optionPrefix . '_processed_blogs');
+            delete_site_option($optionPrefix . '_in_progress');
+            $this->logger->infoMessage("Background multisite $label complete. All sites processed.");
+            return true;
+        }
+    }
+
+    /**
+     * Schedule a background activation for all network sites except the one that
+     * was just activated synchronously.
+     *
+     * @param int $alreadyProcessedBlogId Blog ID of the site already activated.
+     * @return void
+     */
+    private function scheduleBackgroundMultisiteActivation(int $alreadyProcessedBlogId): void {
+        $this->scheduleBackgroundMultisiteBatch(
+            'abj404_activation', 'abj404_network_activation_background', 'activation', $alreadyProcessedBlogId
+        );
     }
 
     /**
@@ -473,49 +965,12 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      *
      * @return bool True if all sites processed, false if more remain
      */
-    public function processMultisiteActivationBatch() {
-        global $wpdb;
-
-        // Get list of already processed blogs
-        $processedBlogs = get_site_option('abj404_activation_processed_blogs', array());
-        if (!is_array($processedBlogs)) {
-            $processedBlogs = array();
-        }
-
-        // Get all sites in the network
-        $allSites = get_sites(array('fields' => 'ids', 'number' => 0));
-        $remainingSites = array_diff($allSites, $processedBlogs);
-
-        if (empty($remainingSites)) {
-            // All sites processed - cleanup and exit
-            delete_site_option('abj404_activation_processed_blogs');
-            delete_site_option('abj404_activation_in_progress');
-            $this->logger->infoMessage("Background multisite activation complete. All sites processed.");
-            return true;
-        }
-
-        // Process up to 10 sites per batch to avoid timeouts
-        $batchSize = 10;
-        $sitesToProcess = array_slice($remainingSites, 0, $batchSize);
-        $totalRemaining = count($remainingSites);
-
-        $this->logger->infoMessage(sprintf(
-            "Processing multisite activation batch: %d sites (of %d remaining)",
-            count($sitesToProcess),
-            $totalRemaining
-        ));
-
-        foreach ($sitesToProcess as $siteId) {
-            try {
-                switch_to_blog($siteId);
-
-                $this->logger->debugMessage(sprintf(
-                    "Activating site ID %d (prefix: %s)...",
-                    $siteId,
-                    $wpdb->prefix
-                ));
-
-                // Run full activation for this site (not just table creation)
+    public function processMultisiteActivationBatch(): bool {
+        return $this->processMultisiteBatch(
+            'abj404_activation',
+            'abj404_network_activation_background',
+            'activation',
+            function (int $siteId): void {
                 add_option('abj404_settings', '', '', false);
 
                 $this->runInitialCreateTables();
@@ -525,50 +980,10 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
                 ABJ_404_Solution_PluginLogic::doRegisterCrons();
 
-                // Update DB version for this site
                 $logic = ABJ_404_Solution_PluginLogic::getInstance();
                 $logic->doUpdateDBVersionOption();
-
-                $processedBlogs[] = $siteId;
-                update_site_option('abj404_activation_processed_blogs', $processedBlogs);
-
-                $this->logger->debugMessage(sprintf(
-                    "Successfully activated site ID %d",
-                    $siteId
-                ));
-
-            } catch (Throwable $e) {
-                $this->logger->errorMessage(sprintf(
-                    "Failed to activate site ID %d: %s",
-                    $siteId,
-                    $e->getMessage()
-                ));
-                // Mark as processed anyway to avoid getting stuck
-                $processedBlogs[] = $siteId;
-                update_site_option('abj404_activation_processed_blogs', $processedBlogs);
-            } finally {
-                restore_current_blog();
             }
-        }
-
-        // If more sites remain, reschedule
-        $stillRemaining = count($remainingSites) - count($sitesToProcess);
-        if ($stillRemaining > 0) {
-            $this->logger->infoMessage(sprintf(
-                "Batch complete. Rescheduling for %d remaining sites.",
-                $stillRemaining
-            ));
-
-            // Schedule next batch in 30 seconds
-            wp_schedule_single_event(time() + 30, 'abj404_network_activation_background');
-            return false;
-        } else {
-            // All done
-            delete_site_option('abj404_activation_processed_blogs');
-            delete_site_option('abj404_activation_in_progress');
-            $this->logger->infoMessage("Background multisite activation complete. All sites processed.");
-            return true;
-        }
+        );
     }
 
     /**
@@ -578,24 +993,10 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      * @param int $alreadyProcessedBlogId Blog ID of the site already upgraded.
      * @return void
      */
-    private function scheduleBackgroundMultisiteUpgrade($alreadyProcessedBlogId) {
-        update_site_option('abj404_upgrade_processed_blogs', array($alreadyProcessedBlogId));
-        update_site_option('abj404_upgrade_in_progress', true);
-
-        $hookName = 'abj404_network_upgrade_background';
-
-        if (wp_next_scheduled($hookName)) {
-            $this->logger->debugMessage("Background multisite upgrade already scheduled.");
-            return;
-        }
-
-        $scheduled = wp_schedule_single_event(time() + 30, $hookName);
-
-        if ($scheduled === false) {
-            $this->logger->errorMessage("Failed to schedule background multisite upgrade. Remaining sites will not have tables updated automatically.");
-        } else {
-            $this->logger->infoMessage("Background multisite upgrade scheduled successfully.");
-        }
+    private function scheduleBackgroundMultisiteUpgrade(int $alreadyProcessedBlogId): void {
+        $this->scheduleBackgroundMultisiteBatch(
+            'abj404_upgrade', 'abj404_network_upgrade_background', 'upgrade', $alreadyProcessedBlogId
+        );
     }
 
     /**
@@ -607,41 +1008,12 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      *
      * @return bool True if all sites processed, false if more remain.
      */
-    public function processMultisiteUpgradeBatch() {
-        $processedBlogs = get_site_option('abj404_upgrade_processed_blogs', array());
-        if (!is_array($processedBlogs)) {
-            $processedBlogs = array();
-        }
-
-        $allSites = get_sites(array('fields' => 'ids', 'number' => 0));
-        $remainingSites = array_diff($allSites, $processedBlogs);
-
-        if (empty($remainingSites)) {
-            delete_site_option('abj404_upgrade_processed_blogs');
-            delete_site_option('abj404_upgrade_in_progress');
-            $this->logger->infoMessage("Background multisite upgrade complete. All sites processed.");
-            return true;
-        }
-
-        $batchSize = 10;
-        $sitesToProcess = array_slice($remainingSites, 0, $batchSize);
-        $totalRemaining = count($remainingSites);
-
-        $this->logger->infoMessage(sprintf(
-            "Processing multisite upgrade batch: %d sites (of %d remaining)",
-            count($sitesToProcess),
-            $totalRemaining
-        ));
-
-        foreach ($sitesToProcess as $siteId) {
-            try {
-                switch_to_blog($siteId);
-
-                $this->logger->debugMessage(sprintf(
-                    "Upgrading site ID %d...",
-                    $siteId
-                ));
-
+    public function processMultisiteUpgradeBatch(): bool {
+        return $this->processMultisiteBatch(
+            'abj404_upgrade',
+            'abj404_network_upgrade_background',
+            'upgrade',
+            function (int $siteId): void {
                 // Run the full upgrade sequence for this site without going through
                 // createDatabaseTables() — that would re-schedule more background tasks.
                 $this->correctIssuesBefore();
@@ -653,39 +1025,8 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
                 $logic = ABJ_404_Solution_PluginLogic::getInstance();
                 $logic->doUpdateDBVersionOption();
-
-                $processedBlogs[] = $siteId;
-                update_site_option('abj404_upgrade_processed_blogs', $processedBlogs);
-
-                $this->logger->debugMessage(sprintf("Successfully upgraded site ID %d", $siteId));
-
-            } catch (Throwable $e) {
-                $this->logger->errorMessage(sprintf(
-                    "Failed to upgrade site ID %d: %s",
-                    $siteId,
-                    $e->getMessage()
-                ));
-                $processedBlogs[] = $siteId;
-                update_site_option('abj404_upgrade_processed_blogs', $processedBlogs);
-            } finally {
-                restore_current_blog();
             }
-        }
-
-        $stillRemaining = count($remainingSites) - count($sitesToProcess);
-        if ($stillRemaining > 0) {
-            $this->logger->infoMessage(sprintf(
-                "Upgrade batch complete. Rescheduling for %d remaining sites.",
-                $stillRemaining
-            ));
-            wp_schedule_single_event(time() + 30, 'abj404_network_upgrade_background');
-            return false;
-        } else {
-            delete_site_option('abj404_upgrade_processed_blogs');
-            delete_site_option('abj404_upgrade_in_progress');
-            $this->logger->infoMessage("Background multisite upgrade complete. All sites processed.");
-            return true;
-        }
+        );
     }
 
     /**
@@ -772,35 +1113,9 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
     /** @return void */
     function createIndexes() {
-    	// Loop over every permanent table DDL file (same discovery as runInitialCreateTables).
-    	// doTableNameReplacements() handles all {wp_abj404_*} placeholders in one call,
-    	// so new tables are automatically included without modifying this method.
-    	$sqlDir = __DIR__ . '/sql';
-    	$files = glob($sqlDir . '/create*Table.sql');
-    	if (!is_array($files)) {
-    		$files = [];
-    	}
-    	sort($files);
-
-    	foreach ($files as $file) {
-    		if (stripos(basename($file), 'Temp') !== false) {
-    			continue;
-    		}
-
-    		$query = ABJ_404_Solution_Functions::readFileContents($file);
-    		if (!is_string($query) || trim($query) === '') {
-    			continue;
-    		}
-
-    		// Replace all {wp_abj404_*} placeholders using the shared helper.
-    		$query = $this->dao->doTableNameReplacements($query);
-
-    		// Extract the resolved table name from the DDL so we can pass it to verifyIndexes().
-    		if (!preg_match('/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"]?(\S+?)[`"]?\s*\(/i', $query, $m)) {
-    			continue;
-    		}
-    		$tableName = trim($m[1], '`"');
-
+    	foreach ($this->discoverPermanentDDLFiles() as $ddlEntry) {
+    		$tableName = $this->dao->doTableNameReplacements($ddlEntry['placeholder']);
+    		$query = $this->dao->doTableNameReplacements($ddlEntry['ddlContent']);
     		$this->verifyIndexes($tableName, $query);
     	}
     }
@@ -812,50 +1127,6 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      */
     function verifyIndexes($tableName, $createTableStatementGoal) {
 
-    	// get the current create table statement
-    	$existingTableSQL = $this->dao->getCreateTableDDL($tableName);
-    	
-    	$existingTableSQL = strtolower($this->removeCommentsFromColumns($existingTableSQL));
-    	$createTableStatementGoal = strtolower(
-    		$this->removeCommentsFromColumns($createTableStatementGoal));
-    	
-    	// get column names and types pattern (backticks are optional — accept both styles);
-    	// (?!key\b) guards against accidentally matching PRIMARY KEY / UNIQUE KEY lines,
-    	// where "PRIMARY" would appear as the column name and "key" as the type.
-    	$colNamesAndTypesPattern = "/\s+?(`?(\w+?)`? (?!key\b)(\w.+?) .+?),/";
-    	// remove the columns.
-    	$existingTableSQL = preg_replace($colNamesAndTypesPattern, "", $existingTableSQL) ?? '';
-    	$createTableStatementGoal = preg_replace($colNamesAndTypesPattern, "",
-    		$createTableStatementGoal) ?? '';
-
-    	// remove the create table and primary key
-    	$primaryPos = strpos($existingTableSQL, 'primary');
-    	$existingTableSQL = $primaryPos !== false ? substr($existingTableSQL, $primaryPos) : '';
-    	$newlinePos = strpos($existingTableSQL, "\n");
-    	$existingTableSQL = $newlinePos !== false ? substr($existingTableSQL, $newlinePos) : '';
-    	$primaryPos = strpos($createTableStatementGoal, 'primary');
-    	$createTableStatementGoal = $primaryPos !== false ? substr($createTableStatementGoal, $primaryPos) : '';
-    	$newlinePos = strpos($createTableStatementGoal, "\n");
-    	$createTableStatementGoal = $newlinePos !== false ? substr($createTableStatementGoal, $newlinePos) : '';
-    	
-    	// remove the engine= ...
-    	$engineLoc = $this->f->strpos($existingTableSQL, ") engine");
-    	if ($engineLoc !== false) {
-    		$existingTableSQL = substr($existingTableSQL, 0, $engineLoc);
-    	}
-    	$commentLoc = $this->f->strpos($existingTableSQL, ") comment");
-    	if ($commentLoc !== false) {
-    		$existingTableSQL = substr($existingTableSQL, 0, $commentLoc);
-    	}
-    	$engineLoc = $this->f->strpos($createTableStatementGoal, ") engine");
-    	if ($engineLoc !== false) {
-    		$createTableStatementGoal = substr($createTableStatementGoal, 0, $engineLoc);
-    	}
-    	$commentLoc = $this->f->strpos($createTableStatementGoal, ") comment");
-    	if ($commentLoc !== false) {
-    		$createTableStatementGoal = substr($createTableStatementGoal, 0, $commentLoc);
-    	}
-    	
 	    	// get the indexes.
 	    	// Pattern matches lines starting with "KEY" / "UNIQUE KEY" - handles composite indexes with commas inside parens
 	    	// Indexes: treat the CREATE TABLE SQL as source of truth, and treat the database as truth
@@ -902,58 +1173,6 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
         $results = $wpdb->get_results($sql, ARRAY_A);
         return !empty($results);
     }
-
-	    /**
-	     * @param string $tableName
-	     * @param string $indexDDL
-	     * @return string
-	     * @phpstan-ignore-next-line method.unused
-	     */
-	    private function buildAddIndexStatement($tableName, $indexDDL) {
-	        global $wpdb;
-	        /** @var \wpdb $wpdb */
-	        $serverVersion = method_exists($wpdb, 'db_version') ? ($wpdb->db_version() ?: '') : '';
-	        $serverInfo = property_exists($wpdb, 'db_server_info') ? ($wpdb->db_server_info ?? '') : '';
-
-	        $isMaria = stripos($serverInfo, 'mariadb') !== false || stripos($serverVersion, 'maria') !== false;
-	        $cleanedVersion = preg_replace('/[^\d\.]/', '', $serverVersion) ?? '';
-	        $supportsIfNotExists = $isMaria && version_compare($cleanedVersion, '10.5', '>=');
-
-	        $indexDDL = trim($indexDDL);
-
-	        // Normalize "KEY `name` (...)" / "UNIQUE KEY `name` (...)" into a form usable with "IF NOT EXISTS".
-	        // MariaDB supports: ADD [UNIQUE] INDEX IF NOT EXISTS `name` (...)
-		        if ($supportsIfNotExists) {
-		            $matches = [];
-		            if (preg_match('/^(unique\\s+)?key\\s+`([^`]+)`\\s*(\\(.+\\))\\s*$/i', $indexDDL, $matches)) {
-		                $unique = !empty($matches[1]);
-		                $name = $matches[2];
-		                $cols = $matches[3];
-		                $type = $unique ? 'unique index' : 'index';
-		                return "alter table " . $tableName . " add " . $type . " if not exists `" . $name . "` " . $cols;
-		            }
-		            if (preg_match('/^`([^`]+)`\\s*(\\(.+\\))\\s*$/', $indexDDL, $matches)) {
-		                $name = $matches[1];
-		                $cols = $matches[2];
-		                return "alter table " . $tableName . " add index if not exists `" . $name . "` " . $cols;
-		            }
-		        }
-
-		        // If we were given a bare index DDL like "`name` (...)", make it valid for MySQL too.
-		        if (preg_match('/^`[^`]+`\\s*\\(.+\\)\\s*$/', $indexDDL)) {
-		            return "alter table " . $tableName . " add index " . $indexDDL;
-		        }
-
-		        // If we were given a bare index DDL like "name (...)", make it valid too.
-		        if (preg_match('/^([A-Za-z0-9_]+)\\s*(\\(.+\\))\\s*$/', $indexDDL, $matches)) {
-		            $name = $matches[1];
-		            $cols = $matches[2];
-		            return "alter table " . $tableName . " add index `" . $name . "` " . $cols;
-		        }
-
-		        // Fallback: use the DDL as-is (already contains KEY/UNIQUE KEY).
-		        return "alter table " . $tableName . " add " . $indexDDL;
-		    }
 
 	    /**
 	     * Parse an index DDL line from our CREATE TABLE SQL into a structured spec.
@@ -1181,22 +1400,8 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     	
     	// normalize minor differences between mysql versions (strip backticks so DDL
     	// files using either quoting style compare equal to SHOW CREATE TABLE output)
-    	$newGoalTableDDL = array();
-    	foreach ($goalTableMatchesColumnDDL as $oneDDLLine) {
-    		$newVal = str_replace('`', '', $oneDDLLine);
-    		// Normalize quoted numeric defaults: MySQL may return default '1'
-    		// while the goal DDL says default 1. Strip quotes around any integer.
-    		$newVal = preg_replace("/default '(\d+)'/", 'default $1', $newVal) ?? $newVal;
-    		array_push($newGoalTableDDL, $newVal);
-    	}
-    	$goalTableMatchesColumnDDL = $newGoalTableDDL;
-    	$newExistingTableDDL = array();
-    	foreach ($existingTableMatchesColumnDDL as $oneDDLLine) {
-    		$newVal = str_replace('`', '', $oneDDLLine);
-    		$newVal = preg_replace("/default '(\d+)'/", 'default $1', $newVal) ?? $newVal;
-    		array_push($newExistingTableDDL, $newVal);
-    	}
-    	$existingTableMatchesColumnDDL = $newExistingTableDDL;
+    	$goalTableMatchesColumnDDL = array_map([$this, 'normalizeColumnDDL'], $goalTableMatchesColumnDDL);
+    	$existingTableMatchesColumnDDL = array_map([$this, 'normalizeColumnDDL'], $existingTableMatchesColumnDDL);
     	
     	// see if anything needs to be updated or created.
     	$updateTheseColumns = array_diff($goalTableMatchesColumnDDL,
@@ -1234,11 +1439,21 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     	/** @var array<int|string, mixed> $goalTableMatchesColumnNames */
     	$goalTableMatchesColumnNames = is_array($tableDifferences['goalTableMatchesColumnNames']) ? $tableDifferences['goalTableMatchesColumnNames'] : [];
 
-    	// drop unnecessary columns.
-    	foreach ($dropTheseColumns as $colName) {
-    		$query = "alter table " . $tableName . " drop " . $colName;
-    		$this->dao->queryAndGetResults($query);
-    		$this->logger->infoMessage("I dropped a column (1): " . $query);
+    	// drop unnecessary columns — but never drop ALL columns (MySQL error:
+    	// "You can't delete all columns with ALTER TABLE; use DROP TABLE instead").
+    	// This happens when a table is completely restructured and every existing
+    	// column name differs from the goal schema.
+    	$existingColumnCount = count($existingTableMatchesColumnDDL);
+    	if (count($dropTheseColumns) > 0 && count($dropTheseColumns) >= $existingColumnCount) {
+    		$this->logger->warn("Skipping column drops on " . $tableName .
+    			" because it would remove all " . $existingColumnCount .
+    			" existing columns. Drops requested: " . implode(', ', $dropTheseColumns));
+    	} else {
+    		foreach ($dropTheseColumns as $colName) {
+    			$query = "alter table " . $tableName . " drop " . $colName;
+    			$this->dao->queryAndGetResults($query);
+    			$this->logger->infoMessage("I dropped a column (1): " . $query);
+    		}
     	}
 
     	// say why we're doing what we're doing.
@@ -1250,13 +1465,10 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     	}
 
     	// create missing columns
-    	// Normalize $goalMatchesSub the same way getTableDifferences() normalizes
-    	// $goalTableMatchesColumnDDL so array_search() can find the right index.
+    	// Normalize $goalMatchesSub using the same normalizeColumnDDL() that
+    	// getTableDifferences() uses, so array_search() can find the right index.
     	$goalMatchesSub = is_array($goalTableMatches[1] ?? null) ? $goalTableMatches[1] : [];
-    	$goalMatchesSub = array_map(function ($ddl) {
-    		$ddlStr = is_string($ddl) ? $ddl : '';
-		return str_replace("default '0'", "default 0", str_replace('`', '', trim($ddlStr)));
-    	}, $goalMatchesSub);
+    	$goalMatchesSub = array_map([$this, 'normalizeColumnDDL'], $goalMatchesSub);
     	foreach ($updateTheseColumns as $colDDL) {
     		// find the colum name.
     		$matchIndex = array_search($colDDL, $goalMatchesSub);
@@ -1305,6 +1517,24 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	    	// Strip inline COMMENT 'text', clauses from column definitions.
 	    	return preg_replace('/ (?:COMMENT.+?,[\r\n])/', ",\n", $ddl) ?? $ddl;
 	    }
+    /**
+     * Normalize a single column DDL fragment for comparison.
+     *
+     * Strips backticks and unquotes integer defaults so that DDL from
+     * SHOW CREATE TABLE (e.g. default '1') matches the goal DDL file
+     * (e.g. default 1). Used by both getTableDifferences() and
+     * updateATableBasedOnDifferences() — a single source of truth
+     * prevents the two normalization sites from drifting out of sync.
+     *
+     * @param mixed $ddl  A column DDL string (or non-string from regex match)
+     * @return string
+     */
+    function normalizeColumnDDL($ddl): string {
+    	$ddlStr = is_string($ddl) ? $ddl : '';
+    	$normalized = strtolower(str_replace('`', '', trim($ddlStr)));
+    	return preg_replace("/default '(\d+)'/", 'default $1', $normalized) ?? $normalized;
+    }
+
     /**
      * @param string $tableName
      * @return void

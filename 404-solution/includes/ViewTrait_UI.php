@@ -69,7 +69,14 @@ trait ViewTrait_UI {
         } catch (Exception $e) {
             $encodedEx = json_encode($e);
             $instance->logger->errorMessage("Caught exception: " . stripcslashes(wp_kses_post(is_string($encodedEx) ? $encodedEx : '')));
-            throw $e;
+            echo '<div class="wrap">';
+            echo '<div class="notice notice-error">';
+            echo '<p><strong>404 Solution:</strong> An error occurred while rendering this page.</p>';
+            echo '<details><summary>Show error details</summary>';
+            echo '<pre style="white-space:pre-wrap;word-break:break-all;max-width:100%;margin:6px 0;">' . esc_html($e->getMessage() . "\n" . $e->getTraceAsString()) . '</pre>';
+            echo '</details>';
+            echo '</div>';
+            echo '</div>';
         }
     }
     
@@ -105,7 +112,8 @@ trait ViewTrait_UI {
         $this->logger->debugMessage("Displaying sub page: " . esc_html($sub == '' ? '(none)' : $sub));
 
         $abj404view->outputAdminHeaderTabs($sub, $message);
-        
+        $abj404view->echoQuickLinks();
+
         $abj404action = $this->dao->getPostOrGetSanitize('abj404action');
         if (($action == 'editRedirect') || ($abj404action == 'editRedirect') || ($sub == 'abj404_edit')) {
             $abj404view->echoAdminEditRedirectPage();
@@ -301,9 +309,9 @@ trait ViewTrait_UI {
      * @return void
      */
     function echoQuickLinks() {
-        $statsUrl = admin_url('admin.php?page=' . ABJ404_PP . '&subpage=abj404_stats');
-        $capturedUrl = admin_url('admin.php?page=' . ABJ404_PP . '&subpage=abj404_captured');
-        $redirectsUrl = admin_url('admin.php?page=' . ABJ404_PP . '&subpage=abj404_redirects');
+        $statsUrl = admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_stats');
+        $capturedUrl = admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_captured');
+        $redirectsUrl = admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_redirects');
         $docsUrl = 'https://ajexoop.com/404-solution/documentation/';
 
         echo '<div class="abj404-quick-links">';

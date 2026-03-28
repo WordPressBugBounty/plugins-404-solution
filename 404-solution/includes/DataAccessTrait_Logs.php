@@ -794,11 +794,12 @@ trait ABJ_404_Solution_DataAccess_LogsTrait {
         $helperFunctions = ABJ_404_Solution_Functions::getInstance();
         $reasonMessage = trim(implode(", ",
                     array_filter(
-                    array($_REQUEST[ABJ404_PP]['ignore_doprocess'] ?? '', $_REQUEST[ABJ404_PP]['ignore_donotprocess'] ?? ''))));
+                    array(ABJ_404_Solution_RequestContext::getInstance()->ignore_doprocess ?: '',
+                          ABJ_404_Solution_RequestContext::getInstance()->ignore_donotprocess ?: ''))));
         $permalinksKept = '(not set)';
-        if ($this->logger->isDebug() && array_key_exists(ABJ404_PP, $_REQUEST) &&
-        		array_key_exists('permalinks_found', $_REQUEST[ABJ404_PP])) {
-       		$permalinksKept = $_REQUEST[ABJ404_PP]['permalinks_kept'];
+        $ctx = ABJ_404_Solution_RequestContext::getInstance();
+        if ($this->logger->isDebug() && !empty($ctx->permalinks_found)) {
+       		$permalinksKept = $ctx->permalinks_kept;
         }
         $this->logger->debugMessage("Logging redirect. Referer: " . esc_html($referer) . 
         		" | Current user: " . $current_user_name . " | From: " . $helperFunctions->normalizeUrlString($_SERVER['REQUEST_URI']) . 
@@ -1143,17 +1144,9 @@ trait ABJ_404_Solution_DataAccess_LogsTrait {
 
     /** @param string $errorMessage @return void */
     private function setLogsv2FullNotice(string $errorMessage): void {
-        $message = function_exists('__')
-            ? __('The 404 Solution log table is full and cannot accept new entries. This is usually caused by a full disk. Please contact your host or manually prune the logs table.', '404-solution')
-            : 'The 404 Solution log table is full and cannot accept new entries. This is usually caused by a full disk. Please contact your host or manually prune the logs table.';
-        if (function_exists('set_transient')) {
-            set_transient('abj404_plugin_db_notice', array(
-                'type'         => 'log_table_full',
-                'message'      => $message,
-                'timestamp'    => time(),
-                'error_string' => $errorMessage,
-            ), 86400);
-        }
+        $message = $this->localizeOrDefault(
+            'The 404 Solution log table is full and cannot accept new entries. This is usually caused by a full disk. Please contact your host or manually prune the logs table.');
+        $this->setPluginDbNotice('log_table_full', $message, $errorMessage);
     }
 
     /**

@@ -739,10 +739,7 @@ class ABJ_404_Solution_DataAccess {
             global $wpdb;
             $wpdb->flush();
             $result['rows'] = $wpdb->get_results($retryQuery, ARRAY_A);
-            $result['last_error'] = (string)($wpdb->last_error ?? '');
-            $result['last_result'] = $wpdb->last_result ?? array();
-            $result['rows_affected'] = $wpdb->rows_affected ?? 0;
-            $result['insert_id'] = $wpdb->insert_id ?? 0;
+            $this->harvestWpdbResult($result);
         } catch (Throwable $e) {
             $this->logger->warn("Invalid-data retry failed: " . $e->getMessage());
         } finally {
@@ -761,6 +758,67 @@ class ABJ_404_Solution_DataAccess {
         }
         $delayMs = min(5000, $delayMs);
         usleep($delayMs * 1000);
+    }
+
+    /**
+     * Harvest standard result fields from $wpdb after a query.
+     *
+     * @param array<string, mixed> $result The result array to populate.
+     * @return void
+     */
+    private function harvestWpdbResult(array &$result): void {
+        global $wpdb;
+        $result['last_error'] = (string)($wpdb->last_error ?? '');
+        $result['last_result'] = $wpdb->last_result ?? array();
+        $result['rows_affected'] = $wpdb->rows_affected ?? 0;
+        $result['insert_id'] = $wpdb->insert_id ?? 0;
+    }
+
+    /**
+     * Build a SQL-safe comma-separated list from recognized_post_types option.
+     *
+     * @param array<string, mixed> $options Plugin options array.
+     * @return string e.g. "'post', 'page'" or '' if empty.
+     */
+    function buildPostTypeSqlList(array $options): string {
+        $rptVal = $options['recognized_post_types'] ?? '';
+        $postTypes = $this->f->explodeNewline(is_string($rptVal) ? $rptVal : '');
+        $recognizedPostTypes = '';
+        foreach ($postTypes as $postType) {
+            $recognizedPostTypes .= "'" . trim($this->f->strtolower($postType)) . "', ";
+        }
+        return rtrim($recognizedPostTypes, ", ");
+    }
+
+    /**
+     * Build a SQL-safe comma-separated list from recognized_categories option.
+     *
+     * @param array<string, mixed> $options Plugin options array.
+     * @return string e.g. "'category', 'post_tag'" or '' if empty.
+     */
+    function buildCategorySqlList(array $options): string {
+        $rcVal = $options['recognized_categories'] ?? '';
+        $categories = $this->f->explodeNewline(is_string($rcVal) ? $rcVal : '');
+        $recognizedCategories = '';
+        foreach ($categories as $category) {
+            $recognizedCategories .= "'" . trim($this->f->strtolower($category)) . "', ";
+        }
+        return rtrim($recognizedCategories, ", ");
+    }
+
+    /**
+     * Set SQL session variables to allow large queries.
+     *
+     * Sets max_join_size and sql_big_selects for the current session only.
+     * Prevents "The SELECT would examine more than MAX_JOIN_SIZE rows" errors.
+     *
+     * @return void
+     */
+    function setSqlBigSelects(): void {
+        $ignoreErrorsOptions = array('log_errors' => false);
+        $this->queryAndGetResults("set session max_join_size = 18446744073709551615",
+            $ignoreErrorsOptions);
+        $this->queryAndGetResults("set session sql_big_selects = 1", $ignoreErrorsOptions);
     }
 
     /** Return the results of the query in a variable.
@@ -821,15 +879,7 @@ class ABJ_404_Solution_DataAccess {
         if (function_exists('abj404_benchmark_record_db_query')) {
             abj404_benchmark_record_db_query(((float)$result['elapsed_time']) * 1000.0);
         }
-        $result['last_error'] = (string)($wpdb->last_error ?? '');
-        $result['last_result'] = $wpdb->last_result ?? array();
-        $result['rows_affected'] = $wpdb->rows_affected ?? 0;
-
-        if (isset($wpdb->dbh) && $wpdb->dbh != null && isset($wpdb->rows_affected)) {
-	        $result['rows_affected'] = $wpdb->rows_affected;
-        }
-
-        $result['insert_id'] = $wpdb->insert_id ?? 0;
+        $this->harvestWpdbResult($result);
         
         if (!is_array($result['rows'])) {
             // In production (WP_DEBUG off), only log SQL filename to avoid PII exposure
@@ -843,10 +893,7 @@ class ABJ_404_Solution_DataAccess {
             $this->ensureConnection();
             $wpdb->flush();
             $result['rows'] = $wpdb->get_results($query, ARRAY_A);
-            $result['last_error'] = (string)($wpdb->last_error ?? '');
-            $result['last_result'] = $wpdb->last_result ?? array();
-            $result['rows_affected'] = $wpdb->rows_affected ?? 0;
-            $result['insert_id'] = $wpdb->insert_id ?? 0;
+            $this->harvestWpdbResult($result);
         }
 
         if (!$options['skip_repair'] && $result['last_error'] !== '' && $this->isMissingPluginTableError($result['last_error'])) {
@@ -864,10 +911,7 @@ class ABJ_404_Solution_DataAccess {
             /** @var wpdb $wpdb */
             usleep(50000); // 50 ms — enough for most short-lived locks to release
             $result['rows'] = $wpdb->get_results($query, ARRAY_A);
-            $result['last_error'] = (string)$wpdb->last_error;
-            $result['last_result'] = $wpdb->last_result;
-            $result['rows_affected'] = $wpdb->rows_affected;
-            $result['insert_id'] = $wpdb->insert_id;
+            $this->harvestWpdbResult($result);
             if ($result['last_error'] !== '' && $this->isDeadlockOrLockTimeoutError($result['last_error'])) {
                 $this->setPluginDbNotice('lock_timeout', $this->localizeOrDefault('A database lock wait timeout occurred. If this persists, contact your host — another process may be holding a long-running lock.'), $result['last_error']);
             }
@@ -970,7 +1014,8 @@ class ABJ_404_Solution_DataAccess {
                     $this->serverSideIssueChecked = true;
                     $existing = $this->getRuntimeFlag('abj404_plugin_db_notice');
                     if (is_array($existing) && !empty($existing['type'])
-                        && $existing['type'] !== 'collation') {
+                        && $existing['type'] !== 'collation'
+                        && $existing['type'] !== 'stale_permalink_cache') {
                         $this->serverSideIssueNoted = true;
                     }
                 }
@@ -1318,10 +1363,7 @@ class ABJ_404_Solution_DataAccess {
             $prevSuppressState = $wpdb->suppress_errors(true);
             $result['rows'] = $wpdb->get_results($query, ARRAY_A);
             $wpdb->suppress_errors($prevSuppressState);
-            $result['last_error'] = (string)($wpdb->last_error ?? '');
-            $result['last_result'] = $wpdb->last_result ?? array();
-            $result['rows_affected'] = $wpdb->rows_affected ?? 0;
-            $result['insert_id'] = $wpdb->insert_id ?? 0;
+            $this->harvestWpdbResult($result);
 
             if ($result['last_error'] === '') {
                 $this->logger->infoMessage("Missing-table auto-repair succeeded.");
@@ -1332,20 +1374,28 @@ class ABJ_404_Solution_DataAccess {
                     delete_option($repairCooldownKey);
                 }
             } else {
+                // Check for prefix mismatch: plugin tables may exist under a
+                // different $table_prefix than the current $wpdb->prefix (common
+                // after site migrations or hosting panel clones).
+                $prefixDiag = $this->diagnosePrefixMismatch();
+
                 // Repair failed — now escalate to ERROR so it triggers email notification.
                 $this->logger->errorMessage("Missing plugin table auto-repair failed. "
                     . "Original error: " . $originalSqlError
-                    . ", Retry error: " . $result['last_error']);
+                    . ", Retry error: " . $result['last_error']
+                    . $prefixDiag);
                 // Engage 24h cooldown and surface a single admin notice on
                 // the plugin screen so the admin knows to investigate (e.g. missing CREATE
                 // privilege or wrong DB user).  Never email; never show on all wp-admin pages.
                 $this->setRuntimeFlag($repairCooldownKey, time() + 86400, 86400);
+                $adminMsg = 'A plugin database table is missing and could not be repaired automatically. '
+                    . 'Try deactivating and reactivating 404 Solution, or verify that your database user has CREATE TABLE privileges.';
+                if ($prefixDiag !== '') {
+                    $adminMsg .= ' ' . $prefixDiag;
+                }
                 $noticePayload = array(
                     'type'         => 'missing_table',
-                    'message'      => $this->localizeOrDefault(
-                        'A plugin database table is missing and could not be repaired automatically. '
-                        . 'Try deactivating and reactivating 404 Solution, or verify that your database user has CREATE TABLE privileges.'
-                    ),
+                    'message'      => $this->localizeOrDefault($adminMsg),
                     'timestamp'    => time(),
                     'error_string' => $result['last_error'],
                 );
@@ -1356,6 +1406,64 @@ class ABJ_404_Solution_DataAccess {
             $this->setRuntimeFlag($repairCooldownKey, time() + 86400, 86400);
         } finally {
             self::$tableRepairInProgress = false;
+        }
+    }
+
+    /**
+     * Check whether plugin tables exist under a different prefix than $wpdb->prefix.
+     *
+     * After site migrations or hosting panel clones, $table_prefix in wp-config.php
+     * may differ from the prefix used when the plugin tables were originally created.
+     * Returns a diagnostic string if a mismatch is detected, empty string otherwise.
+     *
+     * @return string Diagnostic message or empty string.
+     */
+    private function diagnosePrefixMismatch(): string {
+        global $wpdb;
+        try {
+            $dbName = $wpdb->dbname ?? '';
+            if ($dbName === '') {
+                return '';
+            }
+            $dbNameEscaped = esc_sql($dbName);
+            $dbNameStr = is_array($dbNameEscaped) ? '' : $dbNameEscaped;
+            // Find any table containing 'abj404_redirects' in this database.
+            $rows = $wpdb->get_results(
+                "SELECT table_name FROM information_schema.tables "
+                . "WHERE table_schema = '{$dbNameStr}' "
+                . "AND LOWER(table_name) LIKE '%abj404\_redirects'",
+                ARRAY_A
+            );
+            if (!is_array($rows) || empty($rows)) {
+                return '';
+            }
+            $expectedTable = $this->getLowercasePrefix() . 'abj404_redirects';
+            $foundTables = [];
+            foreach ($rows as $row) {
+                // Case-insensitive key lookup (MySQL driver inconsistency).
+                $name = null;
+                foreach ($row as $key => $value) {
+                    if (strtolower((string)$key) === 'table_name') {
+                        $name = (string)$value;
+                        break;
+                    }
+                }
+                if ($name !== null) {
+                    $foundTables[] = $name;
+                }
+            }
+            // Filter out the table we're already looking for.
+            $mismatched = array_filter($foundTables, function ($t) use ($expectedTable) {
+                return strtolower($t) !== strtolower($expectedTable);
+            });
+            if (empty($mismatched)) {
+                return '';
+            }
+            return ', PREFIX MISMATCH DETECTED: $wpdb->prefix is "' . ($wpdb->prefix ?? '')
+                . '" (expected table: ' . $expectedTable . ') but plugin tables exist as: '
+                . implode(', ', $mismatched) . '. Check $table_prefix in wp-config.php.';
+        } catch (Throwable $e) {
+            return '';
         }
     }
 

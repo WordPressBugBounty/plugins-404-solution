@@ -40,6 +40,7 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         }
 
         $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getOrphanedAutoRedirects.sql");
+        $query = $this->doTableNameReplacements($query);
         $query = $this->f->doNormalReplacements($query);
 
         $results = $this->queryAndGetResults($query);
@@ -89,13 +90,7 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         $query = $this->f->str_replace('{status_list}', $statusList, $query);
         $query = $this->f->str_replace('{timelimit}', (string)$then, $query);
 
-        // Fix for MAX_JOIN_SIZE error (reported by 24 users - 53% of errors)
-        // Set SQL_BIG_SELECTS=1 to allow large queries during maintenance operations
-        // IMPORTANT: This is a SESSION-LEVEL setting that only affects this connection
-        // and automatically expires when the script finishes (no permanent database changes)
-        // This is safe for cron jobs and prevents "The SELECT would examine more than MAX_JOIN_SIZE rows" error
-        global $wpdb;
-        $wpdb->query("SET SQL_BIG_SELECTS=1");
+        $this->setSqlBigSelects();
 
         // Execute query and get results
         $results = $this->queryAndGetResults($query);
@@ -422,9 +417,7 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         }
 
         // if we should not capture a 404 then don't.
-        if (!array_key_exists(ABJ404_PP, $_REQUEST) ||
-        		!array_key_exists('ignore_doprocess', $_REQUEST[ABJ404_PP]) ||
-        		!@$_REQUEST[ABJ404_PP]['ignore_doprocess']) {
+        if (!ABJ_404_Solution_RequestContext::getInstance()->ignore_doprocess) {
             $now = time();
             $redirectsTable = $this->doTableNameReplacements("{wp_abj404_redirects}");
 
@@ -677,13 +670,7 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
 
         // get the valid post types
         $options = $abj404logic->getOptions();
-        $rptVal = $options['recognized_post_types'] ?? '';
-        $postTypes = $this->f->explodeNewline(is_string($rptVal) ? $rptVal : '');
-        $recognizedPostTypes = '';
-        foreach ($postTypes as $postType) {
-            $recognizedPostTypes .= "'" . trim($this->f->strtolower($postType)) . "', ";
-        }
-        $recognizedPostTypes = rtrim($recognizedPostTypes, ", ");
+        $recognizedPostTypes = $this->buildPostTypeSqlList($options);
         if ($recognizedPostTypes === '') {
             return array();
         }
@@ -804,13 +791,7 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         
         // get the valid post types
         $options = $abj404logic->getOptions();
-        $rptVal2 = $options['recognized_post_types'] ?? '';
-        $postTypes = $this->f->explodeNewline(is_string($rptVal2) ? $rptVal2 : '');
-        $recognizedPostTypes = '';
-        foreach ($postTypes as $postType) {
-            $recognizedPostTypes .= "'" . trim($this->f->strtolower($postType)) . "', ";
-        }
-        $recognizedPostTypes = rtrim($recognizedPostTypes, ", ");
+        $recognizedPostTypes = $this->buildPostTypeSqlList($options);
         if ($recognizedPostTypes === '') {
             return array();
         }
@@ -842,13 +823,7 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         // get the valid post types
         $options = $abj404logic->getOptions();
 
-        $rcVal = $options['recognized_categories'] ?? '';
-        $categories = $this->f->explodeNewline(is_string($rcVal) ? $rcVal : '');
-        $recognizedCategories = '';
-        foreach ($categories as $category) {
-            $recognizedCategories .= "'" . trim($this->f->strtolower($category)) . "', ";
-        }
-        $recognizedCategories = rtrim($recognizedCategories, ", ");
+        $recognizedCategories = $this->buildCategorySqlList($options);
 
         if ($slug != null) {
             // Sanitize invalid UTF-8 before SQL to prevent database errors
@@ -928,16 +903,10 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         // get the valid post types
         $options = $abj404logic->getOptions();
 
-        $rcVal2 = $options['recognized_categories'] ?? '';
-        $categories = $this->f->explodeNewline(is_string($rcVal2) ? $rcVal2 : '');
-        $recognizedCategories = '';
-        if (empty($categories)) {
+        $recognizedCategories = $this->buildCategorySqlList($options);
+        if ($recognizedCategories === '') {
             $recognizedCategories = "''";
         }
-        foreach ($categories as $category) {
-            $recognizedCategories .= "'" . trim($this->f->strtolower($category)) . "', ";
-        }
-        $recognizedCategories = rtrim($recognizedCategories, ", ");
 
         if ($term_id != null) {
             // Cast to integer for safety even though term_id is currently always null from callers
@@ -1006,7 +975,7 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         
         $redirectTypes = array();
         foreach ($type as $aType) {
-            if (('' . $aType != ABJ404_TYPE_HOME) && ('' . $aType != ABJ404_TYPE_HOME)) {
+            if (('' . $aType != ABJ404_TYPE_HOME) && ('' . $aType != ABJ404_TYPE_404_DISPLAYED)) {
                 array_push($redirectTypes, absint($aType));
             }
         }
@@ -1017,7 +986,7 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
                     wp_kses_post((string)json_encode($redirectTypes)));
             return $message;
         }
-        $purge = sanitize_text_field($_POST['purgetype']);
+        $purge = isset($_POST['purgetype']) ? sanitize_text_field($_POST['purgetype']) : '';
 
         if ($purge != 'abj404_logs' && $purge != 'abj404_redirects') {
             $message = __('Error: An invalid purge type was selected. Exiting.', '404-solution');
