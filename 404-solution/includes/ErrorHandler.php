@@ -71,8 +71,9 @@ class ABJ_404_Solution_ErrorHandler {
             }
             
             $extraInfo = "(none)";
-            if (array_key_exists(ABJ404_PP, $_REQUEST) && array_key_exists('debug_info', $_REQUEST[ABJ404_PP])) {
-                $extraInfo = stripcslashes(wp_kses_post((string)json_encode($_REQUEST[ABJ404_PP]['debug_info'])));
+            $ctxDebugInfo = ABJ_404_Solution_RequestContext::getInstance()->debug_info;
+            if ($ctxDebugInfo !== '') {
+                $extraInfo = stripcslashes(wp_kses_post((string)json_encode($ctxDebugInfo)));
             }
             $errmsg = "ABJ404-SOLUTION Normal error handler error: errno: " .
                         wp_kses_post((string)json_encode($errno)) . ", errstr: " . wp_kses_post((string)json_encode($errstr)) .
@@ -82,22 +83,16 @@ class ABJ_404_Solution_ErrorHandler {
                     (extension_loaded('mbstring') ? 'true' : 'false');
             
             if ($abj404logging != null) {
-                switch ($errno) {
-                    case E_NOTICE:
-                        $serverName = array_key_exists('SERVER_NAME', $_SERVER) ? $_SERVER['SERVER_NAME'] : (array_key_exists('HTTP_HOST', $_SERVER) ? $_SERVER['HTTP_HOST'] : '(not found)');
-                        if (in_array($serverName, $GLOBALS['abj404_whitelist'])) {
-                            $e = new Exception;
-                            $abj404logging->debugMessage($errmsg . ', Trace:' . $e->getTraceAsString());
-                        }
-                        break;
-                        
-                    case $onlyAWarning:
-                    	$abj404logging->debugMessage($errmsg);
-                    	break;
-                    
-                    default:
-                        $abj404logging->errorMessage($errmsg);
-                        break;
+                if ($errno === E_NOTICE) {
+                    $serverName = array_key_exists('SERVER_NAME', $_SERVER) ? $_SERVER['SERVER_NAME'] : (array_key_exists('HTTP_HOST', $_SERVER) ? $_SERVER['HTTP_HOST'] : '(not found)');
+                    if (in_array($serverName, $GLOBALS['abj404_whitelist'])) {
+                        $e = new Exception;
+                        $abj404logging->debugMessage($errmsg . ', Trace:' . $e->getTraceAsString());
+                    }
+                } elseif ($onlyAWarning) {
+                    $abj404logging->debugMessage($errmsg);
+                } else {
+                    $abj404logging->errorMessage($errmsg);
                 }
             } else {
                 echo $errmsg;
@@ -324,8 +319,9 @@ class ABJ_404_Solution_ErrorHandler {
             }
 
             $extraInfo = "(none)";
-            if (array_key_exists(ABJ404_PP, $_REQUEST) && array_key_exists('debug_info', $_REQUEST[ABJ404_PP])) {
-                $extraInfo = stripcslashes(wp_kses_post((string)json_encode($_REQUEST[ABJ404_PP]['debug_info'])));
+            $ctxDebugInfo = ABJ_404_Solution_RequestContext::getInstance()->debug_info;
+            if ($ctxDebugInfo !== '') {
+                $extraInfo = stripcslashes(wp_kses_post((string)json_encode($ctxDebugInfo)));
             }
             $errmsg = "ABJ404-SOLUTION Fatal error handler: " .
                 stripcslashes(wp_kses_post((string)json_encode($lasterror))) .
