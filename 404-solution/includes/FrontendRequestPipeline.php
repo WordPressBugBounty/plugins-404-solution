@@ -131,7 +131,7 @@ class ABJ_404_Solution_FrontendRequestPipeline {
             return;
         }
 
-        ABJ_404_Solution_RequestContext::getInstance()->process_start_time = microtime(true);
+        $_REQUEST[ABJ404_PP]['process_start_time'] = microtime(true);
         $userRequest = ABJ_404_Solution_UserRequest::getInstance();
         if ($userRequest === null) {
             return;
@@ -142,13 +142,13 @@ class ABJ_404_Solution_FrontendRequestPipeline {
         $this->logic->initializeIgnoreValues($pathOnly, $urlSlugOnly);
         $this->trace = [];
 
-        if (ABJ_404_Solution_RequestContext::getInstance()->ignore_donotprocess) {
-            $this->addTraceStep('Ignore list', 'Matched — request ignored');
+        if ($_REQUEST[ABJ404_PP]['ignore_donotprocess']) {
+            $this->addTraceStep('ignore_check', 'skipped: do-not-process');
             $this->dao->logRedirectHit($pathOnly, '404', 'ignore_donotprocess', null, $this->trace);
             $this->emitBenchmarkHeadersIfEnabled();
             return;
         }
-        $this->addTraceStep('Ignore list', 'Not ignored');
+        $this->addTraceStep('ignore_check', 'passed');
 
         $requestedURL = $userRequest->getPathWithSortedQueryString();
         $requestedURLWithoutComments = $requestedURL;
@@ -159,28 +159,68 @@ class ABJ_404_Solution_FrontendRequestPipeline {
             }
         }
 
-        $options = $this->logic->getOptions();
-
         $lookupStart = microtime(true);
         $redirect = $this->dao->getActiveRedirectForURL($requestedURL);
         $this->recordRedirectLookupTiming($lookupStart);
+        $options = $this->logic->getOptions();
         $this->logAReallyLongDebugMessage($options, $requestedURL, $redirect);
 
         if ($requestedURL != "") {
-            $matched = $this->evaluateRedirectCandidate($redirect, '', $options);
-            if ($matched !== null) {
-                $this->processRedirect($requestedURL, $matched, 'existing');
-                exit;
+            // A redirect is actionable when it has an id AND either has a real destination
+            // (final_dest != '0') OR is a homepage redirect (TYPE_HOME always uses final_dest=0).
+            $typeHomeInt = defined('ABJ404_TYPE_HOME') ? (int)ABJ404_TYPE_HOME : 5;
+            $redirectTypeInt1 = isset($redirect['type']) && is_scalar($redirect['type']) ? (int)$redirect['type'] : 0;
+            if ($redirect['id'] != '0' && ($redirect['final_dest'] != '0' || $redirectTypeInt1 === $typeHomeInt)) {
+                $this->addTraceStep('existing_redirect_lookup', 'found', 'id=' . (is_scalar($redirect['id']) ? (string)$redirect['id'] : '?'));
+                $deadIds = function_exists('get_transient') ? get_transient('abj404_dead_dest_ids') : false;
+                $redirectIdStr = isset($redirect['id']) && is_scalar($redirect['id']) ? (string) $redirect['id'] : '0';
+                if (!is_array($deadIds) || !in_array($redirectIdStr, $deadIds, true)) {
+                    $condEvaluator = new ABJ_404_Solution_RedirectConditionEvaluator($this->dao);
+                    $redirectIdForCond = is_scalar($redirect['id']) ? (int)$redirect['id'] : 0;
+                    if ($condEvaluator->shouldApplyRedirect($redirectIdForCond)) {
+                        $this->addTraceStep('condition_eval', 'conditions passed');
+                        $this->processRedirect($requestedURL, $redirect, 'existing');
+                        exit;
+                    }
+                    // Conditions not met — fall through as if no redirect found.
+                    $condTrace = $condEvaluator->getLastEvaluationTrace();
+                    $condDetail = implode(', ', array_map(function ($c) {
+                        return $c['type'] . '=' . ($c['result'] ? 'pass' : 'fail');
+                    }, $condTrace));
+                    $this->addTraceStep('condition_eval', 'conditions blocked', $condDetail);
+                } else {
+                    $this->addTraceStep('dead_dest_check', 'destination dead, skipping');
+                }
+            } else {
+                $this->addTraceStep('existing_redirect_lookup', 'none found');
             }
 
             if ($requestedURLWithoutComments != $requestedURL) {
                 $lookupStart = microtime(true);
-                $wcRedirect = $this->dao->getActiveRedirectForURL($requestedURLWithoutComments);
+                $redirect = $this->dao->getActiveRedirectForURL($requestedURLWithoutComments);
                 $this->recordRedirectLookupTiming($lookupStart);
-                $matched = $this->evaluateRedirectCandidate($wcRedirect, ' (without comments)', $options);
-                if ($matched !== null) {
-                    $this->processRedirect($requestedURL, $matched, 'existing');
-                    exit;
+                $redirectTypeInt2 = isset($redirect['type']) && is_scalar($redirect['type']) ? (int)$redirect['type'] : 0;
+                if ($redirect['id'] != '0' && ($redirect['final_dest'] != '0' || $redirectTypeInt2 === $typeHomeInt)) {
+                    $this->addTraceStep('existing_redirect_lookup_nocomments', 'found', 'id=' . (is_scalar($redirect['id']) ? (string)$redirect['id'] : '?'));
+                    $deadIds = function_exists('get_transient') ? get_transient('abj404_dead_dest_ids') : false;
+                    $redirectIdStr = isset($redirect['id']) && is_scalar($redirect['id']) ? (string) $redirect['id'] : '0';
+                    if (!is_array($deadIds) || !in_array($redirectIdStr, $deadIds, true)) {
+                        $condEvaluator = new ABJ_404_Solution_RedirectConditionEvaluator($this->dao);
+                        $redirectIdForCond = is_scalar($redirect['id']) ? (int)$redirect['id'] : 0;
+                        if ($condEvaluator->shouldApplyRedirect($redirectIdForCond)) {
+                            $this->addTraceStep('condition_eval_nocomments', 'conditions passed');
+                            $this->processRedirect($requestedURL, $redirect, 'existing');
+                            exit;
+                        }
+                        // Conditions not met — fall through as if no redirect found.
+                        $condTrace = $condEvaluator->getLastEvaluationTrace();
+                        $condDetail = implode(', ', array_map(function ($c) {
+                            return $c['type'] . '=' . ($c['result'] ? 'pass' : 'fail');
+                        }, $condTrace));
+                        $this->addTraceStep('condition_eval_nocomments', 'conditions blocked', $condDetail);
+                    } else {
+                        $this->addTraceStep('dead_dest_check_nocomments', 'destination dead, skipping');
+                    }
                 }
             }
 
@@ -286,56 +326,11 @@ class ABJ_404_Solution_FrontendRequestPipeline {
         }
 
         $this->logic->tryNormalPostQuery($options);
-        $this->addTraceStep('Result', 'No redirect — showed 404 page');
+        $this->addTraceStep('final', 'no match found');
         $this->dao->logRedirectHit($requestedURL, '404', 'gave up.', null, $this->trace);
         $this->triggerAsyncSuggestionsIfNeeded($requestedURL);
         $this->emitBenchmarkHeadersIfEnabled();
         $this->logic->sendTo404Page($requestedURL, '', true, $options);
-    }
-
-    /**
-     * Evaluate an already-fetched redirect: check actionability, health, and conditions.
-     *
-     * @param array<string, mixed> $redirect The redirect row from getActiveRedirectForURL().
-     * @param string $labelSuffix Appended to trace step labels (e.g. ' (without comments)').
-     * @param array<string, mixed> $options Plugin options.
-     * @return array<string, mixed>|null The redirect row if actionable, null otherwise.
-     */
-    private function evaluateRedirectCandidate(array $redirect, string $labelSuffix, array $options): ?array {
-        $typeHomeInt = defined('ABJ404_TYPE_HOME') ? (int)ABJ404_TYPE_HOME : 5;
-        $redirectType = isset($redirect['type']) && is_scalar($redirect['type']) ? (int)$redirect['type'] : 0;
-
-        if ($redirect['id'] == '0' || ($redirect['final_dest'] == '0' && $redirectType !== $typeHomeInt)) {
-            if ($labelSuffix === '') {
-                $this->addTraceStep('Redirect lookup', 'No matching redirect');
-            }
-            return null;
-        }
-
-        $this->addTraceStep('Redirect lookup' . $labelSuffix, 'Found existing redirect',
-            'rule #' . (is_scalar($redirect['id']) ? (string)$redirect['id'] : '?'));
-
-        $deadIds = function_exists('get_transient') ? get_transient('abj404_dead_dest_ids') : false;
-        $redirectIdStr = isset($redirect['id']) && is_scalar($redirect['id']) ? (string)$redirect['id'] : '0';
-        if (is_array($deadIds) && in_array($redirectIdStr, $deadIds, true)) {
-            $this->addTraceStep('Health check' . $labelSuffix, 'Destination unreachable — skipped');
-            return null;
-        }
-
-        $condEvaluator = new ABJ_404_Solution_RedirectConditionEvaluator($this->dao);
-        $redirectIdForCond = is_scalar($redirect['id']) ? (int)$redirect['id'] : 0;
-        if ($condEvaluator->shouldApplyRedirect($redirectIdForCond)) {
-            $this->addTraceStep('Conditions' . $labelSuffix, 'All conditions met');
-            return $redirect;
-        }
-
-        $condTrace = $condEvaluator->getLastEvaluationTrace();
-        $condDetail = implode(', ', array_map(function ($c) {
-            $label = str_replace('_', ' ', $c['type']);
-            return $label . ': ' . ($c['result'] ? 'passed' : 'failed');
-        }, $condTrace));
-        $this->addTraceStep('Conditions' . $labelSuffix, 'Blocked by conditions', $condDetail);
-        return null;
     }
 
     /**
@@ -358,7 +353,7 @@ class ABJ_404_Solution_FrontendRequestPipeline {
             try {
                 if (!$engine->shouldRun($request)) {
                     $this->logger->debugMessage('Engine skipped: ' . $engine->getName());
-                    $this->addTraceStep('Engine: ' . $engine->getName(), 'Skipped', 'not applicable');
+                    $this->addTraceStep('engine:' . $engine->getName(), 'skipped', 'shouldRun=false');
                     continue;
                 }
 
@@ -366,37 +361,37 @@ class ABJ_404_Solution_FrontendRequestPipeline {
 
                 if ($result === null) {
                     $this->logger->debugMessage('Engine returned no match: ' . $engine->getName());
-                    $this->addTraceStep('Engine: ' . $engine->getName(), 'No match');
+                    $this->addTraceStep('engine:' . $engine->getName(), 'no match');
                     continue;
                 }
 
                 if ($result->getLink() === '') {
                     $this->logger->debugMessage('Engine returned empty link, skipping: ' . $engine->getName());
-                    $this->addTraceStep('Engine: ' . $engine->getName(), 'No match', 'empty link');
+                    $this->addTraceStep('engine:' . $engine->getName(), 'no match', 'empty link');
                     continue;
                 }
 
                 if ($this->isExcluded($result, $request->getOptions())) {
                     $this->logger->debugMessage('Match excluded: ' . $engine->getName() . ' id=' . $result->getId());
-                    $this->addTraceStep('Engine: ' . $engine->getName(), 'Excluded', 'post #' . $result->getId());
+                    $this->addTraceStep('engine:' . $engine->getName(), 'excluded', 'id=' . $result->getId());
                     continue;
                 }
 
                 $this->logger->debugMessage('Engine matched: ' . $engine->getName());
                 $this->addTraceStep(
-                    'Engine: ' . $engine->getName(),
-                    'Matched',
-                    'score ' . $result->getScore() . ' → ' . $result->getLink()
+                    'engine:' . $engine->getName(),
+                    'matched',
+                    'id=' . $result->getId() . ' score=' . $result->getScore() . ' → ' . $result->getLink()
                 );
                 return $result;
             } catch (\Throwable $e) {
                 $this->logger->warn('Matching engine error (' . $engine->getName() . '): ' . $e->getMessage());
-                $this->addTraceStep('Engine: ' . $engine->getName(), 'Error', $e->getMessage());
+                $this->addTraceStep('engine:' . $engine->getName(), 'error', $e->getMessage());
                 continue;
             }
         }
 
-        $this->addTraceStep('Suggestion engines', 'No match found');
+        $this->addTraceStep('engines', 'no engine matched');
         return null;
     }
 
@@ -485,7 +480,7 @@ class ABJ_404_Solution_FrontendRequestPipeline {
             $regexDefaultRedirect = isset($options['default_redirect']) && is_scalar($options['default_redirect']) ? (int)$options['default_redirect'] : 0;
             $regexCode = isset($regexPermalink['code']) && is_numeric($regexPermalink['code']) && (int)$regexPermalink['code'] > 0
                 ? (int)$regexPermalink['code'] : $regexDefaultRedirect;
-            $this->addTraceStep('Regex rules', 'Matched', $regexMatchingUrl . ' → ' . $regexLink);
+            $this->addTraceStep('regex_match', 'matched', $regexMatchingUrl . ' → ' . $regexLink);
             $this->dao->logRedirectHit($regexMatchingUrl, $regexAction, 'regex match', $requestedURL, $this->trace);
             $sentTo404Page = $this->logic->forceRedirect(
                 $regexLink,
@@ -498,7 +493,7 @@ class ABJ_404_Solution_FrontendRequestPipeline {
             }
             exit;
         }
-        $this->addTraceStep('Regex rules', 'No match');
+        $this->addTraceStep('regex_match', 'no match');
         return false;
     }
 
@@ -574,7 +569,7 @@ class ABJ_404_Solution_FrontendRequestPipeline {
 
         // 410 Gone: send HTTP 410 status and let WordPress render the suggestions page normally.
         if ($redirectCode === 410) {
-            $this->addTraceStep('Result', 'Responded with 410 Gone', $redirectUrl);
+            $this->addTraceStep('redirect', '410 Gone', $redirectUrl);
             $this->dao->logRedirectHit($redirectUrl, '410', $matchReason, null, $this->trace);
             $this->logic->forceRedirect('', 410);
             // forceRedirect returns false for 410 without exiting — page continues to render.
@@ -583,14 +578,14 @@ class ABJ_404_Solution_FrontendRequestPipeline {
 
         // 451 Unavailable For Legal Reasons: render template and exit.
         if ($redirectCode === 451) {
-            $this->addTraceStep('Result', 'Responded with 451 Unavailable For Legal Reasons', $redirectUrl);
+            $this->addTraceStep('redirect', '451 Unavailable For Legal Reasons', $redirectUrl);
             $this->dao->logRedirectHit($redirectUrl, '451', $matchReason, null, $this->trace);
             $this->logic->forceRedirect('', 451);
             return false;
         }
 
         if ($redirect['type'] == ABJ404_TYPE_404_DISPLAYED) {
-            $this->addTraceStep('Result', 'Showed 404 page', $redirectUrl);
+            $this->addTraceStep('redirect', 'TYPE_404_DISPLAYED → 404 page', $redirectUrl);
             $this->dao->logRedirectHit($redirectUrl, '404', $matchReason, null, $this->trace);
             $this->triggerAsyncSuggestionsIfNeeded($requestedURL);
             $this->emitBenchmarkHeadersIfEnabled();
@@ -637,7 +632,7 @@ class ABJ_404_Solution_FrontendRequestPipeline {
         }
 
         if ($redirect['type'] == ABJ404_TYPE_EXTERNAL) {
-            $this->addTraceStep('Result', 'Redirected to external URL', $redirectFinalDest);
+            $this->addTraceStep('redirect', 'external', $redirectFinalDest);
             $this->dao->logRedirectHit($redirectUrl, $redirectFinalDest, 'external', null, $this->trace);
             $this->logic->forceRedirect($redirectFinalDest, $redirectCode);
             exit;
@@ -648,7 +643,7 @@ class ABJ_404_Solution_FrontendRequestPipeline {
         $redirectTypeInt = is_scalar($redirect['type']) ? (int)$redirect['type'] : 0;
         if ($finalDestRaw === '' && $redirectTypeInt !== ABJ404_TYPE_HOME && $redirectTypeInt !== ABJ404_TYPE_404_DISPLAYED) {
             $this->logger->warn("Redirect destination missing. Sending request to 404 page instead. Redirect ID: " . $redirectId);
-            $this->addTraceStep('Result', 'Showed 404 page — redirect destination missing', 'rule #' . $redirectId);
+            $this->addTraceStep('redirect', 'missing destination → 404 page', 'id=' . $redirectId);
             $this->dao->logRedirectHit($redirectUrl, '404', $matchReason . ' (missing destination)', null, $this->trace);
             $this->triggerAsyncSuggestionsIfNeeded($requestedURL);
             $this->emitBenchmarkHeadersIfEnabled();
@@ -664,7 +659,7 @@ class ABJ_404_Solution_FrontendRequestPipeline {
             : '';
         if (!is_string($finalLink) || trim($finalLink) === '' || $finalLink === 'dunno') {
             $this->logger->warn("Resolved permalink is empty/invalid. Sending request to 404 page instead. Redirect ID: " . $redirectId);
-            $this->addTraceStep('Result', 'Showed 404 page — redirect destination invalid', 'rule #' . $redirectId);
+            $this->addTraceStep('redirect', 'invalid destination → 404 page', 'id=' . $redirectId);
             $this->dao->logRedirectHit($redirectUrl, '404', $matchReason . ' (invalid destination)', null, $this->trace);
             $this->triggerAsyncSuggestionsIfNeeded($requestedURL);
             $this->emitBenchmarkHeadersIfEnabled();
@@ -678,7 +673,7 @@ class ABJ_404_Solution_FrontendRequestPipeline {
             $redirectedTo = $urlParts['path'];
         }
 
-        $this->addTraceStep('Result', 'Redirected (' . $redirectCode . ')', $redirectedTo);
+        $this->addTraceStep('redirect', $redirectCode . ' → ' . $redirectedTo);
         $this->dao->logRedirectHit($redirectUrl, $redirectedTo, $matchReason, null, $this->trace);
 
         $sendTo404Page = $this->logic->forceRedirect(

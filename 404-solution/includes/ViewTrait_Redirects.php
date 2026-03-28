@@ -254,7 +254,7 @@ trait ViewTrait_Redirects {
                 $selected = " selected";
             }
             
-            ABJ_404_Solution_RequestContext::getInstance()->debug_info = 'Before row: ' . $rowCounter . ', Title: ' . $theTitle . 
+            $_REQUEST[ABJ404_PP]['debug_info'] = 'Before row: ' . $rowCounter . ', Title: ' . $theTitle . 
                     ', Post type: ' . $row->post_type;
             
             if ($row->post_type != $currentPostType) {
@@ -285,14 +285,14 @@ trait ViewTrait_Redirects {
             $content[] = esc_html($theTitle);
             $content[] = "</option>";
             
-            ABJ_404_Solution_RequestContext::getInstance()->debug_info = 'After row: ' . $rowCounter . ', Title: ' . $theTitle . 
+            $_REQUEST[ABJ404_PP]['debug_info'] = 'After row: ' . $rowCounter . ', Title: ' . $theTitle . 
                     ', Post type: ' . $row->post_type;
         }
         
         $content[] = "\n" . '</optgroup>' . "\n";
         
 
-        ABJ_404_Solution_RequestContext::getInstance()->debug_info = 'Cleared after building redirect destination page list.';
+        $_REQUEST[ABJ404_PP]['debug_info'] = 'Cleared after building redirect destination page list.';
         
         return implode('', $content);
     }

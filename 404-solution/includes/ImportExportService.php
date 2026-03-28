@@ -140,9 +140,8 @@ class ABJ_404_Solution_ImportExportService {
     function getExportableRedirects() {
         global $wpdb;
 
-        $dao = ABJ_404_Solution_DataAccess::getInstance();
-        $redirectsTable = $dao->doTableNameReplacements('{wp_abj404_redirects}');
-        $cacheTable     = $dao->doTableNameReplacements('{wp_abj404_permalink_cache}');
+        $redirectsTable = $wpdb->prefix . 'abj404_redirects';
+        $cacheTable     = $wpdb->prefix . 'abj404_permalink_cache';
 
         $manualStatus = defined('ABJ404_STATUS_MANUAL') ? (int)ABJ404_STATUS_MANUAL : 1;
         $regexStatus  = defined('ABJ404_STATUS_REGEX')  ? (int)ABJ404_STATUS_REGEX  : 6;

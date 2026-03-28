@@ -13,7 +13,6 @@ if (!defined('ABSPATH')) {
  *   abj404_engine_profiles_delete – Delete a profile by ID.
  */
 class ABJ_404_Solution_Ajax_EngineProfiles {
-    use ABJ_404_Solution_AjaxSecurityTrait;
 
     /** @return void */
     public static function registerActions(): void {
@@ -37,7 +36,11 @@ class ABJ_404_Solution_Ajax_EngineProfiles {
      * @return void
      */
     public static function handleList(): void {
-        self::requireAdminWithNonce('abj404_engine_profiles_nonce');
+        check_ajax_referer('abj404_engine_profiles_nonce', 'nonce');
+        if (!ABJ_404_Solution_PluginLogic::getInstance()->userIsPluginAdmin()) {
+            wp_send_json_error(['message' => 'Insufficient permissions'], 403);
+            return; // @phpstan-ignore deadCode.unreachable
+        }
 
         $profiles = ABJ_404_Solution_EngineProfileResolver::getInstance()->getAllProfilesForAdmin();
         wp_send_json_success(['profiles' => $profiles]);
@@ -52,7 +55,11 @@ class ABJ_404_Solution_Ajax_EngineProfiles {
      * @return void
      */
     public static function handleSave(): void {
-        self::requireAdminWithNonce('abj404_engine_profiles_nonce');
+        check_ajax_referer('abj404_engine_profiles_nonce', 'nonce');
+        if (!ABJ_404_Solution_PluginLogic::getInstance()->userIsPluginAdmin()) {
+            wp_send_json_error(['message' => 'Insufficient permissions'], 403);
+            return; // @phpstan-ignore deadCode.unreachable
+        }
 
         $id           = isset($_POST['id'])              ? absint($_POST['id'])                                      : 0;
         $name         = isset($_POST['name'])            ? sanitize_text_field(wp_unslash((string)$_POST['name']))   : '';
@@ -118,7 +125,11 @@ class ABJ_404_Solution_Ajax_EngineProfiles {
      * @return void
      */
     public static function handleDelete(): void {
-        self::requireAdminWithNonce('abj404_engine_profiles_nonce');
+        check_ajax_referer('abj404_engine_profiles_nonce', 'nonce');
+        if (!ABJ_404_Solution_PluginLogic::getInstance()->userIsPluginAdmin()) {
+            wp_send_json_error(['message' => 'Insufficient permissions'], 403);
+            return; // @phpstan-ignore deadCode.unreachable
+        }
 
         $id = isset($_POST['id']) ? absint($_POST['id']) : 0;
 

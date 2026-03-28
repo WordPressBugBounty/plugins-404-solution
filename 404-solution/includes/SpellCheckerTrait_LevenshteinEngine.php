@@ -190,7 +190,7 @@ trait SpellCheckerTrait_LevenshteinEngine {
 			    $urlParts = parse_url($the_permalink);
 			}
 
-			ABJ_404_Solution_RequestContext::getInstance()->debug_info = 'Likely match IDs processing permalink: ' .
+			$_REQUEST[ABJ404_PP]['debug_info'] = 'Likely match IDs processing permalink: ' .
 				$the_permalink . ', $wasntReadyCount: ' . $wasntReadyCount;
 			$idToPermalink[$id] = $the_permalink;
 
@@ -263,7 +263,7 @@ trait SpellCheckerTrait_LevenshteinEngine {
 				$row = array_pop($currentBatch);
 			}
 		}
-		ABJ_404_Solution_RequestContext::getInstance()->debug_info = '';
+		$_REQUEST[ABJ404_PP]['debug_info'] = '';
 
 		if ($wasntReadyCount > 0) {
 			$this->logger->infoMessage("The permalink cache wasn't ready for " . $wasntReadyCount . " IDs.");
@@ -411,7 +411,7 @@ trait SpellCheckerTrait_LevenshteinEngine {
 		if ($this->enablePerformanceCounters) {
 			$this->levenshteinCallCount++;
 		}
-	    ABJ_404_Solution_RequestContext::getInstance()->debug_info = 'customLevenshtein. str1: ' . esc_html($str1) . ', str2: ' . esc_html($str2);
+	    $_REQUEST[ABJ404_PP]['debug_info'] = 'customLevenshtein. str1: ' . esc_html($str1) . ', str2: ' . esc_html($str2);
 
 	    $RowLen = $this->f->strlen($str1);
 	    $ColLen = $this->f->strlen($str2);
@@ -472,7 +472,7 @@ trait SpellCheckerTrait_LevenshteinEngine {
 			$v1 = $vTmp;
 		}
 
-		ABJ_404_Solution_RequestContext::getInstance()->debug_info = 'Cleared after customLevenshtein.';
+		$_REQUEST[ABJ404_PP]['debug_info'] = 'Cleared after customLevenshtein.';
 		return $v0[$RowLen];
 	}
 

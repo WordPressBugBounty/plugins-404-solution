@@ -9,7 +9,6 @@ if (!defined('ABSPATH')) {
 
 $base = dirname(__DIR__) . DIRECTORY_SEPARATOR;
 return array(
-    'ABJ_404_Solution_AjaxSecurityTrait' => $base . 'includes/ajax/AjaxSecurityTrait.php',
     'ABJ_404_Solution_Ajax_CrossPluginImporter' => $base . 'includes/ajax/Ajax_CrossPluginImporter.php',
     'ABJ_404_Solution_Ajax_Php' => $base . 'includes/ajax/Ajax_Php.php',
     'ABJ_404_Solution_Ajax_TrendData' => $base . 'includes/ajax/Ajax_TrendData.php',
@@ -47,7 +46,6 @@ return array(
     'ABJ_404_Solution_PermalinkCache' => $base . 'includes/PermalinkCache.php',
     'ABJ_404_Solution_PluginLogic' => $base . 'includes/PluginLogic.php',
     'ABJ_404_Solution_RedirectConditionEvaluator' => $base . 'includes/RedirectConditionEvaluator.php',
-    'ABJ_404_Solution_RequestContext' => $base . 'includes/RequestContext.php',
     'ABJ_404_Solution_RestApiController' => $base . 'includes/RestApiController.php',
     'ABJ_404_Solution_WPCLICommands' => $base . 'includes/WPCLICommands.php',
     'ABJ_404_Solution_PostEditorIntegration' => $base . 'includes/PostEditorIntegration.php',

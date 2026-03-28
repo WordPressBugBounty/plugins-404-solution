@@ -152,8 +152,7 @@ trait ViewTrait_Stats {
             return;
         }
 
-        $dao = ABJ_404_Solution_DataAccess::getInstance();
-        $redirectsTable = $dao->doTableNameReplacements('{wp_abj404_redirects}');
+        $redirectsTable = $wpdb->prefix . 'abj404_redirects';
 
         // Query score distribution bands.
         $query = $wpdb->prepare(

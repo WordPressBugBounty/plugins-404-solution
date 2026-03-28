@@ -197,10 +197,10 @@ class ABJ_404_Solution_ShortCode {
          	"</script> \n";
         }
 
-        $ctxUrl = ABJ_404_Solution_RequestContext::getInstance()->requested_url;
-        if ($ctxUrl !== '') {
+        if (isset($_REQUEST[ABJ404_PP]) &&
+                isset($_REQUEST[ABJ404_PP][$cookieName])) {
             // Normalize URL using centralized function for consistency
-            $urlRequest = $f->normalizeURLForCacheKey($f->normalizeUrlString($ctxUrl));
+            $urlRequest = $f->normalizeURLForCacheKey($f->normalizeUrlString($_REQUEST[ABJ404_PP][$cookieName]));
         }
 
         // Fallback: check for URL passed via query parameter

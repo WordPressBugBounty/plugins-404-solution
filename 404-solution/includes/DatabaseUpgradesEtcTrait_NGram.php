@@ -405,11 +405,9 @@ trait ABJ_404_Solution_DatabaseUpgradesEtc_NGramTrait {
     function rebuildNGramCache($batchSize = 100, $forceRebuild = false) {
         global $wpdb;
 
-        // Use the same SynchronizationUtils lock as rebuildNGramCacheAsync() to
-        // prevent TRUNCATE TABLE from racing with async batch inserts.
-        $lockKey = 'ngram_rebuild';
-        $uniqueID = $this->syncUtils->synchronizerAcquireLockTry($lockKey);
-        if (empty($uniqueID)) {
+        // Race condition protection: Use transient lock
+        $lockKey = 'abj404_ngram_rebuild_lock';
+        if (get_transient($lockKey)) {
             $this->logger->infoMessage("N-gram rebuild already in progress (locked). Skipping.");
             return [
                 'total_pages' => 0,
@@ -420,6 +418,9 @@ trait ABJ_404_Solution_DatabaseUpgradesEtc_NGramTrait {
             ];
         }
 
+        // Set lock (30 minute timeout for very large sites)
+        set_transient($lockKey, time(), 1800);
+
         try {
             $ngramTable = $this->dao->getPrefixedTableName('abj404_ngram_cache');
             $permalinkCacheTable = $this->dao->getPrefixedTableName('abj404_permalink_cache');
@@ -429,6 +430,7 @@ trait ABJ_404_Solution_DatabaseUpgradesEtc_NGramTrait {
                 $existingCount = $wpdb->get_var("SELECT COUNT(*) FROM {$ngramTable}");
                 if ($existingCount > 0) {
                     $this->logger->debugMessage("N-gram cache already contains {$existingCount} entries. Skipping rebuild (use forceRebuild=true to override).");
+                    delete_transient($lockKey);
                     return [
                         'total_pages' => $existingCount,
                         'processed' => 0,
@@ -445,6 +447,7 @@ trait ABJ_404_Solution_DatabaseUpgradesEtc_NGramTrait {
             $result = $wpdb->query("TRUNCATE TABLE {$ngramTable}");
             if ($result === false) {
                 $this->logger->errorMessage("Failed to truncate N-gram cache table: " . $wpdb->last_error);
+                delete_transient($lockKey);
                 return ['total_pages' => 0, 'processed' => 0, 'success' => 0, 'failed' => 1, 'error' => $wpdb->last_error];
             }
 
@@ -458,11 +461,13 @@ trait ABJ_404_Solution_DatabaseUpgradesEtc_NGramTrait {
 
             if ($totalPages === null) {
                 $this->logger->errorMessage("Failed to query permalink cache table: " . $wpdb->last_error);
+                delete_transient($lockKey);
                 return ['total_pages' => 0, 'processed' => 0, 'success' => 0, 'failed' => 1, 'error' => $wpdb->last_error];
             }
 
             if ($totalPages == 0) {
                 $this->logger->debugMessage("No pages in permalink cache. N-gram cache rebuild skipped (will rebuild when pages are added).");
+                delete_transient($lockKey);
                 return ['total_pages' => 0, 'processed' => 0, 'success' => 0, 'failed' => 0];
             }
 
@@ -511,7 +516,7 @@ trait ABJ_404_Solution_DatabaseUpgradesEtc_NGramTrait {
 
         } finally {
             // Always release the lock
-            $this->syncUtils->synchronizerReleaseLock($uniqueID, $lockKey);
+            delete_transient($lockKey);
         }
     }
 
@@ -527,14 +532,15 @@ trait ABJ_404_Solution_DatabaseUpgradesEtc_NGramTrait {
     function syncMissingNGrams($batchSize = 50) {
         global $wpdb;
 
-        // Use the same SynchronizationUtils lock as rebuildNGramCacheAsync() and
-        // rebuildNGramCache() to prevent concurrent modification of the ngram table.
-        $lockKey = 'ngram_rebuild';
-        $uniqueID = $this->syncUtils->synchronizerAcquireLockTry($lockKey);
-        if (empty($uniqueID)) {
+        // Use the same lock as rebuild to prevent concurrent execution
+        $lockKey = 'abj404_ngram_rebuild_lock';
+        if (get_transient($lockKey)) {
             $this->logger->debugMessage("Ngram sync skipped - rebuild/sync already in progress.");
             return ['posts_added' => 0, 'posts_failed' => 0, 'categories_added' => 0, 'categories_failed' => 0, 'locked' => true];
         }
+
+        // Set lock (30 minute timeout)
+        set_transient($lockKey, time(), 1800);
 
         try {
             $ngramTable = $this->dao->getPrefixedTableName('abj404_ngram_cache');
@@ -558,6 +564,7 @@ trait ABJ_404_Solution_DatabaseUpgradesEtc_NGramTrait {
 
             if ($wpdb->last_error) {
                 $this->logger->errorMessage("Failed to query for missing post ngram entries: " . $wpdb->last_error);
+                delete_transient($lockKey);
                 return array_merge($stats, ['error' => $wpdb->last_error]);
             }
 
@@ -641,7 +648,7 @@ trait ABJ_404_Solution_DatabaseUpgradesEtc_NGramTrait {
 
         } finally {
             // Always release the lock
-            $this->syncUtils->synchronizerReleaseLock($uniqueID, $lockKey);
+            delete_transient($lockKey);
         }
     }
 
