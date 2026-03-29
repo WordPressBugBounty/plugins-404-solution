@@ -467,7 +467,7 @@ trait ABJ_404_Solution_DataAccess_LogsTrait {
         $rawLogsId = $tableOptions['logsid'];
         if ($rawLogsId != 0) {
             $logsid_included = 'specific logs id included. */';
-            $logsid = esc_sql($abj404logic->sanitizeForSQL(is_string($rawLogsId) ? $rawLogsId : ''));
+            $logsid = esc_sql($abj404logic->sanitizeForSQL(is_scalar($rawLogsId) ? (string)$rawLogsId : ''));
         }
 
         // Whitelist allowed columns for orderby to prevent SQL injection
@@ -1253,7 +1253,12 @@ trait ABJ_404_Solution_DataAccess_LogsTrait {
             if (is_object($value) || is_array($value)) {
                 return null;
             }
-            return substr((string)$value, 0, $maxLen);
+            $str = (string)$value;
+            // Strip invalid UTF-8 sequences that cause "invalid data" SQL errors.
+            if (function_exists('mb_convert_encoding')) {
+                $str = mb_convert_encoding($str, 'UTF-8', 'UTF-8');
+            }
+            return substr($str, 0, $maxLen);
         };
 
         $sanitized = array();

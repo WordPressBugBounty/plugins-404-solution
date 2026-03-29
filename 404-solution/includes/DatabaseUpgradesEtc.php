@@ -119,8 +119,6 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
      * @return void
      */
     private function reallyCreateDatabaseTables($updatingToNewVersion = false) {
-		$this->renameAbj404TablesToLowerCase();
-
     	if ($updatingToNewVersion) {
     		$this->correctIssuesBefore();
     	}
@@ -165,6 +163,9 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     		$this->createIndexes();
     	}
 
+    	// Adopt orphaned tables AFTER target tables exist (rename handles prefix mismatches).
+    	$this->renameAbj404TablesToLowerCase();
+
     	// we could do this only when a table is created or when the "meta" column is created
     	// but it doesn't take long anyway so we do it every night.
     	$this->permalinkCache->updatePermalinkCache(1);
@@ -197,14 +198,21 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     		$migrationResults = $this->migrateURLsToRelativePaths();
 
     		// Show admin notice if migration occurred
-    		if ($updatingToNewVersion && !empty($migrationResults['redirects_updated']) && function_exists('add_settings_error')) {
+    		if ($updatingToNewVersion && !empty($migrationResults['redirects_updated'])) {
     			$rawRedirectsUpdated = $migrationResults['redirects_updated'];
     			$redirectsUpdated = is_scalar($rawRedirectsUpdated) ? (int)$rawRedirectsUpdated : 0;
     			$message = sprintf(
-    				__('404 Solution: Migrated %d redirects to subdirectory-independent format.', '404-solution'),
+    				_n(
+    					'404 Solution: Migrated %d redirect to subdirectory-independent format.',
+    					'404 Solution: Migrated %d redirects to subdirectory-independent format.',
+    					$redirectsUpdated,
+    					'404-solution'
+    				),
     				$redirectsUpdated
     			);
-    			add_settings_error('abj404_settings', 'migration_success', $message, 'updated');
+    			if (function_exists('add_settings_error')) {
+    				add_settings_error('abj404_settings', 'migration_success', $message, 'updated');
+    			}
     		}
     	}
 
@@ -424,9 +432,18 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 			$tablesByPrefix[$prefix][] = $tableName;
 		}
 
+		// Skip prefixes we've already adopted.
+		$adoptedPrefixes = get_option('abj404_adopted_prefixes', array());
+		if (!is_array($adoptedPrefixes)) {
+			$adoptedPrefixes = array();
+		}
+
 		// Process each OLD prefix (not the current one).
 		foreach ($tablesByPrefix as $oldPrefix => $tables) {
 			if ($oldPrefix === $currentPrefix) {
+				continue;
+			}
+			if (in_array($oldPrefix, $adoptedPrefixes, true)) {
 				continue;
 			}
 
@@ -681,6 +698,16 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 		$this->logger->infoMessage(
 			"Adoption complete: {$totalAdopted} total rows adopted from prefix '{$oldPrefix}' to '{$currentPrefix}'"
 		);
+
+		// Record this prefix as adopted so we don't re-detect it on every page load.
+		$adoptedPrefixes = get_option('abj404_adopted_prefixes', array());
+		if (!is_array($adoptedPrefixes)) {
+			$adoptedPrefixes = array();
+		}
+		if (!in_array($oldPrefix, $adoptedPrefixes, true)) {
+			$adoptedPrefixes[] = $oldPrefix;
+			update_option('abj404_adopted_prefixes', $adoptedPrefixes, false);
+		}
 	}
 
 	/**
@@ -977,6 +1004,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
                 $this->correctCollations();
                 $this->updateTableEngineToInnoDB();
                 $this->createIndexes();
+                $this->renameAbj404TablesToLowerCase();
 
                 ABJ_404_Solution_PluginLogic::doRegisterCrons();
 
@@ -1021,6 +1049,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
                 $this->correctCollations();
                 $this->updateTableEngineToInnoDB();
                 $this->createIndexes();
+                $this->renameAbj404TablesToLowerCase();
                 $this->correctIssuesAfter();
 
                 $logic = ABJ_404_Solution_PluginLogic::getInstance();
@@ -1331,7 +1360,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     		$this->removeCommentsFromColumns($createTableStatementGoal));
     	
     	// remove the "COLLATE xxx" from the columns.
-    	$removeCollatePattern = '/collate \w+ ?/';
+    	$removeCollatePattern = '/collate[= ]\w+ ?/';
     	$existingTableSQL = preg_replace($removeCollatePattern, "", $existingTableSQL) ?? '';
     	$createTableStatementGoal = preg_replace($removeCollatePattern, "", $createTableStatementGoal) ?? '';
 
@@ -1532,7 +1561,11 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     function normalizeColumnDDL($ddl): string {
     	$ddlStr = is_string($ddl) ? $ddl : '';
     	$normalized = strtolower(str_replace('`', '', trim($ddlStr)));
-    	return preg_replace("/default '(\d+)'/", 'default $1', $normalized) ?? $normalized;
+    	$normalized = preg_replace("/default '(\d+)'/", 'default $1', $normalized) ?? $normalized;
+    	// MySQL omits DEFAULT NULL for nullable columns — strip it so DDL file
+    	// and SHOW CREATE TABLE produce identical normalized strings.
+    	$normalized = preg_replace('/\s+default\s+null\b/', '', $normalized) ?? $normalized;
+    	return $normalized;
     }
 
     /**
