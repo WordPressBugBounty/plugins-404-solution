@@ -308,6 +308,10 @@ class ABJ_404_Solution_WordPress_Connector {
             // Settings mode toggle (Simple/Advanced)
             ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-settings-mode-toggle', plugin_dir_url(__FILE__) . 'ajax/SettingsModeToggle.js',
                 array('jquery'));
+
+            // Behavior tiles (404 destination selector)
+            ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-behavior-tiles', ABJ404_URL . 'includes/js/behaviorTiles.js',
+                array());
         }
 
         if ($isCardAccordionPage) {
@@ -706,7 +710,9 @@ class ABJ_404_Solution_WordPress_Connector {
 
         // Display infrastructure notices (DB errors, stale cache, etc.) only on
         // the plugin's own admin pages — not on the dashboard or other screens.
-        // This prevents noisy notices from appearing across all of wp-admin.
+        // This hook runs early in the request; rendering here ensures a notice
+        // set by a failed repair attempt is visible before later queries might
+        // auto-clear stale transients.
         if ($isPluginPage) {
             $dbNotice = get_transient('abj404_plugin_db_notice');
             if (is_array($dbNotice) && isset($dbNotice['message']) && is_string($dbNotice['message'])) {

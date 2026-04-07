@@ -286,13 +286,26 @@ trait ABJ_404_Solution_PluginLogicTrait_SettingsUpdate {
             }
         }
 
-        if (isset($postData['redirect_to_data_field_id'])) {
-            $options['dest404page'] = sanitize_text_field(is_string($postData['redirect_to_data_field_id']) ? $postData['redirect_to_data_field_id'] : '');
-        }
-        if (isset($postData['redirect_to_data_field_title'])) {
-            $options['dest404pageURL'] = sanitize_text_field(is_string($postData['redirect_to_data_field_title']) ? $postData['redirect_to_data_field_title'] : '');
-            if ($options['dest404page'] == ABJ404_TYPE_EXTERNAL . '|' . ABJ404_TYPE_EXTERNAL) {
-            	$options['dest404page'] = $options['dest404pageURL'] . '|' . ABJ404_TYPE_EXTERNAL;
+        // Handle behavior tile selection
+        if (isset($postData['dest404_behavior'])) {
+            $validBehaviors = array('suggest', 'homepage', 'custom', 'theme_default');
+            $behavior = sanitize_text_field(is_string($postData['dest404_behavior']) ? $postData['dest404_behavior'] : '');
+            if (in_array($behavior, $validBehaviors, true)) {
+                $options['dest404_behavior'] = $behavior;
+                $message .= $this->applyBehaviorToDest404Page($options, $behavior, $postData);
+            } else {
+                $message .= __('Error: Invalid 404 behavior selected', '404-solution') . ".<BR/>";
+            }
+        } else {
+            // Legacy: handle direct redirect_to_data_field_id (for backward compat)
+            if (isset($postData['redirect_to_data_field_id'])) {
+                $options['dest404page'] = sanitize_text_field(is_string($postData['redirect_to_data_field_id']) ? $postData['redirect_to_data_field_id'] : '');
+            }
+            if (isset($postData['redirect_to_data_field_title'])) {
+                $options['dest404pageURL'] = sanitize_text_field(is_string($postData['redirect_to_data_field_title']) ? $postData['redirect_to_data_field_title'] : '');
+                if ($options['dest404page'] == ABJ404_TYPE_EXTERNAL . '|' . ABJ404_TYPE_EXTERNAL) {
+                    $options['dest404page'] = $options['dest404pageURL'] . '|' . ABJ404_TYPE_EXTERNAL;
+                }
             }
         }
 
@@ -305,6 +318,57 @@ trait ABJ_404_Solution_PluginLogicTrait_SettingsUpdate {
         }
 
         return $message;
+    }
+
+    /**
+     * Apply the selected behavior tile to the dest404page option.
+     *
+     * @param array<string, mixed> $options The options array to update (by reference)
+     * @param string $behavior The selected behavior: suggest, homepage, custom, theme_default
+     * @param array<string, mixed> $postData The POST data
+     * @return string Any error messages
+     */
+    private function applyBehaviorToDest404Page(array &$options, string $behavior, array $postData): string {
+        switch ($behavior) {
+            case 'suggest':
+                // Create or find the system page
+                $systemPage = ABJ_404_Solution_SystemPage::getInstance();
+                $pageId = $systemPage->getOrCreateSystemPage();
+                if ($pageId > 0) {
+                    $options['dest404page'] = $pageId . '|' . ABJ404_TYPE_POST;
+                } else {
+                    return __('Error: Could not create the suggestion page', '404-solution') . ".<BR/>";
+                }
+                break;
+
+            case 'homepage':
+                $options['dest404page'] = '0|' . ABJ404_TYPE_HOME;
+                break;
+
+            case 'custom':
+                // Use the page picker value
+                if (isset($postData['redirect_to_data_field_id'])) {
+                    $options['dest404page'] = sanitize_text_field(
+                        is_string($postData['redirect_to_data_field_id']) ? $postData['redirect_to_data_field_id'] : ''
+                    );
+                }
+                if (isset($postData['redirect_to_data_field_title'])) {
+                    $options['dest404pageURL'] = sanitize_text_field(
+                        is_string($postData['redirect_to_data_field_title']) ? $postData['redirect_to_data_field_title'] : ''
+                    );
+                    if ($options['dest404page'] == ABJ404_TYPE_EXTERNAL . '|' . ABJ404_TYPE_EXTERNAL) {
+                        $options['dest404page'] = $options['dest404pageURL'] . '|' . ABJ404_TYPE_EXTERNAL;
+                    }
+                }
+                break;
+
+            case 'theme_default':
+            default:
+                $options['dest404page'] = '0|' . ABJ404_TYPE_404_DISPLAYED;
+                break;
+        }
+
+        return "";
     }
 
     /** Update WordPress-specific settings.
@@ -601,7 +665,61 @@ trait ABJ_404_Solution_PluginLogicTrait_SettingsUpdate {
             }
         }
 
+        $this->normalizeSuggestionTemplateOptions($options);
+
         return $message;
+    }
+
+    /**
+     * Repair malformed suggestion template options.
+     *
+     * Keep valid custom text intact; only heal known-broken literal token forms.
+     *
+     * @param array<string, mixed> $options
+     * @return bool True when any option was changed.
+     */
+    private function normalizeSuggestionTemplateOptions(array &$options): bool {
+        $changed = false;
+        $defaults = $this->getDefaultOptions();
+
+        $titleDefault = isset($defaults['suggest_title']) && is_string($defaults['suggest_title']) ?
+            $defaults['suggest_title'] : '<h3>{suggest_title_text}</h3>';
+        $noResultsDefault = isset($defaults['suggest_noresults']) && is_string($defaults['suggest_noresults']) ?
+            $defaults['suggest_noresults'] : '<p>{suggest_noresults_text}</p>';
+
+        $titleValue = isset($options['suggest_title']) && is_scalar($options['suggest_title']) ?
+            (string)$options['suggest_title'] : '';
+        $titleLower = strtolower(trim($titleValue));
+        $titleHasBareBrokenToken = (strpos($titleValue, 'suggest_title_text') !== false &&
+            strpos($titleValue, '{suggest_title_text}') === false);
+        if (
+            $titleValue === '' ||
+            in_array($titleLower, array('suggest_title_text', '{suggest_title_text}'), true) ||
+            $titleHasBareBrokenToken
+        ) {
+            if ($titleValue !== $titleDefault) {
+                $options['suggest_title'] = $titleDefault;
+                $changed = true;
+            }
+        }
+
+        $noResultsValue = isset($options['suggest_noresults']) && is_scalar($options['suggest_noresults']) ?
+            (string)$options['suggest_noresults'] : '';
+        $noResultsLower = strtolower(trim($noResultsValue));
+        $noResultsHasBareBrokenToken = (strpos($noResultsValue, 'suggest_noresults_text') !== false &&
+            strpos($noResultsValue, '{suggest_noresults_text}') === false);
+        if (
+            $noResultsValue === '' ||
+            in_array($noResultsLower, array('suggest_noresults_text', '{suggest_noresults_text}'), true) ||
+            $noResultsHasBareBrokenToken
+        ) {
+            if ($noResultsValue !== $noResultsDefault) {
+                $options['suggest_noresults'] = $noResultsDefault;
+                $changed = true;
+            }
+        }
+
+        return $changed;
     }
 
     /** Update regex pattern settings for ignoring files/folders and suggestion exclusions.

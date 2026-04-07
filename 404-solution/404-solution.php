@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 	Author:      Aaron J
 	Author URI:  https://www.ajexperience.com/404-solution/
 
-	Version: 4.0.4
+	Version: 4.1.0
 	Requires at least: 5.0
 	Requires PHP: 7.4
 
@@ -145,6 +145,7 @@ function abj404_autoloader($class) {
 				$inc . 'DataAccessTrait_Logs.php',
 				$inc . 'DataAccessTrait_Redirects.php',
 				$inc . 'DataAccessTrait_Stats.php',
+				$inc . 'DataAccessTrait_ErrorClassification.php',
 			),
 			'ABJ_404_Solution_PluginLogic' => array(
 				$inc . 'PluginLogicTrait_UrlNormalization.php',
@@ -749,7 +750,9 @@ function abj404_404listener() {
 
     	if ($originalURL !== null) {
 			// clear the cookie - sanitize before writing to $_REQUEST
-			$_REQUEST[ABJ404_PP . '_REQUEST_URI'] = sanitize_text_field($originalURL);
+            $sanitizedOriginal = sanitize_text_field($originalURL);
+			$_REQUEST[ABJ404_PP . '_REQUEST_URI'] = $sanitizedOriginal;
+            $_REQUEST[ABJ404_PP . '_REQUEST_URI_UPDATE_URL'] = $sanitizedOriginal;
 			setcookie($cookieName, '', time() - 5, "/");
 
 			require_once(plugin_dir_path( __FILE__ ) . "includes/Loader.php");
