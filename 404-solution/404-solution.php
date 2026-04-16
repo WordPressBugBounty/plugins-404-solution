@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 	Author:      Aaron J
 	Author URI:  https://www.ajexperience.com/404-solution/
 
-	Version: 4.1.1
+	Version: 4.1.2
 	Requires at least: 5.0
 	Requires PHP: 7.4
 
@@ -319,11 +319,47 @@ if (!function_exists('abj404_shortCodeListener')) {
 				$inc . 'DatabaseUpgradesEtcTrait_NGram.php',
 				$inc . 'DatabaseUpgradesEtcTrait_Maintenance.php',
 				$inc . 'DatabaseUpgradesEtcTrait_PluginUpdate.php',
-				// SQL templates
-				$inc . 'sql/getPermalinkFromURL.sql',
-				$inc . 'sql/getRedirectsForView.sql',
-				$inc . 'sql/createRedirectsTable.sql',
+				// SQL templates — all files required for correct operation.
+				// A test (SqlFileIntegrityListCompletenessTest) verifies this list
+				// stays in sync with the actual files in includes/sql/.
+				$inc . 'sql/correctLookupTableIssue.sql',
+				$inc . 'sql/createEngineProfilesTable.sql',
 				$inc . 'sql/createLogTable.sql',
+				$inc . 'sql/createLogsHitsTempTable.sql',
+				$inc . 'sql/createLookupTable.sql',
+				$inc . 'sql/createNGramCacheTable.sql',
+				$inc . 'sql/createPermalinkCacheTable.sql',
+				$inc . 'sql/createRedirectConditionsTable.sql',
+				$inc . 'sql/createRedirectsTable.sql',
+				$inc . 'sql/createSpellingCacheTable.sql',
+				$inc . 'sql/createViewCacheTable.sql',
+				$inc . 'sql/deleteOldLogs.sql',
+				$inc . 'sql/getAdditionalPostData.sql',
+				$inc . 'sql/getIDsNeededForPermalinkCache.sql',
+				$inc . 'sql/getLogRecords.sql',
+				$inc . 'sql/getLogsCount.sql',
+				$inc . 'sql/getLogsIDandURL.sql',
+				$inc . 'sql/getLogsIDandURLForAjax.sql',
+				$inc . 'sql/getMostUnusedRedirects.sql',
+				$inc . 'sql/getOrphanedAutoRedirects.sql',
+				$inc . 'sql/getPermalinkFromURL.sql',
+				$inc . 'sql/getPostsNeedingContentKeywords.sql',
+				$inc . 'sql/getPublishedCategories.sql',
+				$inc . 'sql/getPublishedImageIDs.sql',
+				$inc . 'sql/getPublishedPagesAndPostsIDs.sql',
+				$inc . 'sql/getPublishedTags.sql',
+				$inc . 'sql/getRedirectsExport.sql',
+				$inc . 'sql/getRedirectsForView.sql',
+				$inc . 'sql/getRedirectsForViewTempTable.sql',
+				$inc . 'sql/getRedirectsWithLogs.sql',
+				$inc . 'sql/importDataFromPluginRedirectioner.sql',
+				$inc . 'sql/insertPermalinkCache.sql',
+				$inc . 'sql/insertSpellingCache.sql',
+				$inc . 'sql/logsSetMinLogID.sql',
+				$inc . 'sql/migrateToNewLogsTable.sql',
+				$inc . 'sql/selectTableEngines.sql',
+				$inc . 'sql/updatePermalinkCache.sql',
+				$inc . 'sql/updatePermalinkCacheParentPages.sql',
 			);
 		}
 	}
@@ -577,6 +613,14 @@ if (!function_exists('abj404_degraded_admin_page')) {
 	/** @return void */
 	function abj404_degraded_admin_page() {
 		if (!current_user_can('manage_options')) {
+			echo '<div class="wrap">';
+			echo '<h1>404 Solution</h1>';
+			echo '<div class="notice notice-error"><p>';
+			echo '<strong>Permission denied.</strong> ';
+			echo 'Your user account does not have permission to access this page.';
+			echo '</p><p>';
+			echo 'Please verify that your WordPress role has the <code>manage_options</code> capability.';
+			echo '</p></div></div>';
 			return;
 		}
 
