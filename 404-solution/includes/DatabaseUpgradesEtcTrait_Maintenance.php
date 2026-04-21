@@ -468,11 +468,22 @@ trait ABJ_404_Solution_DatabaseUpgradesEtc_MaintenanceTrait {
 
             $this->logger->infoMessage("Table repair complete for site " . get_current_blog_id());
         } else {
-            // Tables exist - insurance: verify/correct collations and ensure indexes exist.
-            // This catches collation drift (including column-level drift) and missed index additions.
+            // Tables exist - insurance: verify/correct collations, ensure indexes exist,
+            // and enforce InnoDB engine. This catches collation drift (including column-level
+            // drift), missed index additions, and MyISAM reversions from hosting migrations
+            // or table restores — without waiting for the next plugin upgrade.
             $this->correctCollations();
             $this->createIndexes();
+            $this->updateTableEngineToInnoDB();
         }
+
+        // Check for orphaned tables under a stale/changed prefix and adopt their data.
+        // This catches hosting migrations or wp-config prefix changes that leave plugin
+        // tables under the old prefix. The method is idempotent — no-op when nothing to adopt.
+        // (On the missing-tables path above, createDatabaseTables() already triggers adoption
+        // via renameAbj404TablesToLowerCase(), but running it again is harmless and covers
+        // edge cases where tables exist under the current prefix but orphans remain.)
+        $this->adoptOrphanedTables();
     }
 
     /**
