@@ -2659,3 +2659,43 @@ msgstr ""
 #: includes/ViewTrait_UI.php
 msgid "If you have a security plugin installed, it may be restricting access to this page."
 msgstr ""
+
+#: includes/GoogleSearchConsole.php
+msgid "Advanced: use your own Google Cloud credentials"
+msgstr ""
+
+#: includes/GoogleSearchConsole.php
+msgid "Connect to Google Search Console"
+msgstr ""
+
+#: includes/WordPress_Connector.php
+msgid "No access token received from authorization."
+msgstr ""
+
+#: includes/ViewTrait_RedirectsTable.php
+msgid "Loading status…"
+msgstr ""
+
+#: includes/ViewTrait_RedirectsTable.php
+msgid "Loading redirects…"
+msgstr ""
+
+#: includes/ViewTrait_RedirectsTable.php
+msgid "Loading captured URLs…"
+msgstr ""
+
+#: includes/ViewTrait_Logs.php
+msgid "Loading logs…"
+msgstr ""
+
+#: includes/ViewTrait_RedirectsTable.php includes/ajax/view_updater.js
+msgid "Loading…"
+msgstr ""
+
+#: includes/ViewTrait_Settings.php includes/js/settingsDeferred.js
+msgid "Loading Google Search Console section…"
+msgstr ""
+
+#: includes/ajax/Ajax_Php.php includes/js/settingsDeferred.js
+msgid "Unable to load Google Search Console section."
+msgstr ""

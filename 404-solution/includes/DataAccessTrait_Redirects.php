@@ -229,6 +229,9 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         // Remove orphaned auto redirects (destination post deleted/unpublished)
         $orphanedCount = $this->cleanupOrphanedAutoRedirects();
 
+        // Auto-trash junk/bot captured URLs
+        $junkTrashedCount = $this->autoTrashJunkCapturedUrls($options);
+
         //Clean up old logs. prepare the query. get the disk usage in bytes. compare to the max requested
         // disk usage (MB to bytes). delete 1k rows at a time until the size is acceptable.
         $logsSizeBytes = $abj404dao->getLogDiskUsage();
@@ -263,6 +266,7 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
                 $capturedURLsCount . ", Old automatic redirects removed: " . $autoRedirectsCount .
                 ", Old manual redirects removed: " . $manualRedirectsCount .
                 ", Orphaned auto redirects removed: " . $orphanedCount .
+                ", Junk URLs auto-trashed: " . $junkTrashedCount .
                 ", Old log lines removed: " . $oldLogRowsDeleted .
                 " (age: " . $oldLogRowsDeletedByAge . ", size: " . $oldLogRowsDeletedBySize . ")" .
                 ", New log size: " . $logSizeMB . "MB" .
@@ -290,7 +294,7 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
                 $message .= ", Log file emailed to developer.";
             } else {
                 // No error to report — roll the heartbeat dice.
-                if ($this->logger->sendHeartbeatIfDueRandom(100)) {
+                if ($this->logger->sendHeartbeatIfDueRandom(200)) {
                     $message .= ", Heartbeat log emailed to developer.";
                 }
             }
@@ -750,37 +754,60 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         $query = $this->f->str_replace('{limit-results}', $limitResults, $query);
         $query = $this->f->str_replace('{order-results}', $orderResults, $query);
         
-        $rows = $wpdb->get_results($query);
-        if (!empty($wpdb->last_error) && $this->isInvalidDataError($wpdb->last_error) &&
+        $result = $this->queryAndGetResults($query, array('result_type' => OBJECT));
+        $queryError = is_string($result['last_error'] ?? '') ? ($result['last_error'] ?? '') : '';
+        $rows = is_array($result['rows']) ? $result['rows'] : array();
+
+        // Collation-error fallback: if CONVERT(... USING utf8mb4) COLLATE still fails
+        // (e.g. MySQL version quirk), retry without any COLLATE forcing — the pre-4.1.4
+        // behavior that relies on implicit collation resolution.
+        if (!empty($queryError) && $this->isCollationError($queryError)) {
+            $fpreg = ABJ_404_Solution_FunctionsPreg::getInstance();
+            $fallbackQuery = $fpreg->regexReplace(
+                'CONVERT\(wpt\.name USING utf8mb4\) COLLATE [A-Za-z0-9_]+',
+                'wpt.name', $query);
+            $fallbackQuery = $fpreg->regexReplace(
+                'CONVERT\(usefulterms\.grouped_terms USING utf8mb4\) COLLATE [A-Za-z0-9_]+',
+                'usefulterms.grouped_terms', is_string($fallbackQuery) ? $fallbackQuery : $query);
+            $fallbackResult = $this->queryAndGetResults(
+                is_string($fallbackQuery) ? $fallbackQuery : $query,
+                array('result_type' => OBJECT, 'log_errors' => false));
+            $queryError = is_string($fallbackResult['last_error'] ?? '') ? ($fallbackResult['last_error'] ?? '') : '';
+            if (empty($queryError)) {
+                $rows = is_array($fallbackResult['rows']) ? $fallbackResult['rows'] : array();
+            }
+        }
+
+        if (!empty($queryError) && $this->isInvalidDataError($queryError) &&
                 $slug != "" && strpos($query, 'CAST(wp_posts.post_name AS CHAR CHARACTER SET utf8mb4)') !== false) {
             // Compatibility fallback: retry once without CAST/COLLATE for environments
             // where mixed encodings still reject utf8mb4 coercion.
             $fallbackSpecifiedSlug = " */\n and wp_posts.post_name = '" . esc_sql($slug) . "' \n ";
             $fallbackQuery = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getPublishedPagesAndPostsIDs.sql");
-            $fallbackQuery = $this->doTableNameReplacements($fallbackQuery);
             $fallbackQuery = $this->f->str_replace('{recognizedPostTypes}', $recognizedPostTypes, $fallbackQuery);
             $fallbackQuery = $this->f->str_replace('{specifiedSlug}', $fallbackSpecifiedSlug, $fallbackQuery);
             $fallbackQuery = $this->f->str_replace('{searchTerm}', $searchTerm, $fallbackQuery);
             $fallbackQuery = $this->f->str_replace('{extraWhereClause}', $extraWhereClause, $fallbackQuery);
             $fallbackQuery = $this->f->str_replace('{limit-results}', $limitResults, $fallbackQuery);
             $fallbackQuery = $this->f->str_replace('{order-results}', $orderResults, $fallbackQuery);
-            $fallbackResult = $this->queryAndGetResults($fallbackQuery, array('log_errors' => false));
-            $fallbackRows = is_array($fallbackResult['rows'] ?? array()) ? ($fallbackResult['rows'] ?? array()) : array();
-            $rows = array_map(function($row) {
-                return (object)$row;
-            }, $fallbackRows);
+            $fallbackResult = $this->queryAndGetResults($fallbackQuery, array('result_type' => OBJECT, 'log_errors' => false));
+            $fallbackError = is_string($fallbackResult['last_error'] ?? '') ? ($fallbackResult['last_error'] ?? '') : '';
+            if (empty($fallbackError)) {
+                $queryError = '';
+                $rows = is_array($fallbackResult['rows']) ? $fallbackResult['rows'] : array();
+            }
         }
 
-        // check for errors
-        if ($wpdb->last_error) {
+        // check for errors (use $queryError which tracks the latest attempt)
+        if ($queryError) {
             // "Unknown column 'plc.content_keywords'" occurs during the DB migration window
             // when the column hasn't been added yet (e.g. sync lock was stuck for ~24h).
             // Degrade to warning so it doesn't generate email reports for every 404 hit.
-            if (stripos($wpdb->last_error, 'unknown column') !== false &&
-                    stripos($wpdb->last_error, 'content_keywords') !== false) {
-                $this->logger->warn("content_keywords column not yet available (DB migration pending): " . $wpdb->last_error);
-            } else if (!$this->classifyAndHandleInfrastructureError($wpdb->last_error)) {
-                $this->logger->errorMessage("Error executing query. Err: " . $wpdb->last_error . ", Query: " . $query);
+            if (stripos($queryError, 'unknown column') !== false &&
+                    stripos($queryError, 'content_keywords') !== false) {
+                $this->logger->warn("content_keywords column not yet available (DB migration pending): " . $queryError);
+            } else if (!$this->classifyAndHandleInfrastructureError($queryError)) {
+                $this->logger->errorMessage("Error executing query. Err: " . $queryError . ", Query: " . $query);
             }
         }
 
@@ -807,13 +834,13 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         $query = $this->doTableNameReplacements($query);
         $query = $this->f->str_replace('{recognizedPostTypes}', $recognizedPostTypes, $query);
         
-        $rows = $wpdb->get_results($query);
-        // check for errors
-        if ($wpdb->last_error && !$this->classifyAndHandleInfrastructureError($wpdb->last_error)) {
-            $this->logger->errorMessage("Error executing query. Err: " . $wpdb->last_error . ", Query: " . $query);
+        $result = $this->queryAndGetResults($query, array('result_type' => OBJECT));
+        $queryError = is_string($result['last_error'] ?? '') ? ($result['last_error'] ?? '') : '';
+        if ($queryError && !$this->classifyAndHandleInfrastructureError($queryError)) {
+            $this->logger->errorMessage("Error executing query. Err: " . $queryError . ", Query: " . $query);
         }
-        
-        return $rows;
+
+        return is_array($result['rows']) ? $result['rows'] : array();
     }
 
     /** Returns rows with the defined terms (tags).
@@ -847,15 +874,16 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         $query = $this->f->str_replace('{limit}', $limitClause, $query);
         $query = $this->doTableNameReplacements($query);
         $query = $this->f->str_replace('{recognizedCategories}', $recognizedCategories, $query);
-        
-        $rows = $wpdb->get_results($query);
-        // check for errors
-        if ($wpdb->last_error && !$this->classifyAndHandleInfrastructureError($wpdb->last_error)) {
-            $this->logger->errorMessage("Error executing query. Err: " . $wpdb->last_error . ", Query: " . $query);
+
+        $result = $this->queryAndGetResults($query, array('result_type' => OBJECT));
+        $queryError = is_string($result['last_error'] ?? '') ? ($result['last_error'] ?? '') : '';
+        if ($queryError && !$this->classifyAndHandleInfrastructureError($queryError)) {
+            $this->logger->errorMessage("Error executing query. Err: " . $queryError . ", Query: " . $query);
         }
-        
+        $rows = is_array($result['rows']) ? $result['rows'] : array();
+
         $rows = $this->addURLToTermsRows($rows);
-        
+
         return $rows;
     }
     
@@ -936,15 +964,16 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         $query = $this->f->str_replace('{slug}', $slug, $query);
         $query = $this->f->str_replace('{limit}', $limitClause, $query);
         $query = $this->doTableNameReplacements($query);
-        
-        $rows = $wpdb->get_results($query);
-        // check for errors
-        if ($wpdb->last_error && !$this->classifyAndHandleInfrastructureError($wpdb->last_error)) {
-            $this->logger->errorMessage("Error executing query. Err: " . $wpdb->last_error . ", Query: " . $query);
+
+        $result = $this->queryAndGetResults($query, array('result_type' => OBJECT));
+        $queryError = is_string($result['last_error'] ?? '') ? ($result['last_error'] ?? '') : '';
+        if ($queryError && !$this->classifyAndHandleInfrastructureError($queryError)) {
+            $this->logger->errorMessage("Error executing query. Err: " . $queryError . ", Query: " . $query);
         }
-        
+        $rows = is_array($result['rows']) ? $result['rows'] : array();
+
         $rows = $this->addURLToTermsRows($rows);
-        
+
         return $rows;
     }
 
@@ -1160,5 +1189,90 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
                 $this->logger->warn("saveRedirectConditions: error inserting condition #{$index} for redirect_id={$redirectId}: " . $wpdb->last_error);
             }
         }
+    }
+
+    /**
+     * Auto-trash captured URLs that match known junk/bot patterns, and
+     * captured URLs with 0 hits older than 14 days.
+     *
+     * Rate-limited to once per hour via transient.
+     *
+     * @param array<string, mixed> $options Plugin options.
+     * @return int Number of URLs trashed.
+     */
+    function autoTrashJunkCapturedUrls(array $options): int {
+        // Feature must be enabled
+        $enabled = $options['auto_trash_junk_urls'] ?? '0';
+        if ($enabled !== '1') {
+            return 0;
+        }
+
+        // Rate limit: once per hour
+        $transientKey = 'abj404_last_auto_trash';
+        if (get_transient($transientKey) !== false) {
+            return 0;
+        }
+        set_transient($transientKey, time(), HOUR_IN_SECONDS);
+
+        $patternsRaw = $options['auto_trash_junk_patterns'] ?? '';
+        $patternsStr = is_string($patternsRaw) ? $patternsRaw : '';
+        $lines = array_filter(array_map('trim', explode("\n", $patternsStr)));
+
+        if (empty($lines)) {
+            return 0;
+        }
+
+        global $wpdb;
+        $totalTrashed = 0;
+
+        // Build LIKE conditions for each pattern
+        $likeClauses = array();
+        foreach ($lines as $pattern) {
+            $escaped = $wpdb->esc_like($pattern);
+            $likeClauses[] = $wpdb->prepare("url LIKE %s", '%' . $escaped . '%');
+        }
+
+        // Trash captured URLs matching junk patterns (case-insensitive via LIKE)
+        $wherePatterns = implode(' OR ', $likeClauses);
+        $query = "UPDATE {wp_abj404_redirects}
+            SET disabled = 1
+            WHERE status = " . ABJ404_STATUS_CAPTURED . "
+            AND disabled = 0
+            AND (" . $wherePatterns . ")";
+        $query = $this->doTableNameReplacements($query);
+
+        $result = $this->queryAndGetResults($query);
+        $affected = $result['rows_affected'] ?? 0;
+        $totalTrashed += is_numeric($affected) ? (int)$affected : 0;
+
+        // Trash captured URLs with 0 log hits older than 14 days.
+        // logshits is not a column — it's computed from the logs table.
+        $cutoff = time() - (14 * DAY_IN_SECONDS);
+        $query = $wpdb->prepare(
+            "UPDATE {wp_abj404_redirects} r
+            SET r.disabled = 1
+            WHERE r.status = " . ABJ404_STATUS_CAPTURED . "
+            AND r.disabled = 0
+            AND r.timestamp < %d
+            AND NOT EXISTS (
+                SELECT 1 FROM {wp_abj404_logsv2} l
+                WHERE l.requested_url = r.url
+                LIMIT 1
+            )",
+            $cutoff
+        );
+        $query = $this->doTableNameReplacements($query);
+
+        $result = $this->queryAndGetResults($query);
+        $affected = $result['rows_affected'] ?? 0;
+        $totalTrashed += is_numeric($affected) ? (int)$affected : 0;
+
+        if ($totalTrashed > 0) {
+            $this->logger->infoMessage("Auto-trashed " . $totalTrashed . " junk/stale captured URLs during maintenance.");
+            // Invalidate the cached status counts so the UI reflects the change
+            delete_transient(self::CACHE_KEY_CAPTURED_STATUS);
+        }
+
+        return $totalTrashed;
     }
 }

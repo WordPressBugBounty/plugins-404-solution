@@ -265,6 +265,107 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
     }
 
     /**
+     * Count captured URLs that have been hit 3 or more times (signal of real user impact).
+     * Uses transient caching for performance.
+     * @return int Number of captured URLs with 3+ log hits
+     */
+    function getHighImpactCapturedCount(): int {
+        $cached = get_transient(self::CACHE_KEY_HIGH_IMPACT_CAPTURED);
+        if ($cached !== false) {
+            return intval(is_scalar($cached) ? $cached : 0);
+        }
+
+        // Pre-aggregate log counts in a subquery, then count matching redirects.
+        // This avoids the expensive varchar JOIN (r.url = l.requested_url with
+        // 190-char prefix indexes) and the GROUP BY + HAVING temp table on the
+        // redirects table.  The logsv2 subquery uses the requested_url index to
+        // aggregate, and the outer query checks existence via IN on the same
+        // prefix-indexed column — far cheaper than a full JOIN.
+        $query = "SELECT COUNT(*) as cnt
+            FROM {wp_abj404_redirects} r
+            WHERE r.status = " . ABJ404_STATUS_CAPTURED . " AND r.disabled = 0
+              AND r.url IN (
+                SELECT requested_url
+                FROM {wp_abj404_logsv2}
+                GROUP BY requested_url
+                HAVING COUNT(*) >= 3
+              )";
+        $query = $this->doTableNameReplacements($query);
+
+        $result = $this->queryWithTimeout($query, 60);
+        $rows = is_array($result['rows']) ? $result['rows'] : array();
+        $count = (!empty($rows) && isset($rows[0]['cnt'])) ? intval($rows[0]['cnt']) : 0;
+
+        set_transient(self::CACHE_KEY_HIGH_IMPACT_CAPTURED, $count, self::STATUS_CACHE_TTL);
+
+        return $count;
+    }
+
+    /**
+     * Execute a query with a timeout to prevent it from blocking the page indefinitely.
+     * On timeout, logs a warning with the query shape and returns an empty result.
+     *
+     * Supports MySQL 5.7+ (MAX_EXECUTION_TIME hint) and MariaDB 10.1+ (max_statement_time).
+     * Falls back to a normal query if the DB engine doesn't support timeouts.
+     *
+     * @param string $query The SQL query to execute
+     * @param int $timeoutSeconds Maximum execution time in seconds
+     * @return array<string, mixed> Same format as queryAndGetResults()
+     */
+    private function queryWithTimeout(string $query, int $timeoutSeconds = 60): array {
+        global $wpdb;
+
+        $timeoutMs = $timeoutSeconds * 1000;
+
+        // Detect MySQL vs MariaDB to apply the right timeout mechanism.
+        $dbVersion = isset($wpdb->dbh) && function_exists('mysqli_get_server_info') && $wpdb->dbh instanceof \mysqli
+            ? mysqli_get_server_info($wpdb->dbh)
+            : ($wpdb->db_version() ?? '');
+        $isMariaDB = stripos($dbVersion, 'mariadb') !== false;
+
+        if ($isMariaDB) {
+            // MariaDB 10.1+: SET STATEMENT max_statement_time=N FOR SELECT ...
+            $timedQuery = "SET STATEMENT max_statement_time=" . $timeoutSeconds . " FOR " . $query;
+        } else {
+            // MySQL 5.7.8+: optimizer hint after SELECT keyword.
+            // Safe: MySQL < 5.7 ignores unknown optimizer hints.
+            $timedQuery = preg_replace(
+                '/^(\s*SELECT\s)/i',
+                '$1/*+ MAX_EXECUTION_TIME(' . $timeoutMs . ') */ ',
+                $query
+            );
+            if ($timedQuery === null) {
+                $timedQuery = $query;
+            }
+        }
+
+        $result = $this->queryAndGetResults($timedQuery, array('log_errors' => false));
+
+        // Check if the query timed out (error 3024 for MySQL, 1969 for MariaDB).
+        $lastError = $wpdb->last_error ?? '';
+        if ($lastError !== '' && (
+            strpos($lastError, '3024') !== false ||
+            strpos($lastError, '1969') !== false ||
+            stripos($lastError, 'max_execution_time') !== false ||
+            stripos($lastError, 'max_statement_time') !== false
+        )) {
+            try {
+                $logger = ABJ_404_Solution_Logging::getInstance();
+                $logger->infoMessage(
+                    'Query timed out after ' . $timeoutSeconds . 's. ' .
+                    'This is a hosting performance issue, not a plugin bug. ' .
+                    'Query shape: ' . substr(preg_replace('/\s+/', ' ', trim($query)) ?? $query, 0, 500)
+                );
+            } catch (\Throwable $ignored) {
+                // Logging failure should not prevent graceful degradation.
+            }
+            return array('rows' => array(), 'last_error' => $lastError);
+        }
+
+        return $result;
+    }
+
+    /**
      * Invalidate cached status counts.
      * Call this when redirects are created, updated, or deleted.
      */
@@ -272,6 +373,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
     function invalidateStatusCountsCache(): void {
         delete_transient(self::CACHE_KEY_REDIRECT_STATUS);
         delete_transient(self::CACHE_KEY_CAPTURED_STATUS);
+        delete_transient(self::CACHE_KEY_HIGH_IMPACT_CAPTURED);
         $this->invalidateViewSnapshotCache();
     }
 
@@ -563,13 +665,14 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
             $usedFallbackForLogsHits = true;
             $queryAllRowsAtOnce = false;
 
-            // If sorting by logshits/last_used, we must query ALL rows first,
-            // then sort in PHP, then apply limit - otherwise we get wrong results
+            // If sorting by logshits/last_used, we need to query rows, populate logs
+            // data in PHP, sort, then slice to the page. Cap the fetch to prevent
+            // memory exhaustion on large sites (PHP_INT_MAX previously crashed Apache).
             if ($tableOptions['orderby'] == 'logshits' || $tableOptions['orderby'] == 'last_used') {
                 $needsPhpSortAndLimit = true;
-                // Query all rows (no limit) so we can sort properly in PHP
+                $fallbackMaxRows = 5000;
                 $query = $this->getRedirectsForViewQuery($sub, $tableOptions, false,
-                    0, PHP_INT_MAX, false);
+                    0, $fallbackMaxRows, false);
             } else {
                 // Other sort columns work fine with normal limit
                 $query = $this->getRedirectsForViewQuery($sub, $tableOptions, false,
@@ -756,10 +859,14 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
             } else {
                 $this->logger->errorMessage("Unrecognized sub type: " . esc_html($sub));
             }
-            
+
         } else if ($tableOptions['filter'] == ABJ404_STATUS_MANUAL) {
             $statusTypes = implode(", ", array(ABJ404_STATUS_MANUAL, ABJ404_STATUS_REGEX));
-            
+
+        } else if ($tableOptions['filter'] == ABJ404_HANDLED_FILTER) {
+            // Composite filter: Ignored + Later (Simple mode "Handled" tab)
+            $statusTypes = implode(", ", array(ABJ404_STATUS_IGNORED, ABJ404_STATUS_LATER));
+
         } else {
             $statusTypes = $tableOptions['filter'];
         }
@@ -767,6 +874,9 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
 
         if ($tableOptions['filter'] == ABJ404_TRASH_FILTER) {
             $trashValue = 1;
+        } else if ($tableOptions['filter'] == ABJ404_HANDLED_FILTER) {
+            // Show both active (disabled=0) and trashed (disabled=1) in Handled view
+            $trashValue = 0;
         } else {
             $trashValue = 0;
         }

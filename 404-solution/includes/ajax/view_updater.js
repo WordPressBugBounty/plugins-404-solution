@@ -10,14 +10,19 @@ if (typeof(getURLParameter) !== "function") {
 // when the user presses enter on the filter text input then update the table
 jQuery(document).ready(function($) {
     bindSearchFieldListeners();
+    triggerInitialTableLoadIfNeeded();
     triggerBackgroundTableRefreshIfEnabled();
     triggerStatsBackgroundRefreshIfEnabled();
 });
 
 function getRefreshStatusHost() {
-    var $host = jQuery('.abj404-pagination-right').first();
+    // Prefer the element that actually carries AJAX config attributes.
+    var $host = jQuery('[data-pagination-ajax-url]').first();
     if ($host.length === 0) {
         $host = jQuery('.abj404-filter-bar').first();
+    }
+    if ($host.length === 0) {
+        $host = jQuery('.abj404-pagination-right').first();
     }
     return $host;
 }
@@ -36,6 +41,10 @@ function triggerBackgroundTableRefreshIfEnabled() {
         return;
     }
     if ($config.attr('data-pagination-auto-refresh') !== '1') {
+        return;
+    }
+    if ($config.attr('data-pagination-initial-load') === '1' &&
+        jQuery('.abj404-table[data-table-awaiting-load="1"]').length > 0) {
         return;
     }
     if (!shouldRunAutoRefreshNow($config)) {
@@ -119,6 +128,41 @@ function triggerBackgroundTableRefreshIfEnabled() {
     } else {
         setTimeout(runRefresh, 900);
     }
+}
+
+function triggerInitialTableLoadIfNeeded() {
+    var $config = getRefreshStatusHost();
+    if ($config.length === 0) {
+        return;
+    }
+    if ($config.attr('data-pagination-initial-load') !== '1') {
+        return;
+    }
+    if (jQuery('.abj404-table[data-table-awaiting-load="1"]').length === 0) {
+        $config.attr('data-pagination-initial-load', '0');
+        return;
+    }
+
+    var perpageElements = document.querySelectorAll('.perpage');
+    if (perpageElements == null || perpageElements.length === 0) {
+        return;
+    }
+
+    paginationLinksChange(perpageElements[0], {
+        backgroundRefresh: false,
+        detectOnly: false,
+        onComplete: function() {
+            $config.attr('data-pagination-initial-load', '0');
+        },
+        onError: function() {
+            $config.attr('data-pagination-initial-load', '0');
+            // Remove placeholder attributes so the page is not stuck on
+            // "Loading…" forever when the AJAX request fails.
+            jQuery('[data-table-awaiting-load]').removeAttr('data-table-awaiting-load');
+            jQuery('[data-tab-counts-placeholder]').removeAttr('data-tab-counts-placeholder');
+            jQuery('[data-health-bar-placeholder]').removeAttr('data-health-bar-placeholder');
+        }
+    });
 }
 
 function getStatsRefreshConfigHost() {
@@ -642,12 +686,12 @@ function paginationLinksChange(triggerItem, options) {
     var tableSelector = jQuery('.abj404-table').length > 0 ? '.abj404-table' : '.wp-list-table';
 
     // Get AJAX config from the page (supports both new data-attrs and legacy URL-with-query).
-    var $ajaxConfigEl = jQuery(".abj404-pagination-right").first();
+    var $ajaxConfigEl = jQuery("[data-pagination-ajax-url]").first();
     if ($ajaxConfigEl.length === 0) {
         $ajaxConfigEl = jQuery(".abj404-filter-bar").first();
     }
     if ($ajaxConfigEl.length === 0) {
-        $ajaxConfigEl = jQuery("[data-pagination-ajax-url]").first();
+        $ajaxConfigEl = jQuery(".abj404-pagination-right").first();
     }
     var url = $ajaxConfigEl.attr("data-pagination-ajax-url") || window.ajaxurl;
     if (!url) {
@@ -791,11 +835,17 @@ function paginationLinksChange(triggerItem, options) {
 
             // replace the tables - support both old (.wp-list-table) and new (.abj404-table) table classes
             var pageLinks = jQuery('.abj404-pagination-right');
-            if (pageLinks.length > 0) {
-                jQuery(pageLinks[0]).replaceWith(result.paginationLinksTop);
-                if (pageLinks.length > 1) {
-                    jQuery(pageLinks[1]).replaceWith(result.paginationLinksBottom);
-                }
+            if (pageLinks.length > 1) {
+                // Two pagination bars: top gets search filter, bottom doesn't.
+                var $topPagination = jQuery(result.paginationLinksTop);
+                $topPagination.addClass('abj404-pagination-top');
+                jQuery(pageLinks[0]).replaceWith($topPagination);
+                var $bottomPagination = jQuery(result.paginationLinksBottom);
+                $bottomPagination.addClass('abj404-pagination-bottom');
+                jQuery(pageLinks[1]).replaceWith($bottomPagination);
+            } else if (pageLinks.length === 1) {
+                // Single pagination bar: use bottom variant (no search filter).
+                jQuery(pageLinks[0]).replaceWith(result.paginationLinksBottom);
             }
             // Replace the table - try both class names
             if (jQuery('.wp-list-table').length > 0) {
@@ -803,10 +853,41 @@ function paginationLinksChange(triggerItem, options) {
             } else if (jQuery('.abj404-table').length > 0) {
                 jQuery('.abj404-table').replaceWith(result.table);
             }
+            // Update tab counts from AJAX response
+            if (result.tabCounts) {
+                jQuery('.abj404-content-tab[data-tab-filter]').each(function() {
+                    var filterVal = jQuery(this).attr('data-tab-filter');
+                    if (filterVal in result.tabCounts) {
+                        jQuery(this).find('.abj404-tab-count').text(result.tabCounts[filterVal]);
+                    }
+                });
+                jQuery('.abj404-content-tabs').removeAttr('data-tab-counts-placeholder');
+            }
+            // Update health bar from AJAX response (redirects page only)
+            if (typeof result.highImpactCapturedCount !== 'undefined' && result.statusCounts) {
+                var $bar = jQuery('.abj404-health-bar[data-health-bar-placeholder]');
+                if ($bar.length > 0) {
+                    var active = (result.statusCounts.all || 0) - (result.statusCounts.trash || 0);
+                    var high = result.highImpactCapturedCount || 0;
+                    var html;
+                    if (high === 0) {
+                        html = '<span class="abj404-health-dot abj404-health-green"></span>' +
+                            jQuery('<span>').text(active + ' redirects active, no URLs need attention').html();
+                    } else {
+                        html = '<span class="abj404-health-dot abj404-health-yellow"></span>' +
+                            jQuery('<span>').text(active + ' redirects active \u2014 ' + high + ' captured URLs have repeat visitors').html() +
+                            ' <a href="?page=' + (getURLParameter('page') || 'abj404_solution') + '&subpage=abj404_captured&filter=' +
+                            (result.statusCounts._capturedFilter || '') + '">View</a>';
+                    }
+                    $bar.html(html);
+                    $bar.removeAttr('data-health-bar-placeholder');
+                }
+            }
             // Reinitialize table interactions (checkboxes, bulk actions) after AJAX refresh
             if (typeof window.abj404InitTableInteractions === 'function') {
                 window.abj404InitTableInteractions();
             }
+            jQuery('.abj404-filter-bar').attr('data-pagination-initial-load', '0');
             bindSearchFieldListeners();
             if (typeof window.abj404InitTimeAgo === 'function') {
                 window.abj404InitTimeAgo();
