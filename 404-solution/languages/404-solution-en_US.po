@@ -846,6 +846,10 @@ msgstr "Avg confidence: %s%%"
 msgid "Manual redirect — no confidence score"
 msgstr "Manual redirect — no confidence score"
 
+#: includes/ViewTrait_RedirectsTable.php
+msgid "No confidence score for this engine"
+msgstr "No confidence score for this engine"
+
 msgid "New Redirect Added Successfully!"
 msgstr "New Redirect Added Successfully!"
 
@@ -2583,6 +2587,10 @@ msgstr "spell check"
 msgid "archive fallback"
 msgstr "archive fallback"
 
+#: includes/FrontendRequestPipeline.php
+msgid "wp guess"
+msgstr "wp guess"
+
 #: includes/ImportExportService.php
 msgid "Error: Native export file does not exist."
 msgstr "Error: Native export file does not exist."
@@ -2955,8 +2963,8 @@ msgstr "Remove Credentials"
 msgid "Connected to Google Search Console."
 msgstr "Connected to Google Search Console."
 
-msgid "Search traffic data for your captured 404 URLs is shown below. Data is cached for 1 hour."
-msgstr "Search traffic data for your captured 404 URLs is shown below. Data is cached for 1 hour."
+msgid "Search traffic data for your captured 404 URLs is shown below. Data is refreshed nightly."
+msgstr "Search traffic data for your captured 404 URLs is shown below. Data is refreshed nightly."
 
 msgid "Disconnect"
 msgstr "Disconnect"
@@ -2999,6 +3007,10 @@ msgstr "Impressions"
 
 msgid "No search traffic data found for your captured 404 URLs in the last 90 days."
 msgstr "No search traffic data found for your captured 404 URLs in the last 90 days."
+
+#: includes/GoogleSearchConsole.php
+msgid "GSC data is being fetched in the background. Reload this page in a few minutes."
+msgstr "GSC data is being fetched in the background. Reload this page in a few minutes."
 
 msgid "Avg. Position"
 msgstr "Avg. Position"
@@ -3286,6 +3298,9 @@ msgstr "URL Fix"
 
 msgid "Archive Fallback"
 msgstr "Archive Fallback"
+
+msgid "WordPress URL Guess Fallback"
+msgstr ""
 
 msgid "Lower number = higher priority. First matching profile wins."
 msgstr "Lower number = higher priority. First matching profile wins."

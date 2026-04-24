@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 	Author:      Aaron J
 	Author URI:  https://www.ajexperience.com/404-solution/
 
-	Version: 4.1.5
+	Version: 4.1.6
 	Requires at least: 5.0
 	Requires PHP: 7.4
 
@@ -340,6 +340,7 @@ if (!function_exists('abj404_shortCodeListener')) {
 				$inc . 'sql/getIDsNeededForPermalinkCache.sql',
 				$inc . 'sql/getLogRecords.sql',
 				$inc . 'sql/getLogsCount.sql',
+				$inc . 'sql/getDistinctLoggedUrls.sql',
 				$inc . 'sql/getLogsIDandURL.sql',
 				$inc . 'sql/getLogsIDandURLForAjax.sql',
 				$inc . 'sql/getMostUnusedRedirects.sql',
@@ -1029,6 +1030,36 @@ function abj404_sendDigestCronListener() {
 	add_action('abj404_network_activation_hook', 'abj404_networkActivationListener');
 	add_action('abj404_network_activation_background', 'abj404_networkActivationBackgroundListener');
 	add_action('abj404_network_upgrade_background', 'abj404_networkUpgradeBackgroundListener');
+	add_action('abj404_gsc_fetch_cron', 'abj404_gscFetchCronListener');
+	add_action('abj404_gsc_background_refresh', 'abj404_gscBackgroundRefreshListener');
+
+if (!function_exists('abj404_gscFetchCronListener')) {
+/** Nightly cron: fetch GSC data and cache it. @return void */
+function abj404_gscFetchCronListener(): void {
+    try {
+        require_once(plugin_dir_path( __FILE__ ) . "includes/Loader.php");
+        $gscLogger = ABJ_404_Solution_Logging::getInstance();
+        $gsc = new ABJ_404_Solution_GoogleSearchConsole($gscLogger);
+        $gsc->fetchAndCacheGscData();
+    } catch (\Throwable $e) {
+        error_log('404 Solution cron (GSC fetch): ' . $e->getMessage());
+    }
+}
+}
+
+if (!function_exists('abj404_gscBackgroundRefreshListener')) {
+/** On-demand background refresh triggered when an admin views the Options tab with stale data. @return void */
+function abj404_gscBackgroundRefreshListener(): void {
+    try {
+        require_once(plugin_dir_path( __FILE__ ) . "includes/Loader.php");
+        $gscLogger = ABJ_404_Solution_Logging::getInstance();
+        $gsc = new ABJ_404_Solution_GoogleSearchConsole($gscLogger);
+        $gsc->fetchAndCacheGscData();
+    } catch (\Throwable $e) {
+        error_log('404 Solution cron (GSC background refresh): ' . $e->getMessage());
+    }
+}
+}
 
 	/**
 	 * Override the locale for this plugin if user has configured a language override.

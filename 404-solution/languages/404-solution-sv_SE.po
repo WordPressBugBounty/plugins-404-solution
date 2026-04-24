@@ -821,6 +821,10 @@ msgstr "Genomsn. konfidens: %s%%"
 msgid "Manual redirect — no confidence score"
 msgstr "Manuell omdirigering — inget konfidenspoäng"
 
+#: includes/ViewTrait_RedirectsTable.php
+msgid "No confidence score for this engine"
+msgstr "Inget konfidenspoäng för denna motor"
+
 msgid "New Redirect Added Successfully!"
 msgstr "Ny omdirigering har lagts till."
 
@@ -2566,6 +2570,10 @@ msgstr "stavningskontroll"
 msgid "archive fallback"
 msgstr "arkivreserv"
 
+#: includes/FrontendRequestPipeline.php
+msgid "wp guess"
+msgstr "WP-gissning"
+
 #: includes/ImportExport.php
 msgid "Error: Native export file does not exist."
 msgstr "Fel: den inbyggda exportfilen finns inte."
@@ -2954,8 +2962,8 @@ msgstr "Ta bort uppgifter"
 msgid "Connected to Google Search Console."
 msgstr "Ansluten till Google Search Console."
 
-msgid "Search traffic data for your captured 404 URLs is shown below. Data is cached for 1 hour."
-msgstr "Söktrafikdata för dina infångade 404-URL:er visas nedan. Data cachelagras i 1 timme."
+msgid "Search traffic data for your captured 404 URLs is shown below. Data is refreshed nightly."
+msgstr "Söktrafikdata för dina infångade 404-URL:er visas nedan. Data uppdateras varje natt."
 
 msgid "Disconnect"
 msgstr "Koppla från"
@@ -2998,6 +3006,10 @@ msgstr "Visningar"
 
 msgid "No search traffic data found for your captured 404 URLs in the last 90 days."
 msgstr "Ingen söktrafik hittades för dina registrerade 404-URL:er under de senaste 90 dagarna."
+
+#: includes/GoogleSearchConsole.php
+msgid "GSC data is being fetched in the background. Reload this page in a few minutes."
+msgstr "GSC-data hämtas i bakgrunden. Ladda om denna sida om några minuter."
 
 msgid "Avg. Position"
 msgstr "Genomsnittlig position"
@@ -3283,6 +3295,9 @@ msgstr "URL-korrigering"
 
 msgid "Archive Fallback"
 msgstr "Arkivfallback"
+
+msgid "WordPress URL Guess Fallback"
+msgstr "WordPress URL-gissningsfallback"
 
 msgid "Lower number = higher priority. First matching profile wins."
 msgstr "Lägre nummer = högre prioritet. Den första matchande profilen vinner."

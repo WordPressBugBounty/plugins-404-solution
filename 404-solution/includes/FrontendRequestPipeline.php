@@ -77,6 +77,68 @@ class ABJ_404_Solution_FrontendRequestPipeline {
         $this->trace[] = ['step' => $step, 'outcome' => $outcome, 'detail' => $detail];
     }
 
+    /** @return string */
+    private function wpGuessEngineClassName(): string {
+        return 'ABJ_404_Solution_WordPressUrlGuessEngine';
+    }
+
+    /**
+     * @param string $requestedURL
+     * @return bool
+     */
+    private function shouldRunWordPressGuessFallback(string $requestedURL): bool {
+        $enabled = true;
+        if (function_exists('apply_filters')) {
+            $enabled = (bool) apply_filters(
+                'abj404_wp_guess_fallback_enabled',
+                true,
+                $requestedURL
+            );
+        }
+        if (!$enabled) {
+            return false;
+        }
+
+        return ABJ_404_Solution_EngineProfileResolver::getInstance()
+            ->isEngineEnabledForUrl($requestedURL, $this->wpGuessEngineClassName());
+    }
+
+    /**
+     * Normalize a guessed URL into the same request-shape used by $requestedURL:
+     * path (relative to WP home directory) plus sorted query string.
+     *
+     * @param string $guessedUrl
+     * @return string
+     */
+    private function normalizeGuessedUrlToRequestShape(string $guessedUrl): string {
+        $normalized = $this->f->normalizeUrlString($guessedUrl);
+        if ($normalized === '') {
+            return '';
+        }
+
+        $parts = parse_url($normalized);
+        if (!is_array($parts)) {
+            return '';
+        }
+
+        $path = isset($parts['path']) ? $parts['path'] : '/';
+        if ($path === '') {
+            $path = '/';
+        }
+        $path = $this->logic->removeHomeDirectory($path);
+        if ($path === '') {
+            $path = '/';
+        }
+        if ($path[0] !== '/') {
+            $path = '/' . $path;
+        }
+
+        /** @var array<string, string> $urlPartsStr */
+        $urlPartsStr = array_map('strval', $parts);
+        $sortedQuery = $this->f->sortQueryString($urlPartsStr);
+        return $path . $sortedQuery;
+    }
+
     /**
      * Emit benchmark header immediately for paths that may not reach WordPress send_headers.
      *
@@ -176,6 +238,7 @@ class ABJ_404_Solution_FrontendRequestPipeline {
         $redirect = $this->dao->getActiveRedirectForURL($requestedURL);
         $this->recordRedirectLookupTiming($lookupStart);
         $this->logAReallyLongDebugMessage($options, $requestedURL, $redirect);
+        $autoRedirectsAreOn = !array_key_exists('auto_redirects', $options) || $options['auto_redirects'] == '1';
 
         if ($requestedURL != "") {
             $matched = $this->evaluateRedirectCandidate($redirect, '', $options);
@@ -200,8 +263,6 @@ class ABJ_404_Solution_FrontendRequestPipeline {
                 $this->emitBenchmarkHeadersIfEnabled();
                 return;
             }
-
-            $autoRedirectsAreOn = !array_key_exists('auto_redirects', $options) || $options['auto_redirects'] == '1';
 
             if ($autoRedirectsAreOn) {
                 $matchRequest = new ABJ_404_Solution_MatchRequest($requestedURL, $urlSlugOnly, $options);
@@ -294,6 +355,62 @@ class ABJ_404_Solution_FrontendRequestPipeline {
                     }
                 }
             }
+        }
+
+        // Last resort: defer to WordPress's built-in URL guessing.
+        // WordPress matches partial slugs via LIKE 'slug%' — a complementary
+        // strategy to our Levenshtein-based spell checker. For example,
+        // /redes matches /redes-social because the slug starts with "redes".
+        $wpGuessFallbackEnabled = $autoRedirectsAreOn && $this->shouldRunWordPressGuessFallback($requestedURL);
+        $wpGuessEngineName = __('wp guess', '404-solution');
+        if ($wpGuessFallbackEnabled && function_exists('redirect_guess_404_permalink')) {
+            $wpGuess = redirect_guess_404_permalink();
+            if ($wpGuess && is_string($wpGuess)) {
+                $normalizedGuess = $this->normalizeGuessedUrlToRequestShape($wpGuess);
+                if ($normalizedGuess !== '' && $normalizedGuess === $requestedURL) {
+                    $this->addTraceStep('WordPress URL guess', 'Ignored self-redirect guess', $wpGuess);
+                } else {
+                    $this->addTraceStep('WordPress URL guess', 'Matched candidate', $wpGuess);
+                    $defaultRedirect = isset($options['default_redirect']) && is_scalar($options['default_redirect'])
+                        ? (string)$options['default_redirect'] : '301';
+
+                    // Resolve post ID so the redirect record links to the destination post.
+                    $wpGuessPostId = '';
+                    $wpGuessType = (string)$this->wpTypePost();
+                    if (function_exists('url_to_postid')) {
+                        $postId = url_to_postid($wpGuess);
+                        if ($postId > 0) {
+                            $wpGuessPostId = (string)$postId;
+                        }
+                    }
+
+                    $wpGuessResult = new ABJ_404_Solution_MatchResult(
+                        $wpGuessPostId !== '' ? $wpGuessPostId : '0',
+                        $wpGuessType,
+                        $wpGuess,
+                        '',
+                        0.0,
+                        $wpGuessEngineName
+                    );
+                    if ($this->isExcluded($wpGuessResult, $options)) {
+                        $this->addTraceStep('WordPress URL guess', 'Excluded destination — skipped', $wpGuess);
+                    } else {
+                        $this->addTraceStep('WordPress URL guess', 'Matched — redirecting', $wpGuess);
+                        $this->dao->setupRedirect($requestedURL, (string)ABJ404_STATUS_AUTO,
+                            $wpGuessType, $wpGuessPostId, $defaultRedirect, 0, $wpGuessEngineName);
+                        $this->dao->logRedirectHit($requestedURL, $wpGuess, $wpGuessEngineName, null, $this->trace);
+                        $redirectSent = $this->logic->forceRedirect(esc_url($wpGuess), (int)$defaultRedirect);
+                        if ($redirectSent !== false) {
+                            exit;
+                        }
+                        $this->addTraceStep('WordPress URL guess', 'Redirect blocked — continued', $wpGuess);
+                    }
+                }
+            }
+            $this->addTraceStep('WordPress URL guess', 'No match');
+        } elseif (!$wpGuessFallbackEnabled) {
+            $reason = !$autoRedirectsAreOn ? 'auto_redirects off' : 'engine profile/filter';
+            $this->addTraceStep('WordPress URL guess', 'Skipped — ' . $reason);
         }
 
         $this->logic->tryNormalPostQuery($options);

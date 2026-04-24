@@ -821,6 +821,10 @@ msgstr "Durchschn. Konfidenz: %s%%"
 msgid "Manual redirect — no confidence score"
 msgstr "Manuell-Weiterleitung — kein Konfidenz-Score"
 
+#: includes/ViewTrait_RedirectsTable.php
+msgid "No confidence score for this engine"
+msgstr "Kein Konfidenzwert für diese Engine"
+
 msgid "New Redirect Added Successfully!"
 msgstr "Neue Weiterleitung erfolgreich hinzugefügt!"
 
@@ -2567,6 +2571,10 @@ msgstr "Rechtschreibprüfung"
 msgid "archive fallback"
 msgstr "Archiv-Fallback"
 
+#: includes/FrontendRequestPipeline.php
+msgid "wp guess"
+msgstr "WP-Vermutung"
+
 #: includes/ImportExportService.php
 msgid "Error: Native export file does not exist."
 msgstr "Fehler: Die native Exportdatei existiert nicht."
@@ -2952,8 +2960,8 @@ msgstr "Anmeldedaten entfernen"
 msgid "Connected to Google Search Console."
 msgstr "Verbunden mit Google Search Console."
 
-msgid "Search traffic data for your captured 404 URLs is shown below. Data is cached for 1 hour."
-msgstr "Suchtraffic-Daten für Ihre erfassten 404-URLs werden unten angezeigt. Daten werden 1 Stunde zwischengespeichert."
+msgid "Search traffic data for your captured 404 URLs is shown below. Data is refreshed nightly."
+msgstr "Suchtraffic-Daten für Ihre erfassten 404-URLs werden unten angezeigt. Die Daten werden nächtlich aktualisiert."
 
 msgid "Disconnect"
 msgstr "Trennen"
@@ -2996,6 +3004,10 @@ msgstr "Impressionen"
 
 msgid "No search traffic data found for your captured 404 URLs in the last 90 days."
 msgstr "Keine Suchanfragedaten für Ihre erfassten 404-URLs der letzten 90 Tage gefunden."
+
+#: includes/GoogleSearchConsole.php
+msgid "GSC data is being fetched in the background. Reload this page in a few minutes."
+msgstr "GSC-Daten werden im Hintergrund abgerufen. Laden Sie diese Seite in wenigen Minuten neu."
 
 msgid "Avg. Position"
 msgstr "Durchschn. Position"
@@ -3281,6 +3293,9 @@ msgstr "URL-Korrektur"
 
 msgid "Archive Fallback"
 msgstr "Archiv-Fallback"
+
+msgid "WordPress URL Guess Fallback"
+msgstr "WordPress-URL-Raten-Fallback"
 
 msgid "Lower number = higher priority. First matching profile wins."
 msgstr "Niedrigere Zahl = höhere Priorität. Das erste übereinstimmende Profil gewinnt."

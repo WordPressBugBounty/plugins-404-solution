@@ -303,66 +303,19 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
 
     /**
      * Execute a query with a timeout to prevent it from blocking the page indefinitely.
-     * On timeout, logs a warning with the query shape and returns an empty result.
+     * On timeout, logs an error with the query shape and returns an empty result.
      *
-     * Supports MySQL 5.7+ (MAX_EXECUTION_TIME hint) and MariaDB 10.1+ (max_statement_time).
-     * Falls back to a normal query if the DB engine doesn't support timeouts.
+     * Delegates to queryAndGetResults() with the 'timeout' option, which handles
+     * MySQL 5.7+ (MAX_EXECUTION_TIME hint) and MariaDB 10.1+ (max_statement_time).
      *
      * @param string $query The SQL query to execute
      * @param int $timeoutSeconds Maximum execution time in seconds
      * @return array<string, mixed> Same format as queryAndGetResults()
      */
     private function queryWithTimeout(string $query, int $timeoutSeconds = 60): array {
-        global $wpdb;
-
-        $timeoutMs = $timeoutSeconds * 1000;
-
-        // Detect MySQL vs MariaDB to apply the right timeout mechanism.
-        $dbVersion = isset($wpdb->dbh) && function_exists('mysqli_get_server_info') && $wpdb->dbh instanceof \mysqli
-            ? mysqli_get_server_info($wpdb->dbh)
-            : ($wpdb->db_version() ?? '');
-        $isMariaDB = stripos($dbVersion, 'mariadb') !== false;
-
-        if ($isMariaDB) {
-            // MariaDB 10.1+: SET STATEMENT max_statement_time=N FOR SELECT ...
-            $timedQuery = "SET STATEMENT max_statement_time=" . $timeoutSeconds . " FOR " . $query;
-        } else {
-            // MySQL 5.7.8+: optimizer hint after SELECT keyword.
-            // Safe: MySQL < 5.7 ignores unknown optimizer hints.
-            $timedQuery = preg_replace(
-                '/^(\s*SELECT\s)/i',
-                '$1/*+ MAX_EXECUTION_TIME(' . $timeoutMs . ') */ ',
-                $query
-            );
-            if ($timedQuery === null) {
-                $timedQuery = $query;
-            }
-        }
-
-        $result = $this->queryAndGetResults($timedQuery, array('log_errors' => false));
-
-        // Check if the query timed out (error 3024 for MySQL, 1969 for MariaDB).
-        $lastError = $wpdb->last_error ?? '';
-        if ($lastError !== '' && (
-            strpos($lastError, '3024') !== false ||
-            strpos($lastError, '1969') !== false ||
-            stripos($lastError, 'max_execution_time') !== false ||
-            stripos($lastError, 'max_statement_time') !== false
-        )) {
-            try {
-                $logger = ABJ_404_Solution_Logging::getInstance();
-                $logger->infoMessage(
-                    'Query timed out after ' . $timeoutSeconds . 's. ' .
-                    'This is a hosting performance issue, not a plugin bug. ' .
-                    'Query shape: ' . substr(preg_replace('/\s+/', ' ', trim($query)) ?? $query, 0, 500)
-                );
-            } catch (\Throwable $ignored) {
-                // Logging failure should not prevent graceful degradation.
-            }
-            return array('rows' => array(), 'last_error' => $lastError);
-        }
-
-        return $result;
+        return $this->queryAndGetResults($query, array(
+            'timeout' => $timeoutSeconds,
+        ));
     }
 
     /**
@@ -927,7 +880,8 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         $searchFilterForRedirectsExists = "no redirects fiter text found";
         $searchFilterForCapturedExists = "no captured 404s filter text found";
         $filterText = '';
-        if ($tableOptions['filterText'] != '') {
+        $rawFilterText = is_string($tableOptions['filterText'] ?? null) ? $tableOptions['filterText'] : '';
+        if ($rawFilterText != '') {
             if ($sub == 'abj404_redirects') {
                 // Close the comment without including user input to avoid comment breakout.
                 $searchFilterForRedirectsExists = ' filter text enabled */';
@@ -942,8 +896,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         }
 
         // Sanitize filter text for use inside LIKE; strip comment markers and escape for SQL LIKE.
-        $filterTextRaw = $tableOptions['filterText'];
-        $filterTextRaw = str_replace(array('*', '/', '$'), '', is_string($filterTextRaw) ? $filterTextRaw : '');
+        $filterTextRaw = str_replace(array('*', '/', '$'), '', $rawFilterText);
         if (isset($wpdb) && is_object($wpdb) && method_exists($wpdb, 'esc_like')) {
             /** @var wpdb $wpdb */
             $filterTextRaw = $wpdb->esc_like($filterTextRaw);

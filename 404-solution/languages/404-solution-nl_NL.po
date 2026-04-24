@@ -821,6 +821,10 @@ msgstr "Gem. betrouwbaarheid: %s%%"
 msgid "Manual redirect — no confidence score"
 msgstr "Handmatige doorverwijzing — geen betrouwbaarheidsscore"
 
+#: includes/ViewTrait_RedirectsTable.php
+msgid "No confidence score for this engine"
+msgstr "Geen betrouwbaarheidsscore voor deze engine"
+
 msgid "New Redirect Added Successfully!"
 msgstr "Nieuwe omleiding succesvol toegevoegd!"
 
@@ -2566,6 +2570,10 @@ msgstr "spellingscontrole"
 msgid "archive fallback"
 msgstr "archiefterugval"
 
+#: includes/FrontendRequestPipeline.php
+msgid "wp guess"
+msgstr "WP-schatting"
+
 #: includes/ImportExport.php
 msgid "Error: Native export file does not exist."
 msgstr "Fout: het native exportbestand bestaat niet."
@@ -2954,8 +2962,8 @@ msgstr "Referenties verwijderen"
 msgid "Connected to Google Search Console."
 msgstr "Verbonden met Google Search Console."
 
-msgid "Search traffic data for your captured 404 URLs is shown below. Data is cached for 1 hour."
-msgstr "Zoekverkeersgegevens voor uw vastgelegde 404-URL's worden hieronder weergegeven. Gegevens worden 1 uur gecacht."
+msgid "Search traffic data for your captured 404 URLs is shown below. Data is refreshed nightly."
+msgstr "Zoekverkeersgegevens voor uw vastgelegde 404-URL's worden hieronder weergegeven. De gegevens worden elke nacht vernieuwd."
 
 msgid "Disconnect"
 msgstr "Verbinding verbreken"
@@ -2998,6 +3006,10 @@ msgstr "Vertoningen"
 
 msgid "No search traffic data found for your captured 404 URLs in the last 90 days."
 msgstr "Geen zoekverkeergegevens gevonden voor uw vastgelegde 404-URL's in de afgelopen 90 dagen."
+
+#: includes/GoogleSearchConsole.php
+msgid "GSC data is being fetched in the background. Reload this page in a few minutes."
+msgstr "GSC-gegevens worden op de achtergrond opgehaald. Herlaad deze pagina over enkele minuten."
 
 msgid "Avg. Position"
 msgstr "Gem. positie"
@@ -3283,6 +3295,9 @@ msgstr "URL-correctie"
 
 msgid "Archive Fallback"
 msgstr "Archieffallback"
+
+msgid "WordPress URL Guess Fallback"
+msgstr "WordPress URL-raad-fallback"
 
 msgid "Lower number = higher priority. First matching profile wins."
 msgstr "Lager getal = hogere prioriteit. Het eerste overeenkomende profiel wint."
