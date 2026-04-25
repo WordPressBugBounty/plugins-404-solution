@@ -73,20 +73,26 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
     }
     
    /**
-    * @global type $wpdb
     * @return int the total number of redirects that have been captured.
     */
    function getCapturedCount() {
-       global $wpdb;
-       
-       $query = "select count(id) from {wp_abj404_redirects} where status = " . ABJ404_STATUS_CAPTURED;
-       $query = $this->doTableNameReplacements($query);
-       
-       $captured = $wpdb->get_col($query, 0);
-       if (!is_array($captured) || empty($captured)) {
+       $query = "select count(id) from {wp_abj404_redirects} where status = " . absint(ABJ404_STATUS_CAPTURED);
+
+       // Route through queryAndGetResults() so the count query inherits the
+       // centralized 60s timeout. Tiny query in normal operation, but the
+       // redirects table can grow into millions of rows on busy sites.
+       $result = $this->queryAndGetResults($query);
+       if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
            return 0;
        }
-       return intval($captured[0]);
+
+       $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+       if (empty($rows)) {
+           return 0;
+       }
+       $first = $rows[0];
+       $value = is_array($first) ? reset($first) : $first;
+       return intval($value);
    }
     
    /** Get all of the post types from the wp_posts table.
@@ -109,29 +115,52 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
    }
    
    /** Get the approximate number of bytes used by the logs table.
-    * @global type $wpdb
-    * @return int
+    *
+    * Reads data_length+index_length from information_schema.tables. InnoDB
+    * (and modern MyISAM) maintain these values continuously, so an ANALYZE TABLE
+    * pre-warm is unnecessary — the residual accuracy gain is irrelevant for
+    * an "X MB" UI display and the bytes-per-log heuristic in deleteOldRedirectsCron.
+    *
+    * The previous implementation issued ANALYZE TABLE before the size lookup.
+    * On sites with millions of logsv2 rows that single statement could take
+    * 10–30 seconds. ANALYZE TABLE has no automatic query timeout (the SELECT
+    * timeout in queryAndGetResults() applies only to SELECT statements), so
+    * the Settings/Tools page render exceeded reverse-proxy timeouts (e.g.
+    * Cloudflare 524, nginx 504) on large sites.
+    *
+    * The size SELECT now routes through queryAndGetResults() so it inherits
+    * the default 60-second SELECT timeout. On timeout or other error we return
+    * a non-positive sentinel; downstream callers (deleteOldRedirectsCron,
+    * the Settings UI) treat that as "could not determine".
+    *
+    * @return int Bytes used by the logs table, 0 on missing/empty stats,
+    *             or -1 if the lookup itself failed/timed out.
     */
    function getLogDiskUsage() {
-       global $wpdb;
+       $query = 'SELECT (data_length+index_length) tablesize FROM information_schema.tables '
+               . 'WHERE table_name=\'{wp_abj404_logsv2}\'';
 
-       // we have to analyze the table first for the query to be valid.
-       $result = $this->queryAndGetResults("ANALYZE TABLE {wp_abj404_logsv2}");
+       $result = $this->queryAndGetResults($query);
 
-       if ($result['last_error'] != '') {
-           $this->logger->errorMessage("Error: " . esc_html(is_string($result['last_error']) ? $result['last_error'] : ''));
+       if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
+           $err = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
+           if ($err !== '') {
+               $this->logger->errorMessage("Error: " . esc_html($err));
+           }
            return -1;
        }
-       
-       $query = 'SELECT (data_length+index_length) tablesize FROM information_schema.tables ' . 
-               'WHERE table_name=\'{wp_abj404_logsv2}\'';
-       $query = $this->doTableNameReplacements($query);
 
-       $size = $wpdb->get_col($query, 0);
-       if (!is_array($size) || empty($size)) {
+       $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+       if (empty($rows)) {
            return 0;
        }
-       return intval($size[0]);
+
+       $row = is_array($rows[0] ?? null) ? $rows[0] : array();
+       $size = $row['tablesize'] ?? null;
+       if ($size === null || !is_scalar($size)) {
+           return 0;
+       }
+       return intval($size);
    }
 
     /**
@@ -379,37 +408,49 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
      * @return int the number of records found.
      */
     function getLogsCount($logID) {
-        global $wpdb;
         // Sanitize logID to prevent SQL injection
         $logID = absint($logID);
 
         $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getLogsCount.sql");
-        $query = $this->doTableNameReplacements($query);
 
         if ($logID != 0) {
             $query = $this->f->str_replace('/* {SPECIFIC_ID}', '', $query);
             $query = $this->f->str_replace('{logID}', (string)$logID, $query);
         }
-        
-        $row = $wpdb->get_row($query, ARRAY_N);
-        if (!is_array($row) || empty($row)) {
+
+        // Route through queryAndGetResults() so the count query (potentially
+        // a JOIN against logsv2 when SPECIFIC_ID is set) inherits the
+        // centralized 60s timeout. Bypassing via $wpdb->get_row() leaves the
+        // admin page with no upper bound on slow logsv2 lookups.
+        $result = $this->queryAndGetResults($query);
+        if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
             return 0;
         }
-        $records = $row[0];
 
-        return intval($records);
+        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+        if (empty($rows)) {
+            return 0;
+        }
+        $first = $rows[0];
+        $value = is_array($first) ? reset($first) : $first;
+        return intval($value);
     }
 
-    /** 
-     * @global type $wpdb
+    /**
      * @return array<int, array<string, mixed>>
      */
     function getRedirectsAll() {
-        global $wpdb;
         $query = "select id, url from {wp_abj404_redirects} order by url";
-        $query = $this->doTableNameReplacements($query);
-        
-        $rows = $wpdb->get_results($query, ARRAY_A);
+
+        // Route through queryAndGetResults() so this list query inherits the
+        // centralized 60s timeout. The redirects table can be very large on
+        // busy sites and an unbounded ORDER BY without timeout protection
+        // could exceed reverse-proxy limits.
+        $result = $this->queryAndGetResults($query);
+        if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
+            return array();
+        }
+        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
         return $rows;
     }
     
@@ -458,12 +499,17 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
      * @return array<int, array<string, mixed>>
      */
     function getRedirectsWithLogs() {
-        global $wpdb;
-        
         $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getRedirectsWithLogs.sql");
-        $query = $this->doTableNameReplacements($query);
-        
-        $rows = $wpdb->get_results($query, ARRAY_A);
+
+        // Route through queryAndGetResults() so this redirects+logs JOIN
+        // inherits the centralized 60s timeout. logsv2 can be huge, and the
+        // join shape is identical to the one already protected in the hits
+        // table rebuild path (commit 70f3b5fe).
+        $result = $this->queryAndGetResults($query);
+        if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
+            return array();
+        }
+        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
         return $rows;
     }
 
@@ -1028,19 +1074,14 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
 
         // Check if the table exists
         if (!$this->logsHitsTableExists()) {
-            // First-time creation: table must exist before query runs, so create synchronously
-            $this->logger->debugMessage(__FUNCTION__ . " creating now because the table doesn't exist (first time).");
-            $created = $this->createRedirectsForViewHitsTable();
-            if ($created) {
-                $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'not_needed', 86400);
-            } else {
-                // Preserve a more specific state set by createRedirectsForViewHitsTable().
-                // For example, if another request already holds the lock we keep "running".
-                $decision = $this->getLogsHitsTableLastDecision();
-                if ($decision !== 'running') {
-                    $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'paused', 86400);
-                }
-            }
+            // Defer creation to shutdown hook so the admin page loads immediately.
+            // The view query gracefully falls back to null hits columns when the
+            // table doesn't exist (getRedirectsForViewQuery checks logsHitsTableExists).
+            // On sites with large logsv2 tables the INSERT...SELECT that populates
+            // the hits table can take minutes, which exceeds proxy timeouts (e.g.
+            // Cloudflare's 100-second limit → HTTP 524).
+            $this->logger->debugMessage(__FUNCTION__ . " table doesn't exist, deferring creation to shutdown hook.");
+            $this->scheduleHitsTableRebuild();
             return;
         }
 
@@ -1233,6 +1274,22 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         // Handle both object and array results
         $maxId = is_array($row) ? array_values($row)[0] : (array_values((array)$row)[0] ?? 0);
         return (int)($maxId ?? 0);
+    }
+
+    /** @return int */
+    function getMinLogId() {
+        $query = "SELECT MIN(id) FROM {wp_abj404_logsv2}";
+        $query = $this->doTableNameReplacements($query);
+        $results = $this->queryAndGetResults($query);
+
+        $resultRows = is_array($results['rows']) ? $results['rows'] : array();
+        if (empty($resultRows)) {
+            return 0;
+        }
+
+        $row = $resultRows[0];
+        $minId = is_array($row) ? array_values($row)[0] : (array_values((array)$row)[0] ?? 0);
+        return (int)($minId ?? 0);
     }
 
     /**
