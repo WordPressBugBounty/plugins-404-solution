@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 	Author:      Aaron J
 	Author URI:  https://www.ajexperience.com/404-solution/
 
-	Version: 4.1.7
+	Version: 4.1.6
 	Requires at least: 5.0
 	Requires PHP: 7.4
 
@@ -327,7 +327,6 @@ if (!function_exists('abj404_shortCodeListener')) {
 				$inc . 'sql/correctLookupTableIssue.sql',
 				$inc . 'sql/createEngineProfilesTable.sql',
 				$inc . 'sql/createLogTable.sql',
-				$inc . 'sql/createLogsHitsPreAggTable.sql',
 				$inc . 'sql/createLogsHitsTempTable.sql',
 				$inc . 'sql/createLookupTable.sql',
 				$inc . 'sql/createNGramCacheTable.sql',

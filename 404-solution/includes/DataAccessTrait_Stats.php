@@ -12,31 +12,20 @@ trait ABJ_404_Solution_DataAccess_StatsTrait {
      * @return int
      */
     function getStatsCount($query, array $valueParams) {
+        global $wpdb;
+
         if ($query == '') {
             return 0;
         }
 
-        // Route through queryAndGetResults() so the query inherits the
-        // centralized timeout, retry, and corrupted-table recovery.
-        $result = $this->queryAndGetResults($query, array('query_params' => $valueParams));
+        $results = $wpdb->get_col($wpdb->prepare($query, $valueParams));
 
-        if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
-            return 0;
-        }
-
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
-        if (empty($rows)) {
+        if (sizeof($results) == 0) {
             $this->logger->debugMessage("getStatsCount returned no results for query: " . esc_html($query));
             return 0;
         }
-
-        $first = $rows[0];
-        if (is_array($first)) {
-            $value = reset($first);
-        } else {
-            $value = $first;
-        }
-        return intval($value);
+        
+        return intval($results[0]);
     }
 
     /**
@@ -59,6 +48,8 @@ trait ABJ_404_Solution_DataAccess_StatsTrait {
      * }
      */
     function getPeriodicStatsSummary($sinceTimestamp, $notFoundDest = '404') {
+        global $wpdb;
+
         $sinceTimestamp = absint($sinceTimestamp);
         $notFoundDest = sanitize_text_field((string)$notFoundDest);
         if ($notFoundDest === '') {
@@ -89,27 +80,23 @@ trait ABJ_404_Solution_DataAccess_StatsTrait {
             FROM {$logsTable}
             WHERE timestamp >= %d";
 
-        // Route through queryAndGetResults() so this 8x DISTINCT aggregate on
-        // logsv2 inherits the centralized 60-second timeout. Without it, a
-        // large logsv2 table can stall the Stats dashboard refresh AJAX past
-        // the reverse-proxy limit (Cloudflare 524, nginx 504).
-        $result = $this->queryAndGetResults($sql, array(
-            'query_params' => array(
-                $notFoundDest, $notFoundDest, $notFoundDest, $notFoundDest,
-                $notFoundDest, $notFoundDest, $notFoundDest, $notFoundDest,
-                $sinceTimestamp,
-            ),
-        ));
+        $prepared = $wpdb->prepare(
+            $sql,
+            $notFoundDest,
+            $notFoundDest,
+            $notFoundDest,
+            $notFoundDest,
+            $notFoundDest,
+            $notFoundDest,
+            $notFoundDest,
+            $notFoundDest,
+            $sinceTimestamp
+        );
 
-        if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
+        $row = $wpdb->get_row($prepared, ARRAY_A);
+        if (!is_array($row)) {
             return $zero;
         }
-
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
-        if (empty($rows) || !is_array($rows[0] ?? null)) {
-            return $zero;
-        }
-        $row = $rows[0];
 
         foreach ($zero as $key => $unused) {
             $zero[$key] = isset($row[$key]) ? intval($row[$key]) : 0;
@@ -421,28 +408,17 @@ trait ABJ_404_Solution_DataAccess_StatsTrait {
      * @throws Exception
      */
     function getEarliestLogTimestamp() {
+        global $wpdb;
+
         $query = 'SELECT min(timestamp) as timestamp FROM {wp_abj404_logsv2}';
+        $query = $this->doTableNameReplacements($query);
+        $results = $wpdb->get_col($query);
 
-        // Route through queryAndGetResults() so this aggregate on logsv2 inherits
-        // the centralized timeout — covered by the timestamp index, but a corrupted
-        // index or stat refresh could still take >60s on huge tables.
-        $result = $this->queryAndGetResults($query);
-
-        if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
+        if (sizeof($results) == 0) {
             return -1;
         }
-
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
-        if (empty($rows)) {
-            return -1;
-        }
-
-        $first = $rows[0];
-        $value = is_array($first) ? reset($first) : $first;
-        if ($value === null || $value === false || $value === '') {
-            return -1;
-        }
-        return intval($value);
+        
+        return intval($results[0]);
     }
     
     /** Look at $_POST and $_GET for the specified option and return the default value if it's not set.
