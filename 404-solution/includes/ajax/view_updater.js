@@ -14,7 +14,92 @@ jQuery(document).ready(function($) {
     triggerInitialTableLoadIfNeeded();
     triggerBackgroundTableRefreshIfEnabled();
     triggerStatsBackgroundRefreshIfEnabled();
+    // The health bar is rendered as an empty placeholder by PHP and hydrated
+    // here so the slow getHighImpactCapturedCount() query never blocks first
+    // paint of the redirects table.  Safe to call on every page — it returns
+    // early when no placeholder is in the DOM.
+    refreshHealthBarIfNeeded();
 });
+
+/**
+ * Hydrate the redirects-page health bar via a dedicated AJAX call so the
+ * slow getHighImpactCapturedCount() query never blocks the table render.
+ *
+ * Reads endpoint URL, action, and nonce from data-attrs on the placeholder
+ * div emitted by ViewTrait_RedirectsTable.  No-op when no placeholder is
+ * present (other admin pages, or when the bar is already hydrated).
+ *
+ * Idempotent: a `data-health-bar-loading` flag prevents duplicate concurrent
+ * requests when this function is invoked from both jQuery.ready and the
+ * pagination success handler on the same page load.
+ */
+function refreshHealthBarIfNeeded() {
+    var $bar = jQuery('.abj404-health-bar[data-health-bar-placeholder]');
+    if ($bar.length === 0) {
+        return;
+    }
+    if ($bar.attr('data-health-bar-loading') === '1') {
+        return;
+    }
+
+    var url = $bar.attr('data-health-bar-ajax-url') || window.ajaxurl;
+    var action = $bar.attr('data-health-bar-ajax-action') || 'ajaxRefreshHealthBar';
+    var nonce = $bar.attr('data-health-bar-nonce') || '';
+    if (!url || !nonce) {
+        // Endpoint config missing — drop the placeholder so the page is usable.
+        $bar.removeAttr('data-health-bar-placeholder');
+        $bar.empty();
+        return;
+    }
+
+    $bar.attr('data-health-bar-loading', '1');
+
+    jQuery.ajax({
+        url: url,
+        type: 'POST',
+        dataType: 'json',
+        data: {
+            action: action,
+            nonce: nonce,
+            page: getURLParameter('page') || '',
+            subpage: getURLParameter('subpage') || ''
+        },
+        success: function(result) {
+            $bar.removeAttr('data-health-bar-loading');
+            if (!result || typeof result.highImpactCapturedCount === 'undefined' || !result.statusCounts) {
+                $bar.removeAttr('data-health-bar-placeholder');
+                $bar.empty();
+                return;
+            }
+            var active = (result.statusCounts.all || 0) - (result.statusCounts.trash || 0);
+            var rollupAvailable = result.rollupAvailable !== false && result.highImpactCapturedCount !== null;
+            var high = result.highImpactCapturedCount || 0;
+            var html;
+            if (!rollupAvailable) {
+                html = '<span class="abj404-health-dot abj404-health-gray"></span>' +
+                    jQuery('<span>').text(active + ' redirects active, URL attention status unavailable while logs rebuild').html();
+            } else if (high === 0) {
+                html = '<span class="abj404-health-dot abj404-health-green"></span>' +
+                    jQuery('<span>').text(active + ' redirects active, no URLs need attention').html();
+            } else {
+                html = '<span class="abj404-health-dot abj404-health-yellow"></span>' +
+                    jQuery('<span>').text(active + ' redirects active — ' + high + ' captured URLs have repeat visitors').html() +
+                    ' <a href="?page=' + (getURLParameter('page') || 'abj404_solution') + '&subpage=abj404_captured&filter=' +
+                    (result.statusCounts._capturedFilter || '') + '">View</a>';
+            }
+            $bar.html(html);
+            $bar.removeAttr('data-health-bar-placeholder');
+        },
+        error: function() {
+            // On error, drop the placeholder so the UI doesn't get stuck on
+            // "Loading status…" forever.  The failure has already been logged
+            // server-side via the ajaxRefreshHealthBar exception handler.
+            $bar.removeAttr('data-health-bar-loading');
+            $bar.removeAttr('data-health-bar-placeholder');
+            $bar.empty();
+        }
+    });
+}
 
 function bindPaginationLinkListeners() {
     // Delegate to document so handlers survive table HTML replacement after AJAX refresh.
@@ -181,6 +266,15 @@ function triggerInitialTableLoadIfNeeded() {
                 }
                 $config.attr('data-pagination-initial-load', '0');
                 // Last-resort fallback: unblock page placeholders so the UI is usable.
+                // Replace the "Loading…" cell text with a concrete error state so
+                // the page no longer appears stuck — stripping the attribute alone
+                // leaves the original placeholder rows visible to the user.
+                var errorMessage = 'Could not load table data. Try refreshing the page.';
+                jQuery('.abj404-table[data-table-awaiting-load] tbody').html(
+                    '<tr><td class="abj404-empty-message abj404-error">' +
+                    jQuery('<div/>').text(errorMessage).html() +
+                    '</td></tr>'
+                );
                 jQuery('[data-table-awaiting-load]').removeAttr('data-table-awaiting-load');
                 jQuery('[data-tab-counts-placeholder]').removeAttr('data-tab-counts-placeholder');
                 jQuery('[data-health-bar-placeholder]').removeAttr('data-health-bar-placeholder');
@@ -811,6 +905,11 @@ function paginationLinksChange(triggerItem, options) {
         url: baseUrl,
         type: 'POST',
         dataType: "json",
+        // Without a client-side timeout, a slow server (e.g. while
+        // attemptMissingTableRepairAndRetry runs createDatabaseTables) can leave
+        // the table stuck on its loading placeholder forever — onError never
+        // fires and the retry/fallback path never engages.
+        timeout: 15000,
         data: {
             action: action,
             page: page,
@@ -893,26 +992,10 @@ function paginationLinksChange(triggerItem, options) {
                 });
                 jQuery('.abj404-content-tabs').removeAttr('data-tab-counts-placeholder');
             }
-            // Update health bar from AJAX response (redirects page only)
-            if (typeof result.highImpactCapturedCount !== 'undefined' && result.statusCounts) {
-                var $bar = jQuery('.abj404-health-bar[data-health-bar-placeholder]');
-                if ($bar.length > 0) {
-                    var active = (result.statusCounts.all || 0) - (result.statusCounts.trash || 0);
-                    var high = result.highImpactCapturedCount || 0;
-                    var html;
-                    if (high === 0) {
-                        html = '<span class="abj404-health-dot abj404-health-green"></span>' +
-                            jQuery('<span>').text(active + ' redirects active, no URLs need attention').html();
-                    } else {
-                        html = '<span class="abj404-health-dot abj404-health-yellow"></span>' +
-                            jQuery('<span>').text(active + ' redirects active \u2014 ' + high + ' captured URLs have repeat visitors').html() +
-                            ' <a href="?page=' + (getURLParameter('page') || 'abj404_solution') + '&subpage=abj404_captured&filter=' +
-                            (result.statusCounts._capturedFilter || '') + '">View</a>';
-                    }
-                    $bar.html(html);
-                    $bar.removeAttr('data-health-bar-placeholder');
-                }
-            }
+            // Health bar is hydrated by a separate AJAX call (refreshHealthBarIfNeeded)
+            // so the slow getHighImpactCapturedCount() query never blocks first paint
+            // of the redirects table.
+            refreshHealthBarIfNeeded();
             // Reinitialize table interactions (checkboxes, bulk actions) after AJAX refresh
             if (typeof window.abj404InitTableInteractions === 'function') {
                 window.abj404InitTableInteractions();
@@ -1005,18 +1088,33 @@ function paginationLinksChange(triggerItem, options) {
             }
 
             if (!isBackgroundRefresh) {
-                alert(
-                    "404 Solution: Ajax error while updating the table.\n\n" +
-                    "HTTP status: " + status + "\n" +
-                    "textStatus: " + textStatus + "\n" +
-                    "errorThrown: " + errorThrown + "\n" +
-                    "action: " + action + "\n" +
-                    "subpage: " + subpage + "\n" +
-                    "url: " + baseUrl + "\n\n" +
-                    (messageFromServer ? ("Server message:\n" + messageFromServer + "\n\n") : "") +
-                    (detailsFromServer ? ("Server details (admin only):\n" + detailsFromServer + "\n\n") : "") +
-                    "Response (preview):\n" + responsePreview
-                );
+                // Render a non-blocking admin notice instead of a native alert().
+                // Native alert() blocks the page, breaks browser automation tests,
+                // and forces the admin to dismiss before they can refresh.
+                var noticeTitle = '404 Solution: AJAX error while updating the table.';
+                var $notice = jQuery('<div class="notice notice-error abj404-ajax-error-notice is-dismissible"></div>');
+                var $titleEl = jQuery('<p></p>').css('font-weight', 'bold').text(noticeTitle);
+                var detailLines = [
+                    'HTTP status: ' + status,
+                    'textStatus: ' + textStatus,
+                    'errorThrown: ' + errorThrown,
+                    'action: ' + action,
+                    'subpage: ' + subpage
+                ];
+                if (messageFromServer) {
+                    detailLines.push('Server message: ' + messageFromServer);
+                }
+                var $detailsEl = jQuery('<pre></pre>')
+                    .css({whiteSpace: 'pre-wrap', margin: '0 0 8px 0'})
+                    .text(detailLines.join('\n'));
+                $notice.append($titleEl).append($detailsEl);
+                jQuery('.abj404-ajax-error-notice').remove();
+                var $tableContainer = jQuery('.abj404-table-container').first();
+                if ($tableContainer.length > 0) {
+                    $tableContainer.before($notice);
+                } else {
+                    jQuery('.wrap').first().prepend($notice);
+                }
             }
             if (typeof options.onError === 'function') {
                 options.onError({

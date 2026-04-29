@@ -236,22 +236,35 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         // disk usage (MB to bytes). delete 1k rows at a time until the size is acceptable.
         $logsSizeBytes = $abj404dao->getLogDiskUsage();
         $maxLogSizeBytes = (array_key_exists('maximum_log_disk_usage', $options) ? $options['maximum_log_disk_usage'] : 100) * 1024 * 1000;
-        
-        $totalLogLines = $abj404dao->getLogsCount(0);
-        $averageSizePerLine = max($logsSizeBytes, 1) / max($totalLogLines, 1);
-        $logLinesToKeep = ceil($maxLogSizeBytes / $averageSizePerLine);
-        $logLinesToDelete = max($totalLogLines - $logLinesToKeep, 0);
-        if ($logLinesToDelete == null || trim((string)$logLinesToDelete) == '') {
-        	$logLinesToDelete = 0;
-        }
-        if ($logLinesToDelete > 0) {
-	        $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/deleteOldLogs.sql");
-	        $query = $this->f->str_replace('{lines_to_delete}', (string)$logLinesToDelete, $query);
-	        $results = $this->queryAndGetResults($query);
-            $oldLogRowsDeletedBySizeRaw = $results['rows_affected'] ?? 0;
-            $oldLogRowsDeletedBySize = (is_int($oldLogRowsDeletedBySizeRaw) || is_float($oldLogRowsDeletedBySizeRaw) || is_string($oldLogRowsDeletedBySizeRaw))
-                ? (int)$oldLogRowsDeletedBySizeRaw
-                : 0;
+
+        // Disk-size gate first: skip the trim entirely when we're under budget.
+        // This keeps the daily cron path fast in the common case (no over-quota,
+        // no scan, no destructive query) without relying on a row-count
+        // approximation for any decision that drives DELETE.
+        //
+        // When we ARE over budget, pay for an exact COUNT(id) before computing
+        // logLinesToDelete. An information_schema.TABLE_ROWS approximation
+        // would be cheap, but for InnoDB it can drift by orders of magnitude
+        // — using it as the denominator of a destructive DELETE … LIMIT N
+        // query risks over-deleting retained logs (approx too low →
+        // averageSizePerLine inflated → logLinesToKeep too small) or
+        // under-deleting enough to miss the disk cap (approx too high →
+        // reverse). The exact COUNT cost is paid only on the rare ticks
+        // where we actually need to trim.
+        if ($logsSizeBytes > $maxLogSizeBytes) {
+            $totalLogLines = $abj404dao->getLogsCount(0);
+            $averageSizePerLine = max($logsSizeBytes, 1) / max($totalLogLines, 1);
+            $logLinesToKeep = ceil($maxLogSizeBytes / $averageSizePerLine);
+            $logLinesToDelete = max($totalLogLines - $logLinesToKeep, 0);
+            if ($logLinesToDelete > 0) {
+                $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/deleteOldLogs.sql");
+                $query = $this->f->str_replace('{lines_to_delete}', (string)$logLinesToDelete, $query);
+                $results = $this->queryAndGetResults($query);
+                $oldLogRowsDeletedBySizeRaw = $results['rows_affected'] ?? 0;
+                $oldLogRowsDeletedBySize = (is_int($oldLogRowsDeletedBySizeRaw) || is_float($oldLogRowsDeletedBySizeRaw) || is_string($oldLogRowsDeletedBySizeRaw))
+                    ? (int)$oldLogRowsDeletedBySizeRaw
+                    : 0;
+            }
         }
         
         $logsSizeBytes = $abj404dao->getLogDiskUsage();
@@ -523,10 +536,19 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
     }
 
     /** Get the redirect for the URL.
+     *
      * @param string $url
+     * @param bool $degradedMode When true, the lookup tolerates a partially-
+     *        migrated schema by stripping predicates that reference columns
+     *        not yet present (e.g. r.start_ts / r.end_ts on installs that
+     *        have not run the 4.1.x scheduled-redirect migration). Skipping
+     *        scheduled-redirect filtering is far better than 100% of redirects
+     *        failing silently. The pipeline only enables this mode when
+     *        DB_VERSION lags ABJ404_VERSION and recovery has not closed the
+     *        gap, so the happy path pays no extra cost.
      * @return array<string, mixed>
      */
-    function getActiveRedirectForURL($url) {
+    function getActiveRedirectForURL($url, $degradedMode = false) {
         // Strip invalid UTF-8/control bytes but keep valid unicode for multilingual slugs.
         $url = $this->f->sanitizeInvalidUTF8($url);
 
@@ -541,7 +563,7 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         $abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
         $candidates = $abj404logic->getNormalizedUrlCandidates($url);
         foreach ($candidates as $candidate) {
-            $redirect = $this->getActiveRedirectForNormalizedUrl($candidate);
+            $redirect = $this->getActiveRedirectForNormalizedUrl($candidate, $degradedMode);
             if ($redirect['id'] !== 0) {
                 return $redirect;
             }
@@ -580,9 +602,10 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
 
     /**
      * @param string $url
+     * @param bool $degradedMode See getActiveRedirectForURL().
      * @return array<string, mixed>
      */
-    private function getActiveRedirectForNormalizedUrl($url) {
+    private function getActiveRedirectForNormalizedUrl($url, $degradedMode = false) {
         $redirect = array();
 
         // we look for two URLs that might match. one with a trailing slash and one without.
@@ -598,6 +621,19 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
 
         // join to the wp_posts table to make sure the post exists.
         $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getPermalinkFromURL.sql");
+
+        // Degraded mode: when the migration that adds r.start_ts/r.end_ts has
+        // not run (or is failing repeatedly), the columns may be missing from
+        // wp_abj404_redirects on this install. Strip the scheduled-redirect
+        // predicates so the lookup still serves manual + automatic redirects.
+        // Trade-off: scheduled redirects whose start/end window is currently
+        // active will still match (good); scheduled redirects whose window has
+        // not yet opened or has already closed will *also* match during this
+        // window (acceptable — far better than 100% of redirects failing).
+        if ($degradedMode && $this->redirectsTableMissingScheduledColumns()) {
+            $query = $this->stripScheduledRedirectPredicates($query);
+        }
+
         // Fix HIGH #2 (5th review): Use prepared statements instead of manual escaping
         $query = $this->prepare_query_wp($query, array("url1" => $url1, "url2" => $url2));
         $query = $this->doTableNameReplacements($query);
@@ -620,6 +656,91 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         }
 
         return $redirect;
+    }
+
+    /**
+     * Determine whether wp_abj404_redirects is missing the scheduled-redirect
+     * columns (start_ts / end_ts) added in the 4.1.x migration. Result is
+     * cached in a transient so subsequent 404s do not re-run SHOW COLUMNS.
+     *
+     * The cache is short-lived on the "missing" branch (5 min) so that once
+     * the migration finally runs we pick up the new columns quickly. On the
+     * "present" branch we cache for 24 h — columns don't disappear once added,
+     * so a long TTL keeps the happy path fast.
+     */
+    private function redirectsTableMissingScheduledColumns(): bool {
+        $cacheKey = 'abj404_redirects_scheduled_cols_status';
+        if (function_exists('get_transient')) {
+            $cached = get_transient($cacheKey);
+            if ($cached === 'missing') { return true; }
+            if ($cached === 'present') { return false; }
+        }
+
+        $tableName = $this->doTableNameReplacements('{wp_abj404_redirects}');
+        $columns = $this->getRedirectsTableColumns($tableName);
+
+        // If we couldn't read the schema at all, do NOT strip predicates —
+        // returning false keeps the standard query, which fails loudly rather
+        // than masking a deeper problem.
+        if (empty($columns)) {
+            return false;
+        }
+
+        $colsLower = array_map('strtolower', $columns);
+        $missing = !in_array('start_ts', $colsLower, true)
+                || !in_array('end_ts', $colsLower, true);
+
+        if (function_exists('set_transient')) {
+            $hour = defined('HOUR_IN_SECONDS') ? (int) HOUR_IN_SECONDS : 3600;
+            set_transient(
+                $cacheKey,
+                $missing ? 'missing' : 'present',
+                $missing ? 5 * 60 : 24 * $hour
+            );
+        }
+
+        return $missing;
+    }
+
+    /**
+     * Read column names for a table via SHOW COLUMNS. Returns [] on failure
+     * so callers can decide to fall back to the standard query.
+     *
+     * @return array<int, string>
+     */
+    private function getRedirectsTableColumns(string $tableName): array {
+        global $wpdb;
+        if (!isset($wpdb)) {
+            return [];
+        }
+        $rows = $wpdb->get_results(
+            "SHOW COLUMNS FROM `" . esc_sql($tableName) . "`",
+            ARRAY_A
+        );
+        if (!is_array($rows) || !empty($wpdb->last_error)) {
+            return [];
+        }
+        $columns = [];
+        foreach ($rows as $row) {
+            if (is_array($row) && isset($row['Field']) && is_string($row['Field'])) {
+                $columns[] = $row['Field'];
+            }
+        }
+        return $columns;
+    }
+
+    /**
+     * Strip lines from getPermalinkFromURL.sql that reference r.start_ts or
+     * r.end_ts. Used in degraded mode when those columns are missing on this
+     * install.
+     */
+    private function stripScheduledRedirectPredicates(string $sql): string {
+        $stripped = preg_replace(
+            '/^[^\n]*\br\.(?:start_ts|end_ts)\b[^\n]*\R?/m',
+            '',
+            $sql
+        );
+        return is_string($stripped) ? $stripped : $sql;
     }
 
     /**

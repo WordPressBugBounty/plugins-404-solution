@@ -296,6 +296,28 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
     /**
      * Count captured URLs that have been hit 3 or more times (signal of real user impact).
      * Uses transient caching for performance.
+     *
+     * Implementation: INNER JOIN against the pre-aggregated logs_hits rollup,
+     * which already stores logshits per requested_url and is rebuilt by cron via
+     * createRedirectsForViewHitsTable(). Same JOIN shape as
+     * getRedirectsForViewQuery() — BINARY column equality.
+     *
+     * The previous implementation aggregated logsv2 with GROUP BY + HAVING per
+     * call; on busy sites with millions of log rows that took 30–60s and hit
+     * the AJAX timeout. The pre-aggregated table makes the count O(distinct
+     * URLs) instead of O(total log rows).
+     *
+     * Fallback: if logs_hits is missing or empty, return 0 and schedule a
+     * shutdown-time rebuild so a subsequent request can serve real data. We
+     * deliberately do NOT fall back to the old logsv2 GROUP BY query: the whole
+     * point of this function is to never run that scan again.
+     *
+     * Cache policy: only the result of a successful query against a populated
+     * rollup is cached for STATUS_CACHE_TTL (24h). Errors, timeouts, missing
+     * rollups, and empty-during-rebuild outcomes all return 0 *without
+     * caching* so the next request retries — otherwise a single transient
+     * failure would hide repeat-visitor URLs for a full day.
+     *
      * @return int Number of captured URLs with 3+ log hits
      */
     function getHighImpactCapturedCount(): int {
@@ -304,30 +326,81 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
             return intval(is_scalar($cached) ? $cached : 0);
         }
 
-        // Pre-aggregate log counts in a subquery, then count matching redirects.
-        // This avoids the expensive varchar JOIN (r.url = l.requested_url with
-        // 190-char prefix indexes) and the GROUP BY + HAVING temp table on the
-        // redirects table.  The logsv2 subquery uses the requested_url index to
-        // aggregate, and the outer query checks existence via IN on the same
-        // prefix-indexed column — far cheaper than a full JOIN.
-        $query = "SELECT COUNT(*) as cnt
-            FROM {wp_abj404_redirects} r
-            WHERE r.status = " . ABJ404_STATUS_CAPTURED . " AND r.disabled = 0
-              AND r.url IN (
-                SELECT requested_url
-                FROM {wp_abj404_logsv2}
-                GROUP BY requested_url
-                HAVING COUNT(*) >= 3
-              )";
-        $query = $this->doTableNameReplacements($query);
+        // If the rollup is not available, defer rather than scan logsv2.
+        // Do not cache: the rebuild is in flight and the next request should retry.
+        if (!$this->logsHitsTableExists()) {
+            $this->scheduleHitsTableRebuild();
+            return 0;
+        }
+
+        $query = $this->buildHighImpactCapturedCountQuery();
 
         $result = $this->queryWithTimeout($query, 60);
+        $hadError = !empty($result['last_error']) || !empty($result['timed_out']);
         $rows = is_array($result['rows']) ? $result['rows'] : array();
         $count = (!empty($rows) && isset($rows[0]['cnt'])) ? intval($rows[0]['cnt']) : 0;
+
+        // Do not cache on error/timeout — the rollup is fine, the query just
+        // failed transiently (network blip, replication lag, etc.). Caching 0
+        // for 24h would silently hide real repeat-visitor URLs.
+        if ($hadError) {
+            return 0;
+        }
+
+        // If the rollup exists but has no rows yet (first run, or rebuild in
+        // progress), schedule a rebuild AND skip caching so the next request
+        // can serve real data once the rebuild completes (typically seconds).
+        if ($count === 0) {
+            if ($this->isHitsTableEmpty()) {
+                $this->scheduleHitsTableRebuild();
+                return 0;
+            }
+        }
 
         set_transient(self::CACHE_KEY_HIGH_IMPACT_CAPTURED, $count, self::STATUS_CACHE_TTL);
 
         return $count;
+    }
+
+    /**
+     * Build the SQL for getHighImpactCapturedCount(). Exposed so structural
+     * regression tests can assert no logsv2 access and verify the EXPLAIN plan.
+     *
+     * @return string Fully-replaced SQL (table-name placeholders resolved).
+     */
+    function buildHighImpactCapturedCountQuery(): string {
+        // logs_hits.requested_url is stored in canonical form (leading '/',
+        // no trailing '/') by createRedirectsForViewHitsTable(). Canonicalize
+        // r.url on the (small) redirects side so a single indexed lookup
+        // against h.requested_url matches every URL variant the original
+        // request might have arrived as.
+        $query = "SELECT COUNT(*) AS cnt
+            FROM {wp_abj404_redirects} r
+            INNER JOIN {wp_abj404_logs_hits} h
+                ON BINARY h.requested_url = BINARY CONCAT('/', TRIM(BOTH '/' FROM r.url))
+            WHERE r.status = " . ABJ404_STATUS_CAPTURED . " AND r.disabled = 0
+              AND h.logshits >= 3";
+        return $this->doTableNameReplacements($query);
+    }
+
+    /**
+     * Cheap probe: does the logs_hits rollup contain at least one row?
+     * SELECT 1 ... LIMIT 1 against a small table.
+     *
+     * @return bool true when the rollup has zero rows (rebuild in progress,
+     *              cold start, or post-truncate). false when at least one
+     *              row exists OR when the probe itself errors (treat
+     *              ambiguous probes as "not empty" so we don't spam reschedules).
+     */
+    private function isHitsTableEmpty(): bool {
+        $check = "SELECT 1 FROM {wp_abj404_logs_hits} LIMIT 1";
+        $check = $this->doTableNameReplacements($check);
+        $result = $this->queryAndGetResults($check);
+        if (!empty($result['last_error']) || !empty($result['timed_out'])) {
+            return false;
+        }
+        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+        return empty($rows);
     }
 
     /**
@@ -840,7 +913,8 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
             // Verify table was actually created before using it (handles silent creation failures)
             if ($this->logsHitsTableExists()) {
                 $logsTableJoin = "  LEFT OUTER JOIN {wp_abj404_logs_hits} logstable \n " .
-                        "  on binary wp_abj404_redirects.url = binary logstable.requested_url \n ";
+                        "  on binary logstable.requested_url = " .
+                        "binary concat('/', trim(both '/' from wp_abj404_redirects.url)) \n ";
             } else {
                 // Fall back to null columns if table creation failed
                 $logsTableColumns = "null as logshits, \n null as logsid, \n null as last_used, \n";

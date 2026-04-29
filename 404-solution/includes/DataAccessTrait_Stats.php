@@ -682,36 +682,99 @@ trait ABJ_404_Solution_DataAccess_StatsTrait {
     /**
      * Get the top N captured 404s by hit count for the digest email.
      *
+     * Implementation: LEFT JOIN against the pre-aggregated logs_hits rollup,
+     * which stores logshits per *canonical* requested_url and is rebuilt by
+     * cron via createRedirectsForViewHitsTable(). The canonical form is
+     * CONCAT('/', TRIM(BOTH '/' FROM url)) — the same normalization the
+     * legacy slash-tolerant LEFT JOIN on logsv2 used, hoisted to write time.
+     *
+     * The join canonicalizes r.url on the (small) redirects side and probes
+     * the indexed h.requested_url on the (canonical) rollup side, so URL
+     * variants like '/foo', 'foo', and '/foo/' all match the same rollup row
+     * — recovering the legacy query's variant-folding behavior without
+     * defeating any index.
+     *
+     * Why LEFT JOIN with COALESCE rather than INNER JOIN: the legacy query
+     * was a slash-normalized LEFT JOIN on logsv2 with COUNT(l.id) — captured
+     * rows with no matching logs (purged logs, fresh capture before any logs)
+     * appeared in the digest with logshits=0. INNER JOIN against logs_hits
+     * silently dropped those rows; LEFT JOIN + COALESCE(h.logshits, 0)
+     * restores parity for the no-hits / purged-hits cases.
+     *
+     * Routes through queryAndGetResults() so the cron digest query inherits
+     * the centralized 60-second SELECT timeout, retry on transient errors,
+     * and corrupted-table REPAIR recovery.
+     *
+     * Fallback: if logs_hits is missing, log a warning, schedule a rebuild,
+     * and return []. Callers that need to distinguish "rollup unavailable"
+     * from "no captured 404s" should pre-check via {@see logsHitsTableExists()}
+     * (see EmailDigest::send for the canonical pattern). We deliberately do
+     * NOT fall back to scanning logsv2 — the whole point of this rewrite is
+     * to never run that query again.
+     *
      * @param int $limit Maximum number of rows to return.
-     * @return array<int, array<string, mixed>>
+     * @return array<int, array<string, mixed>> Each row has keys: url, logshits, created.
      */
     function getTopCapturedForDigest(int $limit): array {
-        global $wpdb;
-
         $limit = max(1, $limit);
-        $redirectsTable = $this->doTableNameReplacements('{wp_abj404_redirects}');
-        $logsTable = $this->doTableNameReplacements('{wp_abj404_logsv2}');
 
-        $sql = $wpdb->prepare(
-            "SELECT r.url, COUNT(l.id) AS logshits, r.timestamp AS created
-             FROM {$redirectsTable} r
-             LEFT JOIN {$logsTable} l
-               ON CONCAT('/', TRIM(BOTH '/' FROM l.requested_url)) =
-                  CONCAT('/', TRIM(BOTH '/' FROM r.url))
-             WHERE r.status = %d AND r.disabled = 0
-             GROUP BY r.id, r.url, r.timestamp
-             ORDER BY logshits DESC
-             LIMIT %d",
-            ABJ404_STATUS_CAPTURED,
-            $limit
-        );
-
-        $rows = $wpdb->get_results($sql, ARRAY_A);
-        if (!is_array($rows)) {
+        if (!$this->logsHitsTableExists()) {
+            // Log so the operator can correlate "no top URLs in digest" with
+            // a rollup rebuild in flight, instead of silently shipping an
+            // empty table that looks like "no captured 404s in this period."
+            $this->logger->warn('getTopCapturedForDigest: logs_hits rollup unavailable; '
+                . 'digest top-captured table will be empty until rebuild completes. '
+                . 'EmailDigest pre-checks via logsHitsTableExists() to render an "unavailable" message instead.');
+            $this->scheduleHitsTableRebuild();
             return array();
         }
 
+        $query = $this->buildTopCapturedForDigestQuery($limit);
+        $result = $this->queryAndGetResults($query, array('timeout' => 60));
+
+        if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
+            // Transient query failure on a present rollup. Log so the operator
+            // can correlate "empty digest table" with a real DB hiccup rather
+            // than assuming "no captured 404s in this period."
+            $errRaw = $result['last_error'] ?? '';
+            $errMsg = is_string($errRaw) ? $errRaw : '';
+            $timedOut = !empty($result['timed_out']);
+            $this->logger->warn('getTopCapturedForDigest: query failed against present rollup; '
+                . 'digest top-captured table will be empty. timed_out=' . ($timedOut ? '1' : '0')
+                . ', error=' . ($errMsg !== '' ? $errMsg : '(none)'));
+            return array();
+        }
+
+        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
         return $rows;
+    }
+
+    /**
+     * Build the SQL for getTopCapturedForDigest(). Exposed so structural
+     * regression tests can assert no logsv2 access and verify the EXPLAIN plan.
+     *
+     * Uses LEFT JOIN + COALESCE so captured rows with no matching logs_hits
+     * row still appear with logshits=0, restoring parity with the legacy
+     * slash-normalized LEFT JOIN. ORDER BY ... NULLS-via-COALESCE puts hit-bearing
+     * rows first; rows with 0 hits only surface when fewer than $limit captured
+     * URLs have any hits at all.
+     *
+     * @param int $limit Already-normalized positive integer LIMIT.
+     * @return string Fully-replaced SQL (table-name placeholders resolved).
+     */
+    function buildTopCapturedForDigestQuery(int $limit): string {
+        $limit = max(1, $limit);
+        // logs_hits.requested_url is canonical (leading '/', no trailing '/').
+        // Canonicalize r.url on the (small) redirects side so variants fold
+        // into the same rollup row.
+        $query = "SELECT r.url, COALESCE(h.logshits, 0) AS logshits, r.timestamp AS created
+            FROM {wp_abj404_redirects} r
+            LEFT JOIN {wp_abj404_logs_hits} h
+                ON BINARY h.requested_url = BINARY CONCAT('/', TRIM(BOTH '/' FROM r.url))
+            WHERE r.status = " . ABJ404_STATUS_CAPTURED . " AND r.disabled = 0
+            ORDER BY logshits DESC, r.url ASC
+            LIMIT " . $limit;
+        return $this->doTableNameReplacements($query);
     }
 
     /**
@@ -791,26 +854,59 @@ trait ABJ_404_Solution_DataAccess_StatsTrait {
     }
 
     /**
-     * Store extracted content keywords for a permalink cache entry.
+     * Bulk-update content_keywords for many permalink cache rows in a single
+     * UPDATE statement, eliminating the N+1 round trips that previously hit
+     * the DB on every cron tick and on every anonymous-AJAX suggestion-compute
+     * request that touched populateContentKeywords (audit finding G3).
      *
-     * @param int    $id       The post ID (permalink cache primary key).
-     * @param string $keywords Space-separated lowercase keywords.
+     * Builds:
+     *   UPDATE {table} SET content_keywords = CASE id
+     *       WHEN %d THEN %s ... END
+     *   WHERE id IN (%d, %d, ...)
+     *
+     * Routes through queryAndGetResults() so the bulk write inherits the
+     * centralized timeout, retry, and corrupted-table recovery.
+     *
+     * @param array<int, string> $idToKeywords Map of permalink cache id => keywords string.
      * @return void
      */
-    function updateContentKeywordsForId(int $id, string $keywords): void {
-        global $wpdb;
+    function bulkUpdateContentKeywords(array $idToKeywords): void {
+        if (empty($idToKeywords)) {
+            return;
+        }
 
         $table = $this->doTableNameReplacements('{wp_abj404_permalink_cache}');
-        $wpdb->update(
-            $table,
-            array('content_keywords' => $keywords),
-            array('id' => $id),
-            array('%s'),
-            array('%d')
-        );
 
-        if ($wpdb->last_error && !$this->classifyAndHandleInfrastructureError($wpdb->last_error)) {
-            $this->logger->errorMessage("Error updating content_keywords for id $id: " . $wpdb->last_error);
+        $whenClauses = array();
+        $params = array();
+        $ids = array();
+        foreach ($idToKeywords as $id => $keywords) {
+            $intId = (int) $id;
+            $whenClauses[] = 'WHEN %d THEN %s';
+            $params[] = $intId;
+            $params[] = $keywords;
+            $ids[] = $intId;
+        }
+
+        $idPlaceholders = implode(',', array_fill(0, count($ids), '%d'));
+
+        $sql = "UPDATE `{$table}` SET content_keywords = CASE id\n        "
+            . implode("\n        ", $whenClauses)
+            . "\n        END\n        WHERE id IN ({$idPlaceholders})";
+
+        $allParams = array_merge($params, $ids);
+
+        $result = $this->queryAndGetResults($sql, array('query_params' => $allParams));
+
+        $lastErrorRaw = $result['last_error'] ?? '';
+        $lastError = is_string($lastErrorRaw) ? $lastErrorRaw : '';
+        if ($lastError !== '') {
+            // "Unknown column" means content_keywords hasn't been added yet (DB migration pending).
+            // Other infrastructure errors are already handled by queryAndGetResults; only log
+            // unclassified errors here.
+            if (stripos($lastError, 'unknown column') !== false) {
+                $this->logger->warn("content_keywords column not yet available (DB migration pending): " . $lastError);
+            }
         }
     }
 

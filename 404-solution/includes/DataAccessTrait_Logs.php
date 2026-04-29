@@ -267,16 +267,19 @@ trait ABJ_404_Solution_DataAccess_LogsTrait {
         $this->queryAndGetResults($createPreAggQuery);
 
         // Phase 1: chunk through logsv2 by ID range.
-        // Each chunk aggregates by requested_url within its ID slice.
-        // The same URL can appear across chunks — Phase 2 merges them.
+        // Each chunk aggregates by canonical requested_url (CONCAT('/', TRIM…))
+        // so URL variants like '/foo', 'foo', and '/foo/' collapse into a
+        // single pre-agg row. The same canonical key can still appear across
+        // chunks — Phase 2 sums them.
         for ($start = $minId; $start <= $maxId; $start += $chunkSize) {
             $end = $start + $chunkSize;
             $chunkQuery = "INSERT INTO " . $preAggTable .
                 " (requested_url, logsid, last_used, logshits) " .
-                "SELECT requested_url, MIN(id), MAX(timestamp), COUNT(*) " .
+                "SELECT CONCAT('/', TRIM(BOTH '/' FROM requested_url)), " .
+                "       MIN(id), MAX(timestamp), COUNT(*) " .
                 "FROM " . $logsv2Table . " " .
                 "WHERE id >= %d AND id < %d " .
-                "GROUP BY requested_url";
+                "GROUP BY CONCAT('/', TRIM(BOTH '/' FROM requested_url))";
             $chunkResult = $this->queryAndGetResults($chunkQuery, array(
                 'log_too_slow' => false,
                 'timeout' => 10,
@@ -291,15 +294,16 @@ trait ABJ_404_Solution_DataAccess_LogsTrait {
 
         // Phase 2: join the small pre-agg table with redirects and
         // re-aggregate across chunks into the final temp table.
-        // The concat/trim normalization is identical to the original query
-        // but runs against far fewer rows (unique URLs per chunk, not raw logs).
+        // a.requested_url is already canonical from Phase 1, so the join
+        // only needs to canonicalize r.url. Final GROUP BY collapses any
+        // remaining duplicate canonical rows that originated from different
+        // ID-range chunks.
         $phase2Query = "INSERT INTO " . $tempDestTable .
             " (requested_url, logsid, last_used, logshits) " .
             "SELECT a.requested_url, MIN(a.logsid), MAX(a.last_used), SUM(a.logshits) " .
             "FROM " . $preAggTable . " a " .
             "INNER JOIN " . $redirectsTable . " r " .
-            "ON concat('/', trim(both '/' from a.requested_url)) = " .
-            "   concat('/', trim(both '/' from r.url)) " .
+            "ON a.requested_url = CONCAT('/', TRIM(BOTH '/' FROM r.url)) " .
             "GROUP BY a.requested_url";
         $results = $this->queryAndGetResults($phase2Query, array('log_too_slow' => false, 'timeout' => 60));
 
@@ -313,13 +317,27 @@ trait ABJ_404_Solution_DataAccess_LogsTrait {
     }
     
     /**
+     * Populate logshits / logsid / last_used on each row from the pre-aggregated
+     * wp_abj404_logs_hits rollup. Used by the captured/redirects table fallback
+     * path when the main getRedirectsForView JOIN cannot include the rollup
+     * (logs_hits race, sort by url/status/timestamp with queryAllRowsAtOnce=false).
+     *
+     * Reads only from logs_hits — never scans wp_abj404_logsv2. The previous
+     * implementation aggregated logsv2 with GROUP BY in 50-URL chunks; on busy
+     * sites with hot URLs (100K+ hits/URL) that meant 100K rows scanned per
+     * chunk, routinely hitting the centralized 60s timeout. logs_hits is
+     * O(distinct URLs), so the same lookup runs in milliseconds.
+     *
+     * Fallback: if logs_hits is missing or the lookup errors, schedule a
+     * shutdown-time rebuild (mirrors getHighImpactCapturedCount, commit
+     * 9133848d) and return rows with their original null/zero hit fields.
+     * Never falls back to scanning logsv2 — the whole point is to never run
+     * that query again.
+     *
      * @param array<int, array<string, mixed>> $rows
      * @return array<int, array<string, mixed>>
      */
     function populateLogsData($rows) {
-        global $wpdb;
-
-        // If no rows, return early
         if (empty($rows)) {
             return $rows;
         }
@@ -336,45 +354,55 @@ trait ABJ_404_Solution_DataAccess_LogsTrait {
             }
         }
 
-        // If no valid URLs, return rows unchanged
         if (empty($urls)) {
             return $rows;
         }
 
-        // Remove duplicates to avoid unnecessary work
         $urls = array_values(array_unique($urls));
 
-        // Fetch logs data in batches to avoid extremely large IN() clauses
-        // which can be slow on tables with prefix indexes (190-char limit).
-        $logsTable = $this->getPrefixedTableName('abj404_logsv2');
-        $batchSize = 50;
+        // If the rollup is not available, defer to a shutdown-time rebuild
+        // rather than scan raw logsv2. Caller sees rows with null hits — same
+        // contract as the main getRedirectsForView path when logs_hits is missing.
+        if (!$this->logsHitsTableExists()) {
+            $this->scheduleHitsTableRebuild();
+            return $rows;
+        }
+
+        // Chunk lookups so an absurdly large URL set doesn't build a multi-MB
+        // IN() clause. logs_hits is small (O(distinct URLs)) so a generous batch
+        // is fine — we cap at 200 to stay well within MySQL packet limits.
+        $logsHitsTable = $this->doTableNameReplacements('{wp_abj404_logs_hits}');
+        $batchSize = 200;
         $logsResults = array();
         $urlChunks = array_chunk($urls, $batchSize);
 
         foreach ($urlChunks as $urlChunk) {
             $placeholders = implode(',', array_fill(0, count($urlChunk), '%s'));
-            $sql = "SELECT requested_url,
-                        MIN(id) AS logsid,
-                        MAX(timestamp) AS last_used,
-                        COUNT(requested_url) AS logshits
-                 FROM {$logsTable}
-                 WHERE requested_url IN ($placeholders)
-                 GROUP BY requested_url";
+            // BINARY column equality matches getRedirectsForViewQuery() so case
+            // and encoding edge cases behave identically across the main path
+            // and this fallback. logs_hits stores rows by their exact logged
+            // URL — variants like '/foo' and 'foo' may both exist as separate
+            // rows; the PHP-side aggregation below merges them by canonical URL.
+            $sql = "SELECT requested_url, logsid, last_used, logshits "
+                 . "FROM {$logsHitsTable} "
+                 . "WHERE BINARY requested_url IN ($placeholders)";
 
-            // Route through queryAndGetResults so each chunk inherits the
-            // centralized 60s timeout. Without it, a slow chunk on a huge
-            // logsv2 table can stall an admin AJAX request past the
-            // reverse-proxy limit (Cloudflare 524).
             $chunkResult = $this->queryAndGetResults($sql, array(
                 'query_params' => $urlChunk,
                 'log_too_slow' => false,
             ));
 
-            // queryAndGetResults() already logs errors/timeouts and applies
-            // recovery. On failure abort the whole population early so we
-            // don't leak partial data into the view.
+            // logs_hits can be dropped between the existence check above and
+            // this query (rebuild race). Treat any failure as "rollup
+            // unavailable": schedule a rebuild and return rows untouched.
+            // Never fall back to scanning logsv2.
             if (!empty($chunkResult['timed_out']) ||
                 (isset($chunkResult['last_error']) && $chunkResult['last_error'] != '')) {
+                $errRaw = $chunkResult['last_error'] ?? '';
+                $err = is_string($errRaw) ? $errRaw : '';
+                if ($err !== '' && strpos($err, 'logs_hits') !== false) {
+                    $this->scheduleHitsTableRebuild();
+                }
                 return $rows;
             }
 
@@ -1546,11 +1574,44 @@ trait ABJ_404_Solution_DataAccess_LogsTrait {
      *   'hits_redirect' => int  (rows where dest_url is not the 404 sentinel)
      *   'new_captures'  => int  (same as hits_404 for trend purposes)
      *
+     * Result is cached in a transient keyed on (blog_id, days, max_log_id)
+     * with TTL TREND_DATA_CACHE_TTL_SECONDS. New log inserts increase
+     * max_log_id which moves the cache key, so fresh data appears
+     * automatically as soon as a new request arrives.
+     *
      * @param int $days Number of days (default 30, clamped to 1-90)
      * @return array<int, array<string, mixed>>
      */
     public function getDailyActivityTrend(int $days = 30): array {
         $days = max(1, min(90, $days));
+
+        $blogId = 1;
+        if (function_exists('get_current_blog_id')) {
+            $blogId = function_exists('absint')
+                ? absint(get_current_blog_id())
+                : abs(intval(get_current_blog_id()));
+            if ($blogId <= 0) {
+                $blogId = 1;
+            }
+        }
+
+        $maxLogId = 0;
+        try {
+            $maxLogId = intval($this->getMaxLogId());
+            if ($maxLogId < 0) {
+                $maxLogId = 0;
+            }
+        } catch (Throwable $unused) {
+            $maxLogId = 0;
+        }
+
+        $cacheKey = 'abj404_trend_v1_' . $blogId . '_' . $days . '_' . $maxLogId;
+        if (function_exists('get_transient')) {
+            $cached = get_transient($cacheKey);
+            if (is_array($cached)) {
+                return $cached;
+            }
+        }
 
         $logsTable = $this->doTableNameReplacements('{wp_abj404_logsv2}');
         $cutoff = time() - ($days * 86400);
@@ -1568,6 +1629,8 @@ trait ABJ_404_Solution_DataAccess_LogsTrait {
         $result = $this->queryAndGetResults($query, array(
             'query_params' => array($notFoundDest, $notFoundDest),
         ));
+        $hadError = !empty($result['timed_out'])
+            || (isset($result['last_error']) && $result['last_error'] !== '');
         $rows = (isset($result['rows']) && is_array($result['rows'])) ? $result['rows'] : array();
 
         // Build a date-keyed map from query results.
@@ -1602,6 +1665,14 @@ trait ABJ_404_Solution_DataAccess_LogsTrait {
                     'new_captures'  => 0,
                 );
             }
+        }
+
+        // Only cache the result on success. A transient DB error/timeout
+        // would otherwise pin a zero-filled chart for TREND_DATA_CACHE_TTL_SECONDS
+        // (15 min) so the admin sees "no activity" until the cache expires —
+        // misleading and harder to diagnose than letting the next request retry.
+        if (!$hadError && function_exists('set_transient')) {
+            set_transient($cacheKey, $output, self::TREND_DATA_CACHE_TTL_SECONDS);
         }
 
         return $output;
