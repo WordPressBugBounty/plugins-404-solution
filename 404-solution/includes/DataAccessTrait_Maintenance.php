@@ -7,6 +7,84 @@ if (!defined('ABSPATH')) {
 trait ABJ_404_Solution_DataAccess_MaintenanceTrait {
 
     /**
+     * Auto-recover from a collation mismatch detected at query time.
+     *
+     * Strategy (matches the project's "try, recover, retry, then notify" pattern,
+     * but the "notify" step is intentionally omitted per owner directive — collation
+     * issues must NEVER surface to the user):
+     *
+     *  1. Detect "Illegal mix of collations" / "Unknown collation" in $result['last_error'].
+     *  2. Honor a 1-hour cooldown transient (`abj404_collation_recovery_cooldown`) so a
+     *     storm of collation errors doesn't run correctCollations() repeatedly.
+     *  3. Call ABJ_404_Solution_DatabaseUpgradesEtc::correctCollations() which converges
+     *     all plugin tables to a single utf8mb4 collation (column-level + table-level).
+     *  4. Set the cooldown transient.
+     *  5. Retry the original query once.  If the retry succeeds, harvest the result; if
+     *     it still fails, return — the caller's $reportError logic downgrades collation
+     *     errors to WARN log entries (no email, no admin notice).
+     *
+     * Self-recursion is prevented by setting a static guard while correctCollations() runs:
+     * the ALTER TABLE statements that correctCollations() emits go back through
+     * queryAndGetResults(), and any collation error encountered there must NOT trigger
+     * another recovery (it would deadlock on the cooldown).
+     *
+     * @param string $query
+     * @param array<string, mixed> $result passed by reference
+     * @param bool   $producesRows Whether the query returns result rows.
+     * @param 'OBJECT'|'OBJECT_K'|'ARRAY_A'|'ARRAY_N' $resultType wpdb output type for get_results().
+     * @return void
+     */
+    private function recoverFromCollationMismatchAndRetry(string $query, array &$result, bool $producesRows, string $resultType): void {
+        // Re-entry guard: if correctCollations()'s own ALTER TABLE hits a collation
+        // error, do NOT recurse — return and let the original error propagate.
+        if (self::$collationRecoveryInProgress) {
+            return;
+        }
+
+        $cooldownKey = 'abj404_collation_recovery_cooldown';
+        $cooldownUntil = $this->getRuntimeFlag($cooldownKey);
+        $onCooldown = is_scalar($cooldownUntil) && (int)$cooldownUntil > time();
+
+        if (!$onCooldown) {
+            self::$collationRecoveryInProgress = true;
+            try {
+                $this->logger->infoMessage("Collation mismatch detected — running correctCollations() to converge plugin tables.");
+                if (class_exists('ABJ_404_Solution_DatabaseUpgradesEtc')) {
+                    $upgrades = ABJ_404_Solution_DatabaseUpgradesEtc::getInstance();
+                    if (method_exists($upgrades, 'correctCollations')) {
+                        $upgrades->correctCollations();
+                    }
+                }
+            } catch (Throwable $e) {
+                $this->logger->warn("correctCollations() threw during collation auto-recovery: " . $e->getMessage());
+            } finally {
+                self::$collationRecoveryInProgress = false;
+                // Set the 1-hour cooldown regardless of success/failure so we don't
+                // hammer correctCollations() on a hot query path.
+                $this->setRuntimeFlag($cooldownKey, time() + 3600, 3600);
+            }
+        }
+
+        // Retry the original query once, whether or not we ran correctCollations().
+        // After a successful run the underlying mismatch should be gone; if cooldown
+        // was active the retry is still cheap and may succeed for transient reasons.
+        global $wpdb;
+        /** @var wpdb $wpdb */
+        $wpdb->flush();
+        if ($producesRows) {
+            $result['rows'] = $wpdb->get_results($query, $resultType);
+        } else {
+            $wpdb->query($query);
+            $result['rows'] = array();
+        }
+        $this->harvestWpdbResult($result);
+
+        if ($result['last_error'] === '') {
+            $this->logger->debugMessage("Collation auto-recovery succeeded; query retry passed.");
+        }
+    }
+
+    /**
      * Tables that may be safely dropped and recreated after repeated repair failures.
      * Tables NOT in this list (e.g. redirects, engine_profiles, redirect_conditions,
      * ngram_cache) will never be auto-dropped because they contain user-configured
@@ -367,10 +445,24 @@ trait ABJ_404_Solution_DataAccess_MaintenanceTrait {
         return is_array($rows[0] ?? null) ? $rows[0] : null;
     }
 
-    /** @return void */
+    /**
+     * Delete duplicate rows in the lookup table.  Called from
+     * correctIssuesBefore() during the upgrade flow, which runs *before*
+     * runInitialCreateTables() — so on a fresh install (or after the
+     * upgrade flow drops a stripped table for clean recreation) the lookup
+     * table may not yet exist.  Suppress errors and skip the table-repair
+     * retry path: there's nothing to clean up if the table doesn't exist,
+     * and we don't want this maintenance call to set the missing_table
+     * admin notice transient that will then surface as a `.notice-error`.
+     *
+     * @return void
+     */
     function correctDuplicateLookupValues(): void {
     	$query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/correctLookupTableIssue.sql");
-    	$this->queryAndGetResults($query);
+    	$this->queryAndGetResults($query, array(
+    		'log_errors' => false,
+    		'skip_repair' => true,
+    	));
     }
 
     /**
@@ -413,20 +505,38 @@ trait ABJ_404_Solution_DataAccess_MaintenanceTrait {
         $redirectsTable = $this->doTableNameReplacements('{wp_abj404_redirects}');
         $logsTable      = $this->doTableNameReplacements('{wp_abj404_logsv2}');
 
-        global $wpdb;
-        $rows = $wpdb->get_col($wpdb->prepare(
-            "SELECT DISTINCT r.id
+        // Route through queryAndGetResults() so this redirects-vs-logsv2 JOIN
+        // inherits the centralized 60-second timeout. The JOIN runs in a cron
+        // context, but a bad index/lock contention can still hang long enough
+        // to back up the cron runner. Always store an empty flag list on
+        // failure so stale data does not poison redirect handling.
+        $sql = "SELECT DISTINCT r.id
              FROM `{$redirectsTable}` r
              INNER JOIN `{$logsTable}` l ON l.requested_url = r.final_dest
              WHERE l.timestamp > %d
                AND (l.dest_url = '' OR l.dest_url IS NULL)
                AND r.disabled = 0
                AND r.final_dest != ''
-               AND r.final_dest != '0'",
-            $cutoff
-        ));
+               AND r.final_dest != '0'";
 
-        $flaggedIds = is_array($rows) ? array_map('strval', $rows) : array();
+        $result = $this->queryAndGetResults($sql, array('query_params' => array($cutoff)));
+
+        $flaggedIds = array();
+        if (empty($result['timed_out']) && (!isset($result['last_error']) || $result['last_error'] == '')) {
+            $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+            foreach ($rows as $row) {
+                if (is_array($row)) {
+                    $value = $row['id'] ?? reset($row);
+                } elseif (is_object($row)) {
+                    $value = $row->id ?? null;
+                } else {
+                    $value = $row;
+                }
+                if ($value !== null && $value !== '') {
+                    $flaggedIds[] = (string)$value;
+                }
+            }
+        }
 
         if (function_exists('set_transient')) {
             $ttl = defined('HOUR_IN_SECONDS') ? 25 * (int) HOUR_IN_SECONDS : 90000;
@@ -465,22 +575,39 @@ trait ABJ_404_Solution_DataAccess_MaintenanceTrait {
         }
 
         $cutoff = time() - ($days * 86400);
-        global $wpdb;
 
-        // Fetch IDs to expire so we can use the existing moveRedirectsToTrash path
-        $ids = $wpdb->get_col($wpdb->prepare(
-            "SELECT id FROM `{$redirectsTable}`
+        // Route through queryAndGetResults() so this cron query inherits the
+        // centralized timeout, retry, and corrupted-table recovery. The query
+        // is small (redirects table only) but the table can grow on busy
+        // sites and a long-held write lock could otherwise hang the cron.
+        $sql = "SELECT id FROM `{$redirectsTable}`
              WHERE status = %d
                AND disabled = 0
                AND `timestamp` > 0
-               AND `timestamp` < %d",
-            ABJ404_STATUS_AUTO,
-            $cutoff
+               AND `timestamp` < %d";
+
+        $result = $this->queryAndGetResults($sql, array(
+            'query_params' => array(ABJ404_STATUS_AUTO, $cutoff),
         ));
 
-        if ($wpdb->last_error) {
-            $this->logger->warn("expireOldAutoRedirects: DB error fetching old auto-redirects: " . $wpdb->last_error);
+        if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
+            // queryAndGetResults() already logged the error/timeout; treat as no-op.
             return 0;
+        }
+
+        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+        $ids = array();
+        foreach ($rows as $row) {
+            if (is_array($row)) {
+                $value = $row['id'] ?? reset($row);
+            } elseif (is_object($row)) {
+                $value = $row->id ?? null;
+            } else {
+                $value = $row;
+            }
+            if ($value !== null && $value !== '') {
+                $ids[] = absint($value);
+            }
         }
 
         if (empty($ids)) {
@@ -489,7 +616,7 @@ trait ABJ_404_Solution_DataAccess_MaintenanceTrait {
 
         $moved = 0;
         foreach ($ids as $id) {
-            $this->moveRedirectsToTrash(absint($id), 1);
+            $this->moveRedirectsToTrash($id, 1);
             $moved++;
         }
 
