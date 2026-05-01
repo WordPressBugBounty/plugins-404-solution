@@ -1,18 +1,24 @@
 # Changelog #
 
+## Version 4.1.12 (May 1, 2026) ##
+
+**Bug Fixes**
+
+* Fixed Captured 404s and Page Redirects table AJAX requests timing out while background log-cache maintenance was running. Maintenance that is triggered by an AJAX table load now runs through scheduled background tasks instead of shutdown work tied to the same HTTP request.
+* Fixed debug-log setup failing on sites with negative or fractional WordPress timezone offsets.
+* Fixed diagnostic logging paths that could throw while trying to report another error, which could hide the original problem behind a secondary logging failure.
+
 ## Version 4.1.11 (May 1, 2026) ##
 
 **Bug Fixes**
 
 * Fixed loss of captured-404 history when the database performed automatic repair of a crashed log table. The plugin previously dropped and recreated the affected table after repeated repair failures, destroying logged hits in the process. It now leaves the table alone if repair cannot succeed, preserving your captured-404 history.
 * Fixed loss of log data during repair of damaged plugin tables that were missing their primary key column. This was the underlying cause of the log-history loss reported during the 4.1.6 to 4.1.7 upgrade. The repair now preserves all existing rows instead of recreating the table from scratch.
-* Fixed recurring admin email reports caused by `opcache_invalidate()` on hosts that block the function. The plugin's error handler now respects PHP's standard warning-suppression behavior, so blocked-but-harmless calls no longer generate email notifications.
 * Fixed timeouts during the nightly log-cache rebuild on sites with aggressive log retention. The rebuild now reliably completes within shared-host time limits.
 
 **Improvements**
 
 * The Captured 404s list and other admin views that read log data now load substantially faster on sites with large log tables. A new indexed column replaces a slower per-row computation; existing sites are updated in the background during nightly maintenance and speed up over time.
-* Admin email reports for database errors now identify which feature triggered the failure instead of using a generic label. When the same error recurs, you can tell at a glance which part of the plugin produced it.
 
 ## Version 4.1.10 (Apr 30, 2026) ##
 
