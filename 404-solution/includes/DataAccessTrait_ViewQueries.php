@@ -458,13 +458,12 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
      * @return void
      */
     function invalidateViewSnapshotCache(): void {
-        try {
-            // Clear all rows from the view cache table.
-            $query = "DELETE FROM {wp_abj404_view_cache} WHERE 1=1";
-            $this->queryAndGetResults($query, array('log_errors' => false));
-        } catch (\Throwable $e) {
-            // Best-effort: cache will expire naturally via TTL if this fails.
-        }
+        // Clear all rows from the view cache table. The 'log_errors' => false
+        // option signals to queryAndGetResults() that this is a best-effort
+        // operation: the cache expires naturally via TTL if the DELETE fails,
+        // so the DAO layer handles the failure quietly without re-throwing.
+        $query = "DELETE FROM {wp_abj404_view_cache} WHERE 1=1";
+        $this->queryAndGetResults($query, array('log_errors' => false));
 
         // Clear WordPress transients for view row and count snapshots.
         // The transient keys are hashed (e.g. abj404_view_rows_<md5>), so
@@ -1166,6 +1165,21 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
     function maybeUpdateRedirectsForViewHitsTable(): void {
         // Record that we checked during this request (used for admin tooltip UX).
         $this->setRuntimeFlag(self::HITS_TABLE_LAST_CHECKED_FLAG, time(), 86400);
+
+        // Piggyback on the captured-404s tab render: also schedule a
+        // 15-second logsv2.canonical_url backfill at shutdown if there's
+        // legacy NULL-row backlog. The shutdown handler holds a worker
+        // for the budget but the admin response is already flushed by
+        // fastcgi_finish_request, so the user doesn't perceive the wait.
+        // The function is internally deduped + gated on column existence,
+        // probe results, and the backfill-complete option, so calling it
+        // unconditionally is cheap.
+        if (function_exists('abj_service')) {
+            $upgradesEtc = abj_service('database_upgrades');
+            if (is_object($upgradesEtc) && method_exists($upgradesEtc, 'scheduleLogsv2CanonicalUrlBackfill')) {
+                $upgradesEtc->scheduleLogsv2CanonicalUrlBackfill();
+            }
+        }
 
         if ($this->shouldSkipNonEssentialDbWrites()) {
             $this->logger->debugMessage(__FUNCTION__ . " skipped due to temporary DB write cooldown.");

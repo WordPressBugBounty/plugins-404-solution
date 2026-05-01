@@ -53,10 +53,22 @@ class ABJ_404_Solution_ErrorHandler {
      * @return boolean
      */
     static function NormalErrorHandler($errno, $errstr, $errfile, $errline) {
+        // Respect PHP's `@` error-suppression operator. While inside @somefunc(),
+        // PHP sets error_reporting() to 0 for the duration of the call. A custom
+        // handler that ignores this state still escalates intentionally-suppressed
+        // warnings to error-level logging — defeating the suppression.
+        // Concrete case: @opcache_invalidate() at PluginLogic.php:1042 on hosts
+        // with opcache.restrict_api set was producing email-threshold reports
+        // because this guard was missing. Returning false here lets PHP's default
+        // handler honour the suppression.
+        if (error_reporting() === 0) {
+            return false;
+        }
+
         $abj404logging = abj_service('logging');
         $f = abj_service('functions');
         $onlyAWarning = false;
-        
+
         try {
         	// if the error file does not contain the name of our plugin then we ignore it.
         	$slashPos = $f->strpos(ABJ404_NAME, '/');
@@ -157,22 +169,13 @@ class ABJ_404_Solution_ErrorHandler {
      * @return bool
      */
     private static function safeWriteLine(string $line): bool {
-        try {
-            $logger = abj_service('logging');
-            if (is_object($logger) && method_exists($logger, 'writeLineToDebugFile')) {
-                $logger->writeLineToDebugFile($line);
-                return true;
-            }
-        } catch (Throwable $e) {
-            // fall back below
+        $logger = abj_service('logging');
+        if (is_object($logger) && method_exists($logger, 'writeLineToDebugFile')) {
+            $logger->writeLineToDebugFile($line);
+            return true;
         }
-        try {
-            $logger = abj_service('logging');
-            if (is_object($logger) && method_exists($logger, 'sanitizeLogLine')) {
-                $line = $logger->sanitizeLogLine($line);
-            }
-        } catch (Throwable $e) {
-            // ignore; still write the best-effort line below
+        if (is_object($logger) && method_exists($logger, 'sanitizeLogLine')) {
+            $line = $logger->sanitizeLogLine($line);
         }
         @file_put_contents(ABJ404_PATH . 'abj404_debug_fallback.txt', $line . "\n", FILE_APPEND);
         return false;
@@ -437,18 +440,14 @@ class ABJ_404_Solution_ErrorHandler {
             }
             if ($isPluginAdmin === null) {
                 // Best-effort fallback: show details to real WordPress admins if PluginLogic is broken.
-                try {
-                    if (function_exists('wp_get_current_user')) {
-                        $user = wp_get_current_user();
-                        if (is_object($user) && property_exists($user, 'roles') && is_array($user->roles)) {
-                            $isPluginAdmin = in_array('administrator', $user->roles, true);
-                        }
+                if (function_exists('wp_get_current_user')) {
+                    $user = wp_get_current_user();
+                    if (is_object($user) && property_exists($user, 'roles') && is_array($user->roles)) {
+                        $isPluginAdmin = in_array('administrator', $user->roles, true);
                     }
-                    if ($isPluginAdmin !== true && function_exists('is_super_admin') && is_super_admin()) {
-                        $isPluginAdmin = true;
-                    }
-                } catch (Throwable $e) {
-                    // ignore
+                }
+                if ($isPluginAdmin !== true && function_exists('is_super_admin') && is_super_admin()) {
+                    $isPluginAdmin = true;
                 }
             }
             if ($isPluginAdmin === null) {

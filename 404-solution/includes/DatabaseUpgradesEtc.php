@@ -25,6 +25,19 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	/** @var string|null */
 	private static $uniqID = null;
 
+	/**
+	 * Per-request dedup flag for scheduleLogsv2CanonicalUrlBackfill().
+	 * Mirrors DataAccess::$hitsTableRebuildScheduled — ensures the shutdown
+	 * hook is registered at most once per request even if the schedule
+	 * function is called from multiple paths (Captured-404s tab render +
+	 * Stats panel + EmailDigest, etc.). Reset to false naturally when the
+	 * PHP process ends; persistent SAPIs (PHP-FPM, mod_php) reset it
+	 * implicitly between requests because static is process-local.
+	 *
+	 * @var bool
+	 */
+	private static $logsv2CanonicalBackfillScheduled = false;
+
 	/** @var ABJ_404_Solution_DataAccess */
 	private $dao;
 
@@ -50,6 +63,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	use ABJ_404_Solution_DatabaseUpgradesEtc_MaintenanceTrait;
 	use ABJ_404_Solution_DatabaseUpgradesEtc_PluginUpdateTrait;
 	use ABJ_404_Solution_DatabaseUpgradesEtc_TableRepairTrait;
+	use ABJ_404_Solution_DatabaseUpgradesEtc_IndexesTrait;
 
 	/**
 	 * Constructor with dependency injection.
@@ -338,6 +352,32 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	 * instead of all in one request that risks PHP max_execution_time.
 	 */
 	const CANONICAL_URL_BACKFILL_TIME_BUDGET_SEC = 25;
+
+	/**
+	 * Per-invocation wall-clock budget (seconds) for backfillLogsv2CanonicalUrl().
+	 * Tighter than the redirects-side budget because logsv2 backfill can also
+	 * be triggered from the Captured-404s admin-tab shutdown hook, which
+	 * holds a PHP-FPM worker for the duration. 15s caps worker-hold to a
+	 * window short enough that concurrent visitors are unlikely to notice
+	 * worker-pool pressure on shared hosts. Daily cron uses the same budget
+	 * so convergence math (~25K-75K rows per invocation) is consistent.
+	 */
+	const LOGSV2_CANONICAL_URL_BACKFILL_TIME_BUDGET_SEC = 15;
+
+	/**
+	 * wp_options key that flips to '1' once backfillLogsv2CanonicalUrl()
+	 * confirms zero NULL rows remain on logsv2.canonical_url. Once set, the
+	 * read-side query can drop the COALESCE fallback and use the no-COALESCE
+	 * form ("logsv2.canonical_url = redirects.canonical_url"); the planner
+	 * picks the smaller side as driver and skips the Filter step (~17,000x
+	 * cost reduction vs the COALESCE form per the redirects-temp-table-perf
+	 * writeup).
+	 *
+	 * Stored as autoload=false so the option doesn't bloat the autoloaded
+	 * options blob on every request — read on the captured-404s render path
+	 * only, which already triggers wp_cache lookups for related options.
+	 */
+	const LOGSV2_CANONICAL_URL_BACKFILL_COMPLETE_OPTION = 'abj404_logsv2_canonical_url_backfill_complete';
 
 	/**
 	 * Known plugin table suffixes for adoption.
@@ -812,14 +852,14 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
 	    /** @return void */
 	    function runInitialCreateTables() {
-	    	// Drop stripped tables BEFORE any CREATE TABLE IF NOT EXISTS runs.  Without
-	    	// this, an existing-but-broken table (missing the file's `id` PRIMARY KEY)
-	    	// would survive the IF NOT EXISTS check and verifyColumns would only ALTER
-	    	// ADD the missing non-PK columns — the auto_increment PK can never be
-	    	// retro-added by ALTER, leaving the table permanently broken.  Previously
-	    	// this lived only in correctIssuesBefore() (upgrade-flow only), so cron
-	    	// callers like deleteOldRedirectsCron's createDatabaseTables() (no $updatingToNewVersion
-	    	// flag) silently propagated the broken state.
+	    	// Re-add a stripped `id` PRIMARY KEY (via ALTER) BEFORE any CREATE TABLE
+	    	// IF NOT EXISTS runs.  Without this step, an existing-but-broken table
+	    	// (missing the file's `id` PRIMARY KEY) would survive the IF NOT EXISTS
+	    	// check and verifyColumns would only ALTER ADD the missing non-PK
+	    	// columns, leaving the table without its primary key.  Lives here (not
+	    	// just in correctIssuesBefore) so cron callers of createDatabaseTables()
+	    	// — which don't pass the $updatingToNewVersion flag — also repair
+	    	// stripped tables instead of propagating the broken state.
 	    	$this->repairStrippedViewCacheTable();
 
 	    	foreach ($this->discoverPermanentDDLFiles() as $ddlEntry) {
@@ -838,6 +878,17 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	    		if (!$this->verifyTableMaterialized($tableName, $ddlEntry['placeholder'])) {
 	    			// Don't abort the loop — other tables can still get created.
 	    			continue;
+	    		}
+
+	    		// Targeted online-DDL column add(s) before the generic verifyColumns()
+	    		// flow runs a bare ALTER. On large logsv2 tables (multi-GB on
+	    		// busy sites) bare ADD COLUMN can block the table for tens of
+	    		// seconds; the targeted helper uses ALGORITHM=INPLACE, LOCK=NONE
+	    		// so InnoDB ≥ 5.6 picks the lockless online-DDL path. If the
+	    		// engine doesn't support it the helper falls back silently and
+	    		// verifyColumns() picks up the column add as a safety net.
+	    		if ($ddlEntry['bareTableName'] === 'abj404_logsv2') {
+	    			$this->ensureLogsv2CanonicalUrlColumn($tableName);
 	    		}
 
 	    		$this->verifyColumns($tableName, $query);
@@ -1186,205 +1237,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
         }
     }
 
-    /** @return void */
-    function createIndexes() {
-    	foreach ($this->discoverPermanentDDLFiles() as $ddlEntry) {
-    		$tableName = $this->dao->doTableNameReplacements($ddlEntry['placeholder']);
-    		$query = $this->dao->doTableNameReplacements($ddlEntry['ddlContent']);
-    		$this->verifyIndexes($tableName, $query);
-    	}
-    }
 
-    /**
-     * @param string $tableName
-     * @param string $createTableStatementGoal
-     * @return void
-     */
-    function verifyIndexes($tableName, $createTableStatementGoal) {
-
-	    	// get the indexes.
-	    	// Pattern matches lines starting with "KEY" / "UNIQUE KEY" - handles composite indexes with commas inside parens
-	    	// Indexes: treat the CREATE TABLE SQL as source of truth, and treat the database as truth
-	    	// for what exists (SHOW INDEX). Avoid parsing SHOW CREATE TABLE output, which is vendor/format dependent.
-	    	$goalSpecsByName = $this->parseIndexSpecsFromCreateTableSql($createTableStatementGoal);
-
-	    	$missingIndexNames = [];
-	    	foreach (array_keys($goalSpecsByName) as $indexName) {
-	    		if (!$this->indexExists($tableName, $indexName)) {
-	    			$missingIndexNames[] = $indexName;
-	    		}
-	    	}
-
-	    	if (count($missingIndexNames) > 0) {
-	    		$this->logger->infoMessage(self::$uniqID . ": On {$tableName} I'm adding missing indexes: " . implode(', ', $missingIndexNames));
-	    	}
-
-	    	// Get actual columns in the table so we can skip indexes that reference missing columns.
-	    	$existingColumns = [];
-	    	$showColResult = $this->dao->queryAndGetResults("SHOW COLUMNS FROM " . $tableName);
-	    	$showColRows = is_array($showColResult['rows'] ?? null) ? $showColResult['rows'] : [];
-	    	foreach ($showColRows as $colRow) {
-	    		if (!is_array($colRow)) { continue; }
-	    		foreach ($colRow as $key => $value) {
-	    			if (strtolower((string)$key) === 'field') {
-	    				$existingColumns[] = strtolower((string)$value);
-	    				break;
-	    			}
-	    		}
-	    	}
-
-	    	foreach ($missingIndexNames as $indexName) {
-	    		$spec = $goalSpecsByName[$indexName] ?? null;
-	    		if (empty($spec)) {
-	    			continue;
-	    		}
-
-	    		// Verify all columns referenced by this index actually exist in the table.
-	    		if (!empty($existingColumns)) {
-	    			$indexColNames = [];
-	    			preg_match_all('/`([^`]+)`/', $spec['columns'], $colMatches);
-	    			if (!empty($colMatches[1])) {
-	    				$indexColNames = array_map('strtolower', $colMatches[1]);
-	    			}
-	    			$missingCols = array_diff($indexColNames, $existingColumns);
-	    			if (!empty($missingCols)) {
-	    				$this->logger->warn("Skipping index {$indexName} on {$tableName}: " .
-	    					"column(s) " . implode(', ', $missingCols) . " do not exist in the table.");
-	    				continue;
-	    			}
-	    		}
-
-		    		$spellingCacheTableName = $this->dao->doTableNameReplacements('{wp_abj404_spelling_cache}');
-		    		$tableNameLower = strtolower($tableName);
-		    		if ($tableNameLower == $spellingCacheTableName && !empty($spec['unique'])) {
-		    			$this->dao->deleteSpellingCache();
-		    		}
-
-	    		$addStatement = $this->buildAddIndexStatementFromParts($tableName, $spec['name'], $spec['columns'], $spec['unique']);
-	    		$this->dao->queryAndGetResults($addStatement);
-	    		$this->logger->infoMessage("I added an index: " . $addStatement);
-	    	}
-	    }
-
-    /**
-     * @param string $tableName
-     * @param string $indexName
-     * @return bool
-     */
-    private function indexExists($tableName, $indexName) {
-        global $wpdb;
-        $sql = $wpdb->prepare("SHOW INDEX FROM {$tableName} WHERE Key_name = %s", $indexName);
-        // DAO-bypass-approved: indexExists() schema-introspection helper (already prepared); DDL pre-check before ALTER TABLE
-        $results = $wpdb->get_results($sql, ARRAY_A);
-        return !empty($results);
-    }
-
-	    /**
-	     * Parse an index DDL line from our CREATE TABLE SQL into a structured spec.
-	     *
-	     * Accepts forms like:
-	     * - KEY `name` (`col`(190), `other`)
-	     * - UNIQUE KEY `name` (`col`)
-	     * - KEY `name` (`col`) USING BTREE
-	     *
-	     * Returns null if the line doesn't look like a KEY/UNIQUE KEY definition.
-	     *
-	     * @param string $indexDDL
-	     * @return array{name: string, columns: string, unique: bool}|null
-	     */
-	    private function parseIndexDDLToSpec($indexDDL) {
-	        $indexDDL = trim($indexDDL);
-	        $matches = [];
-	        if (!preg_match('/^(unique\\s+)?key\\s+`?([^`\\s]+)`?\\s*(\\(.+\\))\\s*(?:using\\s+\\w+)?\\s*$/i', $indexDDL, $matches)) {
-	            return null;
-	        }
-
-	        return [
-	            'name' => $matches[2],
-	            'columns' => $matches[3],
-	            'unique' => !empty($matches[1]),
-	        ];
-	    }
-
-	    /**
-	     * Extract index specs from a CREATE TABLE statement (plugin SQL templates).
-	     *
-	     * @param string $createTableSql
-	     * @return array<string, array{name:string, columns:string, unique:bool}> keyed by index name
-	     */
-	    private function parseIndexSpecsFromCreateTableSql($createTableSql) {
-	        if (!is_string($createTableSql) || $createTableSql === '') {
-	            return [];
-	        }
-
-	        $matches = [];
-	        preg_match_all('/^\\s*(?:unique\\s+)?key\\s+.+?\\s*$/im', $createTableSql, $matches);
-	        $lines = $matches[0];
-
-	        $specsByName = [];
-	        foreach ($lines as $line) {
-	            $spec = $this->parseIndexDDLToSpec($line);
-	            if (empty($spec) || empty($spec['name'])) {
-	                continue;
-	            }
-	            $specsByName[$spec['name']] = $spec;
-	        }
-
-	        return $specsByName;
-	    }
-
-	    /**
-	     * Build a valid ALTER TABLE ... ADD INDEX statement from structured parts.
-	     *
-	     * @param string $tableName
-	     * @param string $indexName
-	     * @param string $columnsSql Must include surrounding parentheses, e.g. "(`a`, `b`(190))"
-	     * @param bool $unique
-	     * @return string
-	     */
-	    private function buildAddIndexStatementFromParts($tableName, $indexName, $columnsSql, $unique) {
-	        global $wpdb;
-	        /** @var \wpdb $wpdb */
-	        $serverVersion = method_exists($wpdb, 'db_version') ? ($wpdb->db_version() ?: '') : '';
-	        $serverInfo = property_exists($wpdb, 'db_server_info') ? ($wpdb->db_server_info ?? '') : '';
-
-	        $isMaria = stripos($serverInfo, 'mariadb') !== false || stripos($serverVersion, 'maria') !== false;
-	        $cleanedVersion = preg_replace('/[^\d\.]/', '', $serverVersion) ?? '';
-	        $supportsIfNotExists = $isMaria && version_compare($cleanedVersion, '10.5', '>=');
-
-	        $indexType = $unique ? 'unique index' : 'index';
-	        $ifNotExists = $supportsIfNotExists ? ' if not exists' : '';
-
-	        return "alter table " . $tableName . " add " . $indexType . $ifNotExists . " `" . $indexName . "` " . trim($columnsSql);
-	    }
-
-	    /**
-	     * @param string $logsTable
-	     * @param string|null $createSqlOverride
-	     * @return void
-	     */
-	    private function ensureLogsCompositeIndex($logsTable, $createSqlOverride = null) {
-	        $indexName = 'idx_requested_url_timestamp';
-	        $createSql = is_string($createSqlOverride) ? $createSqlOverride : ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/createLogTable.sql");
-	        $specsByName = $this->parseIndexSpecsFromCreateTableSql($createSql);
-	        $spec = $specsByName[$indexName] ?? null;
-	        if (empty($spec)) {
-	            $this->logger->errorMessage("Failed to add {$indexName} to {$logsTable}: index definition not found in createLogTable.sql");
-	            return;
-	        }
-
-	        if ($this->indexExists($logsTable, $indexName)) {
-	            return;
-	        }
-	        $query = $this->buildAddIndexStatementFromParts($logsTable, $spec['name'], $spec['columns'], $spec['unique']);
-	        $results = $this->dao->queryAndGetResults($query);
-        if (!empty($results['last_error'])) {
-            $this->logger->errorMessage("Failed to add {$indexName} to {$logsTable}: " . $results['last_error'] . " (query: {$query})");
-        } else {
-            $this->logger->infoMessage("Added {$indexName} to {$logsTable} using query: {$query}");
-        }
-    }
-    
     /**
      * @param string $tableName
      * @param string $createTableStatementGoal

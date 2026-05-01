@@ -55,18 +55,11 @@ class ABJ_404_Solution_Logging {
         }
 
         // If the DI container is initialized, prefer it.
-        if (function_exists('abj_service') && class_exists('ABJ_404_Solution_ServiceContainer')) {
-            try {
-                $c = ABJ_404_Solution_ServiceContainer::getInstance();
-                if (is_object($c) && method_exists($c, 'has') && $c->has('logging')) {
-                    $service = $c->get('logging');
-                    if ($service instanceof ABJ_404_Solution_Logging) {
-                        self::$instance = $service;
-                        return self::$instance;
-                    }
-                }
-            } catch (Throwable $e) {
-                // fall back to legacy singleton below
+        if (class_exists('ABJ_404_Solution_ServiceContainer')) {
+            $service = ABJ_404_Solution_ServiceContainer::safeGet('logging');
+            if ($service instanceof ABJ_404_Solution_Logging) {
+                self::$instance = $service;
+                return self::$instance;
             }
         }
 
@@ -876,6 +869,13 @@ class ABJ_404_Solution_Logging {
     function getDebugFilename(): string {
         // get the UUID here.
         $abj404logic = abj_service('plugin_logic');
+        // abj_service returns null when the container is uninitialised or the
+        // factory threw — common during very-early boot, the test harness, and
+        // self-healing recovery from broken installs. Use a deterministic
+        // filename in that case so logging stays available.
+        if (!is_object($abj404logic) || !method_exists($abj404logic, 'getOptions')) {
+            return 'abj404_debug.txt';
+        }
         $options = $abj404logic->getOptions(true);
         $debugFileKey = null;
         if (is_array($options) && array_key_exists(self::DEBUG_FILE_KEY, $options)) {
@@ -888,13 +888,18 @@ class ABJ_404_Solution_Logging {
 
             // create a probably unique UUID and store it to the database.
             $syncUtils = abj_service('sync_utils');
+            if (!is_object($syncUtils) || !method_exists($syncUtils, 'uniqidReal')) {
+                return 'abj404_debug.txt';
+            }
             $debugFileKey = $syncUtils->uniqidReal();
             $options[self::DEBUG_FILE_KEY] = $debugFileKey;
-            $abj404logic->updateOptions($options);
+            if (method_exists($abj404logic, 'updateOptions')) {
+                $abj404logic->updateOptions($options);
+            }
         }
-        
+
         $debugFileName = 'abj404_debug_' . $debugFileKey . '.txt';
-        
+
         return $debugFileName;
     }
     
