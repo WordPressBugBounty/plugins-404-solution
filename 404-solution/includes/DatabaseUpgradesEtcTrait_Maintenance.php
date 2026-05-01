@@ -147,23 +147,22 @@ trait ABJ_404_Solution_DatabaseUpgradesEtc_MaintenanceTrait {
 	function getTableCollationFromInformationSchema($tableName) {
 		global $wpdb;
 
-		$query = $wpdb->prepare(
+		$queryResult = $this->dao->queryAndGetResults(
 			"SELECT TABLE_COLLATION, " .
 			"SUBSTRING_INDEX(TABLE_COLLATION, '_', 1) as TABLE_CHARSET " .
 			"FROM information_schema.tables " .
 			"WHERE TABLE_NAME = %s AND TABLE_SCHEMA = DATABASE()",
-			$tableName
+			['query_params' => [$tableName]]
 		);
 
-		$results = $wpdb->get_results($query, ARRAY_A);
-
-		// Check for query errors
-		if (!empty($wpdb->last_error)) {
-			$this->logger->debugMessage("information_schema query failed for $tableName: " . $wpdb->last_error);
+		$lastError = isset($queryResult['last_error']) && is_string($queryResult['last_error']) ? $queryResult['last_error'] : '';
+		if ($lastError !== '') {
+			$this->logger->debugMessage("information_schema query failed for $tableName: " . $lastError);
 			return null;
 		}
 
-		if (empty($results[0])) {
+		$results = isset($queryResult['rows']) && is_array($queryResult['rows']) ? $queryResult['rows'] : [];
+		if (empty($results) || !is_array($results[0])) {
 			$this->logger->debugMessage("Table $tableName not found in information_schema (may not exist).");
 			return null;
 		}
@@ -444,6 +443,7 @@ trait ABJ_404_Solution_DatabaseUpgradesEtc_MaintenanceTrait {
         // Check each required table
         foreach ($requiredTables as $tableName) {
             $fullTableName = $this->dao->getPrefixedTableName($tableName);
+            // DAO-bypass-approved: Schema-bootstrap inside repairMissingTables() — runs before CREATE TABLE; routing through DAO would trigger the same missing-table auto-repair we are about to invoke ourselves (recursion)
             $tableExists = $wpdb->get_var("SHOW TABLES LIKE '{$fullTableName}'");
 
             if (!$tableExists) {
@@ -520,13 +520,15 @@ trait ABJ_404_Solution_DatabaseUpgradesEtc_MaintenanceTrait {
             $currentTime
         );
 
+        // DAO-bypass-approved: Outside-plugin-tables wp_options cleanup probe (parallels DataAccessTrait_ViewQueries:478 transient clear)
         $expiredTimeouts = $wpdb->get_col($query);
 
-        if ($wpdb->last_error) {
-            if (!$this->dao->classifyAndHandleInfrastructureError($wpdb->last_error)) {
-                $this->logger->errorMessage("Failed to query for expired rate limit transients: " . $wpdb->last_error);
+        $lastError = (string)($wpdb->last_error ?? '');
+        if ($lastError !== '') {
+            if (!$this->dao->classifyAndHandleInfrastructureError($lastError)) {
+                $this->logger->errorMessage("Failed to query for expired rate limit transients: " . $lastError);
             }
-            return ['deleted' => 0, 'errors' => 1, 'error' => $wpdb->last_error];
+            return ['deleted' => 0, 'errors' => 1, 'error' => $lastError];
         }
 
         if (!empty($expiredTimeouts)) {
@@ -578,15 +580,132 @@ trait ABJ_404_Solution_DatabaseUpgradesEtc_MaintenanceTrait {
         $this->cleanupExpiredRateLimitTransients();
 
         // Flag redirects whose destination URL is generating 404s (drives redirect suspension)
-        ABJ_404_Solution_DataAccess::getInstance()->flagDeadDestinationRedirects();
+        abj_service('data_access')->flagDeadDestinationRedirects();
 
         // Expire auto-created redirects that exceed the configured age threshold
-        ABJ_404_Solution_DataAccess::getInstance()->expireOldAutoRedirects();
+        abj_service('data_access')->expireOldAutoRedirects();
+
+        // Backfill canonical_url on legacy redirect rows so the captured-page
+        // JOIN to logs_hits.requested_url stays index-friendly. Chunked + rate-
+        // limited so the daily cron continues progress without blocking large
+        // sites; converges on its own across successive runs.
+        $this->backfillRedirectsCanonicalUrl();
 
         // Nightly internal-link scan: find broken internal links in published content.
         if (class_exists('ABJ_404_Solution_InternalLinkScanner')) {
             $scanner = new ABJ_404_Solution_InternalLinkScanner();
             $scanner->runNightlyScan();
         }
+    }
+
+    // Constants CANONICAL_URL_BACKFILL_CHUNK_SIZE and
+    // CANONICAL_URL_BACKFILL_TIME_BUDGET_SEC are defined on the using class
+    // (ABJ_404_Solution_DatabaseUpgradesEtc) because trait constants require
+    // PHP 8.2+ and the plugin supports PHP 7.4. self::* below resolves to
+    // the using class at compile time.
+
+    /**
+     * Populate {wp_abj404_redirects}.canonical_url for any rows still NULL,
+     * one chunk at a time. Each chunk runs:
+     *
+     *   UPDATE redirects SET canonical_url = CONCAT('/', TRIM(BOTH '/' FROM url))
+     *   WHERE canonical_url IS NULL LIMIT N
+     *
+     * Idempotent — once every row has canonical_url set, the WHERE matches
+     * zero rows and the function returns immediately. The chunk loop is
+     * bounded by both row count (CANONICAL_URL_BACKFILL_CHUNK_SIZE) and wall
+     * clock (CANONICAL_URL_BACKFILL_TIME_BUDGET_SEC) so a 350K-row site
+     * converges over successive daily cron ticks without ever blocking a
+     * request long enough to hit PHP max_execution_time.
+     *
+     * Skips silently when:
+     *   - the redirects table is missing (degraded site state)
+     *   - the canonical_url column is missing (column add hasn't happened
+     *     yet, e.g. immediately after upgrade before verifyColumns ran)
+     *   - the previous run errored — repair flow surfaces the error
+     *
+     * @return int Number of rows updated in this invocation.
+     */
+    public function backfillRedirectsCanonicalUrl(): int {
+        global $wpdb;
+        if (!isset($wpdb)) {
+            return 0;
+        }
+        $redirectsTable = $this->dao->doTableNameReplacements('{wp_abj404_redirects}');
+
+        // SHOW TABLES existence probe — same shape as verifyTableMaterialized()
+        // in DatabaseUpgradesEtc.php:854. The DAO's tableExists() helper is
+        // private so we can't reach it from here, and routing through
+        // queryAndGetResults() would log a benign "table doesn't exist" error
+        // on freshly-installed sites before runInitialCreateTables() has run.
+        // DAO-bypass-approved: schema existence probe — see comment above.
+        $found = $wpdb->get_var("SHOW TABLES LIKE '" . esc_sql($redirectsTable) . "'");
+        if ($found !== $redirectsTable) {
+            return 0;
+        }
+        if (!$this->columnExists($redirectsTable, 'canonical_url')) {
+            return 0;
+        }
+
+        $chunkSize = (int)self::CANONICAL_URL_BACKFILL_CHUNK_SIZE;
+        $timeBudget = (float)self::CANONICAL_URL_BACKFILL_TIME_BUDGET_SEC;
+        $start = microtime(true);
+        $totalUpdated = 0;
+
+        while ((microtime(true) - $start) < $timeBudget) {
+            $query = "UPDATE " . $redirectsTable .
+                " SET canonical_url = CONCAT('/', TRIM(BOTH '/' FROM url))" .
+                " WHERE canonical_url IS NULL" .
+                " LIMIT " . $chunkSize;
+
+            $result = $this->dao->queryAndGetResults($query);
+            $lastError = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
+            if ($lastError !== '') {
+                $this->logger->warn("backfillRedirectsCanonicalUrl: stopping after error: " . $lastError);
+                return $totalUpdated;
+            }
+
+            $rowsAffected = isset($result['rows_affected']) && is_numeric($result['rows_affected'])
+                ? (int)$result['rows_affected'] : 0;
+            $totalUpdated += $rowsAffected;
+            if ($rowsAffected < $chunkSize) {
+                break;
+            }
+        }
+
+        if ($totalUpdated > 0) {
+            $this->logger->infoMessage(sprintf(
+                "backfillRedirectsCanonicalUrl: populated canonical_url on %d redirect rows in %.2fs.",
+                $totalUpdated,
+                microtime(true) - $start
+            ));
+        }
+        return $totalUpdated;
+    }
+
+    /**
+     * Cheap "does this column exist on this table" probe via SHOW COLUMNS.
+     * Case-insensitive on the column name to match MySQL/MariaDB driver
+     * variations in returned column-name casing.
+     *
+     * @param string $tableName  Fully-qualified table name.
+     * @param string $columnName Column to look for.
+     * @return bool
+     */
+    private function columnExists(string $tableName, string $columnName): bool {
+        $result = $this->dao->queryAndGetResults("SHOW COLUMNS FROM " . $tableName,
+            array('log_errors' => false));
+        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+        $needle = strtolower($columnName);
+        foreach ($rows as $row) {
+            if (!is_array($row)) { continue; }
+            foreach ($row as $key => $value) {
+                if (strtolower((string)$key) !== 'field') { continue; }
+                if (strtolower((string)$value) === $needle) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

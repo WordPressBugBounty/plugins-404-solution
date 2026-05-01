@@ -5,7 +5,7 @@ Tags: 404, redirect, 404 redirect, broken links, spell check
 Requires at least: 5.0
 Requires PHP: 7.4
 Tested up to: 6.9
-Stable tag: 4.1.9
+Stable tag: 4.1.10
 License: GPL-3.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -200,6 +200,21 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 6. **Email Digest** — Weekly HTML email summarizing captured 404s, resolution rate, and a ranked table of top 404 URLs with color-coded hit badges.
 
 == Changelog ==
+
+= Version 4.1.10 (Apr 30, 2026) =
+
+**Bug Fixes**
+
+* Fixed disk-full, read-only, and crashed-table conditions encountered during log flush and N-gram cron scheduling escalating to error level and triggering developer email reports. These hosting conditions are now classified as warnings — the plugin already degrades past them — so they no longer spam the admin's inbox.
+* Fixed admin AJAX error notices showing only generic HTTP/textStatus information when a paginated admin view timed out or returned a 500. The notice now includes the elapsed request time, the server-side processing stage that was in flight when the failure occurred, and the redacted SQL of the failing query when available, so the cause is identifiable without a server log dump.
+* Fixed a parse-time fatal on PHP 7.4 through 8.1 caused by two trait-level constants introduced with the canonical-URL backfill work. The constants are now declared on the using class so the trait file parses cleanly on every supported PHP version.
+
+**Improvements**
+
+* The Page Redirects and Captured 404s admin views are now significantly faster on installs with very large redirects tables. Each redirect now stores a precomputed canonical URL that is indexed and JOINed against the hits rollup, eliminating the per-row CONCAT/TRIM evaluation that could time out the admin AJAX request on sites with hundreds of thousands of captured rows. The column is backfilled in chunks during the upgrade and the nightly maintenance cron, so large sites converge across cron ticks without blocking any single request.
+* The daily cron that flags dead-destination redirects now scales with URL count rather than raw log-row count. The query now JOINs against the precomputed `logs_hits` rollup with a new `failed_hits` column, completing in milliseconds even on sites with millions of log rows where it previously timed out.
+* The admin AJAX timeout for explicit user actions (sorting, filtering, pagination) was raised from 15 seconds to 45 seconds. Background detect-only refreshes still use the tight 15-second budget, so the longer timeout only applies when the admin is actively waiting.
+* Several catch blocks across the plugin that previously swallowed exceptions silently now emit a warning breadcrumb to the support log, so unexpected failure paths are visible in support bundles instead of vanishing.
 
 = Version 4.1.9 (Apr 29, 2026) =
 
@@ -532,118 +547,3 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 = Version 3.1.8 (Jan 19, 2026) =
 * FIX: Preserve Unicode slugs during redirect lookups and allow manual redirect source paths with non-ASCII characters.
 * FIX: TranslatePress-aware redirect translation for localized paths with a filter hook for other multilingual plugins.
-
-= Version 3.1.7 (Dec 19, 2025) =
-* FIX: Prevent invalid SQL during missing-index creation by parsing index definitions from the plugin SQL templates and emitting structured `ALTER TABLE ... ADD INDEX ...` statements.
-
-= Version 3.1.6 (Dec 18, 2025) =
-* FIX: Redirects table pagination/search no longer fails on some MariaDB versions with a SQL syntax error while updating the table.
-
-= Version 3.1.5 (Dec 18, 2025) =
-* FIX: Resolve Page Redirects / Captured 404s table search failing on some databases with "Illegal mix of collations ... for operation 'replace'".
-* Improvement: Daily maintenance insurance now verifies and repairs plugin table collations (including detecting column-level collation drift) and ensures required indexes exist.
-
-= Version 3.1.4 (Dec 18, 2025) =
-* FIX: Page Redirects search AJAX errors now return actionable diagnostics to plugin admins (including PHP fatal/exception details) instead of only a generic WordPress "critical error" message.
-* Improvement: AJAX failures are always written to the 404 Solution debug log (with a safe fallback log file if the normal debug log cannot be written).
-* Improvement: When a fatal is triggered by another plugin/theme during the 404 Solution table AJAX call, details are captured only when the request originated from the 404 Solution admin screens (reduces unrelated log noise).
-
-= Version 3.1.3 (Dec 17, 2025) =
-* FIX: Logs tab dropdown search now returns matching log URLs (instead of always reporting no matches).
-* FIX: Page Redirects / Captured 404s table search (press Enter) no longer fails on some environments due to admin-ajax URL/action handling.
-* Improvement: When a table AJAX refresh fails, the alert now includes HTTP status + response preview and logs full details to the browser console for easier debugging.
-
-= Version 3.1.2 (Dec 16, 2025) =
-* FIX: Captured 404 actions (Ignore/Trash/Restore) now work reliably even when hosts/browsers strip the Referer header (thanks to Larry K for reporting this).
-* FIX: Restoring a captured URL from Trash returns it to Captured status (not Ignored).
-* FIX: MariaDB index creation no longer fails with a SQL syntax error when adding missing indexes (correct `ADD INDEX IF NOT EXISTS` DDL generation).
-* Improvement: "Later" action now preserves current table sorting (orderby/order) when clicked.
-* Improvement: Backend treats `abj404action` as an alias for `action` for consistent bulk/action handling.
-
-= Version 3.1.1 (Dec 11, 2025) =
-* FIX: Make index creation idempotent for `idx_requested_url_timestamp` (skip existing index, use IF NOT EXISTS when supported) to stop duplicate-key errors during upgrades.
-* FIX: Harden log queue flushing with validation/sanitization, duplicate-tolerant inserts, and better error reporting to avoid lost 404 log entries.
-* Compatibility: Explicit `str_getcsv` escape parameter for PHP 8.4+ to silence deprecation notices.
-* Security: Escaped `filterText` SQL path in ajax pagination to block the reported SQL injection vector (only exploitable by authenticated admin users).
-
-= Version 3.1.0 (Dec 6, 2025) =
-* Feature: Async 404 page suggestions - Custom 404 pages sometimes load instantly while suggestions compute in the background.
-* Feature: Per-post redirect toggle - Control automatic slug-change redirects on individual posts/pages in Classic Editor, Gutenberg, and Quick Edit.
-* Feature: Add Arabic language and RTL layout support.
-* Improvement: Optimize category/tag queries for better performance.
-* Improvement: Accessibility - WCAG 2.1 AA compliance with table headers, focus indicators, ARIA labels, modal focus trapping, and reduced motion support.
-* Improvement: Performance optimization for spell-checking on large sites (N-gram indexing, reduced database queries, memory optimization).
-* FIX: Handle corrupted database records gracefully without PHP warnings.
-
-= Version 3.0.8 (Nov 29, 2025) =
-* Improvement: Feedback emails now include database collation info even on locked-down hosts (fallback chain for information_schema restrictions).
-* FIX: Tooltip z-index issue where destination tooltips appeared behind sticky table header.
-
-= Version 3.0.7 (Nov 28, 2025) =
-* Improvement: Load admin pages faster. Load redirects faster.
-* Improvement: Add a two question wizard/setup screen for new users.
-* Improvement: Add warning icon when a redirect URL looks like regex but isn't marked as one.
-* Improvement: Add loading spinner when searching for redirect destinations.
-* Security: Multiple security hardening improvements including CSRF protection and XSS prevention.
-* FIX: Save settings correctly when using simple mode on the options page.
-* FIX: Simple page allows changing the default 404 page destination now.
-* FIX: Dark mode checkbox no longer flashes on page load.
-* FIX: Setup wizard form submission now works correctly.
-
-= Version 3.0.6 (Nov 27, 2025) =
-* FIX: Resolve fatal error "Class ABJ_404_Solution_DataAccess not found" during plugin uninstallation. The Uninstaller now works standalone without requiring the plugin's autoloader.
-
-= Version 3.0.5 (Nov 27, 2025) =
-* Improvement: Options page has Simple/Advanced mode.
-* Improvement: Made the plugin prettier in general.
-
-= Version 3.0.4 (Nov 24, 2025) =
-* FIX: Resolve SQL error "Could not perform query because it contains invalid data" caused by invalid UTF-8 byte sequences in URLs. Added sanitization to strip invalid UTF-8 characters before database storage.
-* FIX: Resolve "Table doesn't exist" errors on case-sensitive MySQL installations (lower_case_table_names=0) with mixed-case WordPress prefixes. All plugin table references now use normalized lowercase prefixes to match table creation behavior.
-
-= Version 3.0.3 (Nov 23, 2025) =
-* Improved: GDPR compliance in log files (just in case).
-* Improved: Some missing translation keys.
-* Improved: Deactivation feedback.
-
-= Version 3.0.2 (Nov 22, 2025) =
-* FIX: Table creation issues on multisite. (Thanks to debug file participants!)
-
-= Version 3.0.1 (Nov 20, 2025) =
-* Improvement: Use accordions on the settings screen instead of chips.
-* FIX: Division by 0 in the new ngram filter.
-* FIX: Language file format issues for various languages.
-* FIX: Correct the deactivate feedback trigger.
-* FIX: Log slow query content correctly.
-* FIX: Table creation issues on multisites.
-
-= Version 3.0.0 (Nov 17, 2025) =
-* Improvement: Add themes. Add automatic dark mode detection for WordPress admin.
-* Improvement: Better support and faster suggestions for sites with 10k+ pages.
-* FIX: Resolve MAX_JOIN_SIZE errors for large sites during maintenance operations by using SQL_BIG_SELECTS for cleanup queries.
-* FIX: Resolve MySQL Server Gone Away errors during long-running operations by checking and restoring database connections.
-* FIX: Resolve PHP 8.2 deprecation error when mb_substr receives null for domain root URLs (e.g., http://example.com).
-* FIX: Fix duplicate subpage parameters in admin URLs that were causing URLs like '?page=x&subpage=y&subpage=y'.
-* FIX: Add isset() checks before accessing $_POST array elements to prevent PHP 8.0+ warnings.
-
-= Version 2.36.10 (April 29, 2025) =
-* FIX: Fix the '_load_textdomain_just_in_time was called incorrectly' issue again, this time for @apos37.
-
-= Version 2.36.9 (April 25, 2025) =
-* FIX: Avoid throwing an error when releasing a synchronization lock not owned by the current process, for leehodson.
-
-= Version 2.36.8 (April 25, 2025) =
-* FIX: Avoid a logging issue while logging a DB error for leehodson.
-
-= Version 2.36.6 (April 15, 2025) =
-* Improvement: Page suggestions: when an admin user clicks the score after a suggestion link it gives them some more information about the link like author, post date, etc.
-* Improvement: Page suggestions: add an option to exclude certain URLs from the list of suggested pages on a custom 404 page based on user defined regex patterns.
-
-= Version 2.36.5 (February 3, 2025) =
-* FIX: Use SHOW CREATE TABLE instead of select from information_schema to get collation data.
-
-= Version 2.36.4 (December 13, 2024) =
-* FIX: Ensure parent classes are loaded before their children to possibly resolve inheritance issues with autoloading. (thanks debug file participants)
-
-= Version 2.36.3 (November 28, 2024) =
-* FIX: Handle arrays in query parameters without logging an error.

@@ -64,13 +64,13 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	 */
 	public function __construct($dataAccess = null, $logging = null, $functions = null, $permalinkCache = null, $syncUtils = null, $pluginLogic = null, $ngramFilter = null) {
 		// Use injected dependencies or fall back to getInstance() for backward compatibility
-		$this->dao = $dataAccess !== null ? $dataAccess : ABJ_404_Solution_DataAccess::getInstance();
-		$this->logger = $logging !== null ? $logging : ABJ_404_Solution_Logging::getInstance();
-		$this->f = $functions !== null ? $functions : ABJ_404_Solution_Functions::getInstance();
-		$this->permalinkCache = $permalinkCache !== null ? $permalinkCache : ABJ_404_Solution_PermalinkCache::getInstance();
-		$this->syncUtils = $syncUtils !== null ? $syncUtils : ABJ_404_Solution_SynchronizationUtils::getInstance();
-		$this->logic = $pluginLogic !== null ? $pluginLogic : ABJ_404_Solution_PluginLogic::getInstance();
-		$this->ngramFilter = $ngramFilter !== null ? $ngramFilter : ABJ_404_Solution_NGramFilter::getInstance();
+		$this->dao = $dataAccess !== null ? $dataAccess : abj_service('data_access');
+		$this->logger = $logging !== null ? $logging : abj_service('logging');
+		$this->f = $functions !== null ? $functions : abj_service('functions');
+		$this->permalinkCache = $permalinkCache !== null ? $permalinkCache : abj_service('permalink_cache');
+		$this->syncUtils = $syncUtils !== null ? $syncUtils : abj_service('sync_utils');
+		$this->logic = $pluginLogic !== null ? $pluginLogic : abj_service('plugin_logic');
+		$this->ngramFilter = $ngramFilter !== null ? $ngramFilter : abj_service('ngram_filter');
 	}
 
 	/** @return self */
@@ -134,6 +134,11 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     		$this->updateTableEngineToInnoDB();
     		$this->createIndexes();
 
+    		// First chunk of the canonical_url backfill runs in-band so newly
+    		// upgraded small sites finish in one shot. Larger sites converge
+    		// over subsequent daily-maintenance cron ticks (same method).
+    		$this->backfillRedirectsCanonicalUrl();
+
     		$this->logger->infoMessage(sprintf(
     			"Network activation: Created tables for current site (ID %d). Scheduling background task for remaining sites.",
     			$currentBlogId
@@ -150,6 +155,11 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     		$this->updateTableEngineToInnoDB();
     		$this->createIndexes();
 
+    		// First chunk of the canonical_url backfill runs in-band so newly
+    		// upgraded small sites finish in one shot. Larger sites converge
+    		// over subsequent daily-maintenance cron ticks (same method).
+    		$this->backfillRedirectsCanonicalUrl();
+
     		$this->logger->infoMessage(sprintf(
     			"Network upgrade: Updated tables for current site (ID %d). Scheduling background upgrade for remaining sites.",
     			$currentBlogId
@@ -163,6 +173,11 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     		$this->correctCollations();
     		$this->updateTableEngineToInnoDB();
     		$this->createIndexes();
+
+    		// First chunk of the canonical_url backfill runs in-band so newly
+    		// upgraded small sites finish in one shot. Larger sites converge
+    		// over subsequent daily-maintenance cron ticks (same method).
+    		$this->backfillRedirectsCanonicalUrl();
     	}
 
     	// Adopt orphaned tables AFTER target tables exist (rename handles prefix mismatches).
@@ -235,6 +250,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 		// On case-insensitive MySQL (lower_case_table_names >= 1), table names
 		// are already treated as lowercase internally. Renaming is pointless and
 		// can cause issues on some hosting setups.
+		// DAO-bypass-approved: Schema-bootstrap inside renameAbj404TablesToLowerCase() — runs before plugin DAO is fully wired during DB upgrades
 		$lctnResult = $wpdb->get_row("SHOW VARIABLES LIKE 'lower_case_table_names'", ARRAY_A);
 		if (is_array($lctnResult)) {
 			$lctnValue = null;
@@ -304,6 +320,26 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	}
 
 	/**
+	 * Number of rows updated per chunk by backfillRedirectsCanonicalUrl().
+	 * Sized so a single chunk completes well under the standard 60s query
+	 * timeout even on slow disks; the chunk loop will keep going until the
+	 * per-invocation budget is exhausted.
+	 *
+	 * Defined here (not on the trait) because trait constants require PHP 8.2+
+	 * and the plugin supports PHP 7.4. The trait references this via self::
+	 * which resolves to the using class at compile time.
+	 */
+	const CANONICAL_URL_BACKFILL_CHUNK_SIZE = 5000;
+
+	/**
+	 * Per-invocation wall-clock budget (seconds) for backfillRedirectsCanonicalUrl().
+	 * Bounds how long the daily cron / activation handler will spend on this
+	 * task in one call so a 350K-row site finishes over a few cron ticks
+	 * instead of all in one request that risks PHP max_execution_time.
+	 */
+	const CANONICAL_URL_BACKFILL_TIME_BUDGET_SEC = 25;
+
+	/**
 	 * Known plugin table suffixes for adoption.
 	 * @var array<int, string>
 	 */
@@ -334,6 +370,8 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 		if ($dbNameRaw === '') {
 			return;
 		}
+		// @utf8-audit: opt-out — $wpdb->dbname is set by WordPress at
+		// bootstrap from wp-config.php; never user input.
 		$dbNameEscaped = esc_sql($dbNameRaw);
 		$dbName = is_array($dbNameEscaped) ? '' : $dbNameEscaped;
 
@@ -832,6 +870,9 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	    	if (!isset($wpdb)) {
 	    		return false;
 	    	}
+	    	// @utf8-audit: opt-out — $tableName is fully-qualified plugin table
+	    	// name from doTableNameReplacements / $wpdb->prefix; never user input.
+	    	// DAO-bypass-approved: Schema-bootstrap inside verifyTableMaterialized() — verifies CREATE TABLE actually materialized; DAO timeout wrapper is irrelevant for DDL existence probe
 	    	$found = $wpdb->get_var("SHOW TABLES LIKE '" . esc_sql($tableName) . "'");
 	    	if ($found === $tableName) {
 	    		return true;
@@ -1006,11 +1047,12 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
                 $this->correctCollations();
                 $this->updateTableEngineToInnoDB();
                 $this->createIndexes();
+                $this->backfillRedirectsCanonicalUrl();
                 $this->renameAbj404TablesToLowerCase();
 
                 ABJ_404_Solution_PluginLogic::doRegisterCrons();
 
-                $logic = ABJ_404_Solution_PluginLogic::getInstance();
+                $logic = abj_service('plugin_logic');
                 $logic->doUpdateDBVersionOption();
             }
         );
@@ -1051,10 +1093,11 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
                 $this->correctCollations();
                 $this->updateTableEngineToInnoDB();
                 $this->createIndexes();
+                $this->backfillRedirectsCanonicalUrl();
                 $this->renameAbj404TablesToLowerCase();
                 $this->correctIssuesAfter();
 
-                $logic = ABJ_404_Solution_PluginLogic::getInstance();
+                $logic = abj_service('plugin_logic');
                 $logic->doUpdateDBVersionOption();
             }
         );
@@ -1104,6 +1147,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
                 $this->correctCollations();
                 $this->updateTableEngineToInnoDB();
                 $this->createIndexes();
+                $this->backfillRedirectsCanonicalUrl();
 
                 $successCount++;
                 $this->logger->debugMessage(sprintf(
@@ -1230,6 +1274,7 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     private function indexExists($tableName, $indexName) {
         global $wpdb;
         $sql = $wpdb->prepare("SHOW INDEX FROM {$tableName} WHERE Key_name = %s", $indexName);
+        // DAO-bypass-approved: indexExists() schema-introspection helper (already prepared); DDL pre-check before ALTER TABLE
         $results = $wpdb->get_results($sql, ARRAY_A);
         return !empty($results);
     }

@@ -22,12 +22,29 @@ class ABJ_404_Solution_EngineProfileResolver {
     /** @var array<int, object>|null Cached profile rows for current request */
     private $cachedProfiles = null;
 
+    /** @var ABJ_404_Solution_DataAccess|null Lazy DAO accessor for centralized query handling. */
+    private $dao = null;
+
     /** @return self */
     public static function getInstance() {
         if (self::$instance === null) {
             self::$instance = new self();
         }
         return self::$instance;
+    }
+
+    /**
+     * Lazy DAO accessor — defers getInstance() until first use so unit tests
+     * that exercise pure-logic methods (URL matching, JSON decoding) don't
+     * boot the data-access singleton.
+     *
+     * @return ABJ_404_Solution_DataAccess
+     */
+    private function dao() {
+        if ($this->dao === null) {
+            $this->dao = abj_service('data_access');
+        }
+        return $this->dao;
     }
 
     /**
@@ -119,8 +136,6 @@ class ABJ_404_Solution_EngineProfileResolver {
             return $this->cachedProfiles;
         }
 
-        global $wpdb;
-
         $table = $this->getTableName();
 
         if (!$this->tableExists($table)) {
@@ -128,18 +143,15 @@ class ABJ_404_Solution_EngineProfileResolver {
             return $this->cachedProfiles;
         }
 
-        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-        $rows = $wpdb->get_results(
-            $wpdb->prepare(
-                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-                "SELECT `id`, `name`, `url_pattern`, `is_regex`, `enabled_engines`, `priority`
-                 FROM `{$table}`
-                 WHERE `status` = 1
-                 ORDER BY `priority` ASC, `id` ASC
-                 LIMIT %d",
-                200
-            )
+        $queryResult = $this->dao()->queryAndGetResults(
+            "SELECT `id`, `name`, `url_pattern`, `is_regex`, `enabled_engines`, `priority`
+             FROM `{$table}`
+             WHERE `status` = 1
+             ORDER BY `priority` ASC, `id` ASC
+             LIMIT %d",
+            ['query_params' => [200], 'result_type' => OBJECT]
         );
+        $rows = $queryResult['rows'] ?? [];
 
         $this->cachedProfiles = is_array($rows) ? $rows : [];
         return $this->cachedProfiles;
@@ -276,11 +288,17 @@ class ABJ_404_Solution_EngineProfileResolver {
      * @return bool
      */
     private function tableExists(string $table): bool {
-        global $wpdb;
-        $result = $wpdb->get_var(
-            $wpdb->prepare('SHOW TABLES LIKE %s', $table)
+        $queryResult = $this->dao()->queryAndGetResults(
+            'SHOW TABLES LIKE %s',
+            ['query_params' => [$table]]
         );
-        return $result === $table;
+        $rows = isset($queryResult['rows']) && is_array($queryResult['rows']) ? $queryResult['rows'] : [];
+        $first = $rows[0] ?? null;
+        if (!is_array($first)) {
+            return false;
+        }
+        $firstValue = reset($first);
+        return $firstValue === $table;
     }
 
     /**
@@ -290,7 +308,6 @@ class ABJ_404_Solution_EngineProfileResolver {
      * @return int|false Inserted/updated row ID, or false on failure.
      */
     public function saveProfile(array $data) {
-        global $wpdb;
         $table = $this->getTableName();
 
         $id = isset($data['id']) && is_numeric($data['id']) ? (int)$data['id'] : 0;
@@ -308,25 +325,31 @@ class ABJ_404_Solution_EngineProfileResolver {
             $enabledEngines = '[]';
         }
 
-        $row = array(
-            'name'            => $name,
-            'url_pattern'     => $urlPattern,
-            'is_regex'        => $isRegex,
-            'enabled_engines' => $enabledEngines,
-            'priority'        => $priority,
-            'status'          => $status,
-        );
-        $formats = array('%s', '%s', '%d', '%s', '%d', '%d');
-
         if ($id > 0) {
-            $result = $wpdb->update($table, $row, array('id' => $id), $formats, array('%d'));
+            $queryResult = $this->dao()->queryAndGetResults(
+                "UPDATE `{$table}`
+                    SET `name` = %s, `url_pattern` = %s, `is_regex` = %d,
+                        `enabled_engines` = %s, `priority` = %d, `status` = %d
+                  WHERE `id` = %d",
+                ['query_params' => [$name, $urlPattern, $isRegex, $enabledEngines, $priority, $status, $id]]
+            );
             $this->cachedProfiles = null;
-            return ($result !== false) ? $id : false;
-        } else {
-            $result = $wpdb->insert($table, $row, $formats);
-            $this->cachedProfiles = null;
-            return ($result !== false) ? (int)$wpdb->insert_id : false;
+            $updateError = isset($queryResult['last_error']) && is_string($queryResult['last_error']) ? $queryResult['last_error'] : '';
+            return $updateError === '' ? $id : false;
         }
+
+        $queryResult = $this->dao()->queryAndGetResults(
+            "INSERT INTO `{$table}` (`name`, `url_pattern`, `is_regex`, `enabled_engines`, `priority`, `status`)
+                  VALUES (%s, %s, %d, %s, %d, %d)",
+            ['query_params' => [$name, $urlPattern, $isRegex, $enabledEngines, $priority, $status]]
+        );
+        $this->cachedProfiles = null;
+        $lastError = isset($queryResult['last_error']) && is_string($queryResult['last_error']) ? $queryResult['last_error'] : '';
+        if ($lastError !== '') {
+            return false;
+        }
+        $insertId = isset($queryResult['insert_id']) && is_scalar($queryResult['insert_id']) ? (int)$queryResult['insert_id'] : 0;
+        return $insertId > 0 ? $insertId : false;
     }
 
     /**
@@ -336,11 +359,14 @@ class ABJ_404_Solution_EngineProfileResolver {
      * @return bool
      */
     public function deleteProfile(int $id): bool {
-        global $wpdb;
         $table = $this->getTableName();
-        $result = $wpdb->delete($table, array('id' => $id), array('%d'));
+        $queryResult = $this->dao()->queryAndGetResults(
+            "DELETE FROM `{$table}` WHERE `id` = %d",
+            ['query_params' => [$id]]
+        );
         $this->cachedProfiles = null;
-        return $result !== false;
+        $deleteError = isset($queryResult['last_error']) && is_string($queryResult['last_error']) ? $queryResult['last_error'] : '';
+        return $deleteError === '';
     }
 
     /**
@@ -349,20 +375,18 @@ class ABJ_404_Solution_EngineProfileResolver {
      * @return array<int, array<string, mixed>>
      */
     public function getAllProfilesForAdmin(): array {
-        global $wpdb;
         $table = $this->getTableName();
 
         if (!$this->tableExists($table)) {
             return [];
         }
 
-        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-        $rows = $wpdb->get_results(
+        $queryResult = $this->dao()->queryAndGetResults(
             "SELECT `id`, `name`, `url_pattern`, `is_regex`, `enabled_engines`, `priority`, `status`
              FROM `{$table}`
-             ORDER BY `priority` ASC, `id` ASC",
-            ARRAY_A
+             ORDER BY `priority` ASC, `id` ASC"
         );
+        $rows = $queryResult['rows'] ?? [];
 
         return is_array($rows) ? $rows : [];
     }

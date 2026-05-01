@@ -102,6 +102,7 @@ class ABJ_404_Solution_Uninstaller {
         }
 
         // Get all blog IDs in the network
+        // DAO-bypass-approved: Multisite blog enumeration during uninstall — no DAO autoloader
         $blog_ids = $wpdb->get_col("SELECT blog_id FROM $wpdb->blogs");
 
         foreach ($blog_ids as $blog_id) {
@@ -131,6 +132,7 @@ class ABJ_404_Solution_Uninstaller {
         // discovery — the DB is the source of truth for which plugin tables exist.
         // This ensures future tables are cleaned up even if this list isn't updated.
         if ($deleteRedirects && $deleteLogs && $deleteCache) {
+            // DAO-bypass-approved: Plugin-table discovery during uninstall — no DAO autoloader
             $allTables = $wpdb->get_results(
                 $wpdb->prepare("SHOW TABLES LIKE %s", $wpdb->esc_like($prefix . 'abj404_') . '%'),
                 ARRAY_N
@@ -175,8 +177,12 @@ class ABJ_404_Solution_Uninstaller {
     private static function deleteTable(string $table_name): void {
         global $wpdb;
 
+        // @utf8-audit: opt-out — $table_name is built from $wpdb->prefix +
+        // 'abj404_*' constants in the deleteTables() loop, or comes from a
+        // SHOW TABLES query result; never user input.
         // Security: Use wpdb methods and prepare statement
         $table_name = esc_sql($table_name);
+        // DAO-bypass-approved: DDL drop during uninstall — no DAO autoloader
         $wpdb->query("DROP TABLE IF EXISTS `$table_name`");
     }
 
@@ -208,6 +214,7 @@ class ABJ_404_Solution_Uninstaller {
         }
 
         // Delete dynamic sync options (using LIKE pattern)
+        // DAO-bypass-approved: wp_options cleanup during uninstall — no DAO autoloader
         $wpdb->query(
             $wpdb->prepare(
                 "DELETE FROM {$optionsTable} WHERE option_name LIKE %s",
@@ -217,6 +224,7 @@ class ABJ_404_Solution_Uninstaller {
 
         // For multisite, delete from site options too
         if (is_multisite()) {
+            // DAO-bypass-approved: Multisite sitemeta cleanup during uninstall
             $wpdb->query(
                 $wpdb->prepare(
                     "DELETE FROM {$sitemetaTable} WHERE meta_key LIKE %s",

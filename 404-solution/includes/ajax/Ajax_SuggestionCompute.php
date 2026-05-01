@@ -22,6 +22,32 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
     const COMPUTE_RATE_LIMIT_WINDOW_SECONDS = 60;
 
     /**
+     * Resolve the time source. Tests bind a `FrozenClock` via the
+     * service container so the single-flight claim window (90s),
+     * worker-recovery window, and `created`/`completed` timestamps can
+     * be asserted exactly. When no container is bound the fallback is
+     * the production `SystemClock`.
+     *
+     * @return ABJ_404_Solution_Clock
+     */
+    private static function clock(): ABJ_404_Solution_Clock {
+        if (function_exists('abj_service') && class_exists('ABJ_404_Solution_ServiceContainer')) {
+            try {
+                $c = ABJ_404_Solution_ServiceContainer::getInstance();
+                if (is_object($c) && method_exists($c, 'has') && $c->has('clock')) {
+                    $svc = $c->get('clock');
+                    if ($svc instanceof ABJ_404_Solution_Clock) {
+                        return $svc;
+                    }
+                }
+            } catch (Throwable $e) {
+                // fall through
+            }
+        }
+        return new ABJ_404_Solution_SystemClock();
+    }
+
+    /**
      * Compute suggestions for a 404 URL and store results in transient.
      * This runs in a background HTTP request.
      *
@@ -58,7 +84,7 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
         }
 
         // URL normalization requires the Functions service.
-        $f = ABJ_404_Solution_Functions::getInstance();
+        $f = abj_service('functions');
         if (function_exists('abj_service') && class_exists('ABJ_404_Solution_ServiceContainer')) {
             try {
                 $c = ABJ_404_Solution_ServiceContainer::getInstance();
@@ -77,7 +103,15 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
         }
 
         // (3) Token check via transient lookup.
-        $urlKey = md5($requestedURL);
+        // Use the same normalizeURLForCacheKey() pipeline as the producer
+        // (SpellChecker::triggerAsyncSuggestionComputation) and the polling
+        // consumer (Ajax_SuggestionPolling::pollSuggestions). Without this,
+        // any URL that esc_url touches — spaces, unicode, double ampersands —
+        // hashes to a different transient key than the producer wrote, and
+        // this worker reports "Unauthorized" while the polling client never
+        // finds the result. Sibling shape of 73f21bce / 6e0908a8 / 83b9fb85.
+        $normalizedURL = $f->normalizeURLForCacheKey($requestedURL);
+        $urlKey = md5($normalizedURL);
         $transientKey = 'abj404_suggest_' . $urlKey;
 
         $existingRaw = get_transient($transientKey);
@@ -115,16 +149,16 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
                 // First worker - claim the work by setting started=time()
                 // TTL of 120s gives slow hosts enough time to complete computation
                 $existingUrl = isset($existing['url']) ? $existing['url'] : '';
-                $existingCreated = (isset($existing['created']) && is_scalar($existing['created'])) ? (int)$existing['created'] : time();
+                $existingCreated = (isset($existing['created']) && is_scalar($existing['created'])) ? (int)$existing['created'] : self::clock()->now();
                 set_transient($transientKey, array(
                     'status' => 'pending',
                     'url' => $existingUrl,
-                    'started' => time(),  // Claim the work
+                    'started' => self::clock()->now(),  // Claim the work
                     'created' => $existingCreated,  // Preserve creation timestamp
                     'token' => $storedToken
                 ), 120);
                 // Proceed to compute
-            } elseif ((time() - $startedAt) < 90) {
+            } elseif ((self::clock()->now() - $startedAt) < 90) {
                 // Another worker claimed recently and is still computing - skip
                 wp_die();
             }
@@ -141,9 +175,9 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
         );
 
         // Get dependencies
-        $abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
-        $spellChecker = ABJ_404_Solution_SpellChecker::getInstance();
-        $logger = ABJ_404_Solution_Logging::getInstance();
+        $abj404logic = abj_service('plugin_logic');
+        $spellChecker = abj_service('spell_checker');
+        $logger = abj_service('logging');
 
         if (function_exists('abj_service') && class_exists('ABJ_404_Solution_ServiceContainer')) {
             try {
@@ -189,7 +223,7 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
             'status' => 'complete',
             'suggestions' => $suggestionsPacket,
             'url' => $requestedURL,
-            'completed' => time(),
+            'completed' => self::clock()->now(),
             'token' => $storedToken  // Preserve token for debugging/audit
         ), 120); // 2 minute TTL
 
@@ -258,7 +292,7 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
         // Use plugin's logging if available, fallback to error_log
         if (class_exists('ABJ_404_Solution_Logging')) {
             try {
-                $logger = ABJ_404_Solution_Logging::getInstance();
+                $logger = abj_service('logging');
                 $logger->errorMessage($logMessage);
             } catch (Exception $e) {
                 // Logging failed during shutdown - use error_log as fallback

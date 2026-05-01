@@ -15,7 +15,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
     
     /** @return bool */
     function isMyISAMSupported(): bool {
-        $abj404dao = ABJ_404_Solution_DataAccess::getInstance();
+        $abj404dao = abj_service('data_access');
         $supportResults = $abj404dao->queryAndGetResults("SELECT ENGINE, SUPPORT " .
             "FROM information_schema.ENGINES WHERE lower(ENGINE) = 'myisam'",
             array('log_errors' => false));
@@ -225,6 +225,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         $query = $this->doTableNameReplacements($query);
 
         $result = $this->queryAndGetResults($query);
+        $hadError = !empty($result['last_error']) || !empty($result['timed_out']);
         $rows = is_array($result['rows']) ? $result['rows'] : array();
 
         $counts = array('all' => 0, 'manual' => 0, 'auto' => 0, 'regex' => 0, 'trash' => 0);
@@ -239,8 +240,14 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
             );
         }
 
-        // Cache the result
-        set_transient(self::CACHE_KEY_REDIRECT_STATUS, $counts, self::STATUS_CACHE_TTL);
+        // Skip the cache write when the SUM(...) query returned an error or
+        // timed out: $rows is empty in that case so $counts is the all-zero
+        // default, and pinning that for STATUS_CACHE_TTL (24h) would make the
+        // Redirects admin page show "0 of every status" until the transient
+        // expires. Same policy as 6454a7dd / b857be36.
+        if (!$hadError) {
+            set_transient(self::CACHE_KEY_REDIRECT_STATUS, $counts, self::STATUS_CACHE_TTL);
+        }
 
         return $counts;
     }
@@ -273,6 +280,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         $query = $this->doTableNameReplacements($query);
 
         $result = $this->queryAndGetResults($query);
+        $hadError = !empty($result['last_error']) || !empty($result['timed_out']);
         $rows = is_array($result['rows']) ? $result['rows'] : array();
 
         $counts = array('all' => 0, 'captured' => 0, 'ignored' => 0, 'later' => 0, 'trash' => 0);
@@ -287,8 +295,14 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
             );
         }
 
-        // Cache the result
-        set_transient(self::CACHE_KEY_CAPTURED_STATUS, $counts, self::STATUS_CACHE_TTL);
+        // Skip the cache write when the SUM(...) query returned an error or
+        // timed out: $rows is empty in that case so $counts is the all-zero
+        // default, and pinning that for STATUS_CACHE_TTL (24h) would make the
+        // Captured-URLs admin page show "0 captured / 0 ignored / 0 later"
+        // until the transient expires. Same policy as 6454a7dd / b857be36.
+        if (!$hadError) {
+            set_transient(self::CACHE_KEY_CAPTURED_STATUS, $counts, self::STATUS_CACHE_TTL);
+        }
 
         return $counts;
     }
@@ -370,14 +384,16 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
      */
     function buildHighImpactCapturedCountQuery(): string {
         // logs_hits.requested_url is stored in canonical form (leading '/',
-        // no trailing '/') by createRedirectsForViewHitsTable(). Canonicalize
-        // r.url on the (small) redirects side so a single indexed lookup
-        // against h.requested_url matches every URL variant the original
-        // request might have arrived as.
+        // no trailing '/') by createRedirectsForViewHitsTable(). Match against
+        // the persisted r.canonical_url column (added 4.1.10) so the JOIN is
+        // an indexed equality lookup instead of CONCAT/TRIM per row. The
+        // COALESCE fallback covers rows from upgraded sites where the chunked
+        // backfill hasn't reached yet.
         $query = "SELECT COUNT(*) AS cnt
             FROM {wp_abj404_redirects} r
             INNER JOIN {wp_abj404_logs_hits} h
-                ON BINARY h.requested_url = BINARY CONCAT('/', TRIM(BOTH '/' FROM r.url))
+                ON BINARY h.requested_url = BINARY
+                   COALESCE(r.canonical_url, CONCAT('/', TRIM(BOTH '/' FROM r.url)))
             WHERE r.status = " . ABJ404_STATUS_CAPTURED . " AND r.disabled = 0
               AND h.logshits >= 3";
         return $this->doTableNameReplacements($query);
@@ -455,8 +471,11 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         // we delete by prefix from wp_options directly.
         global $wpdb;
         if (isset($wpdb->options) && method_exists($wpdb, 'query')) {
+            // @utf8-audit: opt-out — $wpdb->options is the WordPress core
+            // options table name (system value); never user input.
             /** @var string $optionsTable */
             $optionsTable = esc_sql($wpdb->options);
+            // DAO-bypass-approved: View-cache clear targets wp_options — outside the plugin's owned tables; runs during cache invalidation hot path; failure is best-effort
             $wpdb->query(
                 "DELETE FROM `{$optionsTable}` WHERE option_name LIKE '_transient_abj404_view_%'"
                 . " OR option_name LIKE '_transient_timeout_abj404_view_%'"
@@ -912,9 +931,17 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
 
             // Verify table was actually created before using it (handles silent creation failures)
             if ($this->logsHitsTableExists()) {
+                // canonical_url is the persisted CONCAT('/', TRIM(BOTH '/' FROM url))
+                // form (added 4.1.10) so this JOIN is a single indexed equality
+                // lookup against logs_hits.requested_url instead of evaluating
+                // the function on every redirects row. The COALESCE fallback
+                // covers rows from upgraded sites where the chunked backfill
+                // hasn't reached yet — those rows merge in via the original
+                // expression so behavior matches pre-upgrade exactly.
                 $logsTableJoin = "  LEFT OUTER JOIN {wp_abj404_logs_hits} logstable \n " .
                         "  on binary logstable.requested_url = " .
-                        "binary concat('/', trim(both '/' from wp_abj404_redirects.url)) \n ";
+                        "binary COALESCE(wp_abj404_redirects.canonical_url, " .
+                        "concat('/', trim(both '/' from wp_abj404_redirects.url))) \n ";
             } else {
                 // Fall back to null columns if table creation failed
                 $logsTableColumns = "null as logshits, \n null as logsid, \n null as last_used, \n";

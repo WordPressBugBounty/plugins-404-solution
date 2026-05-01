@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 	Author:      Aaron J
 	Author URI:  https://www.ajexperience.com/404-solution/
 
-	Version: 4.1.9
+	Version: 4.1.10
 	Requires at least: 5.0
 	Requires PHP: 7.4
 
@@ -279,6 +279,7 @@ if (!function_exists('abj404_shortCodeListener')) {
 				$inc . 'bootstrap.php',
 				$inc . 'classmap.php',
 				$inc . 'ServiceContainer.php',
+				$inc . 'Clock.php',
 				$inc . 'ErrorHandler.php',
 				// Core classes
 				$inc . 'WordPress_Connector.php',
@@ -286,6 +287,7 @@ if (!function_exists('abj404_shortCodeListener')) {
 				$inc . 'Logging.php',
 				$inc . 'FrontendRequestPipeline.php',
 				$inc . 'ImportExportService.php',
+				$inc . 'QueryBudgetInstrumentation.php',
 				// View + traits
 				$inc . 'View.php',
 				$inc . 'ViewTrait_Shared.php',

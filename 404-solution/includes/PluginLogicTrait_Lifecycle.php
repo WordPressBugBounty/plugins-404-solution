@@ -86,10 +86,10 @@ trait ABJ_404_Solution_PluginLogicTrait_Lifecycle {
      * @return void
      */
     private static function activateSingleSite(): void {
-        $abj404logic = ABJ_404_Solution_PluginLogic::getInstance();
+        $abj404logic = abj_service('plugin_logic');
         add_option('abj404_settings', '', '', false);
 
-        $upgradesEtc = ABJ_404_Solution_DatabaseUpgradesEtc::getInstance();
+        $upgradesEtc = abj_service('database_upgrades');
         $upgradesEtc->createDatabaseTables();
 
         ABJ_404_Solution_PluginLogic::doRegisterCrons();
@@ -155,7 +155,12 @@ trait ABJ_404_Solution_PluginLogicTrait_Lifecycle {
      * @return void
      */
     static function activateNewSite($blog_id, $user_id, $domain, $path, $site_id, $meta): void {
-        // Only activate if the plugin is network-activated
+        // Only activate if the plugin is network-activated.
+        // is_plugin_active_for_network() lives in wp-admin/includes/plugin.php; guard
+        // adjacent in case this hook fires before wp-admin includes are loaded.
+        if (!function_exists('is_plugin_active_for_network')) {
+            return;
+        }
         if (is_plugin_active_for_network(plugin_basename(ABJ404_FILE))) {
             switch_to_blog($blog_id);
             self::activateSingleSite();
@@ -172,7 +177,12 @@ trait ABJ_404_Solution_PluginLogicTrait_Lifecycle {
      * @return void
      */
     static function activateNewSiteModern($site, $args): void {
-        // Only activate if the plugin is network-activated
+        // Only activate if the plugin is network-activated.
+        // is_plugin_active_for_network() lives in wp-admin/includes/plugin.php; guard
+        // adjacent in case this hook fires before wp-admin includes are loaded.
+        if (!function_exists('is_plugin_active_for_network')) {
+            return;
+        }
         if (is_plugin_active_for_network(plugin_basename(ABJ404_FILE))) {
             switch_to_blog((int)$site->blog_id);
             self::activateSingleSite();
@@ -225,11 +235,12 @@ trait ABJ_404_Solution_PluginLogicTrait_Lifecycle {
             switch_to_blog($blog_id);
 
             global $wpdb;
-            $dao = ABJ_404_Solution_DataAccess::getInstance();
+            $dao = abj_service('data_access');
             $prefix = $dao->getLowercasePrefix();
 
             // Remove ALL custom database tables via dynamic discovery.
             // SHOW TABLES is the source of truth — new tables are automatically included.
+            // DAO-bypass-approved: deleteBlogData() — multisite blog teardown after switch_to_blog()
             $tables = $wpdb->get_results(
                 $wpdb->prepare("SHOW TABLES LIKE %s", $wpdb->esc_like($prefix . 'abj404_') . '%'),
                 ARRAY_N
@@ -237,6 +248,7 @@ trait ABJ_404_Solution_PluginLogicTrait_Lifecycle {
             foreach ($tables as $tableRow) {
                 $tblName = is_array($tableRow) && isset($tableRow[0]) ? $tableRow[0] : '';
                 if (preg_match('/^[a-zA-Z0-9_]+$/', $tblName) && strpos($tblName, 'abj404') !== false) {
+                    // DAO-bypass-approved: deleteBlogData() — DDL drop during blog teardown
                     $wpdb->query("DROP TABLE IF EXISTS `{$tblName}`");
                 }
             }
@@ -260,6 +272,7 @@ trait ABJ_404_Solution_PluginLogicTrait_Lifecycle {
             }
 
             // Delete dynamic sync options (using LIKE pattern)
+            // DAO-bypass-approved: deleteBlogData() — wp_options cleanup during blog teardown
             $wpdb->query(
                 $wpdb->prepare(
                     "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",

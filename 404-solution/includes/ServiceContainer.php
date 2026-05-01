@@ -146,9 +146,93 @@ class ABJ_404_Solution_ServiceContainer {
  * This provides a shorter, more convenient syntax than calling
  * ABJ_404_Solution_ServiceContainer::getInstance()->get().
  *
+ * Fallback semantics: if the named service is not currently registered
+ * (e.g. a test cleared the container without re-running
+ * `abj_404_solution_init_services()`), this looks up the service name in a
+ * static name->class map and falls back to the legacy
+ * `ClassName::getInstance()` singleton. This preserves test patterns that
+ * predate the c260 codemod (clear container, register only the mocks the
+ * test cares about) without forcing every test to re-init the entire
+ * service graph. Production code paths are unaffected because services are
+ * always registered at boot via `abj_404_solution_init_services()`; the
+ * lint at `scripts/lint/lint-getinstance-callers.sh` enforces that
+ * production callers must use this helper rather than `getInstance()`
+ * directly.
+ *
  * @param string $name Service identifier
  * @return mixed The service instance
+ *
+ * @phpstan-return (
+ *     $name is 'functions' ? ABJ_404_Solution_Functions : (
+ *     $name is 'logging' ? ABJ_404_Solution_Logging : (
+ *     $name is 'clock' ? ABJ_404_Solution_Clock : (
+ *     $name is 'error_handler' ? class-string : (
+ *     $name is 'data_access' ? ABJ_404_Solution_DataAccess : (
+ *     $name is 'database_upgrades' ? ABJ_404_Solution_DatabaseUpgradesEtc : (
+ *     $name is 'permalink_cache' ? ABJ_404_Solution_PermalinkCache : (
+ *     $name is 'ngram_filter' ? ABJ_404_Solution_NGramFilter : (
+ *     $name is 'plugin_logic' ? ABJ_404_Solution_PluginLogic : (
+ *     $name is 'spell_checker' ? ABJ_404_Solution_SpellChecker : (
+ *     $name is 'engine_slug' ? ABJ_404_Solution_SlugMatchingEngine : (
+ *     $name is 'engine_url_fix' ? ABJ_404_Solution_UrlFixEngine : (
+ *     $name is 'engine_title' ? ABJ_404_Solution_TitleMatchingEngine : (
+ *     $name is 'engine_category_tag' ? ABJ_404_Solution_CategoryTagMatchingEngine : (
+ *     $name is 'engine_content' ? ABJ_404_Solution_ContentMatchingEngine : (
+ *     $name is 'engine_spelling' ? ABJ_404_Solution_SpellingMatchingEngine : (
+ *     $name is 'engine_archive_fallback' ? ABJ_404_Solution_ArchiveFallbackEngine : (
+ *     $name is 'matching_engines' ? array<int, object> : (
+ *     $name is 'wordpress_connector' ? ABJ_404_Solution_WordPress_Connector : (
+ *     $name is 'slug_change_handler' ? ABJ_404_Solution_SlugChangeHandler : (
+ *     $name is 'published_posts_provider' ? ABJ_404_Solution_PublishedPostsProvider : (
+ *     $name is 'sync_utils' ? ABJ_404_Solution_SynchronizationUtils : (
+ *     $name is 'request_context' ? ABJ_404_Solution_RequestContext : (
+ *     $name is 'view' ? ABJ_404_Solution_View : (
+ *     $name is 'view_suggestions' ? ABJ_404_Solution_View_Suggestions : (
+ *     $name is 'shortcode' ? ABJ_404_Solution_ShortCode :
+ *     mixed
+ * ))))))))))))))))))))))))))
  */
 function abj_service($name) {
-    return ABJ_404_Solution_ServiceContainer::getInstance()->get($name);
+    $container = ABJ_404_Solution_ServiceContainer::getInstance();
+    if ($container->has($name)) {
+        return $container->get($name);
+    }
+
+    // Inverse of the registration map in bootstrap.php. Lets a caller resolve
+    // a service even when the container hasn't been populated for this
+    // request (typically: a unit test that called
+    // ABJ_404_Solution_ServiceContainer::reset() / ->clear() and only
+    // registered the specific mocks it needed). Long-tail unregistered
+    // singletons that have a stable getInstance() are also reachable here so
+    // call sites don't have to know whether a class is registered yet.
+    static $serviceClassMap = array(
+        'functions' => 'ABJ_404_Solution_Functions',
+        'logging' => 'ABJ_404_Solution_Logging',
+        'data_access' => 'ABJ_404_Solution_DataAccess',
+        'plugin_logic' => 'ABJ_404_Solution_PluginLogic',
+        'view' => 'ABJ_404_Solution_View',
+        'view_suggestions' => 'ABJ_404_Solution_View_Suggestions',
+        'spell_checker' => 'ABJ_404_Solution_SpellChecker',
+        'wordpress_connector' => 'ABJ_404_Solution_WordPress_Connector',
+        'database_upgrades' => 'ABJ_404_Solution_DatabaseUpgradesEtc',
+        'permalink_cache' => 'ABJ_404_Solution_PermalinkCache',
+        'ngram_filter' => 'ABJ_404_Solution_NGramFilter',
+        'slug_change_handler' => 'ABJ_404_Solution_SlugChangeHandler',
+        'published_posts_provider' => 'ABJ_404_Solution_PublishedPostsProvider',
+        'sync_utils' => 'ABJ_404_Solution_SynchronizationUtils',
+        'shortcode' => 'ABJ_404_Solution_ShortCode',
+        'request_context' => 'ABJ_404_Solution_RequestContext',
+    );
+    if (isset($serviceClassMap[$name])) {
+        $class = $serviceClassMap[$name];
+        if (class_exists($class) && method_exists($class, 'getInstance')) {
+            /** @var callable(): mixed $callback */
+            $callback = array($class, 'getInstance');
+            return call_user_func($callback);
+        }
+    }
+
+    // Last resort — let the container raise its standard "not registered"
+    // exception so callers see a clear failure mode.
+    return $container->get($name);
 }
