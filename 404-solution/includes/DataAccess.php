@@ -6,6 +6,8 @@ if (!defined('ABSPATH')) {
 }
 
 require_once __DIR__ . '/DataAccessTrait_Maintenance.php';
+require_once __DIR__ . '/DataAccessTrait_Connection.php';
+require_once __DIR__ . '/DataAccessTrait_ViewMetadata.php';
 require_once __DIR__ . '/DataAccessTrait_ViewQueries.php';
 require_once __DIR__ . '/DataAccessTrait_ViewSnapshotCache.php';
 require_once __DIR__ . '/DataAccessTrait_Logs.php';
@@ -35,6 +37,12 @@ class ABJ_404_Solution_DataAccess {
     const VIEW_SNAPSHOT_CACHE_TTL_SECONDS = 120;
     /** @var int Minimum interval between expensive refreshes for the same view key. */
     const VIEW_SNAPSHOT_REFRESH_COOLDOWN_SECONDS = 30;
+    /** @var int DB timeout budget for each resumable table-cache warmup stage. */
+    const VIEW_SNAPSHOT_WARMUP_STAGE_TIMEOUT_SECONDS = 28;
+    /** @var int Age after which a running warmup stage is treated as killed/stalled. */
+    const VIEW_SNAPSHOT_WARMUP_STALE_SECONDS = 35;
+    /** @var int Max killed/timeout attempts for one warmup stage before blocking retries. */
+    const VIEW_SNAPSHOT_WARMUP_MAX_ATTEMPTS = 3;
     /** @var int Safety cap: avoid storing extremely large payloads in cache. */
     const VIEW_SNAPSHOT_MAX_PAYLOAD_BYTES = 2097152; // 2 MiB
     /** @var int Cross-request lock timeout for logs-hits rebuild jobs. */
@@ -116,6 +124,8 @@ class ABJ_404_Solution_DataAccess {
     private $redirectsForViewCountRequestCache = array();
 
     use ABJ_404_Solution_DataAccess_MaintenanceTrait;
+    use ABJ_404_Solution_DataAccess_ConnectionTrait;
+    use ABJ_404_Solution_DataAccess_ViewMetadataTrait;
     use ABJ_404_Solution_DataAccess_ViewQueriesTrait;
     use ABJ_404_Solution_DataAccess_ViewSnapshotCacheTrait;
     use ABJ_404_Solution_DataAccess_LogsTrait;
@@ -217,57 +227,6 @@ class ABJ_404_Solution_DataAccess {
         self::$instance = new ABJ_404_Solution_DataAccess();
 
         return self::$instance;
-    }
-
-    /**
-     * Ensure database connection is active and reconnect if necessary.
-     *
-     * Fix for MySQL Server Gone Away error (reported by 3 users - 7% of errors)
-     * This prevents "MySQL server has gone away" errors during long-running operations
-     * by checking the connection status and reconnecting if needed.
-     *
-     * @return bool True if connection is active, false otherwise
-     */
-    private function ensureConnection() {
-        global $wpdb;
-
-        // Check if wpdb exists
-        if (!isset($wpdb)) {
-            return true; // Assume connection is OK if wpdb doesn't exist
-        }
-
-        // Try to check connection (WordPress 3.9+)
-        try {
-            // Try to call check_connection - if it doesn't exist, we'll catch the error
-            $isConnected = $wpdb->check_connection(false);
-
-            // If not connected, attempt reconnection
-            if (!$isConnected) {
-                $this->logger->debugMessage("Database connection lost, attempting to reconnect...");
-
-                // Attempt to reconnect
-                $wpdb->db_connect();
-
-                // Verify reconnection succeeded
-                if ($wpdb->check_connection(false)) {
-                    $this->logger->debugMessage("Database reconnection successful");
-                    return true;
-                } else {
-                    $this->logger->errorMessage("Failed to reconnect to database");
-                    return false;
-                }
-            }
-        } catch (Exception $e) {
-            // If check fails, assume connection is OK to avoid breaking functionality
-            $this->logger->debugMessage("Connection check failed: " . $e->getMessage());
-            return true;
-        } catch (Error $e) {
-            // Handle fatal errors (e.g., method doesn't exist)
-            $this->logger->debugMessage("Connection check not available: " . $e->getMessage());
-            return true;
-        }
-
-        return true;
     }
 
     /**
@@ -755,6 +714,57 @@ class ABJ_404_Solution_DataAccess {
     }
 
     /**
+     * Log the first observed database error for every query, before retry and
+     * recovery paths can mutate or clear wpdb::last_error.
+     *
+     * @param string $query
+     * @param array<string, mixed> $result
+     * @param array<string, mixed> $options
+     * @param bool $producesRows
+     * @return void
+     */
+    private function logObservedSqlError(string $query, array $result, array $options, bool $producesRows): void {
+        $lastError = isset($result['last_error']) && is_string($result['last_error'])
+            ? trim($result['last_error']) : '';
+        if ($lastError === '') {
+            return;
+        }
+
+        $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->extractSqlFilename($query);
+        $elapsed = isset($result['elapsed_time']) && is_numeric($result['elapsed_time'])
+            ? round((float)$result['elapsed_time'], 4) : 0;
+        $logErrors = !array_key_exists('log_errors', $options) || (bool)$options['log_errors'];
+        $message = 'SQL query error observed: ' . $lastError
+            . ', SQL: ' . $sqlInfo
+            . ', source: ' . $this->extractSqlFilename($query)
+            . ', route: ' . ($producesRows ? 'get_results' : 'query')
+            . ', log_errors_option: ' . ($logErrors ? 'true' : 'false')
+            . ', execution_time: ' . $elapsed;
+
+        $this->logger->errorMessage($message);
+    }
+
+    /**
+     * @param string $query
+     * @param Throwable $e
+     * @param array<string, mixed> $options
+     * @param bool $producesRows
+     * @return void
+     */
+    private function logSqlThrowable(string $query, Throwable $e, array $options, bool $producesRows): void {
+        $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->extractSqlFilename($query);
+        $logErrors = !array_key_exists('log_errors', $options) || (bool)$options['log_errors'];
+        $message = 'SQL query threw exception: ' . $e->getMessage()
+            . ', SQL: ' . $sqlInfo
+            . ', source: ' . $this->extractSqlFilename($query)
+            . ', route: ' . ($producesRows ? 'get_results' : 'query')
+            . ', log_errors_option: ' . ($logErrors ? 'true' : 'false');
+
+        $exception = $e instanceof Exception ? $e : new Exception($e->getMessage(), (int)$e->getCode(), $e);
+        $this->logger->errorMessage($message, $exception);
+    }
+
+    /**
      * Build a SQL-safe comma-separated list from recognized_post_types option.
      *
      * @param array<string, mixed> $options Plugin options array.
@@ -894,11 +904,21 @@ class ABJ_404_Solution_DataAccess {
         $producesRows = $this->queryProducesResultRows($query);
 
         $result = array();
-        if ($producesRows) {
-            $result['rows'] = $wpdb->get_results($query, $resultType);
-        } else {
-            $wpdb->query($query);
-            $result['rows'] = array();
+        try {
+            if ($producesRows) {
+                $result['rows'] = $wpdb->get_results($query, $resultType);
+            } else {
+                $wpdb->query($query);
+                $result['rows'] = array();
+            }
+        } catch (Throwable $e) {
+            $result['elapsed_time'] = $timer->stop();
+            $this->logSqlThrowable($query, $e, $options, $producesRows);
+            if ($suppressWpdbErrors) {
+                /** @var wpdb $wpdb */
+                $wpdb->suppress_errors($previousSuppressState);
+            }
+            throw $e;
         }
 
         $result['elapsed_time'] = $timer->stop();
@@ -917,6 +937,10 @@ class ABJ_404_Solution_DataAccess {
             abj404_query_budget_record($this->extractSqlFilename($query), $elapsedMs, $timeoutSeconds);
         }
         $this->harvestWpdbResult($result);
+        $lastErrorForObservedLog = is_string($result['last_error'] ?? null) ? $result['last_error'] : '';
+        if ($lastErrorForObservedLog === '' || !$this->isTransientConnectionError($lastErrorForObservedLog)) {
+            $this->logObservedSqlError($query, $result, $options, $producesRows);
+        }
 
         if ($producesRows && !is_array($result['rows'])) {
             // In production (WP_DEBUG off), only log SQL filename to avoid PII exposure
@@ -1021,20 +1045,21 @@ class ABJ_404_Solution_DataAccess {
             // already handled by dedicated repair/retry handlers above or by
             // noteDatabaseIssueFromError() (admin notice + write-block cooldown).
             // Log as WARN instead of ERROR to avoid triggering dev email reports.
+            $lastErrorForClassification = is_string($result['last_error']) ? $result['last_error'] : '';
             if ($reportError && (
-                $this->isDiskFullError($result['last_error']) ||
-                $this->isReadOnlyError($result['last_error']) ||
-                $this->isQuotaLimitError($result['last_error']) ||
-                $this->isInvalidDataError($result['last_error']) ||
-                $this->isCollationError($result['last_error']) ||
-                $this->isMissingPluginTableError($result['last_error']) ||
-                $this->isIncorrectKeyFileError($result['last_error']) ||
-                $this->isCrashedTableError($result['last_error']) ||
-                $this->isDeadlockOrLockTimeoutError($result['last_error']) ||
-                $this->isTransientConnectionError($result['last_error']) ||
-                $this->isQueryTimeoutError($result['last_error'])
+                $this->isDiskFullError($lastErrorForClassification) ||
+                $this->isReadOnlyError($lastErrorForClassification) ||
+                $this->isQuotaLimitError($lastErrorForClassification) ||
+                $this->isInvalidDataError($lastErrorForClassification) ||
+                $this->isCollationError($lastErrorForClassification) ||
+                $this->isMissingPluginTableError($lastErrorForClassification) ||
+                $this->isIncorrectKeyFileError($lastErrorForClassification) ||
+                $this->isCrashedTableError($lastErrorForClassification) ||
+                $this->isDeadlockOrLockTimeoutError($lastErrorForClassification) ||
+                $this->isTransientConnectionError($lastErrorForClassification) ||
+                $this->isQueryTimeoutError($lastErrorForClassification)
             )) {
-                $this->logger->warn("Server-side DB issue (handled): " . $result['last_error']);
+                $this->logger->warn("Server-side DB issue (handled): " . $lastErrorForClassification);
                 $reportError = false;
             }
 

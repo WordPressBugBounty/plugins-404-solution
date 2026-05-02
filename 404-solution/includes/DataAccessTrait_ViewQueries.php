@@ -6,195 +6,6 @@ if (!defined('ABSPATH')) {
 
 trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
 
-    /** @return array<string, mixed> */
-    function getTableEngines() {
-    	$query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/selectTableEngines.sql");
-    	$results = $this->queryAndGetResults($query);
-    	return $results;
-    }
-    
-    /** @return bool */
-    function isMyISAMSupported(): bool {
-        $abj404dao = abj_service('data_access');
-        $supportResults = $abj404dao->queryAndGetResults("SELECT ENGINE, SUPPORT " .
-            "FROM information_schema.ENGINES WHERE lower(ENGINE) = 'myisam'",
-            array('log_errors' => false));
-        
-        if (!empty($supportResults) && !empty($supportResults['rows']) && is_array($supportResults['rows'])) {
-            $rows = $supportResults['rows'];
-            $row = is_array($rows[0] ?? null) ? $rows[0] : array();
-            $supportValue = array_key_exists('support', $row) ? (string)($row['support'] ?? '') :
-            (array_key_exists('SUPPORT', $row) ? (string)($row['SUPPORT'] ?? '') : "nope");
-
-            return strtolower($supportValue) == 'yes';
-        }
-        return false;
-    }
-    
-    /** Insert data into the database.
-     * Create my own insert statement because wordpress messes it up when the field
-     * length is too long. this also returns the correct value for the last_query.
-     * @global type $wpdb
-     * @param string $tableName
-     * @param array<string, mixed> $dataToInsert
-     * @return array<string, mixed>
-     */
-    function insertAndGetResults($tableName, $dataToInsert) {
-        $tableName = $this->doTableNameReplacements($tableName);
-    
-        $columns = array();
-        $placeholders = array();
-        $values = array();
-    
-        foreach ($dataToInsert as $column => $value) {
-            $columns[] = '`' . $column . '`';
-    
-            if ($value === null) {
-                $placeholders[] = 'NULL';
-                // Do not add null values to $values array
-            } else {
-                $currentDataType = gettype($value);
-                if ($currentDataType == 'integer' || $currentDataType == 'double') {
-                    $placeholders[] = '%d';
-                    $values[] = $value;
-                } elseif ($currentDataType == 'boolean') {
-                    $placeholders[] = '%d';
-                    $values[] = $value ? 1 : 0;
-                } else {
-                    $placeholders[] = '%s';
-                    $values[] = is_scalar($value) ? (string)$value : '';
-                }
-            }
-        }
-    
-        $sql = 'INSERT INTO `' . $tableName . '` (' . implode(', ', $columns) . ') VALUES (' . implode(', ', $placeholders) . ')';
-    
-        return $this->queryAndGetResults($sql, ['query_params' => $values]);
-    }
-    
-   /**
-    * @return int the total number of redirects that have been captured.
-    */
-   function getCapturedCount() {
-       $query = "select count(id) from {wp_abj404_redirects} where status = " . absint(ABJ404_STATUS_CAPTURED);
-
-       // Route through queryAndGetResults() so the count query inherits the
-       // centralized 60s timeout. Tiny query in normal operation, but the
-       // redirects table can grow into millions of rows on busy sites.
-       $result = $this->queryAndGetResults($query);
-       if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
-           return 0;
-       }
-
-       $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
-       if (empty($rows)) {
-           return 0;
-       }
-       $first = $rows[0];
-       $value = is_array($first) ? reset($first) : $first;
-       return intval($value);
-   }
-    
-   /** Get all of the post types from the wp_posts table.
-    * @return array<int, string> An array of post type names. */
-   function getAllPostTypes() {
-       $query = "SELECT DISTINCT post_type FROM {wp_posts} order by post_type";
-       $results = $this->queryAndGetResults($query);
-       $rows = $results['rows'];
-
-       $postType = array();
-
-       // Ensure rows is an array before iterating
-       if (is_array($rows)) {
-           foreach ($rows as $row) {
-               array_push($postType, $row['post_type']);
-           }
-       }
-
-       return $postType;
-   }
-   
-   /** Get the approximate number of bytes used by the logs table.
-    *
-    * Reads data_length+index_length from information_schema.tables. InnoDB
-    * (and modern MyISAM) maintain these values continuously, so an ANALYZE TABLE
-    * pre-warm is unnecessary — the residual accuracy gain is irrelevant for
-    * an "X MB" UI display and the bytes-per-log heuristic in deleteOldRedirectsCron.
-    *
-    * The previous implementation issued ANALYZE TABLE before the size lookup.
-    * On sites with millions of logsv2 rows that single statement could take
-    * 10–30 seconds. ANALYZE TABLE has no automatic query timeout (the SELECT
-    * timeout in queryAndGetResults() applies only to SELECT statements), so
-    * the Settings/Tools page render exceeded reverse-proxy timeouts (e.g.
-    * Cloudflare 524, nginx 504) on large sites.
-    *
-    * The size SELECT now routes through queryAndGetResults() so it inherits
-    * the default 60-second SELECT timeout. On timeout or other error we return
-    * a non-positive sentinel; downstream callers (deleteOldRedirectsCron,
-    * the Settings UI) treat that as "could not determine".
-    *
-    * @return int Bytes used by the logs table, 0 on missing/empty stats,
-    *             or -1 if the lookup itself failed/timed out.
-    */
-   function getLogDiskUsage() {
-       $query = 'SELECT (data_length+index_length) tablesize FROM information_schema.tables '
-               . 'WHERE table_name=\'{wp_abj404_logsv2}\'';
-
-       $result = $this->queryAndGetResults($query);
-
-       if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
-           $err = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
-           if ($err !== '') {
-               $this->logger->errorMessage("Error: " . esc_html($err));
-           }
-           return -1;
-       }
-
-       $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
-       if (empty($rows)) {
-           return 0;
-       }
-
-       $row = is_array($rows[0] ?? null) ? $rows[0] : array();
-       $size = $row['tablesize'] ?? null;
-       if ($size === null || !is_scalar($size)) {
-           return 0;
-       }
-       return intval($size);
-   }
-
-    /**
-     * @global type $wpdb
-     * @param array<int, int> $types specified types such as ABJ404_STATUS_MANUAL, ABJ404_STATUS_AUTO, ABJ404_STATUS_CAPTURED, ABJ404_STATUS_IGNORED.
-     * @param int $trashed 1 to only include disabled redirects. 0 to only include enabled redirects.
-     * @return int the number of records matching the specified types.
-     */
-    function getRecordCount($types = array(), $trashed = 0) {
-        $recordCount = 0;
-
-        if (count($types) >= 1) {
-            $query = "select count(id) as count from {wp_abj404_redirects} where 1 and (status in (";
-
-            // Use absint() for proper integer sanitization to prevent SQL injection
-            $filteredTypes = array_map('absint', $types);
-            $typesForSQL = implode(", ", $filteredTypes);
-            $query .= $typesForSQL . "))";
-
-            // Use absint() for integer parameter sanitization
-            $query .= " and disabled = " . absint($trashed);
-
-            $result = $this->queryAndGetResults($query);
-            $rows = is_array($result['rows']) ? $result['rows'] : array();
-            if (!empty($rows)) {
-	            $row = is_array($rows[0] ?? null) ? $rows[0] : array();
-	            $recordCount = isset($row['count']) && is_scalar($row['count']) ? intval($row['count']) : 0;
-            }
-        }
-
-        return intval($recordCount);
-    }
-
-
     /**
      * Get counts for each redirect status type for display in tabs.
      * Uses transient caching for performance.
@@ -666,15 +477,13 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
      * @return array<int|string, mixed> rows from the redirects table.
      */
     function getRedirectsForView($sub, $tableOptions) {
-        $rawOrderBySnap = $tableOptions['orderby'] ?? '';
-        $orderByForSnapshot = strtolower(is_string($rawOrderBySnap) ? $rawOrderBySnap : '');
-        $isLogsMaintenanceSort = ($orderByForSnapshot === 'logshits' || $orderByForSnapshot === 'last_used');
-        $rawPerpageSnap = $tableOptions['perpage'] ?? 0;
-        $canUseSnapshotCache = absint(is_scalar($rawPerpageSnap) ? $rawPerpageSnap : 0) <= 200
-            && !$isLogsMaintenanceSort;
+        $canUseSnapshotCache = $this->canUseViewTableSnapshotCache($tableOptions);
+        $queryTimeout = isset($tableOptions['_abj404_query_timeout']) && is_numeric($tableOptions['_abj404_query_timeout'])
+            ? max(1, intval($tableOptions['_abj404_query_timeout'])) : 0;
+        $throwOnQueryError = !empty($tableOptions['_abj404_throw_on_view_query_error']);
         $snapshotCacheKey = '';
         $refreshLockHeld = false;
-        if ($canUseSnapshotCache) {
+        if ($canUseSnapshotCache && $queryTimeout <= 0) {
             $snapshotCacheKey = $this->getViewSnapshotCacheKey('abj404_view_rows', $sub, $tableOptions);
             $cachedRowsFromTable = $this->getViewRowsSnapshotFromTable($snapshotCacheKey, false, false);
             if (is_array($cachedRowsFromTable)) {
@@ -734,14 +543,15 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         // if this takes too long then rewrite how specific URLs are linked to from the redirects table.
         // they can use a different ID - not the ID from the logs table.
         $this->setSqlBigSelects();
-        $results = $this->queryAndGetResults($query);
+        $queryOptions = $queryTimeout > 0 ? array('timeout' => $queryTimeout) : array();
+        $results = $this->queryAndGetResults($query, $queryOptions);
 
         if (!empty($results['last_error']) && is_string($results['last_error']) && $this->isCollationError($results['last_error'])) {
             $retryOptions = $tableOptions;
             $retryOptions['forceCollate'] = 'utf8mb4_general_ci';
             $query = $this->getRedirectsForViewQuery($sub, $retryOptions, $queryAllRowsAtOnce,
                 $limitStart, $limitEnd, false);
-            $results = $this->queryAndGetResults($query);
+            $results = $this->queryAndGetResults($query, $queryOptions);
         }
 
         // Handle race condition: logs_hits table may have been dropped between existence check and query
@@ -768,7 +578,14 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
                 $query = $this->getRedirectsForViewQuery($sub, $tableOptions, false,
                     $limitStart, $limitEnd, false);
             }
-            $results = $this->queryAndGetResults($query);
+            $results = $this->queryAndGetResults($query, $queryOptions);
+        }
+
+        if ($throwOnQueryError && (!empty($results['timed_out']) || !empty($results['last_error']))) {
+            if ($refreshLockHeld && $snapshotCacheKey !== '') {
+                $this->releaseViewSnapshotRefreshLock($snapshotCacheKey);
+            }
+            throw new \Exception($this->formatViewQueryFailureMessage('getRedirectsForView', $query, $results));
         }
 
         /** @var array<int, array<string, mixed>> $rows */
@@ -814,6 +631,9 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         	" rows to display before log data and " . count($rows) . 
         	" rows to display after log data for page: ". $sub);
 
+        if ($canUseSnapshotCache && $snapshotCacheKey === '') {
+            $snapshotCacheKey = $this->getViewSnapshotCacheKey('abj404_view_rows', $sub, $tableOptions);
+        }
         if ($canUseSnapshotCache && $snapshotCacheKey !== '' && is_array($rows)) {
             $this->setViewRowsSnapshotToTable($snapshotCacheKey, $sub, $rows, self::VIEW_SNAPSHOT_CACHE_TTL_SECONDS);
             if (function_exists('set_transient')) {
@@ -826,6 +646,71 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         
         return $rows;
     }
+
+    /**
+     * Return whether the admin rows view already has a usable snapshot.
+     *
+     * Used by the AJAX first-paint path to avoid running an expensive cold
+     * table query inline. Fresh snapshots are preferred, but a recently
+     * refreshed stale snapshot is still usable because it lets the admin see
+     * real rows while background refresh detects newer data non-destructively.
+     *
+     * @param string $sub
+     * @param array<string, mixed> $tableOptions
+     * @return bool
+     */
+    function viewRowsSnapshotAvailable($sub, array $tableOptions): bool {
+        $canUseSnapshotCache = $this->canUseViewTableSnapshotCache($tableOptions);
+        if (!$canUseSnapshotCache) {
+            return false;
+        }
+
+        $snapshotCacheKey = $this->getViewSnapshotCacheKey('abj404_view_rows', $sub, $tableOptions);
+        $freshRows = $this->getViewRowsSnapshotFromTable($snapshotCacheKey, false, false);
+        if (is_array($freshRows)) {
+            return true;
+        }
+        $recentRows = $this->getViewRowsSnapshotFromTable($snapshotCacheKey, true, true);
+        if (is_array($recentRows)) {
+            return true;
+        }
+        if (function_exists('get_transient')) {
+            $transientRows = get_transient($snapshotCacheKey);
+            if (is_array($transientRows)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Return whether the full AJAX table response can be rendered from cache.
+     *
+     * Rows alone are not enough for first paint: pagination rendering also
+     * needs getRedirectsForViewCount(). If the count snapshot is cold, the
+     * "cached" path can still block on a heavy COUNT query. The initial AJAX
+     * cache gate uses this method so cold counts are also pushed to the
+     * background hydrate request.
+     *
+     * @param string $sub
+     * @param array<string, mixed> $tableOptions
+     * @return bool
+     */
+    function viewTableSnapshotAvailable($sub, array $tableOptions): bool {
+        if (!$this->viewRowsSnapshotAvailable($sub, $tableOptions)) {
+            return false;
+        }
+
+        $canUseSnapshotCache = function_exists('get_transient')
+            && $this->canUseViewTableSnapshotCache($tableOptions);
+        if (!$canUseSnapshotCache) {
+            return false;
+        }
+
+        $countCacheKey = $this->getViewSnapshotCacheKey('abj404_view_count', $sub, $tableOptions);
+        return get_transient($countCacheKey) !== false;
+    }
     
     /**
      * @param string $sub
@@ -833,16 +718,14 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
      * @return int
      */
     function getRedirectsForViewCount(string $sub, array $tableOptions): int {
-        $rawOrderByCount = $tableOptions['orderby'] ?? '';
-        $orderByForSnapshot = strtolower(is_string($rawOrderByCount) ? $rawOrderByCount : '');
-        $isLogsMaintenanceSort = ($orderByForSnapshot === 'logshits' || $orderByForSnapshot === 'last_used');
-        $rawPerpageCount = $tableOptions['perpage'] ?? 0;
+        $queryTimeout = isset($tableOptions['_abj404_query_timeout']) && is_numeric($tableOptions['_abj404_query_timeout'])
+            ? max(1, intval($tableOptions['_abj404_query_timeout'])) : 0;
+        $throwOnQueryError = !empty($tableOptions['_abj404_throw_on_view_query_error']);
         $canUseSnapshotCache = function_exists('get_transient')
-            && absint(is_scalar($rawPerpageCount) ? $rawPerpageCount : 0) <= 200
-            && !$isLogsMaintenanceSort;
+            && $this->canUseViewTableSnapshotCache($tableOptions);
         $requestCountCacheKey = (string)$sub . '|' . md5(serialize($tableOptions));
         $countCacheKey = '';
-        if ($canUseSnapshotCache) {
+        if ($canUseSnapshotCache && $queryTimeout <= 0) {
             $countCacheKey = $this->getViewSnapshotCacheKey('abj404_view_count', $sub, $tableOptions);
             $cachedCount = get_transient($countCacheKey);
             if ($cachedCount !== false) {
@@ -852,21 +735,30 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         if (array_key_exists($requestCountCacheKey, $this->redirectsForViewCountRequestCache)) {
             return intval($this->redirectsForViewCountRequestCache[$requestCountCacheKey]);
         }
-    	
-        $query = $this->getRedirectsForViewQuery($sub, $tableOptions, false, 0, PHP_INT_MAX,
-        	true);
+
+        $rawFilterText = is_string($tableOptions['filterText'] ?? null) ? $tableOptions['filterText'] : '';
+        if ($rawFilterText === '') {
+            $query = $this->getOptimizedRedirectsForViewCountQuery($sub, $tableOptions);
+        } else {
+            $query = $this->getRedirectsForViewQuery($sub, $tableOptions, false, 0, PHP_INT_MAX, true);
+        }
 
         $this->setSqlBigSelects();
-        $results = $this->queryAndGetResults($query);
+        $queryOptions = $queryTimeout > 0 ? array('timeout' => $queryTimeout) : array();
+        $results = $this->queryAndGetResults($query, $queryOptions);
         $lastErrorRaw = $results['last_error'] ?? '';
         $lastError = is_string($lastErrorRaw) ? $lastErrorRaw : '';
-        if (!empty($lastError) && $this->isCollationError($lastError)) {
+        if ($rawFilterText !== '' && !empty($lastError) && $this->isCollationError($lastError)) {
             $retryOptions = $tableOptions;
             $retryOptions['forceCollate'] = 'utf8mb4_general_ci';
             $retryQuery = $this->getRedirectsForViewQuery($sub, $retryOptions, false, 0, PHP_INT_MAX, true);
-            $results = $this->queryAndGetResults($retryQuery);
+            $results = $this->queryAndGetResults($retryQuery, $queryOptions);
             $lastErrorRaw2 = $results['last_error'] ?? '';
             $lastError = is_string($lastErrorRaw2) ? $lastErrorRaw2 : '';
+        }
+
+        if ($throwOnQueryError && (!empty($results['timed_out']) || $lastError !== '')) {
+            throw new \Exception($this->formatViewQueryFailureMessage('getRedirectsForViewCount', $query, $results));
         }
 
         if ($lastError != '' && trim($lastError) != '') {
@@ -878,12 +770,59 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         	return -1;
         }
         $row = is_array($rows[0] ?? null) ? $rows[0] : array();
-        $countValue = intval(is_scalar($row['count'] ?? 0) ? $row['count'] : 0);
+        $rawCount = $row['count'] ?? $row['COUNT(*)'] ?? reset($row);
+        $countValue = intval(is_scalar($rawCount) ? $rawCount : 0);
         $this->redirectsForViewCountRequestCache[$requestCountCacheKey] = $countValue;
+        if ($canUseSnapshotCache && $countCacheKey === '') {
+            $countCacheKey = $this->getViewSnapshotCacheKey('abj404_view_count', $sub, $tableOptions);
+        }
         if ($canUseSnapshotCache && $countCacheKey !== '') {
             set_transient($countCacheKey, $countValue, self::VIEW_SNAPSHOT_CACHE_TTL_SECONDS);
         }
         return $countValue;
+    }
+
+    /**
+     * @param string $sub
+     * @param array<string, mixed> $tableOptions
+     * @return string
+     */
+    private function getOptimizedRedirectsForViewCountQuery(string $sub, array $tableOptions): string {
+        global $abj404_redirect_types, $abj404_captured_types;
+
+        $statusTypes = '';
+        if ($tableOptions['filter'] == 0 || $tableOptions['filter'] == ABJ404_TRASH_FILTER) {
+            if ($sub == 'abj404_redirects') {
+                $statusTypes = implode(", ", $abj404_redirect_types);
+            } else if ($sub == 'abj404_captured') {
+                $statusTypes = implode(", ", $abj404_captured_types);
+            }
+        } else if ($tableOptions['filter'] == ABJ404_STATUS_MANUAL) {
+            $statusTypes = implode(", ", array(ABJ404_STATUS_MANUAL, ABJ404_STATUS_REGEX));
+        } else if ($tableOptions['filter'] == ABJ404_HANDLED_FILTER) {
+            $statusTypes = implode(", ", array(ABJ404_STATUS_IGNORED, ABJ404_STATUS_LATER));
+        } else {
+            $statusTypes = $tableOptions['filter'];
+        }
+        $statusTypes = preg_replace('/[^\d, ]/', '', trim(is_string($statusTypes) ? $statusTypes : ''));
+
+        $trashValue = ($tableOptions['filter'] == ABJ404_TRASH_FILTER) ? 1 : 0;
+
+        $scoreRangeClause = '';
+        $rawScoreRange = is_string($tableOptions['score_range'] ?? '') ? ($tableOptions['score_range'] ?? 'all') : 'all';
+        switch ($rawScoreRange) {
+            case 'high': $scoreRangeClause = 'AND wp_abj404_redirects.score >= 80'; break;
+            case 'medium': $scoreRangeClause = 'AND wp_abj404_redirects.score >= 50 AND wp_abj404_redirects.score < 80'; break;
+            case 'low': $scoreRangeClause = 'AND wp_abj404_redirects.score IS NOT NULL AND wp_abj404_redirects.score < 50'; break;
+            case 'manual': $scoreRangeClause = 'AND wp_abj404_redirects.score IS NULL'; break;
+        }
+
+        $query = "SELECT COUNT(*) AS count\n" .
+                 "FROM {wp_abj404_redirects} wp_abj404_redirects\n" .
+                 "WHERE 1 and status IN (" . $statusTypes . ") AND disabled = " . intval($trashValue) . "\n" .
+                 $scoreRangeClause;
+
+        return $this->doTableNameReplacements($query);
     }
     
     /**
@@ -902,6 +841,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         global $wpdb;
 
         $logsTableColumns = '';
+        $logsTableColumns = "null as logshits, \n null as logsid, \n null as last_used, \n";
         $logsTableJoin = '';
         $statusTypes = '';
         $trashValue = '';
@@ -913,23 +853,19 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         		"count(*) as count\n /* only selecting for count";
         }
 
-        // if we're showing all rows include all of the log data in the query already. this makes the query very slow. 
-        // this should be replaced by the dynamic loading of log data using ajax queries as the page is viewed.
-        if ($queryAllRowsAtOnce) {
-             $logsTableColumns = "logstable.logshits as logshits, \n" .
-                    "logstable.logsid, \n" .
-                    "logstable.last_used, \n";
-        } else {
-            $logsTableColumns = "null as logshits, \n null as logsid, \n null as last_used, \n";
-        }        
-
-        if ($queryAllRowsAtOnce) {
+        if ($queryAllRowsAtOnce && !$selectCountOnly) {
             // create a temp table and use that instead of a subselect to avoid the sql error
             // "The SELECT would examine more than MAX_JOIN_SIZE rows"
             $this->maybeUpdateRedirectsForViewHitsTable();
 
             // Verify table was actually created before using it (handles silent creation failures)
             if ($this->logsHitsTableExists()) {
+                // if we're showing all rows include all of the log data in the query already. this makes the query very slow. 
+                // this should be replaced by the dynamic loading of log data using ajax queries as the page is viewed.
+                $logsTableColumns = "logstable.logshits as logshits, \n" .
+                    "logstable.logsid, \n" .
+                    "logstable.last_used, \n";
+
                 // canonical_url is the persisted CONCAT('/', TRIM(BOTH '/' FROM url))
                 // form (added 4.1.10) so this JOIN is a single indexed equality
                 // lookup against logs_hits.requested_url instead of evaluating
@@ -943,7 +879,6 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
                         "concat('/', trim(both '/' from wp_abj404_redirects.url))) \n ";
             } else {
                 // Fall back to null columns if table creation failed
-                $logsTableColumns = "null as logshits, \n null as logsid, \n null as last_used, \n";
                 $this->logger->debugMessage("logs_hits table not available, falling back to null columns");
             }
         }
@@ -1094,8 +1029,34 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         }
         
         $query = $this->f->doNormalReplacements($query);
-        
+
         return $query;
+    }
+
+    /**
+     * Build an actionable query failure message for table warmup errors.
+     *
+     * @param string $queryLabel
+     * @param string $query
+     * @param array<string, mixed> $result
+     * @return string
+     */
+    private function formatViewQueryFailureMessage(string $queryLabel, string $query, array $result): string {
+        $lastErrorRaw = $result['last_error'] ?? '';
+        $lastError = is_string($lastErrorRaw) ? trim($lastErrorRaw) : '';
+        $timedOut = !empty($result['timed_out']);
+        $sqlSource = $this->extractSqlFilename($query);
+
+        if ($lastError === '' && $timedOut) {
+            $lastError = $queryLabel . ' timed out';
+        } else if ($lastError === '') {
+            $lastError = $queryLabel . ' failed without a database error message';
+        }
+
+        return $queryLabel . ' failed'
+            . '; last_error=' . $lastError
+            . '; timed_out=' . ($timedOut ? 'true' : 'false')
+            . '; sql_source=' . $sqlSource;
     }
 
     /**
