@@ -1,5 +1,23 @@
 # Changelog #
 
+## Version 4.1.15 (May 6, 2026) ##
+
+**Bug Fixes**
+
+* Fixed a plugin load fatal on PHP 7.4 to 8.1 hosts that was introduced in 4.1.14. A constant inside a trait (added with the staged view rebuild) is only valid in PHP 8.2 and later; the declared minimum is PHP 7.4, so this restores compatibility for all supported PHP versions.
+
+## Version 4.1.14 (May 6, 2026) ##
+
+**Bug Fixes**
+
+* Fixed Captured 404s and Page Redirects admin tables getting stuck or returning "Could not load table data" on very large sites while the table cache was being rebuilt. The rebuild now resumes in small background steps and the admin screen keeps polling progress until the data is ready.
+* Fixed a race where an admin table could retry too soon after a background rebuild started, causing repeated loading failures instead of waiting for the rebuilt data.
+
+**Improvements**
+
+* The Captured 404s and Page Redirects admin tables now use a staged cache rebuild that splits expensive destination, status, and hit-count work into bounded batches. Large sites should see more reliable table loading without long-running AJAX requests.
+* Added clearer in-page progress handling while the admin table cache is warming, so administrators can tell the plugin is still working instead of seeing a static loading state.
+
 ## Version 4.1.13 (May 2, 2026) ##
 
 **Bug Fixes**

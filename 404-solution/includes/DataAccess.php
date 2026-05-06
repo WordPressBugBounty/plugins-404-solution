@@ -9,12 +9,16 @@ require_once __DIR__ . '/DataAccessTrait_Maintenance.php';
 require_once __DIR__ . '/DataAccessTrait_Connection.php';
 require_once __DIR__ . '/DataAccessTrait_ViewMetadata.php';
 require_once __DIR__ . '/DataAccessTrait_ViewQueries.php';
+require_once __DIR__ . '/DataAccessTrait_ViewQueriesStaged.php';
+require_once __DIR__ . '/DataAccessTrait_ViewQueriesStagedRead.php';
 require_once __DIR__ . '/DataAccessTrait_ViewSnapshotCache.php';
 require_once __DIR__ . '/DataAccessTrait_Logs.php';
 require_once __DIR__ . '/DataAccessTrait_LogsHitsRebuild.php';
 require_once __DIR__ . '/DataAccessTrait_Redirects.php';
 require_once __DIR__ . '/DataAccessTrait_Stats.php';
 require_once __DIR__ . '/DataAccessTrait_ErrorClassification.php';
+require_once __DIR__ . '/ViewQueryFailureException.php';
+require_once __DIR__ . '/ViewBuildPendingException.php';
 
 /* Functions in this class should all reference one of the following variables or support functions that do.
  *      $wpdb, $_GET, $_POST, $_SERVER, $_.*
@@ -127,6 +131,8 @@ class ABJ_404_Solution_DataAccess {
     use ABJ_404_Solution_DataAccess_ConnectionTrait;
     use ABJ_404_Solution_DataAccess_ViewMetadataTrait;
     use ABJ_404_Solution_DataAccess_ViewQueriesTrait;
+    use ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait;
+    use ABJ_404_Solution_DataAccess_ViewQueriesStagedReadTrait;
     use ABJ_404_Solution_DataAccess_ViewSnapshotCacheTrait;
     use ABJ_404_Solution_DataAccess_LogsTrait;
     use ABJ_404_Solution_DataAccess_LogsHitsRebuildTrait;
