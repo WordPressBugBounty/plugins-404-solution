@@ -157,10 +157,60 @@ trait ViewTrait_UI {
         // read the html content.
         $html = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/html/adminFooter.html");
         $html = $this->f->str_replace('{JAPANESE_FLASHCARDS_URL}', ABJ404_FC_URL, $html);
-        
+        $html = $this->f->str_replace(
+            '{ABJ404_VIEW_FRESHNESS}',
+            $this->renderViewFreshnessLabel(),
+            $html
+        );
+
         // constants and translations.
         $html = $this->f->doNormalReplacements($html);
         echo $html;
+    }
+
+    /**
+     * Render a short, human-readable "how long ago was the view_done cache
+     * last successfully built" label for the admin footer. Returns one of:
+     *   - "n/a"  when never built or freshness option cleared (post-invalidate);
+     *   - "Xs"   when 0 to 59 seconds old;
+     *   - "Xm"   when 1 to 59 minutes old;
+     *   - "Xh"   when 1 to 23 hours old;
+     *   - "Xd"   when a day or more.
+     *
+     * The view_done snapshot is what the Redirects / Captured / Logs tables
+     * read from; if this label drifts upward into hours when the freshness
+     * TTL is 120s, the auto-rebuild path is failing or being blocked.
+     *
+     * @return string
+     */
+    private function renderViewFreshnessLabel(): string {
+        if (!is_object($this->dao) || !method_exists($this->dao, 'getViewDoneBuiltAtTimestamp')) {
+            return 'n/a';
+        }
+        // Defensive: a unit-test DAO may be a Mockery mock that throws
+        // BadMethodCallException when called without an expectation; any
+        // future DAO implementation could also throw on a transient read
+        // failure. The freshness label is a footer cosmetic. Treat any
+        // failure as n/a so it never blocks the page render. Without this
+        // try/catch, dozens of pre-existing unit tests that mock the DAO
+        // without explicitly stubbing this method threw on every footer
+        // render.
+        try {
+            $builtAt = (int)$this->dao->getViewDoneBuiltAtTimestamp();
+        } catch (\Throwable $e) {
+            return 'n/a';
+        }
+        if ($builtAt <= 0) {
+            return 'n/a';
+        }
+        $age = time() - $builtAt;
+        if ($age < 0) {
+            return 'n/a'; // clock skew; do not surface a negative age
+        }
+        if ($age < 60)    { return $age . 's'; }
+        if ($age < 3600)  { return intval($age / 60) . 'm'; }
+        if ($age < 86400) { return intval($age / 3600) . 'h'; }
+        return intval($age / 86400) . 'd';
     }
 
     /** Output the tabs at the top of the plugin page.

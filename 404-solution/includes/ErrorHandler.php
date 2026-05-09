@@ -306,7 +306,10 @@ class ABJ_404_Solution_ErrorHandler {
 			$canShowDetails = false;
 		}
 
-		if (!(defined('ABJ404_TEST_DISABLE_OB') && ABJ404_TEST_DISABLE_OB)) {
+		$shouldManageOb = function_exists('apply_filters')
+			? apply_filters('abj404_should_manage_output_buffer', true, array('source' => 'renderAdminFatalFallback'))
+			: true;
+		if ($shouldManageOb) {
 			while (ob_get_level() > 0) {
 				@ob_end_clean();
 			}
@@ -372,7 +375,10 @@ class ABJ_404_Solution_ErrorHandler {
             }
         }
         echo json_encode($payload);
-        if (defined('ABJ404_TEST_NO_EXIT') && ABJ404_TEST_NO_EXIT) {
+        $shouldExit = function_exists('apply_filters')
+            ? apply_filters('abj404_should_exit', true, array('source' => 'errorHandler_emitJson'))
+            : true;
+        if (!$shouldExit) {
             return true;
         }
         exit;
@@ -396,6 +402,17 @@ class ABJ_404_Solution_ErrorHandler {
         $errorType = $lasterror['type'];
         if (!self::isFatalType(is_int($errorType) ? $errorType : (is_scalar($errorType) ? (int)$errorType : 0))) {
             return false;
+        }
+
+        // Defensive: error_get_last() during an OOM fatal can return a 'message'
+        // field that contains the full crash context (gigabytes on a runaway
+        // memory exhaustion). json_encoding that downstream then OOMs the
+        // shutdown handler itself. Cap the message length so the handler
+        // never fails recursively due to its own logging path.
+        if (isset($lasterror['message']) && is_string($lasterror['message'])
+            && strlen($lasterror['message']) > 8192) {
+            $lasterror['message'] = substr($lasterror['message'], 0, 8192)
+                . '... (truncated; original length ' . strlen($lasterror['message']) . ' bytes)';
         }
 
         $ctx = isset($GLOBALS['abj404_ajax_context']) && is_array($GLOBALS['abj404_ajax_context'])
@@ -428,7 +445,10 @@ class ABJ_404_Solution_ErrorHandler {
             }
 
             $bufferedOutput = '';
-            if (!(defined('ABJ404_TEST_DISABLE_OB') && ABJ404_TEST_DISABLE_OB)) {
+            $shouldManageOb = function_exists('apply_filters')
+                ? apply_filters('abj404_should_manage_output_buffer', true, array('source' => 'errorHandler_processFatalError'))
+                : true;
+            if ($shouldManageOb) {
                 if (ob_get_level() > 0) {
                     $bufferedOutput = (string)ob_get_contents();
                 }

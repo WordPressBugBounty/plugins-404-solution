@@ -36,8 +36,22 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
     /** @var bool Process-local guard so a single request never rebuilds twice. */
     private static $viewBuildAlreadyRanThisRequest = false;
 
-    /** @var int Per-stage timeout in seconds for staged queries; 0 means use queryAndGetResults default. */
-    private $stagedQueryTimeoutSeconds = 0;
+    // $stagedQueryTimeoutSeconds is declared on the sibling
+    // ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait so the same field
+    // backs both stagedQueryOptions() (helpers trait) and the per-stage
+    // writes performed by the orchestrator below.
+
+    /**
+     * Most recent "batch X/Y" progress detail captured from the inner loops of
+     * resumable stages (S2/S4/S5). Preserved across the per-stage yield log so
+     * the user-visible status doesn't drop from "batch 1.28M/1.97M (yielded)"
+     * back to a bare "yielded in N ms" right before the next tick resumes.
+     *
+     * Reset to '' at the start of every runTimedViewBuildStage() invocation.
+     *
+     * @var string
+     */
+    private $lastBatchProgressDetail = '';
 
     /**
      * Request-lifetime cache of viewDoneIsServeable().  The AJAX gate, the
@@ -54,23 +68,11 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
      */
     private $viewDoneIsServeableCache = null;
 
-    /**
-     * Persisted progress tracker between requests.  When a stage exits before
-     * completing all its batches (PHP timeout, per-stage budget reached), the
-     * next request resumes from the stored high-water id.
-     *
-     * Names are kept short to avoid WP's 191-char option_name index limit
-     * even with long table-prefix sites.
-     *
-     * @var array<string, string>
-     */
-    private static $viewBuildProgressOptionNames = array(
-        'started_at'    => 'abj404_view_build_started_at',
-        'current_stage' => 'abj404_view_build_current_stage',
-        's2_high_water' => 'abj404_view_build_s2_high_water',
-        's4_high_water' => 'abj404_view_build_s4_high_water',
-        's5_high_water' => 'abj404_view_build_s5_high_water',
-    );
+    // $viewBuildProgressOptionNames (the option-name registry) is declared
+    // on the sibling ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait so
+    // the progress get/set/clear helpers and this orchestrator share one
+    // registry. self::$viewBuildProgressOptionNames resolves to the same
+    // composing-class property regardless of which trait references it.
 
     /** @return void */
     public static function resetViewBuildOncePerRequestGuard(): void {
@@ -211,6 +213,19 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
     }
 
     /**
+     * Public accessor for the unix-time the view_done snapshot was last
+     * successfully built. Returns 0 when never built or when the freshness
+     * option has been cleared by an invalidation. Used by the admin footer
+     * (and any diagnostic surface) to render a "Cache view freshness: 5m"
+     * indicator without exposing the internal option name.
+     *
+     * @return int  Unix timestamp, or 0.
+     */
+    public function getViewDoneBuiltAtTimestamp(): int {
+        return $this->viewDoneBuiltAt();
+    }
+
+    /**
      * Invalidate the request-lifetime serveability cache.  Called from any
      * code path that mutates view_done (rename/drop/build completion) so a
      * subsequent read in the same request sees fresh state.
@@ -233,6 +248,11 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
      *   - of:            11 (total number of build sub-stages)
      *   - build_started: unix ts when this resumable build began (0 if none)
      *   - progress_text: short human-readable summary (e.g. "stage 2/11")
+     *   - fingerprint:   per-tick mutation counters used by the JS poller
+     *                    to detect within-stage progress (S2/S4/S5 advance
+     *                    high-water ids across multiple ticks while
+     *                    current_stage stays the same). The poller gives
+     *                    up only when this fingerprint stops changing.
      *
      * @return array<string, mixed>
      */
@@ -252,6 +272,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
             // Callers that want the rich text can call describeBuildProgressForNotice
             // directly; AJAX gate / poll responses use the cheap form.
             'progress_text' => $stage > 0 ? ('stage ' . $stage . '/11') : 'not yet started',
+            'fingerprint' => $this->getViewBuildProgressFingerprint(),
         );
     }
 
@@ -268,18 +289,65 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
      * surfaces them.  This is intentionally NOT silent: a failing build that
      * never advances would otherwise leave the JS poller spinning forever.
      *
+     * @param bool $forceRebuild  Diagnostic mode (?abj404_force_view_rebuild=1):
+     *   - skip the viewDoneIsServeable() short-circuit so we always run the
+     *     staged build under the caller's request context, making every
+     *     staged_build_s* sub-stage event visible in the AJAX debug log;
+     *   - wait up to 30s for the build lock so a sibling cron / tab build
+     *     finishes and we can take ownership of the next build cleanly;
+     *   - re-invalidate inside the locked region so we run a fresh build
+     *     rather than the data the prior lock holder just produced;
+     *   - reset the per-request once-guard so a force-rebuild always proceeds
+     *     even if a sibling code path already ran a build in this request.
+     *
      * @return array<string, mixed>
      */
-    public function advanceViewBuildOnce(): array {
-        if ($this->viewDoneIsServeable()) {
+    public function advanceViewBuildOnce(bool $forceRebuild = false): array {
+        if ($forceRebuild) {
+            // Allow the build to run even if a sibling read path on the same
+            // request already entered the once-guard; the diagnostic flow
+            // explicitly wants to rerun.
+            self::$viewBuildAlreadyRanThisRequest = false;
+        }
+        if (!$forceRebuild && $this->viewDoneIsServeable()) {
             return $this->getViewBuildProgress();
         }
-        if (!$this->acquireViewBuildLock()) {
+        // 10s wait when forced so a cron build mid-flight can release the
+        // lock before we take it. Without this, force-rebuild would return
+        // locked=true, the JS poller would back off, the cron build would
+        // finish in the background under no AJAX context, and the next
+        // poll would see view_done as fresh -- no stage diagnostics ever
+        // reach the debug log. 10s leaves comfortable headroom inside a
+        // 30s PHP request: the typical cron build completes in seconds,
+        // and if it doesn't we still return locked=true and the JS poller
+        // can retry on the next page load.
+        $lockTimeoutSeconds = $forceRebuild ? 10 : 0;
+        if (!$this->acquireViewBuildLock($lockTimeoutSeconds)) {
+            // Force-rebuild lock losses are interesting: a 10s wait that
+            // still failed means another build held the lock longer than
+            // expected (cron stuck, sibling tab mid-S2/S4/S5, dead session
+            // holding GET_LOCK). Always-locked is one of the symptoms
+            // Bruno/Troy report when their build never finishes, so log
+            // every miss with the path so we can tell which caller blocked.
+            $this->logger->debugMessage(sprintf(
+                '[staged] advanceViewBuildOnce: lock not acquired '
+                . '(forceRebuild=%s, waited up to %ds)',
+                $forceRebuild ? 'true' : 'false', $lockTimeoutSeconds
+            ));
             $progress = $this->getViewBuildProgress();
             $progress['locked'] = true;
             return $progress;
         }
         try {
+            if ($forceRebuild) {
+                // Whatever the prior lock holder produced (cron, sibling tab,
+                // a finished S11 swap) we discard inside the locked region
+                // so the rebuild happens fresh under the caller's request
+                // context. invalidateViewDone() also flips the per-request
+                // serveability cache so getViewBuildProgress() at the end
+                // reflects the rebuilt state, not the stale-cached one.
+                $this->invalidateViewDone();
+            }
             $isComplete = $this->runStagedBuildOnce();
         } finally {
             $this->releaseViewBuildLock();
@@ -352,10 +420,20 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
      */
     public function rebuildViewDoneInBackground(): void {
         if ($this->foregroundViewBuildLeaseActive()) {
+            $this->logger->debugMessage(
+                '[staged] rebuildViewDoneInBackground: deferring; '
+                . 'foreground build lease active. Rescheduled.'
+            );
             $this->scheduleViewDoneRebuild(ABJ_404_Solution_ViewBuildConfig::VIEW_BUILD_FOREGROUND_LEASE_SECONDS);
             return;
         }
-        if (!$this->acquireViewBuildLock()) { return; }
+        if (!$this->acquireViewBuildLock()) {
+            $this->logger->debugMessage(
+                '[staged] rebuildViewDoneInBackground: lock not acquired '
+                . '(another worker is building); skipping this cron tick.'
+            );
+            return;
+        }
         try {
             $isComplete = $this->runStagedBuildOnce();
             if (!$isComplete) {
@@ -412,6 +490,16 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         if (!class_exists('ABJ_404_Solution_ViewUpdater')) {
             return;
         }
+        // Capture inner-loop batch markers ("batch 1282000/1971286",
+        // "batch ... (yielded)", "batch killed at size N; shrunk ...") so
+        // logTimedViewBuildStage() can preserve them in the per-stage yield
+        // marker. Skip strings that already contain ", yielded" so the final
+        // yield write does not loop back into the captured detail.
+        if ($detail !== ''
+            && strncmp($detail, 'batch ', 6) === 0
+            && strpos($detail, ', yielded') === false) {
+            $this->lastBatchProgressDetail = $detail;
+        }
         $label = $detail !== '' ? ($stageKey . ':' . $detail) : $stageKey;
         // The class is autoloaded by Loader.php; markInflightStage is a
         // best-effort no-op when no AJAX context exists.
@@ -433,9 +521,29 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
      */
     private function runTimedViewBuildStage(int $stageNumber, string $stageKey, callable $callback) {
         $started = microtime(true);
+        // Reset per-stage so a yield marker for this stage cannot accidentally
+        // pick up a prior stage's batch detail. Inner loops (S2/S4/S5)
+        // populate this via markBuildStage() as they emit "batch X/Y" lines.
+        $this->lastBatchProgressDetail = '';
         try {
+            // Public extension point. Sites can hook this for telemetry, custom
+            // progress dashboards, or chaos-testing the build's resume contract.
+            // The do_action call is inside the try so a callback that throws
+            // (test injection, host kill simulator) is treated identically to
+            // a real SQL error from the stage callback below.
+            if (function_exists('do_action')) {
+                do_action('abj404_view_build_stage_starting', $stageNumber, $stageKey);
+            }
             $result = $callback();
         } catch (\Throwable $e) {
+            // Resumable kill class: host killed the query (max_statement_time,
+            // gone-away, lock-wait, killed connection). The next tick reads
+            // persisted progress and resumes from the same stage. Do NOT
+            // propagate; that would break the JS poll loop.
+            if ($this->isResumableStagedKill($e->getMessage())) {
+                $this->logTimedViewBuildStage($stageNumber, $stageKey, 'killed_resumable', $started);
+                return false;
+            }
             $this->logTimedViewBuildStage($stageNumber, $stageKey, 'error', $started);
             throw $e;
         }
@@ -451,6 +559,60 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
     }
 
     /**
+     * Run a non-batched stage (S3 / S9 / S10) with the kill-streak
+     * escape valve applied. Behaves like runTimedViewBuildStage() except:
+     *
+     *   - Before invoking the stage, looks up the persisted kill streak
+     *     for $streakOptKey. If >= 1, swaps in an extended per-query
+     *     timeout (extendedTimeoutForKilledNonBatchedStage) so the
+     *     SET STATEMENT max_statement_time hint can exceed the host's
+     *     session limit on retry.
+     *   - On `false` return (resumable kill), increments the streak so
+     *     the next request resumes with the extended timeout already in
+     *     effect.
+     *   - On any non-`false` return (completed or 'skipped'), resets the
+     *     streak to 0 -- the next rebuild starts fresh.
+     *
+     * The original $stagedQueryTimeoutSeconds is restored before
+     * returning so subsequent stages run with their own intelligent
+     * timeout, not the extended one (which was only meant for the
+     * stuck non-batched stage).
+     *
+     * @param int      $stageNumber   1-based staged build number.
+     * @param string   $stageKey      Stable stage key for AJAX progress.
+     * @param string   $streakOptKey  Progress option key, e.g. 's3_kill_streak'.
+     * @param callable $callback
+     * @return mixed   Forwards runTimedViewBuildStage's return value:
+     *                 typically true|null on completion, false on
+     *                 resumable kill, 'skipped' when the callback
+     *                 self-skips (S9 with no logs_hits table). Callers
+     *                 only check `=== false` so the broader type is fine.
+     */
+    private function runNonBatchedStageWithKillStreakEscape(
+        int $stageNumber,
+        string $stageKey,
+        string $streakOptKey,
+        callable $callback
+    ) {
+        $savedTimeout = $this->stagedQueryTimeoutSeconds;
+        $this->stagedQueryTimeoutSeconds = $this->extendedTimeoutForKilledNonBatchedStage($streakOptKey);
+        try {
+            $result = $this->runTimedViewBuildStage($stageNumber, $stageKey, $callback);
+        } finally {
+            $this->stagedQueryTimeoutSeconds = $savedTimeout;
+        }
+        if ($result === false) {
+            $this->writeProgressOption(
+                $streakOptKey,
+                $this->readProgressOption($streakOptKey, 0) + 1
+            );
+        } else {
+            $this->writeProgressOption($streakOptKey, 0);
+        }
+        return $result;
+    }
+
+    /**
      * @param int $stageNumber
      * @param string $stageKey
      * @param string $status
@@ -459,7 +621,17 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
      */
     private function logTimedViewBuildStage(int $stageNumber, string $stageKey, string $status, float $started): void {
         $elapsedMs = (int)round((microtime(true) - $started) * 1000);
-        $this->markBuildStage($stageKey, $status . ' in ' . $elapsedMs . ' ms');
+        $markerDetail = $status . ' in ' . $elapsedMs . ' ms';
+        // Preserve mid-stage batch progress in the user-visible yield marker
+        // so the polled status does not drop from "batch 1282000/1971286
+        // (yielded; tight time)" back to a bare "yielded in N ms" between
+        // ticks. Only applied to yield-class statuses; "completed" already
+        // reads cleanly without batch context.
+        if (($status === 'yielded' || $status === 'killed_resumable')
+            && $this->lastBatchProgressDetail !== '') {
+            $markerDetail = $this->lastBatchProgressDetail . ', ' . $markerDetail;
+        }
+        $this->markBuildStage($stageKey, $markerDetail);
         $this->logger->debugMessage(sprintf(
             '[staged] build stage %d/11 %s %s in %d ms',
             $stageNumber,
@@ -469,61 +641,10 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         ));
     }
 
-    /**
-     * @param string $shortName  One of self::$viewBuildProgressOptionNames keys.
-     * @return string  Site-prefixed option name.
-     */
-    private function progressOptionName(string $shortName): string {
-        if (!isset(self::$viewBuildProgressOptionNames[$shortName])) {
-            return '';
-        }
-        return $this->getLowercasePrefix() . self::$viewBuildProgressOptionNames[$shortName];
-    }
-
-    /**
-     * @param string $shortName  Progress key.
-     * @param int    $default
-     * @return int
-     */
-    private function readProgressOption(string $shortName, int $default = 0): int {
-        if (!function_exists('get_option')) {
-            return $default;
-        }
-        $name = $this->progressOptionName($shortName);
-        if ($name === '') {
-            return $default;
-        }
-        $value = get_option($name, $default);
-        return is_scalar($value) ? max(0, intval($value)) : $default;
-    }
-
-    /**
-     * @param string $shortName  Progress key.
-     * @param int    $value
-     * @return void
-     */
-    private function writeProgressOption(string $shortName, int $value): void {
-        if (!function_exists('update_option')) {
-            return;
-        }
-        $name = $this->progressOptionName($shortName);
-        if ($name === '') {
-            return;
-        }
-        // autoload=false so progress writes (potentially many per request)
-        // don't bloat the alloptions cache that loads on every WP page.
-        update_option($name, max(0, intval($value)), false);
-    }
-
-    /** @return void */
-    private function clearAllProgressOptions(): void {
-        if (!function_exists('delete_option')) {
-            return;
-        }
-        foreach (self::$viewBuildProgressOptionNames as $optName) {
-            delete_option($this->getLowercasePrefix() . $optName);
-        }
-    }
+    // progressOptionName / readProgressOption / writeProgressOption /
+    // clearAllProgressOptions live on the sibling
+    // ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait. They read and
+    // write the progress option registry declared in that trait.
 
     /**
      * Read the configured per-batch row count.  Honors:
@@ -546,17 +667,43 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         return max(1, $size);
     }
 
+
     /**
-     * Read the per-stage wall-clock budget after which the request yields
-     * mid-stage (resumed on the next request).
+     * Wall-clock budget after which a batched stage (S2 / S4 / S5) yields
+     * to the next request rather than starting another batch. This is NOT a
+     * query cancellation: any in-flight INSERT or UPDATE-JOIN runs to its
+     * own MySQL timeout. It only stops the loop from issuing more batches
+     * once the request is close to the real ceiling.
+     *
+     * Default: derive from PHP's max_execution_time minus a 2s response
+     * cushion. WP-CLI / cron with no PHP time limit (max_execution_time = 0)
+     * fall back to ABJ_404_Solution_ViewBuildConfig::VIEW_BUILD_PER_STAGE_BUDGET_SECONDS
+     * since unbounded loops would still be undesirable in those contexts.
+     *
+     * Explicit overrides (define / filter) win over auto-detection so
+     * operators can tune it for their host. The minimum floor of 0.1s is
+     * preserved so tests that set a tiny override still complete a batch.
      *
      * @return float  Seconds; always > 0.
      */
     private function viewBuildPerStageBudgetSeconds(): float {
+        $explicitOverride = false;
         $budget = (float)ABJ_404_Solution_ViewBuildConfig::VIEW_BUILD_PER_STAGE_BUDGET_SECONDS;
+
         if (defined('ABJ404_VIEW_BUILD_PER_STAGE_BUDGET_SECONDS')) {
             $budget = (float)ABJ404_VIEW_BUILD_PER_STAGE_BUDGET_SECONDS;
+            $explicitOverride = true;
         }
+
+        if (!$explicitOverride) {
+            $maxExec = (int)ini_get('max_execution_time');
+            if ($maxExec >= 5) {
+                // Use almost the whole window; keep 2s back so the HTTP
+                // response, observers, and shutdown hooks have time to run.
+                $budget = (float)($maxExec - 2);
+            }
+        }
+
         if (function_exists('apply_filters')) {
             $filtered = apply_filters('abj404_view_build_per_stage_budget_seconds', $budget);
             if (is_scalar($filtered)) {
@@ -598,25 +745,57 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
             && (time() - $startedAt) < ABJ_404_Solution_ViewBuildConfig::VIEW_BUILD_RESUME_TTL_SECONDS
             && $bufferExists;
 
+        // Single line per advance request that pins down WHICH path was
+        // taken and why. On a build that takes hours across many requests,
+        // this is the entry point for any "stuck at stage N" investigation:
+        // a single grep for [staged] in the debug log shows whether each
+        // request was resuming, restarting, or skipping due to the per-request
+        // guard.
+        $currentStage = $this->readProgressOption('current_stage', 0);
         if (!$isResuming) {
-            // Fresh start: scrap any partial state.  An abandoned partial
-            // build older than the resume TTL is not safe to continue —
+            $reason = ($startedAt <= 0)
+                ? 'no prior started_at'
+                : (!$bufferExists
+                    ? 'buffer table missing (prior crash or fresh install)'
+                    : ('prior build older than resume TTL ('
+                        . (time() - $startedAt) . 's elapsed)'));
+            $this->logger->debugMessage(sprintf(
+                '[staged] runStagedBuildOnce: fresh start (%s); current_stage=%d',
+                $reason, $currentStage
+            ));
+            // Fresh start: scrap any partial state. An abandoned partial
+            // build older than the resume TTL is not safe to continue;
             // wp_posts/wp_terms/wp_options state may have drifted.
             $this->clearAllProgressOptions();
             $this->dropTransientStagedTables();
         } else {
+            $this->logger->debugMessage(sprintf(
+                '[staged] runStagedBuildOnce: resuming (started_at=%d, %ds ago); current_stage=%d',
+                $startedAt, time() - $startedAt, $currentStage
+            ));
             // Resuming: drop only the leftover deleteme from a prior crashed
             // RENAME swap.  Keep the buffer + progress options intact.
             $this->dropDeletemeTable();
         }
 
+        // Set our own per-query timeout for every staged-build query
+        // run during this advance call. Sized below the host's session
+        // max_statement_time so our hint fires first, producing a
+        // classifiable "max_statement_time exceeded" error we can react
+        // to (Path B: shrink the batch). Without this, MariaDB's silent
+        // server-level kill produces a less-classifiable connection or
+        // generic-query error.
+        $this->stagedQueryTimeoutSeconds = (int)round($this->intelligentStagedQueryTimeoutSeconds());
+
         $stage = $this->readProgressOption('current_stage', 0);
 
         if ($stage < 1) {
             $this->markBuildStage('staged_build_s1_create');
-            $this->runTimedViewBuildStage(1, 'staged_build_s1_create', function () {
+            if ($this->runTimedViewBuildStage(1, 'staged_build_s1_create', function () {
                 $this->stageCreateBuildTable();
-            });
+            }) === false) {
+                return false; // host killed S1; next tick resumes from S1
+            }
             // Stamp started_at on the very first stage so the resume-TTL
             // clock starts from buffer creation.
             if ($this->readProgressOption('started_at', 0) === 0) {
@@ -638,9 +817,16 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
 
         if ($stage < 3) {
             $this->markBuildStage('staged_build_s3_index_fd');
-            $this->runTimedViewBuildStage(3, 'staged_build_s3_index_fd', function () {
-                $this->stageAddPreJoinIndexes();
-            });
+            // Non-batched: kill-streak escape valve extends the per-query
+            // timeout above the host's session limit on retry. Without
+            // this, a CREATE INDEX that exceeds max_statement_time on
+            // big buffers loops with the same timeout forever.
+            if ($this->runNonBatchedStageWithKillStreakEscape(
+                3, 'staged_build_s3_index_fd', 's3_kill_streak',
+                function () { $this->stageAddPreJoinIndexes(); }
+            ) === false) {
+                return false; // host killed S3; next tick resumes from S3
+            }
             $this->writeProgressOption('current_stage', 3);
             $stage = 3;
         }
@@ -667,41 +853,58 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
 
         if ($stage < 6) {
             $this->markBuildStage('staged_build_s6_update_home');
-            $this->runTimedViewBuildStage(6, 'staged_build_s6_update_home', function () {
+            if ($this->runTimedViewBuildStage(6, 'staged_build_s6_update_home', function () {
                 $this->stageUpdateHome();
-            });
+            }) === false) {
+                return false; // host killed S6; next tick resumes from S6
+            }
             $this->writeProgressOption('current_stage', 6);
             $stage = 6;
         }
 
         if ($stage < 7) {
             $this->markBuildStage('staged_build_s7_update_external');
-            $this->runTimedViewBuildStage(7, 'staged_build_s7_update_external', function () {
+            if ($this->runTimedViewBuildStage(7, 'staged_build_s7_update_external', function () {
                 $this->stageUpdateExternal();
-            });
+            }) === false) {
+                return false; // host killed S7; next tick resumes from S7
+            }
             $this->writeProgressOption('current_stage', 7);
             $stage = 7;
         }
 
         if ($stage < 8) {
             $this->markBuildStage('staged_build_s8_update_special');
-            $this->runTimedViewBuildStage(8, 'staged_build_s8_update_special', function () {
+            if ($this->runTimedViewBuildStage(8, 'staged_build_s8_update_special', function () {
                 $this->stageUpdateSpecial();
-            });
+            }) === false) {
+                return false; // host killed S8; next tick resumes from S8
+            }
             $this->writeProgressOption('current_stage', 8);
             $stage = 8;
         }
 
         if ($stage < 9) {
-            $this->runTimedViewBuildStage(9, 'staged_build_s9_update_hits', function () {
-                if ($this->logsHitsTableExists()) {
-                    $this->markBuildStage('staged_build_s9_update_hits');
-                    $this->stageUpdateHits();
-                    return null;
+            // Non-batched: temp-table aggregate over wp_abj404_logs_hits +
+            // UPDATE JOIN against the buffer. Kill-streak escape valve
+            // extends the per-query timeout on retry so a logs_hits scan
+            // that doesn't fit in the host's max_statement_time can
+            // eventually finish.
+            $s9Result = $this->runNonBatchedStageWithKillStreakEscape(
+                9, 'staged_build_s9_update_hits', 's9_kill_streak',
+                function () {
+                    if ($this->logsHitsTableExists()) {
+                        $this->markBuildStage('staged_build_s9_update_hits');
+                        $this->stageUpdateHits();
+                        return null;
+                    }
+                    $this->markBuildStage('staged_build_s9_update_hits', 'skipped; logs hits table unavailable');
+                    return 'skipped';
                 }
-                $this->markBuildStage('staged_build_s9_update_hits', 'skipped; logs hits table unavailable');
-                return 'skipped';
-            });
+            );
+            if ($s9Result === false) {
+                return false; // host killed S9; next tick resumes from S9
+            }
             // Skipped or not, we've moved past S9.
             $this->writeProgressOption('current_stage', 9);
             $stage = 9;
@@ -709,18 +912,26 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
 
         if ($stage < 10) {
             $this->markBuildStage('staged_build_s10_index_sort');
-            $this->runTimedViewBuildStage(10, 'staged_build_s10_index_sort', function () {
-                $this->stageAddSortIndexes();
-            });
+            // Non-batched: same kill-streak escape valve as S3 -- a
+            // CREATE INDEX that exceeds the host's max_statement_time on
+            // big buffers needs an extended retry timeout to complete.
+            if ($this->runNonBatchedStageWithKillStreakEscape(
+                10, 'staged_build_s10_index_sort', 's10_kill_streak',
+                function () { $this->stageAddSortIndexes(); }
+            ) === false) {
+                return false; // host killed S10; next tick resumes from S10
+            }
             $this->writeProgressOption('current_stage', 10);
             $stage = 10;
         }
 
         if ($stage < 11) {
             $this->markBuildStage('staged_build_s11_swap');
-            $this->runTimedViewBuildStage(11, 'staged_build_s11_swap', function () {
+            if ($this->runTimedViewBuildStage(11, 'staged_build_s11_swap', function () {
                 $this->stageRenameSwap();
-            });
+            }) === false) {
+                return false; // host killed S11; next tick resumes from S11
+            }
             if (function_exists('update_option')) {
                 update_option($this->viewDoneFreshnessOptionName(), time(), false);
             }
@@ -764,21 +975,35 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         }
 
         $attempts = array(
-            $base,
-            $base . ' ENGINE=MyISAM',
-            $base . ' ENGINE=InnoDB',
+            'default' => $base,
+            'MyISAM'  => $base . ' ENGINE=MyISAM',
+            'InnoDB'  => $base . ' ENGINE=InnoDB',
         );
         $lastError = '';
+        $errorsSoFar = array();
         $opts = $this->stagedQueryOptions();
         $opts['log_errors'] = false;
-        foreach ($attempts as $sql) {
+        foreach ($attempts as $engineLabel => $sql) {
             $result = $this->queryAndGetResults($sql, $opts);
             $err = isset($result['last_error']) && is_string($result['last_error'])
                 ? trim($result['last_error']) : '';
             if ($err === '' && empty($result['timed_out'])) {
+                if ($engineLabel !== 'default') {
+                    // Default engine failed but a fallback won. Worth knowing
+                    // because hosts that need a fallback often have other
+                    // engine-specific quirks downstream (lock waits, ALTER
+                    // semantics, etc.).
+                    $this->logger->warn(sprintf(
+                        '[staged] S1 createViewBuildTable: default engine '
+                        . 'failed (%s); succeeded on fallback %s.',
+                        substr(implode('; ', $errorsSoFar), 0, 200),
+                        $engineLabel
+                    ));
+                }
                 return;
             }
             $lastError = $err !== '' ? $err : 'unknown';
+            $errorsSoFar[] = $engineLabel . ': ' . $lastError;
         }
         throw new \Exception('Could not create view build table on any storage engine: ' . $lastError);
     }
@@ -802,39 +1027,100 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
      */
     private function stageInsertRedirectsBatched(): bool {
         $this->markBuildStage('staged_build_s2_insert');
-        $batchSize = $this->viewBuildBatchSize();
         $deadline = microtime(true) + $this->viewBuildPerStageBudgetSeconds();
+        // Pre-flight check uses the SQL hint (smaller than the wall-clock
+        // budget by design), not the budget itself. This is the worst-case
+        // time a single batch can take before SET STATEMENT max_statement_time
+        // fires. The budget is a loop-level wall clock; a single batch never
+        // takes a full budget to run.
+        $perQueryLimit = max(1.0, (float)$this->intelligentStagedQueryTimeoutSeconds());
 
         $totalCount = $this->countLiveRedirects();
         if ($totalCount <= 0) {
-            // Empty redirects table — nothing to copy.
+            // Empty redirects table; nothing to copy.
             $this->writeProgressOption('s2_high_water', 0);
             return true;
         }
 
+        $batchNumber = 0;
         while (true) {
             $copiedSoFar = $this->countViewBuildRows();
             if ($copiedSoFar >= $totalCount) {
                 break; // covered the table
             }
+            // Wall-clock yield (Path A): per-stage budget exhausted. NOT a
+            // batch-size problem; do not shrink.
             if (microtime(true) >= $deadline) {
                 $this->markBuildStage('staged_build_s2_insert',
                     'batch ' . $this->humanBatchProgress($copiedSoFar, $totalCount) . ' (yielded)');
                 return false;
             }
+            // Pre-flight: only start a batch when the request has enough PHP
+            // time left to finish it at our SQL hint. Without this, a batch
+            // we started with too little time would get killed mid-flight by
+            // PHP's max_execution_time and we could not safely tell whether
+            // the kill was a real batch-too-big problem or just request-time
+            // exhaustion. Yield without shrinking.
+            //
+            // Always allow the first batch of a tick to run, even when PHP
+            // time looks tight: phpTimeRemainingSeconds() reflects the time
+            // left at the START of the stage, which on a typical 30s shared
+            // host is already below the SQL hint after WP boot. Without this
+            // first-batch escape, the build would yield on every request
+            // without ever inserting a row -- exactly the "stuck at stage
+            // 1/11" symptom that stranded large-site installs.
+            if ($batchNumber > 0 && $this->phpTimeRemainingSeconds() < $perQueryLimit + 1.0) {
+                $this->markBuildStage('staged_build_s2_insert',
+                    'batch ' . $this->humanBatchProgress($copiedSoFar, $totalCount) . ' (yielded; tight time)');
+                return false;
+            }
 
+            $batchSize = $this->viewBuildBatchSizeForStage('s2_batch_size');
+            $batchNumber++;
             $loBound = $this->maxBuildBufferId();
             $beforeMax = $loBound;
-            $afterMax = $this->runInsertBatch($loBound, $batchSize);
+            try {
+                // Public extension point. Sites hook this for per-batch
+                // telemetry; tests bind a callback that throws to simulate
+                // a host kill. Inside the try/catch so a hook-thrown
+                // resumable error is handled exactly the same way as a
+                // real kill from the SQL call below.
+                if (function_exists('do_action')) {
+                    do_action('abj404_view_build_batch_starting', 's2_insert', $batchNumber, $batchSize);
+                }
+                $afterMax = $this->runInsertBatch($loBound, $batchSize);
+            } catch (\Throwable $e) {
+                if ($this->isResumableStagedKill($e->getMessage())) {
+                    // Path B: batch genuinely too big at the host limit.
+                    // Halve, persist, yield. Next tick uses smaller size.
+                    $newSize = $this->recordStageBatchKilled('s2_batch_size');
+                    $this->logger->warn(sprintf(
+                        '[staged] S2 batch killed by host at size %d; '
+                        . 'shrunk s2_batch_size to %d. Trigger: %s',
+                        $batchSize, $newSize, substr($e->getMessage(), 0, 200)
+                    ));
+                    $this->markBuildStage('staged_build_s2_insert',
+                        'batch killed at size ' . $batchSize
+                        . '; shrunk to ' . $newSize . ', yielded');
+                    return false;
+                }
+                throw $e;
+            }
             if ($afterMax === $beforeMax) {
-                // No rows above $loBound to copy.  Either the redirects table
+                // No rows above $loBound to copy. Either the redirects table
                 // shrank during the build, or all remaining ids are <= loBound
                 // (impossible given strict id-range semantics, but defensive).
                 // Treat as done; the read query will reflect whatever was
                 // captured.
+                $this->logger->warn(sprintf(
+                    '[staged] S2 stopping early: INSERT batch did not advance '
+                    . 'MAX(id) (loBound=%d, beforeMax=%d, afterMax=%d, '
+                    . 'copiedSoFar=%d, totalCount=%d). Treating as done.',
+                    $loBound, $beforeMax, $afterMax, $copiedSoFar, $totalCount
+                ));
                 break;
             }
-            // Mirror MAX(id) into the option for diagnostics.  This is
+            // Mirror MAX(id) into the option for diagnostics. This is
             // best-effort; correctness does NOT depend on this write.
             $this->writeProgressOption('s2_high_water', $afterMax);
 
@@ -949,30 +1235,66 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
      */
     private function runIdRangeBatchedUpdate(string $stageKey, string $highWaterKey, string $sqlFile): bool {
         $this->markBuildStage($stageKey);
-        $batchSize = $this->viewBuildBatchSize();
         $deadline = microtime(true) + $this->viewBuildPerStageBudgetSeconds();
+        $perQueryLimit = max(1.0, (float)$this->intelligentStagedQueryTimeoutSeconds());
+        // s4_high_water -> s4_batch_size; s5_high_water -> s5_batch_size.
+        $batchSizeKey = str_replace('_high_water', '_batch_size', $highWaterKey);
 
         $highWater = $this->readProgressOption($highWaterKey, 0);
         $totalMaxId = $this->maxBuildBufferId();
         if ($totalMaxId <= 0) {
-            // Buffer is empty (no redirects).  Nothing to update.
+            // Buffer is empty (no redirects). Nothing to update.
             $this->writeProgressOption($highWaterKey, 0);
             return true;
         }
 
+        $batchNumber = 0;
         while ($highWater < $totalMaxId) {
+            // Wall-clock yield (Path A); not a batch-size problem.
             if (microtime(true) >= $deadline) {
                 $this->markBuildStage($stageKey,
                     'batch ' . $this->humanBatchProgress($highWater, $totalMaxId) . ' (yielded)');
                 return false;
             }
+            // Pre-flight: yield without shrinking when there is not enough
+            // PHP request time left to finish a batch at the SQL hint. Same
+            // rationale as in stageInsertRedirectsBatched, including the
+            // first-batch escape so a tight-PHP-time request still makes
+            // forward progress instead of yielding indefinitely.
+            if ($batchNumber > 0 && $this->phpTimeRemainingSeconds() < $perQueryLimit + 1.0) {
+                $this->markBuildStage($stageKey,
+                    'batch ' . $this->humanBatchProgress($highWater, $totalMaxId) . ' (yielded; tight time)');
+                return false;
+            }
 
+            $batchSize = $this->viewBuildBatchSizeForStage($batchSizeKey);
+            $batchNumber++;
             $hiBound = min($totalMaxId, $highWater + $batchSize);
             $extra = array(
                 '{LO_BOUND}' => (string)$highWater,
                 '{HI_BOUND}' => (string)$hiBound,
             );
-            $this->runStagedSqlFile($sqlFile, $extra);
+            try {
+                if (function_exists('do_action')) {
+                    do_action('abj404_view_build_batch_starting', $stageKey, $batchNumber, $batchSize);
+                }
+                $this->runStagedSqlFile($sqlFile, $extra);
+            } catch (\Throwable $e) {
+                if ($this->isResumableStagedKill($e->getMessage())) {
+                    $newSize = $this->recordStageBatchKilled($batchSizeKey);
+                    $this->logger->warn(sprintf(
+                        '[staged] %s batch killed by host at size %d; '
+                        . 'shrunk %s to %d. Trigger: %s',
+                        $stageKey, $batchSize, $batchSizeKey, $newSize,
+                        substr($e->getMessage(), 0, 200)
+                    ));
+                    $this->markBuildStage($stageKey,
+                        'batch killed at size ' . $batchSize
+                        . '; shrunk to ' . $newSize . ', yielded');
+                    return false;
+                }
+                throw $e;
+            }
             $highWater = $hiBound;
             $this->writeProgressOption($highWaterKey, $highWater);
 
@@ -1074,198 +1396,14 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
             array('log_errors' => false));
     }
 
-    /**
-     * Execute a staged SQL file with placeholder substitution and the
-     * standard error-handling pipeline.
-     *
-     * On failure, the error message is prefixed with the file name and any
-     * batch bounds present in $extraTranslations so the GUI's "stage N
-     * failed" notice carries actionable context.  The current sub-stage
-     * label set by markBuildStage() remains in place so the AJAX shutdown
-     * handler renders the correct stageNumber/queryLabel.
-     *
-     * @param string $relativePath
-     * @param array<string, string> $extraTranslations
-     * @return void
-     */
-    private function runStagedSqlFile(string $relativePath, array $extraTranslations): void {
-        $path = __DIR__ . '/sql/getRedirectsForViewStaged/' . $relativePath;
-        $template = ABJ_404_Solution_Functions::readFileContents($path);
-        if (!is_string($template) || trim($template) === '') {
-            throw new \Exception("Staged SQL template missing or empty: $relativePath");
-        }
-        $sql = $this->doTableNameReplacements($template);
-        // extraTranslations (status_for_view / type_for_view labels, batch
-        // bounds) must run BEFORE doNormalReplacements: doNormalReplacements
-        // falls back to __() for any {key} it does not know, which strips
-        // the braces and prevents the str_replace below from matching.
-        if (!empty($extraTranslations)) {
-            $sql = $this->f->str_replace(array_keys($extraTranslations), array_values($extraTranslations), $sql);
-        }
-        $sql = $this->f->doNormalReplacements($sql);
-        $result = $this->queryAndGetResults($sql, $this->stagedQueryOptions());
-        $err = isset($result['last_error']) && is_string($result['last_error']) ? trim($result['last_error']) : '';
-        if ($err !== '') {
-            $context = $this->describeStagedSqlFailure($relativePath, $extraTranslations);
-            throw new \Exception('Staged SQL ' . $context . ' failed: ' . $err);
-        }
-    }
-
-    /**
-     * Same as runStagedSqlFile but silently tolerates "Duplicate key name"
-     * errors so an interrupted ALTER TABLE ADD INDEX can be safely re-run
-     * on a request that resumes a prior partially-completed build.  All
-     * other errors are raised as usual.
-     *
-     * @param string $relativePath
-     * @param array<string, string> $extraTranslations
-     * @return void
-     */
-    private function runStagedSqlFileTolerantOfDuplicateKey(string $relativePath, array $extraTranslations): void {
-        try {
-            $this->runStagedSqlFile($relativePath, $extraTranslations);
-        } catch (\Throwable $e) {
-            $msg = $e->getMessage();
-            if (stripos($msg, 'Duplicate key name') !== false
-                || stripos($msg, 'errno: 1061') !== false) {
-                // The index already exists from a prior partial run — that is
-                // the expected resume-time state, not a failure.
-                return;
-            }
-            throw $e;
-        }
-    }
-
-    /**
-     * Render a short human-readable description of which file + which batch
-     * bounds were running when an error fired.  Used to enrich error
-     * messages so the GUI notice lists the exact failing slice.
-     *
-     * @param string $relativePath
-     * @param array<string, string> $extraTranslations
-     * @return string
-     */
-    private function describeStagedSqlFailure(string $relativePath, array $extraTranslations): string {
-        $parts = array($relativePath);
-        if (isset($extraTranslations['{LO_BOUND}'])) {
-            $parts[] = 'lo=' . $extraTranslations['{LO_BOUND}'];
-        }
-        if (isset($extraTranslations['{HI_BOUND}'])) {
-            $parts[] = 'hi=' . $extraTranslations['{HI_BOUND}'];
-        }
-        if (isset($extraTranslations['{BATCH_SIZE}'])) {
-            $parts[] = 'limit=' . $extraTranslations['{BATCH_SIZE}'];
-        }
-        return implode(' ', $parts);
-    }
-
-    /**
-     * Render a short human-readable summary of how far a resumable build has
-     * progressed.  Used in the admin notice and the throw message when a
-     * request can't yet serve view_done because the build is still running
-     * across requests.
-     *
-     * @return string  e.g. "stage 2/11, 3000/12000 rows" or "not yet started".
-     */
-    private function describeBuildProgressForNotice(): string {
-        $stage = $this->readProgressOption('current_stage', 0);
-        if ($stage <= 0) {
-            return 'not yet started';
-        }
-        $parts = array('stage ' . $stage . '/11');
-        if ($stage < 2) {
-            // S2 is the heaviest; surface buffer/redirect counts.
-            $copied = $this->countViewBuildRows();
-            $total = $this->countLiveRedirects();
-            if ($total > 0) {
-                $parts[] = $copied . '/' . $total . ' rows';
-            }
-        }
-        return implode(', ', $parts);
-    }
-
-    /**
-     * @return array<string, mixed> Options for queryAndGetResults that
-     * inherit the warmup pipeline's per-stage timeout when set.
-     */
-    private function stagedQueryOptions(): array {
-        if ($this->stagedQueryTimeoutSeconds > 0) {
-            return array('timeout' => $this->stagedQueryTimeoutSeconds);
-        }
-        return array();
-    }
-
-    /** @return bool */
-    private function viewDoneTableExists(): bool {
-        return $this->stagedTableExists($this->viewDoneTableName());
-    }
-
-    /** @param string $tableName @return bool */
-    private function stagedTableExists(string $tableName): bool {
-        global $wpdb;
-        if (!isset($wpdb) || !method_exists($wpdb, 'prepare')) {
-            return false;
-        }
-        /** @var \wpdb $wpdb */
-        $sql = $wpdb->prepare('SHOW TABLES LIKE %s', $tableName);
-        if (!is_string($sql) || $sql === '') {
-            return false;
-        }
-        $result = $this->queryAndGetResults($sql, array('log_errors' => false));
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
-        if (empty($rows)) {
-            return false;
-        }
-        $first = $rows[0];
-        $first = is_array($first) ? $first : array();
-        $value = reset($first);
-        $valueStr = is_scalar($value) ? (string)$value : '';
-        return ($valueStr === $tableName);
-    }
-
-    /** @return bool */
-    private function viewDoneIsFresh(): bool {
-        if (!function_exists('get_option')) {
-            return false;
-        }
-        $built = get_option($this->viewDoneFreshnessOptionName(), 0);
-        $builtAt = is_scalar($built) ? intval($built) : 0;
-        if ($builtAt <= 0) {
-            return false;
-        }
-        return (time() - $builtAt) < ABJ_404_Solution_ViewBuildConfig::VIEW_DONE_FRESHNESS_TTL_SECONDS;
-    }
-
-    /** @return bool */
-    private function acquireViewBuildLock(): bool {
-        $name = $this->getLowercasePrefix() . ABJ_404_Solution_ViewBuildConfig::VIEW_DONE_BUILD_LOCK_NAME;
-        $sql = "SELECT GET_LOCK('" . esc_sql($name) . "', 0) AS got";
-        $result = $this->queryAndGetResults($sql, array('log_errors' => false));
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
-        if (empty($rows) || !is_array($rows[0])) {
-            return false;
-        }
-        $got = $rows[0]['got'] ?? 0;
-        return is_scalar($got) && intval($got) === 1;
-    }
-
-    /** @return void */
-    private function releaseViewBuildLock(): void {
-        // @utf8-audit: opt-out - $name is built from $wpdb->prefix + a class
-        // constant; never user input, cannot contain invalid UTF-8 bytes.
-        $name = $this->getLowercasePrefix() . ABJ_404_Solution_ViewBuildConfig::VIEW_DONE_BUILD_LOCK_NAME;
-        $this->queryAndGetResults("SELECT RELEASE_LOCK('" . esc_sql($name) . "')",
-            array('log_errors' => false));
-    }
-
-    /** @return void */
-    private function scheduleViewDoneRebuild(int $delaySeconds = 1): void {
-        if (function_exists('wp_next_scheduled') && function_exists('wp_schedule_single_event')) {
-            $hook = 'abj404_rebuildViewDone';
-            $next = wp_next_scheduled($hook);
-            if ($next === false) {
-                wp_schedule_single_event(time() + max(1, intval($delaySeconds)), $hook);
-            }
-        }
-    }
+    // The following helpers all live on the sibling
+    // ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait so this file stays
+    // focused on the orchestrator. They're listed here as a navigation aid:
+    //   - runStagedSqlFile / runStagedSqlFileTolerantOfDuplicateKey
+    //   - describeStagedSqlFailure / describeBuildProgressForNotice
+    //   - stagedQueryOptions
+    //   - viewDoneTableExists / stagedTableExists
+    //   - viewDoneIsFresh
+    //   - acquireViewBuildLock / releaseViewBuildLock
+    //   - scheduleViewDoneRebuild
 }

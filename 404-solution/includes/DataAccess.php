@@ -11,7 +11,10 @@ require_once __DIR__ . '/DataAccessTrait_ViewMetadata.php';
 require_once __DIR__ . '/DataAccessTrait_ViewQueries.php';
 require_once __DIR__ . '/DataAccessTrait_ViewQueriesStaged.php';
 require_once __DIR__ . '/DataAccessTrait_ViewQueriesStagedRead.php';
+require_once __DIR__ . '/DataAccessTrait_ViewBuildAdaptive.php';
+require_once __DIR__ . '/DataAccessTrait_ViewBuildHelpers.php';
 require_once __DIR__ . '/DataAccessTrait_ViewSnapshotCache.php';
+require_once __DIR__ . '/DataAccessTrait_QueryTimeouts.php';
 require_once __DIR__ . '/DataAccessTrait_Logs.php';
 require_once __DIR__ . '/DataAccessTrait_LogsHitsRebuild.php';
 require_once __DIR__ . '/DataAccessTrait_Redirects.php';
@@ -133,12 +136,15 @@ class ABJ_404_Solution_DataAccess {
     use ABJ_404_Solution_DataAccess_ViewQueriesTrait;
     use ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait;
     use ABJ_404_Solution_DataAccess_ViewQueriesStagedReadTrait;
+    use ABJ_404_Solution_DataAccess_ViewBuildAdaptiveTrait;
+    use ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait;
     use ABJ_404_Solution_DataAccess_ViewSnapshotCacheTrait;
     use ABJ_404_Solution_DataAccess_LogsTrait;
     use ABJ_404_Solution_DataAccess_LogsHitsRebuildTrait;
     use ABJ_404_Solution_DataAccess_RedirectsTrait;
     use ABJ_404_Solution_DataAccess_StatsTrait;
     use ABJ_404_Solution_DataAccess_ErrorClassificationTrait;
+    use ABJ_404_Solution_DataAccess_QueryTimeoutsTrait;
 
     /** Cache key for redirect status counts */
     const CACHE_KEY_REDIRECT_STATUS = 'abj404_redirect_status_counts';
@@ -736,18 +742,86 @@ class ABJ_404_Solution_DataAccess {
             return;
         }
 
+        // Honor an explicit log_errors=false: the caller has accepted that
+        // this query may fail and does not want the failure routed through
+        // Logging::errorMessage() (which can email the developer and surface
+        // admin notices). The error is still returned in $result['last_error']
+        // so callers can react to it. May 2026: a regression in this function
+        // was emailing 35 of 38 4.1.15 sites about benign SHOW CREATE TABLE
+        // probes of the transient view_build table. log_errors=false must
+        // mean "do not log".
+        $logErrors = !array_key_exists('log_errors', $options) || (bool)$options['log_errors'];
+        if (!$logErrors) {
+            return;
+        }
+
+        // Honor ignore_errors: callers pass substring patterns for errors
+        // that are expected and benign for that query (e.g. RENAME TABLE
+        // with ignore_errors=["already exists"] in renameAbj404TablesToLowerCase
+        // when the lowercase target name pre-exists). Without this check,
+        // the observation logger fires ERROR before the downstream
+        // ignore_errors branch can suppress, which emails the developer.
+        // May 2026: 16+ sites in the email-flood cohort hit this path.
+        $ignoreErrorStrings = isset($options['ignore_errors']) && is_array($options['ignore_errors'])
+            ? $options['ignore_errors'] : array();
+        foreach ($ignoreErrorStrings as $needle) {
+            if (is_string($needle) && $needle !== '' && strpos($lastError, $needle) !== false) {
+                return;
+            }
+        }
+
         $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->extractSqlFilename($query);
         $elapsed = isset($result['elapsed_time']) && is_numeric($result['elapsed_time'])
             ? round((float)$result['elapsed_time'], 4) : 0;
-        $logErrors = !array_key_exists('log_errors', $options) || (bool)$options['log_errors'];
         $message = 'SQL query error observed: ' . $lastError
             . ', SQL: ' . $sqlInfo
             . ', source: ' . $this->extractSqlFilename($query)
             . ', route: ' . ($producesRows ? 'get_results' : 'query')
-            . ', log_errors_option: ' . ($logErrors ? 'true' : 'false')
+            . ', log_errors_option: ' . ($logErrors ? 'true' : 'false') /** @phpstan-ignore ternary.alwaysTrue */
             . ', execution_time: ' . $elapsed;
 
+        // Infrastructure errors (collation mismatch, disk full, read-only,
+        // host quota, deadlock, transient connection drop, etc.) are server
+        // and host issues, not plugin bugs. Log as WARN so they appear in
+        // the debug log without triggering Logging::errorMessage() email
+        // reports. The downstream code at queryAndGetResults() lines 1067+
+        // already classifies these for its own reporting branch; doing the
+        // same classification here keeps the two layers consistent.
+        // May 2026: 4 of 38 4.1.13 sites in the email-flood cohort were
+        // "Illegal mix of collations" reports that should have been WARN.
+        if ($this->isInfrastructureSqlError($lastError)) {
+            $this->logger->warn($message);
+            return;
+        }
+
         $this->logger->errorMessage($message);
+    }
+
+    /**
+     * Pure classifier: true if the SQL error string matches a known
+     * infrastructure / host / hosting-environment failure pattern. These
+     * are conditions the plugin can detect and degrade past, not plugin
+     * bugs. Centralizing the union here keeps logObservedSqlError() and
+     * the downstream reporting branch in queryAndGetResults() consistent.
+     *
+     * @param string $errorText
+     * @return bool
+     */
+    private function isInfrastructureSqlError(string $errorText): bool {
+        if ($errorText === '') {
+            return false;
+        }
+        return $this->isDiskFullError($errorText)
+            || $this->isReadOnlyError($errorText)
+            || $this->isQuotaLimitError($errorText)
+            || $this->isInvalidDataError($errorText)
+            || $this->isCollationError($errorText)
+            || $this->isMissingPluginTableError($errorText)
+            || $this->isIncorrectKeyFileError($errorText)
+            || $this->isCrashedTableError($errorText)
+            || $this->isDeadlockOrLockTimeoutError($errorText)
+            || $this->isTransientConnectionError($errorText)
+            || $this->isAccessDeniedError($errorText);
     }
 
     /**
@@ -1063,7 +1137,8 @@ class ABJ_404_Solution_DataAccess {
                 $this->isCrashedTableError($lastErrorForClassification) ||
                 $this->isDeadlockOrLockTimeoutError($lastErrorForClassification) ||
                 $this->isTransientConnectionError($lastErrorForClassification) ||
-                $this->isQueryTimeoutError($lastErrorForClassification)
+                $this->isQueryTimeoutError($lastErrorForClassification) ||
+                $this->isAccessDeniedError($lastErrorForClassification)
             )) {
                 $this->logger->warn("Server-side DB issue (handled): " . $lastErrorForClassification);
                 $reportError = false;
@@ -1130,178 +1205,12 @@ class ABJ_404_Solution_DataAccess {
         return $result;
     }
 
-    /**
-     * @param string $query
-     * @return bool
-     */
-    private function queryStartsWithSelect(string $query): bool {
-        // SQL loaded from .sql files is wrapped in leading comments.
-        // Treat "/* ... */ SELECT ..." as a SELECT query for timeout purposes.
-        return preg_match('/^\s*(?:\/\*[\s\S]*?\*\/\s*)*SELECT\s/i', $query) === 1;
-    }
-
-    /**
-     * Returns true if the query produces a result set (rows), so it should
-     * be sent through $wpdb->get_results(). Returns false for INSERT, UPDATE,
-     * DELETE, REPLACE, DDL, SET, etc. — those should go through $wpdb->query().
-     *
-     * Sees past leading SQL comments and any `SET STATEMENT max_statement_time=N FOR `
-     * timeout wrapper. The wrapper is critical because applyQueryTimeout() prepends
-     * it on MariaDB, which would otherwise mask the underlying statement type.
-     *
-     * Misclassification triggered the 4.1.7 spell-check `mysqli_num_fields(true)`
-     * TypeError on PHP 8.1+ MariaDB sites — see DataAccessNonSelectRoutingTest.
-     *
-     * @param string $query
-     * @return bool
-     */
-    private function queryProducesResultRows(string $query): bool {
-        $stripped = (string)preg_replace('/^\s*(?:\/\*[\s\S]*?\*\/\s*)+/', '', $query);
-        $stripped = (string)preg_replace(
-            '/^\s*SET\s+STATEMENT\s+\w+\s*=\s*\d+\s+FOR\s+/i',
-            '',
-            $stripped,
-            1
-        );
-        // Strip nested leading comments inside the SET STATEMENT wrapper too.
-        $stripped = (string)preg_replace('/^\s*(?:\/\*[\s\S]*?\*\/\s*)+/', '', $stripped);
-        return preg_match('/^\s*(SELECT|SHOW|EXPLAIN|DESCRIBE|DESC)\s/i', $stripped) === 1;
-    }
-
-    /**
-     * Apply a DB-level timeout to any query type.
-     *
-     * Dispatches to the appropriate engine-specific mechanism:
-     * - Pure SELECT: MySQL optimizer hint or MariaDB SET STATEMENT
-     * - INSERT...SELECT (or any non-leading SELECT): MariaDB SET STATEMENT
-     *   or MySQL hint injected into the embedded SELECT
-     * - Other DML/DDL: MariaDB SET STATEMENT (MySQL has no mechanism for
-     *   non-SELECT timeouts; these queries are typically fast)
-     *
-     * Skips queries that already carry a timeout hint to prevent double-wrapping
-     * (e.g. callers that used to apply timeouts manually before this was centralized).
-     *
-     * @param string $query Any SQL query
-     * @param int $timeoutSeconds Maximum execution time in seconds
-     * @return string The query with timeout applied (or unchanged if no mechanism)
-     */
-    private function applyQueryTimeout(string $query, int $timeoutSeconds): string {
-        // Skip if a timeout hint is already present (prevents double-wrapping).
-        if (preg_match('/MAX_EXECUTION_TIME|max_statement_time/i', $query)) {
-            return $query;
-        }
-
-        if ($this->queryStartsWithSelect($query)) {
-            return $this->applySelectTimeout($query, $timeoutSeconds);
-        }
-        if (preg_match('/SELECT\s/i', $query)) {
-            // INSERT...SELECT, CREATE TABLE...SELECT, etc.
-            return $this->applyNonLeadingSelectTimeout($query, $timeoutSeconds);
-        }
-        // Plain INSERT, UPDATE, DELETE, DDL — only MariaDB has a timeout mechanism.
-        return $this->applyStatementTimeout($query, $timeoutSeconds);
-    }
-
-    /**
-     * Detect the DB engine. Returns true for MariaDB, false for MySQL/unknown.
-     * @return bool
-     */
-    private function isMariaDB(): bool {
-        global $wpdb;
-        if (!isset($wpdb) || !is_object($wpdb)) {
-            return false;
-        }
-        try {
-            if (isset($wpdb->dbh) && function_exists('mysqli_get_server_info') && $wpdb->dbh instanceof \mysqli) {
-                $dbVersion = mysqli_get_server_info($wpdb->dbh);
-            } else {
-                /** @var wpdb $wpdb */
-                $dbVersion = $wpdb->db_version() ?? '';
-            }
-        } catch (\Throwable $e) {
-            // Mockery mocks, plain stdClass, or other test doubles may not
-            // have db_version(). Default to MySQL (not MariaDB).
-            $dbVersion = '';
-        }
-        return stripos($dbVersion, 'mariadb') !== false;
-    }
-
-    /**
-     * Apply timeout to a pure SELECT query.
-     *
-     * MySQL 5.7.8+: MAX_EXECUTION_TIME(ms) optimizer hint.
-     * MariaDB 10.1+: SET STATEMENT max_statement_time=N FOR ...
-     *
-     * @param string $query A SELECT query
-     * @param int $timeoutSeconds Maximum execution time in seconds
-     * @return string The query with timeout hint applied
-     */
-    private function applySelectTimeout(string $query, int $timeoutSeconds): string {
-        if ($this->isMariaDB()) {
-            return "SET STATEMENT max_statement_time=" . $timeoutSeconds . " FOR " . $query;
-        }
-        $timeoutMs = $timeoutSeconds * 1000;
-        $timedQuery = preg_replace(
-            '/^(\s*(?:\/\*[\s\S]*?\*\/\s*)*SELECT\s)/i',
-            '$1/*+ MAX_EXECUTION_TIME(' . $timeoutMs . ') */ ',
-            $query
-        );
-        return ($timedQuery !== null) ? $timedQuery : $query;
-    }
-
-    /**
-     * Apply timeout to a query containing a non-leading SELECT (INSERT...SELECT, etc.).
-     *
-     * MariaDB 10.1+: SET STATEMENT max_statement_time=N FOR ... (wraps entire statement).
-     * MySQL 5.7.8+: MAX_EXECUTION_TIME(ms) hint injected into the first SELECT keyword.
-     *
-     * @param string $query An INSERT...SELECT or similar query
-     * @param int $timeoutSeconds Maximum execution time in seconds
-     * @return string The query with timeout applied
-     */
-    private function applyNonLeadingSelectTimeout(string $query, int $timeoutSeconds): string {
-        if ($this->isMariaDB()) {
-            return "SET STATEMENT max_statement_time=" . $timeoutSeconds . " FOR " . $query;
-        }
-        $timeoutMs = $timeoutSeconds * 1000;
-        $timedQuery = preg_replace(
-            '/(SELECT\s)/i',
-            'SELECT /*+ MAX_EXECUTION_TIME(' . $timeoutMs . ') */ ',
-            $query,
-            1
-        );
-        return ($timedQuery !== null) ? $timedQuery : $query;
-    }
-
-    /**
-     * Apply timeout to a non-SELECT statement (INSERT, UPDATE, DELETE, DDL).
-     *
-     * MariaDB 10.1+: SET STATEMENT max_statement_time=N FOR ... works on all DML.
-     * MySQL: has no SQL-level timeout mechanism for non-SELECT queries.
-     *
-     * @param string $query Any non-SELECT query
-     * @param int $timeoutSeconds Maximum execution time in seconds
-     * @return string The query with timeout applied (unchanged on MySQL)
-     */
-    private function applyStatementTimeout(string $query, int $timeoutSeconds): string {
-        if ($this->isMariaDB()) {
-            return "SET STATEMENT max_statement_time=" . $timeoutSeconds . " FOR " . $query;
-        }
-        // MySQL has no timeout mechanism for non-SELECT queries.
-        return $query;
-    }
-
-    /**
-     * @deprecated Use the 'timeout' option on queryAndGetResults() instead.
-     *             Kept for backward compatibility with any external callers.
-     *
-     * @param string $insertSelectQuery The INSERT INTO ... SELECT ... query
-     * @param int $timeoutSeconds Maximum execution time in seconds
-     * @return string The query with timeout applied
-     */
-    function applyTimeoutToInsertSelect(string $insertSelectQuery, int $timeoutSeconds): string {
-        return $this->applyNonLeadingSelectTimeout($insertSelectQuery, $timeoutSeconds);
-    }
+    // Engine-aware per-query timeout helpers + query-shape probes are
+    // declared on the sibling ABJ_404_Solution_DataAccess_QueryTimeoutsTrait:
+    //   - queryStartsWithSelect / queryProducesResultRows
+    //   - applyQueryTimeout / applySelectTimeout
+    //   - applyNonLeadingSelectTimeout / applyStatementTimeout
+    //   - isMariaDB / applyTimeoutToInsertSelect
 
     /**
      * @param string $key
