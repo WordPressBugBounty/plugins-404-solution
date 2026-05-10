@@ -5,7 +5,7 @@ Tags: 404, redirect, 404 redirect, broken links, spell check
 Requires at least: 5.0
 Requires PHP: 7.4
 Tested up to: 6.9
-Stable tag: 4.1.16
+Stable tag: 4.1.17
 License: GPL-3.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -200,6 +200,22 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 6. **Email Digest** — Weekly HTML email summarizing captured 404s, resolution rate, and a ranked table of top 404 URLs with color-coded hit badges.
 
 == Changelog ==
+
+= Version 4.1.17 (May 10, 2026) =
+
+**Bug Fixes**
+
+* Fixed repeated "Access denied" errors and silently-stuck Captured 404s and Page Redirects pages on shared and managed hosting environments where certain database privileges are restricted. The rebuild now skips the affected step and continues, instead of retrying the same denied operation on every cron run and emailing the site administrator.
+* Fixed the rebuild silently never starting on managed or sharded MySQL services (such as PlanetScale and Vitess) that do not support standard MySQL named locks. The plugin now uses an alternate locking mechanism on these hosts.
+* Fixed the rebuild getting permanently stuck after a previous run was interrupted (for example, by a server restart mid-rebuild). The plugin now detects and cleans up leftover state at the start of the next rebuild so it can complete normally.
+* Fixed the rebuild silently waiting forever when WordPress scheduled tasks (cron) are disabled and no external cron is configured. The plugin now shows a clear admin notice with guidance on how to resolve it.
+* Improved compatibility with multisite networks during long-running rebuilds that span multiple background tasks.
+* Improved compatibility with persistent object caches (Redis, Memcached) so that rebuild progress is reliably saved even when the cache layer is briefly inconsistent.
+* Improved compatibility with HyperDB, LudicrousDB, and other custom database drop-ins.
+
+**Improvements**
+
+* The plugin now self-detects unusual PHP and database hosting limits (memory limit, time limit, strict SQL modes, query packet size) at the start of each rebuild and adapts to work within them, instead of failing on restrictive hosts.
 
 = Version 4.1.16 (May 8, 2026) =
 
@@ -540,73 +556,3 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 * Fixed spelling cache returning wrong data type, breaking suggestions.
 * Fixed database error storms flooding site admin emails.
 
-= Version 3.3.7 (Mar 20, 2026) =
-* Improvement: The plugin now automatically repairs corrupted plugin tables (MySQL errno 1034 "Incorrect key file") and retries the failed operation, so transient disk-level corruption no longer causes user-visible errors.
-* Improvement: The activity log table is now stored on InnoDB, eliminating the "table is full" (errno 1114) failure mode that affected MyISAM tables. If the log table fills up, the plugin automatically trims the oldest 1,000 entries to free space and retries.
-* Improvement: Admin notices for database problems now only appear on the plugin's own settings page rather than on every WordPress admin screen.
-* Fix: Corrected a latent PHP error in the "Incorrect key file" recovery path that would have triggered a fatal error instead of attempting repair.
-
-= Version 3.3.6 (Mar 20, 2026) =
-* Fix: Prevented a spurious database error during schema upgrades where a comment in an internal SQL file was mistakenly interpreted as a column definition, causing a malformed ALTER TABLE statement to be logged. No data was affected.
-
-= Version 3.3.5 (Mar 20, 2026) =
-* Improvement: Large source files refactored into focused trait files — no functional changes, but the codebase is easier to navigate and maintain.
-* Improvement: Strict type checking (PHPStan level 9) enforced throughout the codebase, catching and fixing potential type-mismatch errors before they could affect users.
-
-= Version 3.3.4 (Mar 19, 2026) =
-* Fix: Fixed an upgrade bug introduced in 3.3.3 that accidentally cleared the admin page view cache. No redirect data was affected — the cache rebuilds automatically on the next page load.
-* Fix: Added a safety check to prevent future upgrades from accidentally wiping plugin caches.
-* Fix: Sites affected by the 3.3.3 bug will have their cache table automatically repaired on the first admin page load after updating.
-
-= Version 3.3.3 (Mar 19, 2026) =
-* Fix: Uninstaller no longer produces a PHPStan type error when `$wpdb->get_results()` returns null on edge-case database configurations.
-* Improvement: Plugin table cleanup on blog deletion, uninstall, and collation repair now uses dynamic discovery, ensuring any future tables are automatically included.
-
-= Version 3.3.1 (Mar 18, 2026) =
-* Fix: Resolved "Table wp_abj404_view_cache doesn't exist" errors on some v3.3.0 upgrades where the cache table was not created.
-* Fix: Reduced debug log noise when WP_DEBUG is enabled.
-* Fix: Orphaned-redirect cleanup cron no longer triggers errors on sites with incomplete database installs.
-* Fix: Plugin upgrades no longer perform unnecessary database ALTER TABLE operations.
-* Fix: Bot requests with malformed character encodings no longer cause database errors.
-
-= Version 3.3.0 (Mar 15, 2026) =
-* Add: 7-engine matching pipeline — slug matching, URL typo correction, title keywords, category/tag path matching, content keywords, spelling similarity, and archive fallback.
-* Add: Title keyword matching engine — finds posts whose title words appear in the broken URL, with fuzzy Levenshtein scoring for near-matches.
-* Add: Content keyword matching engine — searches post body text when title and slug matching fail.
-* Add: Category/tag matching engine — resolves hierarchical paths like `/shop/electronics` to the right taxonomy term or finds posts within a category.
-* Add: URL typo correction engine — strips `.html`, `.php`, `.asp` and other file extensions, plus trailing punctuation from copy-paste errors.
-* Add: Post type archive fallback engine — redirects to archive pages when no single-post match is found.
-* Add: Per-engine score thresholds — fine-tune how aggressive each matching strategy is (Advanced Settings).
-* Add: Per-post and per-term exclusion — exclude individual posts, pages, or taxonomy terms from automatic redirects via edit screen checkbox.
-* Add: Orphaned redirect cleanup — daily cron automatically removes auto-redirects whose destination post was deleted or unpublished.
-* Improvement: WordPress.org discoverability — updated plugin description, tags, and FAQ for better search visibility.
-
-= Version 3.2.2 (Mar 14, 2026) =
-* FIX: Spell-checker could produce inaccurate match scores on sites with many pages due to an internal data-type mismatch in the large-candidate optimization path.
-* Improvement: Improved compatibility with PHP 8.5 and future PHP versions.
-
-= Version 3.2.1 (Mar 2, 2026) =
-* FIX: 404 page suggestions now show category names instead of full URLs for WooCommerce product categories and other custom taxonomies.
-* Improvement: Database error admin notices now show actionable guidance and the raw MySQL error in an expandable details section.
-* Improvement: Database error notices auto-clear once the issue resolves.
-* FIX: Disk-full detection now recognizes MySQL error 1114 ("The table '...' is full") format.
-
-= Version 3.2.0 (Feb 17, 2026) =
-* Improvement: Faster loading on key admin pages, especially for larger sites.
-* Improvement: Clearer in-page status messages while data refreshes, so admins know what is happening.
-* FIX: Better handling of database charset/collation differences to reduce SQL errors on some hosts.
-* FIX: Improved resilience when database limits or transient DB issues occur, with safer fallback behavior.
-* Improvement: Broader CSV import compatibility with common redirect export formats.
-* Improvement: General backend and coding maintenance improvements.
-
-= Version 3.1.10 (Jan 21, 2026) =
-* Improvement: Add WPML and Polylang-aware redirect translation based on the request language.
-
-= Version 3.1.9 (Jan 20, 2026) =
-* FIX: Manual and external redirects now store and match Unicode paths consistently.
-* Improvement: URL normalization is now unified across redirects, suggestions, and logs.
-* Improvement: Row action hover links stay clickable without resizing rows.
-
-= Version 3.1.8 (Jan 19, 2026) =
-* FIX: Preserve Unicode slugs during redirect lookups and allow manual redirect source paths with non-ASCII characters.
-* FIX: TranslatePress-aware redirect translation for localized paths with a filter hook for other multilingual plugins.

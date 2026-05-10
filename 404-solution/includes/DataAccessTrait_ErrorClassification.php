@@ -157,6 +157,53 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
             $this->f->strpos($lower, 'command denied') !== false);
     }
 
+    /**
+     * True when an error indicates that the `SET STATEMENT max_statement_time=N FOR ...`
+     * timeout wrapper itself was rejected by the server (privilege denied or
+     * syntax not understood). Distinct from an error in the wrapped query.
+     *
+     * Hosts that reject the wrapper:
+     *   1. MariaDB requiring SUPER for SET STATEMENT (errno 1227 / SQLSTATE 42000)
+     *   2. ProxySQL / older audit firewalls that do not parse the prefix and
+     *      return a syntax error (errno 1064 / SQLSTATE 42000) on "SET STATEMENT"
+     *   3. Galera clusters that reject SET STATEMENT in some replication modes
+     *
+     * The caller MUST also confirm the failed query actually started with
+     * a `SET STATEMENT max_statement_time=` prefix before treating the error
+     * as a wrapper rejection. Generic access-denied or syntax errors on
+     * other query shapes are not recoverable by stripping a wrapper that
+     * was never there.
+     *
+     * @param string $errorText
+     * @return bool
+     */
+    private function classifySetStatementFailure(string $errorText): bool {
+        if ($errorText === '') {
+            return false;
+        }
+        $lower = strtolower($errorText);
+        // SUPER privilege required (MariaDB SET STATEMENT requires SUPER on
+        // some configurations). The error is access-denied class, but the
+        // SUPER-privilege phrasing is the unambiguous tell. Generic
+        // table-access-denied uses "for user" or names a table.
+        if ($this->f->strpos($lower, 'super privilege') !== false ||
+            $this->f->strpos($lower, 'super_privilege') !== false ||
+            $this->f->strpos($lower, '(at least one of) the super') !== false) {
+            return true;
+        }
+        // ProxySQL / firewall syntax-error path: "syntax error" or
+        // "you have an error in your sql syntax" combined with "SET STATEMENT"
+        // mentioned in the error context. The wpdb->last_error often echoes
+        // a leading slice of the offending query.
+        if (($this->f->strpos($lower, 'syntax error') !== false ||
+             $this->f->strpos($lower, 'error in your sql syntax') !== false ||
+             $this->f->strpos($lower, '1064') !== false) &&
+            $this->f->strpos($lower, 'set statement') !== false) {
+            return true;
+        }
+        return false;
+    }
+
     /** @param string $errorText @return bool */
     private function isCollationError(string $errorText): bool {
         if (!is_string($errorText) || $errorText === '') {
@@ -196,6 +243,26 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
             stripos($errorText, 'max_statement_time') !== false);
     }
 
+    /**
+     * Detect MySQL/MariaDB max_allowed_packet errors. Default error message:
+     * "Got a packet bigger than 'max_allowed_packet' bytes" (errno 1153).
+     * Routed by the staged-build orchestrator into batch-shrink recovery so
+     * a host with a small packet limit doesn't loop forever on the same
+     * oversized INSERT.
+     *
+     * @param string $errorText
+     * @return bool
+     */
+    private function isPacketTooLarge(string $errorText): bool {
+        if (!is_string($errorText) || $errorText === '') {
+            return false;
+        }
+        $lower = strtolower($errorText);
+        return ($this->f->strpos($lower, 'max_allowed_packet') !== false ||
+            $this->f->strpos($lower, 'got a packet bigger') !== false ||
+            $this->f->strpos($lower, '1153') !== false);
+    }
+
     /** @param string $errorText @return bool */
     private function isDeadlockOrLockTimeoutError(string $errorText): bool {
         if (!is_string($errorText) || $errorText === '') {
@@ -206,6 +273,103 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
             $this->f->strpos($lower, 'lock wait timeout exceeded') !== false ||
             $this->f->strpos($lower, 'error 1213') !== false ||
             $this->f->strpos($lower, 'error 1205') !== false);
+    }
+
+    /**
+     * Detect PHP "Allowed memory size of N bytes exhausted" / "Out of memory"
+     * messages. Real OOM is a fatal that bypasses try/catch, but a Throwable
+     * wrapper (e.g. PHP 8 Error subclass surfaced from a memory-aware hook,
+     * or an explicit guard that pre-rejects an over-budget allocation) can
+     * carry the same wording. Routed through the staged-build classifier so
+     * S9 (optional) skips on OOM instead of bubbling out as a stage error.
+     *
+     * @param string $errorText
+     * @return bool
+     */
+    public function isOutOfMemoryError(string $errorText): bool {
+        if ($errorText === '') {
+            return false;
+        }
+        $lower = strtolower($errorText);
+        return ($this->f->strpos($lower, 'allowed memory size') !== false ||
+            $this->f->strpos($lower, 'out of memory') !== false ||
+            $this->f->strpos($lower, 'memory exhausted') !== false ||
+            $this->f->strpos($lower, 'memory_limit') !== false);
+    }
+
+    /**
+     * True when an error from a staged-build query represents a permanent
+     * host-side environmental constraint we cannot recover from by retrying:
+     * GRANT-revoked privilege (CREATE TEMPORARY TABLES, ALTER, RENAME),
+     * read-only replica, exhausted disk/quota, table marked crashed (a
+     * crashed plugin table on a stage that does DDL we can't repair our
+     * way out of), or a PHP-side OOM. Re-running the same query on the
+     * next cron tick will just produce the same error.
+     *
+     * Used by classifyStageFailure() to decide between "skip optional stage"
+     * and "halt critical stage". Resumable kills (max_statement_time, lock
+     * waits, gone-away) are NOT permanent and are already handled by
+     * isResumableStagedKill().
+     *
+     * Programmer-class errors (syntax, undefined column, unknown function)
+     * deliberately return false: we want those to surface as bugs, not be
+     * silently degraded around. (Codex pushback in test docblock for
+     * testStage9SyntaxErrorIsNotSilentlySkipped.)
+     *
+     * @param string $errorText
+     * @return bool
+     */
+    private function isPermanentHostSideStagedFailure(string $errorText): bool {
+        if (!is_string($errorText) || $errorText === '') {
+            return false;
+        }
+        if ($this->isResumableStagedKill($errorText)) {
+            return false;
+        }
+        return ($this->isAccessDeniedError($errorText)
+            || $this->isReadOnlyError($errorText)
+            || $this->isDiskFullError($errorText)
+            || $this->isQuotaLimitError($errorText)
+            || $this->isOutOfMemoryError($errorText));
+    }
+
+    /**
+     * Per-stage classification for an error raised inside the staged view
+     * build. Routes the orchestrator's catch block instead of the legacy
+     * binary "resumable-kill or rethrow" decision: the staged build has
+     * stages that can be skipped without breaking publication (S3/S9/S10:
+     * adds/aggregates) and stages that genuinely cannot proceed without
+     * (S1 create, S2 insert, S11 swap).
+     *
+     * Returns one of:
+     *   - 'resumable' : kill class the next tick can retry (existing behavior)
+     *   - 'skip'      : permanent host failure on an optional stage; mark
+     *                   the stage permanently skipped, advance past it
+     *   - 'halt'      : permanent host failure on a critical stage; stop
+     *                   re-trying, surface a deduplicated admin notice
+     *   - 'rethrow'   : programmer-class or unknown error; let it propagate
+     *                   so the dev mailbox carries actionable context
+     *
+     * The per-stage policy lives on
+     * ABJ_404_Solution_ViewBuildConfig::stageFailurePolicy() so it can be
+     * tuned without touching this classifier.
+     *
+     * @param int    $stageNumber  1..11
+     * @param string $errorText
+     * @return string
+     */
+    public function classifyStageFailure(int $stageNumber, string $errorText): string {
+        if (!is_string($errorText) || $errorText === '') {
+            return 'rethrow';
+        }
+        if ($this->isResumableStagedKill($errorText)) {
+            return 'resumable';
+        }
+        if (!$this->isPermanentHostSideStagedFailure($errorText)) {
+            return 'rethrow';
+        }
+        $policy = ABJ_404_Solution_ViewBuildConfig::stageFailurePolicy($stageNumber);
+        return $policy === 'optional' ? 'skip' : 'halt';
     }
 
     /**
@@ -228,7 +392,7 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
      * @return bool
      */
     private function isResumableStagedKill(string $errorText): bool {
-        if (!is_string($errorText) || $errorText === '') {
+        if ($errorText === '') {
             return false;
         }
         if ($this->isQueryTimeoutError($errorText)) {
@@ -245,6 +409,14 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
         // substring (server-side KILL QUERY, client cancellation, replica
         // failover). Same resume semantics.
         if (stripos($errorText, 'query execution was interrupted') !== false) {
+            return true;
+        }
+        // max_allowed_packet exceeded: the next tick's batch-shrink path
+        // will halve the batch size and retry, exactly like a host-killed
+        // batch. Without this, an oversized INSERT loops with the same
+        // packet error and never converges (same infinite-retry shape as
+        // the access-denied bug pre-classifier).
+        if ($this->isPacketTooLarge($errorText)) {
             return true;
         }
         return false;
@@ -299,7 +471,7 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
     }
 
     private function noteDatabaseIssueFromError(string $errorText): void {
-        if (!is_string($errorText) || trim($errorText) === '') {
+        if (trim($errorText) === '') {
             return;
         }
         if ($this->isDiskFullError($errorText)) {
@@ -352,7 +524,7 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
 
     /** @param string $errorText @return bool */
     private function isMissingPluginTableError(string $errorText): bool {
-        if (!is_string($errorText) || $errorText === '') {
+        if ($errorText === '') {
             return false;
         }
         $lower = strtolower($errorText);

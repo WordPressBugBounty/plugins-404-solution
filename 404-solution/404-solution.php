@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 	Author:      Aaron J
 	Author URI:  https://www.ajexperience.com/404-solution/
 
-	Version: 4.1.16
+	Version: 4.1.17
 	Requires at least: 5.0
 	Requires PHP: 7.4
 
@@ -1194,6 +1194,46 @@ if (!function_exists('abj404_show_plugin_db_notice')) {
 }
 add_action('admin_notices', 'abj404_show_plugin_db_notice');
 
+if (!function_exists('abj404_show_view_build_cron_notices')) {
+	/**
+	 * Render the staged-view-build cron-stuck and schedule-failure notices.
+	 * Set by DataAccess::scheduleViewDoneRebuild() when DISABLE_WP_CRON is true
+	 * or when wp_schedule_single_event itself fails. 24h dedup transients.
+	 *
+	 * @return void
+	 */
+	function abj404_show_view_build_cron_notices() {
+		if (!is_admin() || !current_user_can('manage_options')) {
+			return;
+		}
+		$page = isset($_GET['page']) ? sanitize_text_field($_GET['page']) : '';
+		if ($page !== ABJ404_PP) {
+			return;
+		}
+		$keys = array(
+			'abj404_view_build_stuck_wp_cron_disabled',
+			'abj404_view_build_cron_schedule_failed',
+		);
+		foreach ($keys as $key) {
+			$notice = get_transient($key);
+			if (!is_array($notice) || empty($notice['message'])) {
+				continue;
+			}
+			$noticeMessage = is_string($notice['message']) ? $notice['message'] : '';
+			echo '<div class="notice notice-warning"><p><strong>404 Solution:</strong> '
+				. esc_html($noticeMessage) . '</p>';
+			if (!empty($notice['error_string'])) {
+				$noticeErrorString = is_string($notice['error_string']) ? $notice['error_string'] : '';
+				echo '<details><summary>' . esc_html(__('Show details', '404-solution'))
+					. '</summary><pre style="white-space:pre-wrap;word-break:break-all;max-width:100%;margin:6px 0;">'
+					. esc_html($noticeErrorString) . '</pre></details>';
+			}
+			echo '</div>';
+		}
+	}
+}
+add_action('admin_notices', 'abj404_show_view_build_cron_notices');
+
 if (!function_exists('abj404_get_simulated_db_latency_ms')) {
 	/** @return bool */
 	function abj404_is_local_debug_host() {
@@ -1336,7 +1376,15 @@ function abj404_loadSomethingWhenWordPressIsReady() {
 
 	$action = null;
 	if ($isAdminRequest) {
-		$action = isset($_GET['action']) ? sanitize_text_field($_GET['action']) : (isset($_POST['action']) ? sanitize_text_field($_POST['action']) : null);
+		$actionGet = isset($_GET['action']) && is_string($_GET['action']) ? $_GET['action'] : '';
+		$actionPost = isset($_POST['action']) && is_string($_POST['action']) ? $_POST['action'] : '';
+		if ($actionGet !== '') {
+			$action = sanitize_text_field($actionGet);
+		} else if ($actionPost !== '') {
+			$action = sanitize_text_field($actionPost);
+		} else {
+			$action = null;
+		}
 	}
 	if ($isAdminRequest && abj404_is_local_debug_host() && current_user_can('manage_options') && isset($_GET['abj404_set_sim_db_ms'])) {
 		$nonceOk = isset($_GET['_wpnonce']) ? wp_verify_nonce($_GET['_wpnonce'], 'abj404_set_sim_db_ms') : false;
