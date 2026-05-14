@@ -102,6 +102,38 @@ final class ABJ_404_Solution_ViewBuildConfig {
     const VIEW_BUILD_FOREGROUND_LEASE_SECONDS = 120;
 
     /**
+     * Upper-bound staleness threshold. When viewDoneIsServeable() serves
+     * data older than this, an admin notice fires telling the admin the
+     * redirects table data is out of date. The fix that lets view_done
+     * serve stale post-invalidate data without blocking would otherwise
+     * let arbitrarily old data render silently if the rebuild never
+     * completes (cron stuck, repeated invalidation racing the build,
+     * floor-kill streak halt). This notice is the honest upper bound:
+     * stale-but-present is fine; stale-and-unsignalled is not.
+     *
+     * 24h matches the dedup TTL in VIEW_BUILD_DEGRADED_NOTICE_TTL_SECONDS
+     * and the cron-stuck threshold in scheduleViewDoneRebuild() so the
+     * three notice families speak in the same time units.
+     */
+    const VIEW_DONE_HARD_STALE_NOTICE_AGE_SECONDS = 86400;
+
+    /**
+     * Sanity cap on how long an admin-initiated mutation flag (set by
+     * markViewDoneInvalidatedByAdminMutation()) can keep view_done
+     * unserveable. While the flag is active, viewDoneIsServeable() returns
+     * false so the AJAX gate returns viewBuildPending and the JS poller
+     * waits for a build that covers the mutation. If the build never
+     * completes (cron broken, DB locked) the gate falls back to fbc270d8
+     * stale-serving at this timeout so the admin redirects page is not
+     * blocked indefinitely.
+     *
+     * Five minutes is a comfortable upper bound for staged rebuilds on
+     * Bruno/Troy-grade installs (~11 stages, multi-second per stage).
+     * Above this, the admin sees stale data plus the hard-stale notice.
+     */
+    const VIEW_DONE_MUTATION_INVALIDATED_SANITY_SECONDS = 300;
+
+    /**
      * Cap on the per-query SET STATEMENT max_statement_time hint applied
      * to a non-batched stage (S3 / S9 / S10) on retry after a kill. The
      * hint is also bounded by the request's remaining PHP execution time
@@ -210,6 +242,37 @@ final class ABJ_404_Solution_ViewBuildConfig {
         'open_files_limit_min'                 => 1024,
         'innodb_online_alter_log_max_size_min' => 134217728,
     );
+
+    /**
+     * Transient gate key for the c384 on-page-load fallback advance.
+     * One inline advance per gate window; bursts of admin sub-requests
+     * (prefetch, browser refresh, multiple tabs) inside the window
+     * short-circuit so the page-load cost cannot compound. Defined
+     * here (rather than on the consuming trait) because PHP < 8.2
+     * forbids constants in trait bodies.
+     */
+    const PAGE_LOAD_FALLBACK_GATE_KEY = 'abj404_page_load_fallback_advance';
+
+    /**
+     * Seconds the page-load fallback gate transient survives. 60s is
+     * short enough that an attentive admin sees real per-load progress
+     * (one stage per minute of navigation) and long enough that a
+     * burst of clicks within a single working moment does not stack
+     * inline build work.
+     */
+    const PAGE_LOAD_FALLBACK_GATE_SECONDS = 60;
+
+    /**
+     * Per-stage budget seconds during a page-load fallback advance.
+     * The admin is blocking on the response, so a single tick must
+     * not exceed roughly the human-perceived "loading" tolerance.
+     * Picked at 2.0s because that matches the c377 page-load contract
+     * and stays well under the WordPress admin heartbeat default. The
+     * fallback registers this as a ceiling via add_filter on
+     * abj404_view_build_per_stage_budget_seconds (clamping with min(),
+     * not overwriting, so any operator-set smaller budget wins).
+     */
+    const PAGE_LOAD_FALLBACK_BUDGET_SECONDS = 2.0;
 
     private function __construct() {}
 }

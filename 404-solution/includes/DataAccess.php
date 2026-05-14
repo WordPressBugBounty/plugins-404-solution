@@ -14,6 +14,7 @@ require_once __DIR__ . '/DataAccessTrait_ViewBuildStageCallbacks.php';
 require_once __DIR__ . '/DataAccessTrait_ViewQueriesStagedRead.php';
 require_once __DIR__ . '/DataAccessTrait_ViewBuildAdaptive.php';
 require_once __DIR__ . '/DataAccessTrait_ViewBuildHelpers.php';
+require_once __DIR__ . '/DataAccessTrait_ViewBuildLockAndCron.php';
 require_once __DIR__ . '/DataAccessTrait_ViewBuildPhpEnvProbe.php';
 require_once __DIR__ . '/DataAccessTrait_ViewBuildSessionEnvProbe.php';
 require_once __DIR__ . '/DataAccessTrait_ViewBuildHostFailurePolicy.php';
@@ -22,8 +23,10 @@ require_once __DIR__ . '/DataAccessTrait_QueryTimeouts.php';
 require_once __DIR__ . '/DataAccessTrait_Logs.php';
 require_once __DIR__ . '/DataAccessTrait_LogsHitsRebuild.php';
 require_once __DIR__ . '/DataAccessTrait_Redirects.php';
+require_once __DIR__ . '/DataAccessTrait_PublishedContent.php';
 require_once __DIR__ . '/DataAccessTrait_Stats.php';
 require_once __DIR__ . '/DataAccessTrait_ErrorClassification.php';
+require_once __DIR__ . '/DataAccessTrait_SqlErrorReporting.php';
 require_once __DIR__ . '/ViewQueryFailureException.php';
 require_once __DIR__ . '/ViewBuildPendingException.php';
 
@@ -78,6 +81,15 @@ class ABJ_404_Solution_DataAccess {
     const PERIODIC_STATS_REFRESH_COOLDOWN_SECONDS = 30;
     /** @var int Max age for cached daily-activity trend data (Stats tab Chart.js). */
     const TREND_DATA_CACHE_TTL_SECONDS = 900;
+    /**
+     * @var int Short TTL for the cached `getLogsCount(0)` total row count.
+     *          Audit F4: InnoDB has no maintained row counter, so the
+     *          Logs admin tab's `SELECT COUNT(id) FROM logsv2` is a full
+     *          index scan. New inserts move the cache key (`max_log_id`)
+     *          so fresh data is picked up immediately; bulk deletes do
+     *          not move the key, so the TTL bounds staleness at 60 s.
+     */
+    const LOGS_COUNT_CACHE_TTL_SECONDS = 60;
     /** @var int Retention for dashboard stats snapshot payload (stale snapshot is acceptable for fast first paint). */
     const STATS_DASHBOARD_CACHE_TTL_SECONDS = 86400;
     /** @var int Minimum time between full stats snapshot recomputes. */
@@ -95,6 +107,24 @@ class ABJ_404_Solution_DataAccess {
     const HITS_TABLE_LAST_DECISION_FLAG = 'abj404_logs_hits_last_decision';
     /** @var string Runtime flag: last successful hits-table rebuild completion (Unix timestamp). */
     const HITS_TABLE_LAST_REFRESHED_FLAG = 'abj404_logs_hits_last_refreshed_at';
+    /**
+     * @var string Runtime flag: Unix timestamp of the first request that
+     *             observed MAX(logsv2.id) > stored rollup watermark and the
+     *             gap has remained open since. Drives the broken-cron
+     *             admin notice; cleared on rebuild or when the gap closes.
+     */
+    const HITS_TABLE_FIRST_STALE_DETECTED_FLAG = 'abj404_logs_hits_first_stale_detected_at';
+    /** @var string Deduplicated admin-notice transient for stale logs_hits rollup. */
+    const HITS_TABLE_STALE_NOTICE_TRANSIENT = 'abj404_logs_hits_rollup_stale';
+    /**
+     * @var int Minimum age (seconds) of a persisted MAX(logsv2.id) >
+     *          rollup-watermark gap before surfacing a broken-cron admin
+     *          notice. 1 hour is well past the normal cron cycle for the
+     *          5-minute HITS_TABLE_MAX_AGE_SECONDS rollup, so a gap that
+     *          stays open this long is unambiguously a broken or
+     *          stopped cron event (abj404_updateLogsHitsTableAction).
+     */
+    const HITS_TABLE_STALE_NOTICE_THRESHOLD_SECONDS = 3600;
 
     /** @var self|null */
     private static $instance = null;
@@ -171,10 +201,12 @@ class ABJ_404_Solution_DataAccess {
     use ABJ_404_Solution_DataAccess_ViewMetadataTrait;
     use ABJ_404_Solution_DataAccess_ViewQueriesTrait;
     use ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait;
+    use ABJ_404_Solution_DataAccess_ViewBuildStageRunnerTrait;
     use ABJ_404_Solution_DataAccess_ViewBuildStageCallbacksTrait;
     use ABJ_404_Solution_DataAccess_ViewQueriesStagedReadTrait;
     use ABJ_404_Solution_DataAccess_ViewBuildAdaptiveTrait;
     use ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait;
+    use ABJ_404_Solution_DataAccess_ViewBuildLockAndCronTrait;
     use ABJ_404_Solution_DataAccess_ViewBuildPhpEnvProbeTrait;
     use ABJ_404_Solution_DataAccess_ViewBuildSessionEnvProbeTrait;
     use ABJ_404_Solution_DataAccess_ViewBuildHostFailurePolicyTrait;
@@ -182,8 +214,10 @@ class ABJ_404_Solution_DataAccess {
     use ABJ_404_Solution_DataAccess_LogsTrait;
     use ABJ_404_Solution_DataAccess_LogsHitsRebuildTrait;
     use ABJ_404_Solution_DataAccess_RedirectsTrait;
+    use ABJ_404_Solution_DataAccess_PublishedContentTrait;
     use ABJ_404_Solution_DataAccess_StatsTrait;
     use ABJ_404_Solution_DataAccess_ErrorClassificationTrait;
+    use ABJ_404_Solution_DataAccess_SqlErrorReportingTrait;
     use ABJ_404_Solution_DataAccess_QueryTimeoutsTrait;
 
     /** Cache key for redirect status counts */
@@ -197,6 +231,16 @@ class ABJ_404_Solution_DataAccess {
 
     /** Cache TTL in seconds (24 hours - safety net, primary refresh is event-driven invalidation) */
     const STATUS_CACHE_TTL = 86400;
+
+    /**
+     * Short-TTL window used after a query timeout to break the
+     * "page reloads, page re-times-out" loop on slow hosts. 5 minutes is
+     * long enough that an admin browsing session does not re-pay the
+     * timeout cost, and short enough that once the scheduled hits-table
+     * rebuild completes, the next request after the window picks up the
+     * rebuilt rollup. See getHighImpactCapturedCount() self-heal branch.
+     */
+    const STATUS_CACHE_TIMEOUT_SELFHEAL_TTL = 300;
 
     /** Maximum number of regex redirects to cache per-request (memory guard) */
     const REGEX_CACHE_MAX_COUNT = 50;
@@ -460,12 +504,17 @@ class ABJ_404_Solution_DataAccess {
         
         $replacements = array();
         $tables = (isset($wpdb->tables) && is_array($wpdb->tables)) ? $wpdb->tables : array();
+        // Resolve prefix once; null $wpdb (boot-time and unit-test contexts) and
+        // mocks without ->prefix both fall through to 'wp_' instead of triggering
+        // PHP 8+ "Attempt to read property on null" warnings. Infection's
+        // initial-tests phase exits non-zero on any such warning.
+        $prefix = isset($wpdb->prefix) ? $wpdb->prefix : 'wp_';
         foreach ($tables as $tableName) {
-            $replacements['{wp_' . $tableName . '}'] = $wpdb->prefix . $tableName;
+            $replacements['{wp_' . $tableName . '}'] = $prefix . $tableName;
         }
         // wpdb properties are not guaranteed on mocks; provide safe fallbacks.
-        $replacements['{wp_users}'] = $wpdb->users ?? ($wpdb->prefix . 'users');
-        $replacements['{wp_prefix}'] = $wpdb->prefix ?? 'wp_';
+        $replacements['{wp_users}'] = isset($wpdb->users) ? $wpdb->users : ($prefix . 'users');
+        $replacements['{wp_prefix}'] = $prefix;
         $replacements['{wp_prefix_lower}'] = $this->getLowercasePrefix();
 
         // Resolve {wpdb_collate} so any SQL file can force a consistent collation
@@ -766,125 +815,6 @@ class ABJ_404_Solution_DataAccess {
     }
 
     /**
-     * Log the first observed database error for every query, before retry and
-     * recovery paths can mutate or clear wpdb::last_error.
-     *
-     * @param string $query
-     * @param array<string, mixed> $result
-     * @param array<string, mixed> $options
-     * @param bool $producesRows
-     * @return void
-     */
-    private function logObservedSqlError(string $query, array $result, array $options, bool $producesRows): void {
-        $lastError = isset($result['last_error']) && is_string($result['last_error'])
-            ? trim($result['last_error']) : '';
-        if ($lastError === '') {
-            return;
-        }
-
-        // Honor an explicit log_errors=false: the caller has accepted that
-        // this query may fail and does not want the failure routed through
-        // Logging::errorMessage() (which can email the developer and surface
-        // admin notices). The error is still returned in $result['last_error']
-        // so callers can react to it. May 2026: a regression in this function
-        // was emailing 35 of 38 4.1.15 sites about benign SHOW CREATE TABLE
-        // probes of the transient view_build table. log_errors=false must
-        // mean "do not log".
-        $logErrors = !array_key_exists('log_errors', $options) || (bool)$options['log_errors'];
-        if (!$logErrors) {
-            return;
-        }
-
-        // Honor ignore_errors: callers pass substring patterns for errors
-        // that are expected and benign for that query (e.g. RENAME TABLE
-        // with ignore_errors=["already exists"] in renameAbj404TablesToLowerCase
-        // when the lowercase target name pre-exists). Without this check,
-        // the observation logger fires ERROR before the downstream
-        // ignore_errors branch can suppress, which emails the developer.
-        // May 2026: 16+ sites in the email-flood cohort hit this path.
-        $ignoreErrorStrings = isset($options['ignore_errors']) && is_array($options['ignore_errors'])
-            ? $options['ignore_errors'] : array();
-        foreach ($ignoreErrorStrings as $needle) {
-            if (is_string($needle) && $needle !== '' && strpos($lastError, $needle) !== false) {
-                return;
-            }
-        }
-
-        $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->extractSqlFilename($query);
-        $elapsed = isset($result['elapsed_time']) && is_numeric($result['elapsed_time'])
-            ? round((float)$result['elapsed_time'], 4) : 0;
-        $message = 'SQL query error observed: ' . $lastError
-            . ', SQL: ' . $sqlInfo
-            . ', source: ' . $this->extractSqlFilename($query)
-            . ', route: ' . ($producesRows ? 'get_results' : 'query')
-            . ', log_errors_option: ' . ($logErrors ? 'true' : 'false') /** @phpstan-ignore ternary.alwaysTrue */
-            . ', execution_time: ' . $elapsed;
-
-        // Infrastructure errors (collation mismatch, disk full, read-only,
-        // host quota, deadlock, transient connection drop, etc.) are server
-        // and host issues, not plugin bugs. Log as WARN so they appear in
-        // the debug log without triggering Logging::errorMessage() email
-        // reports. The downstream code at queryAndGetResults() lines 1067+
-        // already classifies these for its own reporting branch; doing the
-        // same classification here keeps the two layers consistent.
-        // May 2026: 4 of 38 4.1.13 sites in the email-flood cohort were
-        // "Illegal mix of collations" reports that should have been WARN.
-        if ($this->isInfrastructureSqlError($lastError)) {
-            $this->logger->warn($message);
-            return;
-        }
-
-        $this->logger->errorMessage($message);
-    }
-
-    /**
-     * Pure classifier: true if the SQL error string matches a known
-     * infrastructure / host / hosting-environment failure pattern. These
-     * are conditions the plugin can detect and degrade past, not plugin
-     * bugs. Centralizing the union here keeps logObservedSqlError() and
-     * the downstream reporting branch in queryAndGetResults() consistent.
-     *
-     * @param string $errorText
-     * @return bool
-     */
-    private function isInfrastructureSqlError(string $errorText): bool {
-        if ($errorText === '') {
-            return false;
-        }
-        return $this->isDiskFullError($errorText)
-            || $this->isReadOnlyError($errorText)
-            || $this->isQuotaLimitError($errorText)
-            || $this->isInvalidDataError($errorText)
-            || $this->isCollationError($errorText)
-            || $this->isMissingPluginTableError($errorText)
-            || $this->isIncorrectKeyFileError($errorText)
-            || $this->isCrashedTableError($errorText)
-            || $this->isDeadlockOrLockTimeoutError($errorText)
-            || $this->isTransientConnectionError($errorText)
-            || $this->isAccessDeniedError($errorText);
-    }
-
-    /**
-     * @param string $query
-     * @param Throwable $e
-     * @param array<string, mixed> $options
-     * @param bool $producesRows
-     * @return void
-     */
-    private function logSqlThrowable(string $query, Throwable $e, array $options, bool $producesRows): void {
-        $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->extractSqlFilename($query);
-        $logErrors = !array_key_exists('log_errors', $options) || (bool)$options['log_errors'];
-        $message = 'SQL query threw exception: ' . $e->getMessage()
-            . ', SQL: ' . $sqlInfo
-            . ', source: ' . $this->extractSqlFilename($query)
-            . ', route: ' . ($producesRows ? 'get_results' : 'query')
-            . ', log_errors_option: ' . ($logErrors ? 'true' : 'false');
-
-        $exception = $e instanceof Exception ? $e : new Exception($e->getMessage(), (int)$e->getCode(), $e);
-        $this->logger->errorMessage($message, $exception);
-    }
-
-    /**
      * Build a SQL-safe comma-separated list from recognized_post_types option.
      *
      * @param array<string, mixed> $options Plugin options array.
@@ -1135,9 +1065,15 @@ class ABJ_404_Solution_DataAccess {
 
         // Query timeout (MySQL errno 3024 / MariaDB errno 1969): log the slow
         // query so it appears in debug reports, then return empty results.
+        // Logged at WARN, not ERROR. Timeouts are a host max_statement_time
+        // limit (server-side issue, not a plugin bug). Every caller checks
+        // $result['timed_out'] for graceful fallback. errorMessage() would
+        // trigger the daily developer email digest. Bruno's site
+        // (showmetech.com.br, ~285K captured 404s) emailed every time
+        // getHighImpactCapturedCount() exceeded 60s.
         if ($result['last_error'] !== '' && $this->isQueryTimeoutError($result['last_error'])) {
             $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->extractSqlFilename($query);
-            $this->logger->errorMessage(
+            $this->logger->warn(
                 'Query timed out after ' . $timeoutSeconds . 's. ' .
                 'Query: ' . substr(preg_replace('/\s+/', ' ', trim($sqlInfo)) ?? $sqlInfo, 0, 500)
             );
@@ -1193,6 +1129,7 @@ class ABJ_404_Solution_DataAccess {
                 $this->isIncorrectKeyFileError($lastErrorForClassification) ||
                 $this->isCrashedTableError($lastErrorForClassification) ||
                 $this->isDeadlockOrLockTimeoutError($lastErrorForClassification) ||
+                $this->isGaleraConflictError($lastErrorForClassification) ||
                 $this->isTransientConnectionError($lastErrorForClassification) ||
                 $this->isQueryTimeoutError($lastErrorForClassification) ||
                 $this->isAccessDeniedError($lastErrorForClassification)
@@ -1244,12 +1181,15 @@ class ABJ_404_Solution_DataAccess {
                 if (!$this->serverSideIssueNoted && !$this->serverSideIssueChecked) {
                     $this->serverSideIssueChecked = true;
                     $existing = $this->getRuntimeFlag('abj404_plugin_db_notice');
+                    // Exclude notice types cleared by a dedicated path, not the
+                    // generic write-block/quota cooldown model: stale_permalink_cache
+                    // (cleared by PermalinkCache flush) and missing_table (cleared
+                    // only by attemptMissingTableRepairAndRetry on repair success;
+                    // a separate abj404_missing_table_repair_cooldown gates retries
+                    // but is not consulted here).
+                    $excludedTypes = array('stale_permalink_cache', 'missing_table');
                     if (is_array($existing) && !empty($existing['type'])
-                        && $existing['type'] !== 'stale_permalink_cache') {
-                        // Per owner directive: collation notices must NEVER reach the
-                        // user.  If a stale 'collation' transient exists from an older
-                        // plugin version, opportunistically clear it so it cannot be
-                        // shown by any code path.
+                        && !in_array($existing['type'], $excludedTypes, true)) {
                         $this->serverSideIssueNoted = true;
                     }
                 }
@@ -1277,6 +1217,7 @@ class ABJ_404_Solution_DataAccess {
      */
     private function setRuntimeFlag(string $key, $value, int $ttlSeconds): void {
         if (function_exists('set_transient')) {
+            // allow-cache-empty: passthrough helper. Callers store admin-notice payloads, cooldown timestamps, and lock-state markers, not query results.
             set_transient($key, $value, $ttlSeconds);
             return;
         }

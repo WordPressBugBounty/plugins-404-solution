@@ -36,22 +36,17 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
     /** @var bool Process-local guard so a single request never rebuilds twice. */
     private static $viewBuildAlreadyRanThisRequest = false;
 
+    // Stage-runner / shutdown-diagnostics state ($viewBuildShutdownLoggerRegistered,
+    // $viewBuildStageOpenForShutdown, $viewBuildShutdownStageNumber,
+    // $viewBuildShutdownStageKey, $lastBatchProgressDetail) is declared on the
+    // sibling ABJ_404_Solution_DataAccess_ViewBuildStageRunnerTrait so the
+    // per-stage timing, shutdown logger and inflight marker share one
+    // composing-class field set with the runner methods that read/write them.
+
     // $stagedQueryTimeoutSeconds is declared on the sibling
     // ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait so the same field
     // backs both stagedQueryOptions() (helpers trait) and the per-stage
     // writes performed by the orchestrator below.
-
-    /**
-     * Most recent "batch X/Y" progress detail captured from the inner loops of
-     * resumable stages (S2/S4/S5). Preserved across the per-stage yield log so
-     * the user-visible status doesn't drop from "batch 1.28M/1.97M (yielded)"
-     * back to a bare "yielded in N ms" right before the next tick resumes.
-     *
-     * Reset to '' at the start of every runTimedViewBuildStage() invocation.
-     *
-     * @var string
-     */
-    private $lastBatchProgressDetail = '';
 
     /**
      * Request-lifetime cache of viewDoneIsServeable().  The AJAX gate, the
@@ -77,6 +72,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
     /** @return void */
     public static function resetViewBuildOncePerRequestGuard(): void {
         self::$viewBuildAlreadyRanThisRequest = false;
+        self::$viewBuildShutdownLoggerRegistered = false;
     }
 
     /** @return string */
@@ -97,6 +93,38 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
     /** @return string */
     private function viewDoneFreshnessOptionName(): string {
         return $this->getLowercasePrefix() . 'abj404_view_done_built_at';
+    }
+
+    /**
+     * Option storing the unix timestamp of the most recent ADMIN-INITIATED
+     * mutation (add/edit/trash/delete via the redirects UI). Distinct from
+     * the freshness signal cleared by invalidateViewDone() (cron, maintenance,
+     * upgrade, correctCollations also call invalidateViewDone but must keep
+     * fbc270d8 stale-serving). Sites whose admin clicks Save expect the
+     * just-saved row to render immediately, not the pre-mutation snapshot.
+     *
+     * viewDoneIsServeable() consults this option together with the
+     * data_built_at floor: while a mutation timestamp is more recent than
+     * the latest fresh build, view_done is treated as unserveable so the
+     * AJAX gate returns viewBuildPending and the JS poller waits for a
+     * build that covers the mutation.
+     *
+     * Bounded to 5 minutes via MUTATION_INVALIDATED_SANITY_SECONDS so a
+     * broken cron / stuck build cannot keep view_done unserveable forever.
+     *
+     * @return string
+     */
+    private function viewDoneMutationInvalidatedAtOptionName(): string {
+        return $this->getLowercasePrefix() . 'abj404_view_done_mutation_invalidated_at';
+    }
+
+    /** @return int Unix timestamp of the last admin-initiated mutation, or 0. */
+    private function viewDoneMutationInvalidatedAt(): int {
+        if (!function_exists('get_option')) {
+            return 0;
+        }
+        $val = get_option($this->viewDoneMutationInvalidatedAtOptionName(), 0);
+        return is_scalar($val) ? max(0, intval($val)) : 0;
     }
 
     // Foreground admin/AJAX flows hold this lease briefly so staged-build
@@ -144,28 +172,34 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         if (!empty($tableOptions['_abj404_force_view_rebuild'])) {
             $this->invalidateViewDone();
         }
-        $haveDone = $this->viewDoneTableExists();
         $builtAt = $this->viewDoneBuiltAt();
-        $isFresh = $haveDone && $builtAt > 0 && (time() - $builtAt) < ABJ_404_Solution_ViewBuildConfig::VIEW_DONE_FRESHNESS_TTL_SECONDS;
-        $isInvalidated = $haveDone && $builtAt === 0;
+        $isFresh = $builtAt > 0
+            && (time() - $builtAt) < ABJ_404_Solution_ViewBuildConfig::VIEW_DONE_FRESHNESS_TTL_SECONDS
+            && $this->viewDoneIsServeable();
 
         if ($isFresh) {
             return $this->readFromViewDone($sub, $tableOptions);
         }
 
-        if ($haveDone && !$isInvalidated) {
-            // Stale but not invalidated: serve stale (TTL expired but data
-            // is presumed correct), kick off background rebuild for next
-            // request. This is the steady-state warm path.
+        // Stale or invalidated: if view_done is serveable (table exists with
+        // rows on disk) we return the snapshot now and kick off a background
+        // rebuild for the next request. Invalidated counts as "stale-but-
+        // present"; the freshness signal was cleared (so the rebuild gets
+        // scheduled) but the data on disk is the most recent successful
+        // snapshot and is correct to serve. Hard-stale notice fires when
+        // the data on disk exceeds VIEW_DONE_HARD_STALE_NOTICE_AGE_SECONDS.
+        if ($this->viewDoneIsServeable()) {
             $this->scheduleViewDoneRebuild();
+            $this->maybeRaiseViewDoneHardStaleNotice();
             return $this->readFromViewDone($sub, $tableOptions);
         }
 
-        // view_done is missing or invalidated. Schedule a background rebuild
-        // (cron + ajaxAdvanceViewBuild advance the build) and signal pending
-        // back up. Inline build inside a fetch request is intentionally
-        // removed: on slow hosts it fatals at max_execution_time and the
-        // HTTP 500 / "critical error" payload defeats client-side recovery.
+        // view_done is missing on disk or empty (no usable data). Schedule a
+        // background rebuild (cron + ajaxAdvanceViewBuild advance the build)
+        // and signal pending back up. Inline build inside a fetch request is
+        // intentionally removed: on slow hosts it fatals at max_execution_time
+        // and the HTTP 500 / "critical error" payload defeats client-side
+        // recovery.
         $this->scheduleViewDoneRebuild();
         $progress = $this->describeBuildProgressForNotice();
         throw new ABJ_404_Solution_ViewBuildPendingException(
@@ -185,10 +219,19 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
 
     /**
      * Public read-only check used by the AJAX fetch endpoints to gate "serve
-     * from cache vs. return pending".  True when view_done exists and has
-     * been at least once successfully built (not invalidated). Stale-but-
-     * present is serveable: the steady-state warm path serves stale and
-     * schedules a background rebuild without blocking.
+     * from cache vs. return pending". True when view_done exists on disk and
+     * contains rows. Stale-but-present is serveable: invalidate clears the
+     * freshness signal but leaves the table contents intact, so the steady-
+     * state warm path serves stale and schedules a background rebuild
+     * without blocking.
+     *
+     * Note: serveability does NOT depend on the freshness/built_at signal.
+     * That signal gates whether to schedule a rebuild (stale = schedule), not
+     * whether the existing data can be returned. Serving stale-but-present
+     * data is correct: the data is at most one freshness window out of date
+     * relative to when it was last produced, and the maybeRaiseViewDoneHard
+     * StaleNotice() check fires an admin notice when staleness exceeds the
+     * upper bound (VIEW_DONE_HARD_STALE_NOTICE_AGE_SECONDS).
      *
      * The ViewUpdater AJAX path uses this to avoid triggering the inline
      * build inside a request: if not serveable, the fetch returns
@@ -204,12 +247,82 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
             $this->viewDoneIsServeableCache = false;
             return false;
         }
-        // Invalidated (built_at == 0) is NOT serveable: the freshness option
-        // was just cleared by a redirect create/update/delete, so any read
-        // would return wildly out-of-date data.  The build must run before
-        // the next fetch.
-        $this->viewDoneIsServeableCache = ($this->viewDoneBuiltAt() > 0);
-        return $this->viewDoneIsServeableCache;
+        // Admin-mutation gate: when the admin just added/edited/trashed/
+        // deleted a redirect, the snapshot on disk does not yet reflect
+        // their change. Returning serveable here would let the AJAX fetch
+        // hand back the pre-mutation rows; the admin would not see their
+        // own action take effect until the next cron rebuild. Treat as
+        // unserveable so the gate returns viewBuildPending and the JS
+        // poller waits for a build that covers the mutation. Bounded by
+        // MUTATION_INVALIDATED_SANITY_SECONDS so a stuck build cannot
+        // block the page indefinitely; after that window the gate falls
+        // back to fbc270d8 stale-serving plus the hard-stale notice.
+        $mutationAt = $this->viewDoneMutationInvalidatedAt();
+        if ($mutationAt > 0
+                && $mutationAt > time() - ABJ_404_Solution_ViewBuildConfig::VIEW_DONE_MUTATION_INVALIDATED_SANITY_SECONDS) {
+            $dataBuiltAt = $this->viewDoneDataBuiltAt();
+            if ($dataBuiltAt <= $mutationAt) {
+                $this->viewDoneIsServeableCache = false;
+                return false;
+            }
+        }
+        // Empty view_done is NOT serveable when there has never been a
+        // successful build: rendering an empty admin screen during a cold
+        // start is a worse UX than a brief pending/loading state that drives
+        // the build forward. The has-rows probe also catches the rare "S11
+        // promoted an empty buffer" failure mode where the swap completed
+        // but S2 produced no rows (botched build state); without this guard
+        // the admin would render blank indefinitely with no rebuild ever
+        // scheduled.
+        //
+        // BUT: when a build has actually completed (data_built_at > 0) and
+        // the table is genuinely empty (e.g. a fresh install with no
+        // redirects yet, or the admin dropped wp_abj404_redirects via WP-CLI
+        // and the recreated table is empty), an empty view_done IS the
+        // correct serveable result. Returning false here would loop the JS
+        // poller forever on a cold install: every build cycle produces an
+        // empty view_done, viewDoneIsServeable() returns false, ViewUpdater
+        // returns viewBuildPending, the poller fires another advance, and
+        // the cycle repeats with no exit. data_built_at distinguishes
+        // "build has never completed" from "build completed and the dataset
+        // is genuinely empty".
+        if ($this->viewDoneHasRows()) {
+            $this->viewDoneIsServeableCache = true;
+            return true;
+        }
+        if ($this->viewDoneDataBuiltAt() > 0) {
+            $this->viewDoneIsServeableCache = true;
+            return true;
+        }
+        $this->viewDoneIsServeableCache = false;
+        return false;
+    }
+
+    /**
+     * Mark view_done as needing a fresh build because the admin just
+     * mutated a redirect through the UI (add/edit/trash/delete). Sets the
+     * mutation-invalidated-at option which gates viewDoneIsServeable()
+     * until markViewDoneBuildCompleted() runs (or the sanity timeout
+     * VIEW_DONE_MUTATION_INVALIDATED_SANITY_SECONDS elapses).
+     *
+     * Differs from invalidateViewDone() (which serves stale-but-present
+     * per fbc270d8 to avoid Loading-redirects on slow hosts during cron /
+     * maintenance / correctCollations). Admin actions need immediate
+     * feedback: after clicking Save, the user expects to see the new row,
+     * not the snapshot from before. This method is the single seam
+     * controllers call to opt into that stricter contract.
+     *
+     * Composes invalidateViewDone() so the existing freshness-clear /
+     * progress-clear / buffer-drop / rebuild-schedule lifecycle still
+     * runs; the new mutation flag is purely additive.
+     *
+     * @return void
+     */
+    public function markViewDoneInvalidatedByAdminMutation(): void {
+        if (function_exists('update_option')) {
+            update_option($this->viewDoneMutationInvalidatedAtOptionName(), time(), false);
+        }
+        $this->invalidateViewDone();
     }
 
     /**
@@ -234,6 +347,41 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
      */
     private function invalidateViewDoneServeableCache(): void {
         $this->viewDoneIsServeableCache = null;
+    }
+
+    /**
+     * Public hook called from the S11 swap completion path and from the
+     * reconcile-promote path when a fresh view_done has just been published.
+     * Updates both freshness and data-built-at signals to now, clears the
+     * hard-stale admin notice (self-heal), and resets the request-lifetime
+     * serveability cache so subsequent reads in the same request see the
+     * just-published table.
+     *
+     * The data-built-at signal is the floor used by maybeRaiseViewDoneHard
+     * StaleNotice() to decide when to surface the "data may be out of date"
+     * admin notice. Updating it here means the notice can self-clear
+     * automatically once the build catches up, so an admin who fixed the
+     * underlying cron or host issue does not see a 24h-stale warning for
+     * the entire dedup TTL after recovery.
+     *
+     * @return void
+     */
+    public function markViewDoneBuildCompleted(): void {
+        if (function_exists('update_option')) {
+            $now = $this->clock()->now();
+            update_option($this->viewDoneFreshnessOptionName(), $now, false);
+            update_option($this->viewDoneDataBuiltAtOptionName(), $now, false);
+        }
+        $this->clearViewDoneHardStaleNotice();
+        // Clear the admin-mutation gate: the fresh build covers any
+        // mutation that triggered it, so viewDoneIsServeable() no longer
+        // needs to block reads. Leaving it set would force "Loading
+        // redirects" for the full 5-minute sanity window after every
+        // admin save even though fresh data is on disk.
+        if (function_exists('delete_option')) {
+            delete_option($this->viewDoneMutationInvalidatedAtOptionName());
+        }
+        $this->invalidateViewDoneServeableCache();
     }
 
     /**
@@ -378,6 +526,150 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
     }
 
     /**
+     * Synchronous fallback that advances the staged view-build by one
+     * tick on plugin admin page-load when WP-Cron is broken. Pairs with
+     * the cron-stuck admin notice (c374): the notice tells the admin
+     * cron is broken; this fallback unblocks the page in the meantime
+     * so they do not stare at "Carregando redirecionamentos..." (the
+     * Portuguese localization Bruno reported) forever while they fix
+     * cron.
+     *
+     * Without this, hosts where DISABLE_WP_CRON is set in wp-config.php
+     * AND no external system cron replaces it leave the staged build
+     * stuck: the AJAX JS poller would advance it, but the poller only
+     * fires after the page renders, and the fetch path hard-gates on
+     * view_done being serveable. The admin sees the loading message
+     * indefinitely on every page-load.
+     *
+     * Gates (cheap, in order):
+     *   1. getCronStuckHours() < 24: cron is healthy enough; no fallback
+     *      needed. The 24h floor matches the cron-stuck notice (c374)
+     *      so the two signals fire together, not piecewise.
+     *   2. viewDoneIsServeable() === true: the build is already done,
+     *      so there is nothing to advance. Free option-read check.
+     *   3. abj404_page_load_fallback_advance transient set: a sibling
+     *      sub-request already ran the fallback inside the 60s window;
+     *      avoid burning a second stage of inline work in the same
+     *      admin burst.
+     *
+     * Bounding:
+     *   - A short-lived filter is registered on the per-stage budget
+     *     hook (abj404_view_build_per_stage_budget_seconds) so the
+     *     advance call inside the lock cannot spend the full 10s
+     *     default per-stage budget. The filter is removed in finally
+     *     so the next AJAX advance / cron tick sees the normal budget.
+     *
+     * Lock semantics:
+     *   - Delegates to advanceViewBuildOnce(false), which acquires the
+     *     build lock with a 0s timeout. A sibling cron / AJAX advance
+     *     already in flight returns immediately with locked=true and
+     *     this method reports reason='locked' without doing further
+     *     work. The build progress under the existing lock holder is
+     *     still being made; the admin's next page-load (after the gate
+     *     window) will try again.
+     *
+     * Caller contract (admin_init wrapper in 404-solution.php):
+     *   - Only call when is_admin() is true.
+     *   - Only call when the current user has the plugin-admin
+     *     capability so unauthenticated requests cannot trigger build
+     *     work.
+     *   - Wrap in try/catch; a failure here must not break admin page
+     *     rendering. Log at warning level so it does not generate dev
+     *     email reports per the self-healing philosophy.
+     *
+     * @return array{ran:bool, reason:string, progress:array<string,mixed>}
+     */
+    public function runPageLoadFallbackAdvance(): array {
+        // Cron is healthy: nothing for the fallback to do. Free check
+        // (one wp_get_ready_cron_jobs call) so we can run it first.
+        if ($this->getCronStuckHours() < 24) {
+            return array(
+                'ran' => false,
+                'reason' => 'cron_healthy',
+                'progress' => $this->getViewBuildProgress(),
+            );
+        }
+
+        // Build already serveable: returning before any further work
+        // keeps the fallback's steady-state cost at zero on hosts that
+        // recover, which is the desirable shape (admin returns to a
+        // working page without page-load latency).
+        if ($this->viewDoneIsServeable()) {
+            return array(
+                'ran' => false,
+                'reason' => 'not_needed',
+                'progress' => $this->getViewBuildProgress(),
+            );
+        }
+
+        // Transient gate: a single admin click can produce many
+        // sub-requests (prefetch, refresh, multiple browser tabs).
+        // Cap inline advances to one per 60s so the page-load impact
+        // cannot compound. 60s is short enough that an attentive admin
+        // sees real per-load progress, and long enough that bursts of
+        // navigation do not stack inline build work.
+        $haveTransientApi = function_exists('get_transient') && function_exists('set_transient');
+        $gateKey = ABJ_404_Solution_ViewBuildConfig::PAGE_LOAD_FALLBACK_GATE_KEY;
+        if ($haveTransientApi && get_transient($gateKey) !== false) {
+            return array(
+                'ran' => false,
+                'reason' => 'gate_active',
+                'progress' => $this->getViewBuildProgress(),
+            );
+        }
+        if ($haveTransientApi) {
+            // Set the gate BEFORE running the advance so any failure or
+            // long-running stage still suppresses the next sub-request.
+            // Without this, a slow advance that times out partway would
+            // be retried by the very next sub-request, compounding the
+            // page-load impact instead of bounding it.
+            set_transient(
+                $gateKey,
+                1,
+                (int)ABJ_404_Solution_ViewBuildConfig::PAGE_LOAD_FALLBACK_GATE_SECONDS
+            );
+        }
+
+        // Compress the per-stage budget for just this advance. The
+        // production filter machinery is the existing hook
+        // abj404_view_build_per_stage_budget_seconds; clamping via
+        // min() rather than overwriting preserves any operator-set
+        // smaller-budget filter for hosts that have already tuned
+        // down. Priority 100 runs after most operator filters so the
+        // fallback's ceiling dominates.
+        $budgetSeconds = (float)ABJ_404_Solution_ViewBuildConfig::PAGE_LOAD_FALLBACK_BUDGET_SECONDS;
+        $budgetFilter = static function ($incoming) use ($budgetSeconds) {
+            $value = is_scalar($incoming) ? (float)$incoming : $budgetSeconds;
+            return min($value, $budgetSeconds);
+        };
+        $filterRegistered = false;
+        if (function_exists('add_filter')) {
+            add_filter('abj404_view_build_per_stage_budget_seconds', $budgetFilter, 100);
+            $filterRegistered = true;
+        }
+
+        try {
+            // forceRebuild=false: this is the self-healing path. The
+            // explicit ?abj404_force_view_rebuild=1 admin recovery is a
+            // separate gesture that intentionally clears degraded gates
+            // and waits 30s for the lock. Page-load fallback should
+            // never escalate to those semantics.
+            $progress = $this->advanceViewBuildOnce(false);
+        } finally {
+            if ($filterRegistered && function_exists('remove_filter')) {
+                remove_filter('abj404_view_build_per_stage_budget_seconds', $budgetFilter, 100);
+            }
+        }
+
+        $reason = !empty($progress['locked']) ? 'locked' : 'advanced';
+        return array(
+            'ran' => true,
+            'reason' => $reason,
+            'progress' => $progress,
+        );
+    }
+
+    /**
      * COUNT(*) sibling to runRedirectsForViewStaged. Used by
      * getRedirectsForViewCount when filterText is non-empty (the
      * filterText-empty path already uses the optimized COUNT against
@@ -392,16 +684,17 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         $this->stagedQueryTimeoutSeconds = isset($tableOptions['_abj404_query_timeout'])
             && is_numeric($tableOptions['_abj404_query_timeout'])
             ? max(0, intval($tableOptions['_abj404_query_timeout'])) : 0;
-        $haveDone = $this->viewDoneTableExists();
         $builtAt = $this->viewDoneBuiltAt();
-        $isFresh = $haveDone && $builtAt > 0 && (time() - $builtAt) < ABJ_404_Solution_ViewBuildConfig::VIEW_DONE_FRESHNESS_TTL_SECONDS;
-        $isInvalidated = $haveDone && $builtAt === 0;
+        $isFresh = $builtAt > 0
+            && (time() - $builtAt) < ABJ_404_Solution_ViewBuildConfig::VIEW_DONE_FRESHNESS_TTL_SECONDS
+            && $this->viewDoneIsServeable();
 
-        if (!$haveDone || $isInvalidated) {
-            // No serveable view_done. Schedule a background rebuild and
-            // signal pending; never run the staged build inline inside a
-            // request. The fetch AJAX gate prevents this from being reached
-            // under normal traffic; non-AJAX callers retry on next request.
+        if (!$this->viewDoneIsServeable()) {
+            // view_done is missing on disk or empty (no usable data).
+            // Schedule a background rebuild and signal pending; never run
+            // the staged build inline inside a request. The fetch AJAX gate
+            // prevents this from being reached under normal traffic; non-
+            // AJAX callers retry on next request.
             $this->scheduleViewDoneRebuild();
             $progress = $this->describeBuildProgressForNotice();
             throw new ABJ_404_Solution_ViewBuildPendingException(
@@ -411,9 +704,11 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         }
 
         if (!$isFresh) {
-            // Stale but not invalidated: serve the stale count and kick off
-            // a background rebuild for the next request.
+            // Stale or invalidated but data on disk is serveable: return the
+            // stale count and kick off a background rebuild. Hard-stale
+            // notice fires when the data on disk exceeds the upper bound.
             $this->scheduleViewDoneRebuild();
+            $this->maybeRaiseViewDoneHardStaleNotice();
         }
 
         $sql = $this->buildViewDoneCountQuery($sub, $tableOptions);
@@ -512,7 +807,8 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
      *      so the next fresh build starts from a known empty buffer.
      *
      * Resumable progress = `started_at` within
-     * VIEW_BUILD_RESUME_TTL_SECONDS AND `current_stage` > 0. When a
+     * VIEW_BUILD_RESUME_TTL_SECONDS and either a completed stage
+     * (`current_stage` > 0) or a durable started-stage marker. When a
      * resumable build is in flight we leave view_build alone so the
      * next tick can continue from the persisted high-water id (cases
      * 2 and 3 are skipped; case 1 still runs).
@@ -571,9 +867,10 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         // id; orphan deleteme cleanup above already ran and is enough.
         $startedAt = $this->readProgressOption('started_at', 0);
         $currentStage = $this->readProgressOption('current_stage', 0);
+        $lastStartedStage = $this->readProgressOption('last_started_stage', 0);
         $resumeWindowOk = $startedAt > 0
             && (time() - $startedAt) < ABJ_404_Solution_ViewBuildConfig::VIEW_BUILD_RESUME_TTL_SECONDS;
-        if ($resumeWindowOk && $currentStage > 0) {
+        if ($resumeWindowOk && ($currentStage > 0 || $lastStartedStage > 0)) {
             return $action;
         }
 
@@ -606,11 +903,10 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
                     . '(`%s` -> `%s`); previous run crashed before S11 swap',
                     $tempBuildTable, $doneTable
                 ));
-                if (function_exists('update_option')) {
-                    update_option($this->viewDoneFreshnessOptionName(), $this->clock()->now(), false);
-                }
+                // Same as the S11 swap completion: update both freshness
+                // signals, clear hard-stale notice, reset serveability cache.
+                $this->markViewDoneBuildCompleted();
                 $this->clearAllProgressOptions();
-                $this->invalidateViewDoneServeableCache();
                 return 'promoted';
             }
             $this->logger->warn(sprintf(
@@ -635,9 +931,23 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
             );
             $err = isset($r['last_error']) && is_string($r['last_error']) ? trim($r['last_error']) : '';
             if ($err === '' || !$this->stagedTableExists($tempBuildTable)) {
-                $this->logger->infoMessage(sprintf(
-                    '[staged] reconcile: dropped orphan view_build `%s` (view_done is live; previous run halted before swap)',
-                    $tempBuildTable
+                // WARN (not INFO) so this signal survives a site with DEBUG
+                // disabled. Carries the four progress fields support needs
+                // to distinguish "build keeps restarting at S1" from
+                // "build invalidated on every redirect edit / cron tick"
+                // from "multi-tab/cron lock contention orphaning each
+                // partial build" without asking for another debug zip.
+                $lastCompletedStage = $this->readProgressOption('last_completed_stage', 0);
+                $age = $startedAt > 0 ? max(0, time() - $startedAt) : 0;
+                $this->logger->warn(sprintf(
+                    '[staged] reconcile: dropped orphan view_build `%s` (view_done is live; previous run halted before swap); '
+                    . 'current_stage=%d last_started_stage=%d last_completed_stage=%d started_at=%d age=%ds',
+                    $tempBuildTable,
+                    $currentStage,
+                    $lastStartedStage,
+                    $lastCompletedStage,
+                    $startedAt,
+                    $age
                 ));
                 return 'cleaned';
             }
@@ -694,12 +1004,14 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
     /**
      * Mark the served view_done table stale so the next request triggers a
      * rebuild. Hooked from invalidateViewSnapshotCache() so redirect
-     * create/update/delete invalidates the precomputed view too.
-     *
-     * Also clears any in-flight resumable-build progress: a redirect change
-     * during a partial build would leave the partial buffer with stale data
-     * for ids the change touched, so the safest move is to restart the build
-     * on the next request rather than stitch onto a half-built buffer.
+     * create/update/delete invalidates the precomputed view too. Also clears
+     * any in-flight progress AND drops view_build / view_deleteme in the
+     * same call (gated by SHOW TABLES so steady-state invalidate stays
+     * cheap), making the "progress lost but buffer present" state unreachable
+     * so the next request never classifies a leftover buffer as an orphan
+     * to drop (Troy 2026-05: two "[staged] reconcile: dropped orphan
+     * view_build" INFO lines 6 min apart). Buffer-drop helper lives in
+     * DataAccessTrait_ViewBuildStageCallbacks.
      *
      * @return void
      */
@@ -714,195 +1026,12 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         // a redirect-edit invalidation forces the next request to S1 from
         // scratch, so the prior capture is no longer authoritative.
         $this->clearPrefixAtStageOne();
+        $this->dropTransientBuffersIfPresent();
         $this->invalidateViewDoneServeableCache();
         // Kick off a background rebuild and surface any cron-stuck /
         // schedule-failure conditions to the admin via deduplicated notice.
         // scheduleViewDoneRebuild() is idempotent (checks wp_next_scheduled).
         $this->scheduleViewDoneRebuild();
-    }
-
-    /**
-     * Update the inflight stage transient + AJAX-context global so the
-     * client-side progress poller can render which sub-stage of the staged
-     * build is currently running.
-     *
-     * Best-effort: when there's no AJAX context (background cron, CLI), this
-     * is a no-op.  Never let a transient-write failure mask the real query
-     * error we're about to raise.
-     *
-     * @param string $stageKey  Sub-stage key, e.g. 'staged_build_s2_insert'.
-     * @param string $detail    Optional mid-stage progress detail, e.g. 'batch 4/12'.
-     * @return void
-     */
-    private function markBuildStage(string $stageKey, string $detail = ''): void {
-        if (!class_exists('ABJ_404_Solution_ViewUpdater')) {
-            return;
-        }
-        // Capture inner-loop batch markers ("batch 1282000/1971286",
-        // "batch ... (yielded)", "batch killed at size N; shrunk ...") so
-        // logTimedViewBuildStage() can preserve them in the per-stage yield
-        // marker. Skip strings that already contain ", yielded" so the final
-        // yield write does not loop back into the captured detail.
-        if ($detail !== ''
-            && strncmp($detail, 'batch ', 6) === 0
-            && strpos($detail, ', yielded') === false) {
-            $this->lastBatchProgressDetail = $detail;
-        }
-        $label = $detail !== '' ? ($stageKey . ':' . $detail) : $stageKey;
-        // The class is autoloaded by Loader.php; markInflightStage is a
-        // best-effort no-op when no AJAX context exists.
-        \ABJ_404_Solution_ViewUpdater::markInflightStage($label);
-    }
-
-    /**
-     * Run one staged view-build step and write a clear per-stage timing line.
-     *
-     * The build can span several HTTP requests. For resumable stages that yield
-     * mid-stage (S2/S4/S5), this records the time spent in the current tick and
-     * marks the status as yielded; the final tick for that stage is logged as
-     * completed.
-     *
-     * @param int $stageNumber  1-based staged build number.
-     * @param string $stageKey  Stable stage key used by AJAX progress.
-     * @param callable $callback Stage work to execute.
-     * @return mixed
-     */
-    private function runTimedViewBuildStage(int $stageNumber, string $stageKey, callable $callback) {
-        $started = microtime(true);
-        // Reset per-stage so a yield marker for this stage cannot accidentally
-        // pick up a prior stage's batch detail. Inner loops (S2/S4/S5)
-        // populate this via markBuildStage() as they emit "batch X/Y" lines.
-        $this->lastBatchProgressDetail = '';
-        try {
-            // Public extension point. Sites can hook this for telemetry, custom
-            // progress dashboards, or chaos-testing the build's resume contract.
-            // The do_action call is inside the try so a callback that throws
-            // (test injection, host kill simulator) is treated identically to
-            // a real SQL error from the stage callback below.
-            if (function_exists('do_action')) {
-                do_action('abj404_view_build_stage_starting', $stageNumber, $stageKey);
-            }
-            $result = $callback();
-        } catch (\Throwable $e) {
-            // Catch-block classification + side effects (skip / halt / streak)
-            // live on the HostFailurePolicy trait so this orchestrator stays
-            // focused on stage sequencing. classifyAndHandleStageFailure()
-            // returns one of: 'resumable_yield', 'skipped', 'halted',
-            // 'completed' (post-S11 reconcile), or 'rethrow'.
-            $outcome = $this->classifyAndHandleStageFailure($stageNumber, $stageKey, $e->getMessage(), $started);
-            if ($outcome === 'resumable_yield') {
-                return false;
-            }
-            if ($outcome === 'skipped') {
-                return 'skipped';
-            }
-            if ($outcome === 'halted') {
-                return 'halted';
-            }
-            if ($outcome === 'completed') {
-                return null;
-            }
-            $this->logTimedViewBuildStage($stageNumber, $stageKey, 'error', $started);
-            throw $e;
-        }
-
-        $status = 'completed';
-        if ($result === false) {
-            $status = 'yielded';
-        } else if ($result === 'skipped') {
-            $status = 'skipped';
-        }
-        // Wall-clock yield (false return) implies the stage's batch loop ran
-        // far enough to exhaust the per-stage budget, which is observable
-        // forward progress. Reset the no-progress streak so legitimate
-        // long-running batched stages do not eventually trip the halt.
-        // Completion / skip likewise reset.
-        $this->resetStageNoProgressStreak($stageNumber);
-        $this->logTimedViewBuildStage($stageNumber, $stageKey, $status, $started);
-        return $result;
-    }
-
-    /**
-     * Run a non-batched stage (S3 / S9 / S10) with the kill-streak
-     * escape valve applied. Behaves like runTimedViewBuildStage() except:
-     *
-     *   - Before invoking the stage, looks up the persisted kill streak
-     *     for $streakOptKey. If >= 1, swaps in an extended per-query
-     *     timeout (extendedTimeoutForKilledNonBatchedStage) so the
-     *     SET STATEMENT max_statement_time hint can exceed the host's
-     *     session limit on retry.
-     *   - On `false` return (resumable kill), increments the streak so
-     *     the next request resumes with the extended timeout already in
-     *     effect.
-     *   - On any non-`false` return (completed or 'skipped'), resets the
-     *     streak to 0 -- the next rebuild starts fresh.
-     *
-     * The original $stagedQueryTimeoutSeconds is restored before
-     * returning so subsequent stages run with their own intelligent
-     * timeout, not the extended one (which was only meant for the
-     * stuck non-batched stage).
-     *
-     * @param int      $stageNumber   1-based staged build number.
-     * @param string   $stageKey      Stable stage key for AJAX progress.
-     * @param string   $streakOptKey  Progress option key, e.g. 's3_kill_streak'.
-     * @param callable $callback
-     * @return mixed   Forwards runTimedViewBuildStage's return value:
-     *                 typically true|null on completion, false on
-     *                 resumable kill, 'skipped' when the callback
-     *                 self-skips (S9 with no logs_hits table). Callers
-     *                 only check `=== false` so the broader type is fine.
-     */
-    private function runNonBatchedStageWithKillStreakEscape(
-        int $stageNumber,
-        string $stageKey,
-        string $streakOptKey,
-        callable $callback
-    ) {
-        $savedTimeout = $this->stagedQueryTimeoutSeconds;
-        $this->stagedQueryTimeoutSeconds = $this->extendedTimeoutForKilledNonBatchedStage($streakOptKey);
-        try {
-            $result = $this->runTimedViewBuildStage($stageNumber, $stageKey, $callback);
-        } finally {
-            $this->stagedQueryTimeoutSeconds = $savedTimeout;
-        }
-        if ($result === false) {
-            $this->writeProgressOption(
-                $streakOptKey,
-                $this->readProgressOption($streakOptKey, 0) + 1
-            );
-        } else {
-            $this->writeProgressOption($streakOptKey, 0);
-        }
-        return $result;
-    }
-
-    /**
-     * @param int $stageNumber
-     * @param string $stageKey
-     * @param string $status
-     * @param float $started
-     * @return void
-     */
-    private function logTimedViewBuildStage(int $stageNumber, string $stageKey, string $status, float $started): void {
-        $elapsedMs = (int)round((microtime(true) - $started) * 1000);
-        $markerDetail = $status . ' in ' . $elapsedMs . ' ms';
-        // Preserve mid-stage batch progress in the user-visible yield marker
-        // so the polled status does not drop from "batch 1282000/1971286
-        // (yielded; tight time)" back to a bare "yielded in N ms" between
-        // ticks. Only applied to yield-class statuses; "completed" already
-        // reads cleanly without batch context.
-        if (($status === 'yielded' || $status === 'killed_resumable')
-            && $this->lastBatchProgressDetail !== '') {
-            $markerDetail = $this->lastBatchProgressDetail . ', ' . $markerDetail;
-        }
-        $this->markBuildStage($stageKey, $markerDetail);
-        $this->logger->debugMessage(sprintf(
-            '[staged] build stage %d/11 %s %s in %d ms',
-            $stageNumber,
-            $stageKey,
-            $status,
-            $elapsedMs
-        ));
     }
 
     // progressOptionName / readProgressOption / writeProgressOption /
@@ -1054,6 +1183,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
             return $this->viewDoneIsFresh();
         }
         self::$viewBuildAlreadyRanThisRequest = true;
+        $this->registerViewBuildShutdownDiagnostics();
 
         // Probe the PHP runtime once per request: surfaces a low-memory
         // admin notice and gates the per-stage budget into a tighter
@@ -1093,7 +1223,11 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
                     ? 'buffer table missing (prior crash or fresh install)'
                     : ('prior build older than resume TTL ('
                         . (time() - $startedAt) . 's elapsed)'));
-            $this->logger->debugMessage(sprintf(
+            // INFO (not DEBUG) so this signal survives a site that has
+            // disabled DEBUG. Without it, a stuck-at-S1 redirects page on
+            // such a site leaves no log evidence of whether each request
+            // is restarting fresh or resuming.
+            $this->logger->infoMessage(sprintf(
                 '[staged] runStagedBuildOnce: fresh start (%s); current_stage=%d',
                 $reason, $currentStage
             ));
@@ -1103,7 +1237,10 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
             $this->clearAllProgressOptions();
             $this->dropTransientStagedTables();
         } else {
-            $this->logger->debugMessage(sprintf(
+            // INFO (not DEBUG): see fresh-start branch above. The pair
+            // (fresh start vs. resuming) is the entry point for any
+            // stuck-build investigation and must survive DEBUG-off sites.
+            $this->logger->infoMessage(sprintf(
                 '[staged] runStagedBuildOnce: resuming (started_at=%d, %ds ago); current_stage=%d',
                 $startedAt, time() - $startedAt, $currentStage
             ));
@@ -1321,13 +1458,13 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
             if ($r === false || $r === 'halted') {
                 return false;
             }
-            if (function_exists('update_option')) {
-                update_option($this->viewDoneFreshnessOptionName(), time(), false);
-            }
-            // Build fully done. Wipe progress so the next rebuild starts clean.
+            // Build fully done. markViewDoneBuildCompleted() updates both
+            // freshness and data-built-at signals, clears the hard-stale
+            // admin notice, and resets the serveability cache.
+            $this->markViewDoneBuildCompleted();
+            // Wipe progress so the next rebuild starts clean.
             // clearAllProgressOptions() also clears the prefix_at_s1 capture.
             $this->clearAllProgressOptions();
-            $this->invalidateViewDoneServeableCache();
         }
 
         return true;

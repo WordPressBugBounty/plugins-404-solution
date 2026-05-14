@@ -18,13 +18,13 @@ trait ABJ_404_Solution_PluginLogicTrait_Lifecycle {
         for ($i = 0; $i < count($crons); $i++) {
             $cron_name = $crons[$i];
             $timestamp1 = wp_next_scheduled($cron_name);
-            while ($timestamp1 != False) {
+            while ($timestamp1 != false) {
                 wp_unschedule_event($timestamp1, $cron_name);
                 $timestamp1 = wp_next_scheduled($cron_name);
             }
 
             $timestamp2 = wp_next_scheduled($cron_name, array(''));
-            while ($timestamp2 != False) {
+            while ($timestamp2 != false) {
                 wp_unschedule_event($timestamp2, $cron_name, array(''));
                 $timestamp2 = wp_next_scheduled($cron_name, array(''));
             }
@@ -91,6 +91,14 @@ trait ABJ_404_Solution_PluginLogicTrait_Lifecycle {
 
         $upgradesEtc = abj_service('database_upgrades');
         $upgradesEtc->createDatabaseTables();
+
+        // Route through the canonical self-heal prologue so activation
+        // reaches every recovery primitive in the same order as the daily
+        // cron. createDatabaseTables() above is the full schema-creation
+        // path for a fresh install; the prologue is a cheap idempotent
+        // drift-correction pass that the SelfHealingPrologueReachabilityTest
+        // can statically observe.
+        $upgradesEtc->runSelfHealPrologue();
 
         ABJ_404_Solution_PluginLogic::doRegisterCrons();
 
@@ -201,7 +209,10 @@ trait ABJ_404_Solution_PluginLogicTrait_Lifecycle {
      * Handle new blog creation in multisite (WordPress >= 5.1).
      * This is triggered by the wp_initialize_site action.
      *
-     * @param WP_Site $site The site object for the new site
+     * @param mixed $site The WP_Site object for the new site. Normalized via
+     *     ABJ_404_Solution_SiteRef so a malformed payload (third-party filter
+     *     mutating the action argument, or a missing blog_id) early-returns
+     *     instead of calling switch_to_blog(0).
      * @param array<string, mixed> $args Additional arguments passed to the hook
      * @return void
      */
@@ -213,7 +224,11 @@ trait ABJ_404_Solution_PluginLogicTrait_Lifecycle {
             return;
         }
         if (is_plugin_active_for_network(plugin_basename(ABJ404_FILE))) {
-            $blogId = (int)$site->blog_id;
+            $siteRef = ABJ_404_Solution_SiteRef::fromWpSite($site);
+            if ($siteRef === null) {
+                return;
+            }
+            $blogId = $siteRef->getBlogId();
             switch_to_blog($blogId);
             try {
                 self::activateSingleSite();

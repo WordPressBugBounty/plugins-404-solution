@@ -364,6 +364,23 @@ trait ViewTrait_Stats {
             . '      if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; }'
             . '    });'
             . '  }'
+            . '  function fetchTrendData(days, allowRetry) {'
+            . '    return fetch(ajaxUrl + "?action=abj404getTrendData&nonce=" + encodeURIComponent(nonce) + "&days=" + days)'
+            . '      .then(function(r) {'
+            // B20: a 12-24h-idle nonce expires; admin-ajax replies 403.
+            // Mint a fresh nonce via the shared refresh helper (if loaded)
+            // and retry once. allowRetry guards against an infinite loop.
+            . '        if (r.status === 403 && allowRetry !== false && window.abj404NonceRefresh) {'
+            . '          return window.abj404NonceRefresh.fetchFresh().then(function(freshNonces) {'
+            . '            if (freshNonces && freshNonces["abj404_trendData"]) {'
+            . '              nonce = freshNonces["abj404_trendData"];'
+            . '            }'
+            . '            return fetchTrendData(days, false);'
+            . '          });'
+            . '        }'
+            . '        return r.json();'
+            . '      });'
+            . '  }'
             . '  function fetchAndRender() {'
             . '    var days = getSelectedDays();'
             . '    var loadEl = document.querySelector(".abj404-trends-loading");'
@@ -373,8 +390,7 @@ trait ViewTrait_Stats {
             . '    if (errEl)  errEl.style.display  = "none";'
             . '    if (chartsEl) chartsEl.style.display = "none";'
             . '    destroyCharts();'
-            . '    fetch(ajaxUrl + "?action=abj404getTrendData&nonce=" + encodeURIComponent(nonce) + "&days=" + days)'
-            . '      .then(function(r) { return r.json(); })'
+            . '    fetchTrendData(days, true)'
             . '      .then(function(resp) {'
             . '        if (loadEl) loadEl.style.display = "none";'
             . '        if (!resp || !resp.success || !Array.isArray(resp.data)) {'
@@ -498,10 +514,14 @@ trait ViewTrait_Stats {
             
 	        } else {
 	        	echo "Non-admin request to view debug file.";
-	        	$current_user = wp_get_current_user();
-	        	$userInfo = "Login: " . ($current_user->user_login ?? '') . ", display name: " .
-	         		($current_user->display_name ?? '') . ", Email: " . ($current_user->user_email ?? '') .
-	         		", UserID: " . $current_user->ID;
+	        	$current_user = ABJ_404_Solution_UserRef::fromWpUser(wp_get_current_user());
+	        	$userLogin = $current_user !== null ? $current_user->getLogin() : '';
+	        	$userDisplay = $current_user !== null ? $current_user->getDisplayName() : '';
+	        	$userEmail = $current_user !== null ? $current_user->getEmail() : '';
+	        	$userId = $current_user !== null ? $current_user->getId() : 0;
+	        	$userInfo = "Login: " . $userLogin . ", display name: " .
+	         		$userDisplay . ", Email: " . $userEmail .
+	         		", UserID: " . $userId;
 	            $this->logger->infoMessage("Non-admin request to view debug file. User info: " .
 	            	$userInfo);
 	        }

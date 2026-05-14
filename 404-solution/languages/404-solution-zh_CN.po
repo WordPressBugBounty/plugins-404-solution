@@ -278,6 +278,9 @@ msgstr "反馈发送成功。"
 msgid "Note: Feedback email could not be sent."
 msgstr "注意：反馈邮件无法发送。"
 
+msgid "Thanks for the feedback!"
+msgstr "感谢您的反馈！"
+
 msgid "All"
 msgstr "全部"
 
@@ -1645,8 +1648,8 @@ msgid "Error: Invalid language selected"
 msgstr "错误：选择了无效的语言"
 
 #: includes/html/adminOptionsGeneral.html
-msgid "When an error is detected by the plugin, email the entire log file to the developer. This is not required for the plugin to function, but it is helpful for the developer and for future versions of the plugin. This reveals: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when an issue is reported). Log files are checked daily when maintenance is run."
-msgstr "当插件检测到错误时，将整个日志文件通过电子邮件发送给开发人员。这不是插件运行所必需的，但对开发人员和插件的未来版本很有帮助。这会显示：调试日志中的所有内容、管理员电子邮件地址、已安装的PHP扩展、活动插件、PHP版本、WordPress版本、MySQL版本、已发布页面和文章总数等（报告问题时所询问的所有内容）。日志文件在运行维护时每天检查。"
+msgid "When the plugin detects an error, it transmits a copy of the debug log to the developer for diagnosis. Transmission may be by email or by HTTPS upload to a developer-operated server; the contents are the same. This is not required for the plugin to work, but it helps the developer fix bugs in future versions. The report includes: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when a support issue is opened). Reports are checked daily when maintenance runs."
+msgstr "当插件检测到错误时，会将调试日志的副本传输给开发者以进行诊断。传输方式可以是电子邮件，也可以通过HTTPS上传到由开发者运营的服务器；其内容是相同的。这不是插件正常运行所必需的，但有助于开发者在未来版本中修复缺陷。报告包括：调试日志中的所有内容、管理员电子邮件地址、已安装的PHP扩展、活动的插件、PHP版本、WordPress版本、MySQL版本、已发布的页面和文章的总数等（开启支持工单时所询问的所有内容）。报告在每日维护运行时进行检查。"
 
 #: includes/html/viewSuggestions.html
 # translation-verified: Technical shortcode name [abj404_solution_page_suggestions] intentionally in English
@@ -3770,3 +3773,79 @@ msgstr "正在准备重定向列表，请稍候。"
 #: includes/DataAccessTrait_ViewQueriesStaged.php
 msgid "(404 page)"
 msgstr "(404 页面)"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "Please wait before sending another support request."
+msgstr "请稍候，再发送下一个支持请求。"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "Invalid support request source."
+msgstr "无效的支持请求来源。"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "Failed to send support request. Please try again later."
+msgstr "支持请求发送失败。请稍后重试。"
+
+#: includes/ViewTrait_Settings.php
+msgid "Need help? Contact the developer"
+msgstr "需要帮助？请联系开发者"
+
+#: includes/ViewTrait_Settings.php
+msgid "Having trouble? Send your debug log to the developer. This sends a one-time diagnostic report (URLs, PHP/WP/DB versions, a debug log excerpt, active plugins, site URL) so we can diagnose the issue without asking you to copy-paste anything."
+msgstr "遇到问题？将调试日志发送给开发者。这将发送一份一次性的诊断报告（包含网址、PHP/WP/数据库版本、调试日志摘录、已启用插件、站点网址），以便我们诊断问题，无需您复制粘贴任何内容。"
+
+#: includes/WordPress_Connector.php
+msgid "Send debug log to developer"
+msgstr "将调试日志发送给开发者"
+
+#: includes/html/toolsImportForm.html
+msgid "Overwrite existing redirects when from URL already exists (otherwise duplicate rows are skipped)."
+msgstr "当来源 URL 已存在时覆盖现有的重定向（否则将跳过重复行）。"
+
+#: includes/ImportExportService.php
+msgid "Import paused at row %1$d. %2$d redirect(s) imported so far. Re-upload the same file to resume from row %1$d."
+msgstr "导入在第 %1$d 行已暂停。到目前为止已导入 %2$d 条重定向。重新上传相同的文件以从第 %1$d 行继续。"
+
+#: includes/ImportExportService.php
+msgid "The file seems to have loaded okay. %d existing redirect(s) were overwritten. Please check the redirects page."
+msgstr "文件似乎已成功加载。已覆盖 %d 条现有的重定向。请检查重定向页面。"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "HTTP %d from the developer endpoint"
+msgstr "来自开发者端点的 HTTP %d"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "the request never reached the developer endpoint"
+msgstr "请求未到达开发者端点"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "the report could not be packaged (%s)"
+msgstr "无法打包报告 (%s)"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "transport failure: %s"
+msgstr "传输失败：%s"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "the HTTP transport failed for an unknown reason"
+msgstr "HTTP 传输因未知原因失败"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "Email fallback via wp_mail() also failed. Check that this site can send mail."
+msgstr "通过 wp_mail() 的电子邮件后备也失败了。请检查此站点能否发送邮件。"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "No email fallback was attempted."
+msgstr "未尝试电子邮件后备。"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "Could not send support request: %1$s. %2$s"
+msgstr "无法发送支持请求：%1$s. %2$s"
+
+#: includes/UninstallModal.php
+msgid "Privacy details (retention, erasure path, processing region): %s"
+msgstr "隐私详情（留存期限、删除路径、处理区域）：%s"
+
+#: includes/UninstallModal.php
+msgid "Include technical details (site URL, system info, plugin counts, and a sanitized log excerpt) to help diagnose the issue"
+msgstr "附上技术详情（站点地址、系统信息、扩展数量以及经过脱敏处理的日志片段），以协助诊断该问题"

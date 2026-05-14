@@ -85,12 +85,27 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         $deletionTime = $deletionDays * 86400;
         $then = $now - $deletionTime;
 
+        // setSqlBigSelects() must run before any branch that touches the
+        // deletion query path so a large logs_hits/redirects join cannot
+        // trip MAX_JOIN_SIZE on legacy hosts that still default it small.
+        // Kept above the rollup-existence guard so callers still see the
+        // session pragma flip even on the skip path.
+        $this->setSqlBigSelects();
+
+        // F6 audit: getMostUnusedRedirects.sql joins logs_hits. If the rollup
+        // does not exist yet (fresh install, never built), schedule a rebuild
+        // and skip this run. The next daily cron will have it. Without the
+        // table the LEFT JOIN errors instead of degrading to "never used".
+        if (!$this->logsHitsTableExists()) {
+            $this->logger->debugMessage(__FUNCTION__ . " skipping: logs_hits table missing; scheduling rebuild.");
+            $this->scheduleHitsTableRebuild();
+            return 0;
+        }
+
         // Load and prepare SQL query
         $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getMostUnusedRedirects.sql");
         $query = $this->f->str_replace('{status_list}', $statusList, $query);
         $query = $this->f->str_replace('{timelimit}', (string)$then, $query);
-
-        $this->setSqlBigSelects();
 
         // Execute query and get results
         $results = $this->queryAndGetResults($query);
@@ -420,6 +435,88 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
     }
 
     /**
+     * Per-instance memoized cache of column-existence probes against the
+     * redirects table. Keyed by lowercased column name. Empty array means
+     * the cache has not been primed yet for any column.
+     *
+     * Per-instance (not static) so the DAO singleton resets on process end
+     * without leaking state across test methods that build their own DAO.
+     *
+     * @var array<string, bool>
+     */
+    private $redirectsTableColumnsCache = array();
+
+    /**
+     * Probe whether the redirects table has the named column right now.
+     *
+     * Used by setupRedirect() to drop columns from the INSERT payload when
+     * they are missing on this site (e.g. canonical_url on installs where
+     * dbDelta silently failed to ALTER ADD it). Result is cached for the
+     * life of the DAO instance: the first call runs SHOW COLUMNS FROM
+     * {wp_abj404_redirects}, every subsequent call hits the cache.
+     *
+     * Defensive against host failure: if SHOW COLUMNS errors out (table
+     * missing, permission denied, etc.), returns true so the INSERT path
+     * proceeds with the full payload. Better to surface the eventual
+     * INSERT failure (which is already routed through queryAndGetResults
+     * with auto-repair) than to silently strip a column we cannot probe.
+     *
+     * @param string $columnName
+     * @return bool
+     */
+    private function redirectsTableHasColumn(string $columnName): bool {
+        $key = strtolower($columnName);
+        if ($this->redirectsTableColumnsCache !== array()) {
+            // Cache primed: definitive yes/no for any column we saw on the
+            // table. Absence in the cache means the column does not exist.
+            return isset($this->redirectsTableColumnsCache[$key]);
+        }
+        global $wpdb;
+        if (!isset($wpdb)) {
+            // No DB handle (early-bootstrap path or test harness without
+            // wpdb global). Default permissive so the caller's normal
+            // payload path runs; do not cache so a later call retries.
+            return true;
+        }
+        $redirectsTable = $this->doTableNameReplacements("{wp_abj404_redirects}");
+        // Probe via queryAndGetResults so the DAO's centralized error
+        // classification, retry, and timeout handling apply. log_errors=false
+        // because a missing-table or permission-denied response is a probe
+        // signal here, not a bug to surface to the admin.
+        // @utf8-audit: opt-out - $redirectsTable is built by doTableNameReplacements
+        // from $wpdb->prefix plus the literal token {wp_abj404_redirects}; no user
+        // input flows in, so invalid-UTF-8 to SQL is structurally impossible.
+        $result = $this->queryAndGetResults(
+            "SHOW COLUMNS FROM `" . esc_sql($redirectsTable) . "`",
+            array('log_errors' => false, 'log_too_slow' => false)
+        );
+        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+        if ($rows === array()) {
+            // Probe failed (table missing, permission denied, host-side
+            // restriction). Default permissive so the centralized DAO error
+            // handler classifies any resulting INSERT failure with full
+            // context. Do not cache: the next call may succeed once the
+            // missing-table auto-repair runs.
+            return true;
+        }
+        $primed = array();
+        foreach ($rows as $row) {
+            if (!is_array($row)) { continue; }
+            foreach ($row as $field => $value) {
+                if (strtolower((string)$field) !== 'field') { continue; }
+                $primed[strtolower((string)$value)] = true;
+            }
+        }
+        if ($primed === array()) {
+            // SHOW COLUMNS returned rows but none had a parseable Field
+            // entry. Treat as a probe failure (do not cache).
+            return true;
+        }
+        $this->redirectsTableColumnsCache = $primed;
+        return isset($this->redirectsTableColumnsCache[$key]);
+    }
+
+    /**
      * SQL expression that emits the canonical form of an arbitrary URL column.
      *
      * Used by the (rare) callsites that still need to canonicalize at JOIN
@@ -495,14 +592,25 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
                 'code' => $code,
                 'disabled' => $disabled,
                 'timestamp' => $now,
-                // Pre-compute the canonical form so the captured-page JOIN to
-                // logs_hits.requested_url is a single indexed equality lookup
-                // instead of CONCAT('/', TRIM(...)) per row at query time. The
-                // formula must stay in lockstep with hitsCanonicalUrlSqlExpression()
-                // (read side) and the buildRedirectsCanonicalUrlChunk() backfill.
-                'canonical_url' => self::computeRedirectsCanonicalUrl($fromURL),
             );
-            $insertFormats = array('%s', '%d', '%d', '%s', '%d', '%d', '%d', '%s');
+            $insertFormats = array('%s', '%d', '%d', '%s', '%d', '%d', '%d');
+            // Schema-drift tolerance: canonical_url shipped in 4.1.11. On
+            // installs where dbDelta silently failed to add it, every
+            // captured-404 INSERT errors with "Unknown column 'canonical_url'
+            // in 'field list'" (1671 such errors observed on a single 4.1.12
+            // site over 10 days in the May 10 debug zip). Probe before
+            // referencing the column. The probe result is cached per-request
+            // by self::redirectsTableHasColumn() so the SHOW COLUMNS cost
+            // amortizes across multiple captured-404 hits in the same request.
+            // Pre-compute the canonical form so the captured-page JOIN to
+            // logs_hits.requested_url is a single indexed equality lookup
+            // instead of CONCAT('/', TRIM(...)) per row at query time. The
+            // formula must stay in lockstep with hitsCanonicalUrlSqlExpression()
+            // (read side) and the buildRedirectsCanonicalUrlChunk() backfill.
+            if ($this->redirectsTableHasColumn('canonical_url')) {
+                $insertData['canonical_url'] = self::computeRedirectsCanonicalUrl($fromURL);
+                $insertFormats[] = '%s';
+            }
             if ($engine !== null) {
                 $insertData['engine'] = substr((string)$engine, 0, 64);
                 $insertFormats[] = '%s';
@@ -551,14 +659,12 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
                 return true;
             }
 
-            $post = get_post($destId);
-            if (!is_object($post)) {
+            // Boundary normalizer: WP_Post shape-probing lives in the VO.
+            $ref = ABJ_404_Solution_PostRef::fromWpPost(get_post($destId));
+            if ($ref === null) {
                 return false;
             }
-
-            $postStatus = strtolower($post->post_status);
-
-            return in_array($postStatus, array('publish', 'published'), true);
+            return $ref->isPublished();
         }
 
         if ($type === ABJ404_TYPE_CAT || $type === ABJ404_TYPE_TAG) {
@@ -828,337 +934,9 @@ trait ABJ_404_Solution_DataAccess_RedirectsTrait {
         return $redirect;
     }
     
-    /** Returns rows with the IDs of the published items.
-     * @global type $wpdb
-     * @global type $abj404logic
-     * @global type $abj404dao
-     * @global type $abj404logging
-     * @param string $slug only get results for this slug. (empty means all posts)
-     * @param string $searchTerm use this string in a LIKE on the sql.
-     * @param string $limitResults
-     * @param string $orderResults
-     * @param string $extraWhereClause use this string in a where on the sql.
-     * @return array<int, object>
-     */
-    function getPublishedPagesAndPostsIDs($slug = '', $searchTerm = '',
-    	$limitResults = '', $orderResults = '', $extraWhereClause = '') {
-        global $wpdb;
-        $abj404logic = abj_service('plugin_logic');
-
-        // Fix for missing table error (reported by 2 users - 4% of errors)
-        // Check if wp_posts table exists before querying
-        if (!$this->tableExists($wpdb->posts)) {
-            $this->logger->errorMessage("WordPress posts table not found: " . $wpdb->posts .
-                ". This may indicate an incorrect table prefix or database configuration issue.");
-            return array(); // Return empty array instead of crashing
-        }
-
-        // get the valid post types
-        $options = $abj404logic->getOptions();
-        $recognizedPostTypes = $this->buildPostTypeSqlList($options);
-        if ($recognizedPostTypes === '') {
-            return array();
-        }
-        // ----------------
-
-        if ($slug != "") {
-            // Sanitize invalid UTF-8 before SQL to prevent database errors
-            // (fixes bug: URLs like %9F%9F%9F%9F-%9F%9F%9F-1.png cause "invalid data" errors)
-            $slug = $this->f->sanitizeInvalidUTF8($slug);
-
-            // Check if the post_name column supports utf8mb4 collation
-            // (fixes bug: Arabic sites on latin1 databases get "invalid data" errors)
-            // Note: Check actual column collation, not database default - on mixed setups
-            // the database may be latin1 but wp_posts.post_name is utf8mb4
-            $collationResult = $this->queryAndGetResults(
-                "SELECT COLLATION_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                 WHERE TABLE_SCHEMA = DATABASE()
-                 AND TABLE_NAME = %s
-                 AND COLUMN_NAME = 'post_name'",
-                array('query_params' => array($wpdb->posts), 'log_errors' => false)
-            );
-            $collationRows = isset($collationResult['rows']) && is_array($collationResult['rows']) ? $collationResult['rows'] : array();
-            $columnCollation = null;
-            if (!empty($collationRows) && is_array($collationRows[0])) {
-                $first = reset($collationRows[0]);
-                $columnCollation = is_scalar($first) ? (string)$first : null;
-            }
-            if ($columnCollation !== null && strpos(strtolower($columnCollation), 'utf8mb4') !== false) {
-                // Column supports utf8mb4 - use CAST for proper Unicode comparison
-                $resolvedCollation = $this->sanitizeCollationIdentifier($columnCollation);
-                if ($resolvedCollation === '') {
-                    $resolvedCollation = $this->getPreferredUtf8mb4Collation();
-                }
-                $specifiedSlug = " */\n and CAST(wp_posts.post_name AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci = "
-                        . "'" . esc_sql($slug) . "' \n ";
-                $specifiedSlug = str_replace('utf8mb4_unicode_ci', $resolvedCollation, $specifiedSlug);
-            } else {
-                // Legacy column (latin1, utf8, etc.) - use simple comparison.
-                // 4-byte UTF-8 characters (emoji, rare CJK, etc.) cannot exist in a
-                // utf8mb3/latin1 column, so skip the slug comparison entirely to avoid
-                // "Illegal mix of collations" errors.
-                if ($this->f->containsUtf8mb4Characters($slug)) {
-                    $specifiedSlug = '';
-                } else {
-                    $specifiedSlug = " */\n and wp_posts.post_name = "
-                            . "'" . esc_sql($slug) . "' \n ";
-                }
-            }
-        } else {
-            $specifiedSlug = '';
-        }
-        
-        if ($searchTerm != "") {
-        	$searchTerm = " */\n and lower(wp_posts.post_title) like "
-        		. "'%" . esc_sql($this->f->strtolower($searchTerm)) . "%' \n ";
-        } else {
-        	$searchTerm = '';
-        }
-        
-        if ($extraWhereClause != "") {
-        	$extraWhereClause = " */\n " . $extraWhereClause;
-        }
-        
-        if (!empty($limitResults)) {
-            $limitResults = " */\n  limit " . $limitResults;
-        }
-        if (!empty($orderResults)) {
-        	$orderResults = " */\n  order by " . $orderResults;
-        }
-        
-        // load the query and do the replacements.
-        $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getPublishedPagesAndPostsIDs.sql");
-        $query = $this->doTableNameReplacements($query);
-        $query = $this->f->str_replace('{recognizedPostTypes}', $recognizedPostTypes, $query);
-        $query = $this->f->str_replace('{specifiedSlug}', $specifiedSlug, $query);
-        $query = $this->f->str_replace('{searchTerm}', $searchTerm, $query);
-        $query = $this->f->str_replace('{extraWhereClause}', $extraWhereClause, $query);
-        $query = $this->f->str_replace('{limit-results}', $limitResults, $query);
-        $query = $this->f->str_replace('{order-results}', $orderResults, $query);
-        
-        $result = $this->queryAndGetResults($query, array('result_type' => OBJECT));
-        $queryError = is_string($result['last_error'] ?? '') ? ($result['last_error'] ?? '') : '';
-        $rows = is_array($result['rows']) ? $result['rows'] : array();
-
-        // Collation-error fallback: if CONVERT(... USING utf8mb4) COLLATE still fails
-        // (e.g. MySQL version quirk), retry without any COLLATE forcing — the pre-4.1.4
-        // behavior that relies on implicit collation resolution.
-        if (!empty($queryError) && $this->isCollationError($queryError)) {
-            $fpreg = ABJ_404_Solution_FunctionsPreg::getInstance();
-            $fallbackQuery = $fpreg->regexReplace(
-                'CONVERT\(wpt\.name USING utf8mb4\) COLLATE [A-Za-z0-9_]+',
-                'wpt.name', $query);
-            $fallbackQuery = $fpreg->regexReplace(
-                'CONVERT\(usefulterms\.grouped_terms USING utf8mb4\) COLLATE [A-Za-z0-9_]+',
-                'usefulterms.grouped_terms', is_string($fallbackQuery) ? $fallbackQuery : $query);
-            $fallbackResult = $this->queryAndGetResults(
-                is_string($fallbackQuery) ? $fallbackQuery : $query,
-                array('result_type' => OBJECT, 'log_errors' => false));
-            $queryError = is_string($fallbackResult['last_error'] ?? '') ? ($fallbackResult['last_error'] ?? '') : '';
-            if (empty($queryError)) {
-                $rows = is_array($fallbackResult['rows']) ? $fallbackResult['rows'] : array();
-            }
-        }
-
-        if (!empty($queryError) && $this->isInvalidDataError($queryError) &&
-                $slug != "" && strpos($query, 'CAST(wp_posts.post_name AS CHAR CHARACTER SET utf8mb4)') !== false) {
-            // Compatibility fallback: retry once without CAST/COLLATE for environments
-            // where mixed encodings still reject utf8mb4 coercion.
-            $fallbackSpecifiedSlug = " */\n and wp_posts.post_name = '" . esc_sql($slug) . "' \n ";
-            $fallbackQuery = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getPublishedPagesAndPostsIDs.sql");
-            $fallbackQuery = $this->doTableNameReplacements($fallbackQuery);
-            $fallbackQuery = $this->f->str_replace('{recognizedPostTypes}', $recognizedPostTypes, $fallbackQuery);
-            $fallbackQuery = $this->f->str_replace('{specifiedSlug}', $fallbackSpecifiedSlug, $fallbackQuery);
-            $fallbackQuery = $this->f->str_replace('{searchTerm}', $searchTerm, $fallbackQuery);
-            $fallbackQuery = $this->f->str_replace('{extraWhereClause}', $extraWhereClause, $fallbackQuery);
-            $fallbackQuery = $this->f->str_replace('{limit-results}', $limitResults, $fallbackQuery);
-            $fallbackQuery = $this->f->str_replace('{order-results}', $orderResults, $fallbackQuery);
-            $fallbackResult = $this->queryAndGetResults($fallbackQuery, array('result_type' => OBJECT, 'log_errors' => false));
-            $fallbackError = is_string($fallbackResult['last_error'] ?? '') ? ($fallbackResult['last_error'] ?? '') : '';
-            if (empty($fallbackError)) {
-                $queryError = '';
-                $rows = is_array($fallbackResult['rows']) ? $fallbackResult['rows'] : array();
-            }
-        }
-
-        // check for errors (use $queryError which tracks the latest attempt)
-        if ($queryError) {
-            // "Unknown column 'plc.content_keywords'" occurs during the DB migration window
-            // when the column hasn't been added yet (e.g. sync lock was stuck for ~24h).
-            // Degrade to warning so it doesn't generate email reports for every 404 hit.
-            if (stripos($queryError, 'unknown column') !== false &&
-                    stripos($queryError, 'content_keywords') !== false) {
-                $this->logger->warn("content_keywords column not yet available (DB migration pending): " . $queryError);
-            } else if (!$this->classifyAndHandleInfrastructureError($queryError)) {
-                $this->logger->errorMessage("Error executing query. Err: " . $queryError . ", Query: " . $query);
-            }
-        }
-
-        return $rows;
-    }
-
-    /** Returns rows with the IDs of the published images.
-     * @return array<int, object>
-     */
-    function getPublishedImagesIDs() {
-        global $wpdb;
-        $abj404logic = abj_service('plugin_logic');
-        
-        // get the valid post types
-        $options = $abj404logic->getOptions();
-        $recognizedPostTypes = $this->buildPostTypeSqlList($options);
-        if ($recognizedPostTypes === '') {
-            return array();
-        }
-        // ----------------
-
-        // load the query and do the replacements.
-        $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getPublishedImageIDs.sql");
-        $query = $this->doTableNameReplacements($query);
-        $query = $this->f->str_replace('{recognizedPostTypes}', $recognizedPostTypes, $query);
-        
-        $result = $this->queryAndGetResults($query, array('result_type' => OBJECT));
-        $queryError = is_string($result['last_error'] ?? '') ? ($result['last_error'] ?? '') : '';
-        if ($queryError && !$this->classifyAndHandleInfrastructureError($queryError)) {
-            $this->logger->errorMessage("Error executing query. Err: " . $queryError . ", Query: " . $query);
-        }
-
-        return is_array($result['rows']) ? $result['rows'] : array();
-    }
-
-    /** Returns rows with the defined terms (tags).
-     * @param string|null $slug
-     * @param int|null $limit
-     * @return array<int, object>
-     */
-    function getPublishedTags($slug = null, $limit = null) {
-        global $wpdb;
-        $abj404logic = abj_service('plugin_logic');
-
-        // get the valid post types
-        $options = $abj404logic->getOptions();
-
-        $recognizedCategories = $this->buildCategorySqlList($options);
-
-        if ($slug != null) {
-            // Sanitize invalid UTF-8 before SQL to prevent database errors
-            $slug = $this->f->sanitizeInvalidUTF8($slug);
-            $slug = "*/ and wp_terms.slug = '" . esc_sql($slug) . "'\n";
-        }
-
-        $limitClause = '';
-        if ($limit !== null && is_numeric($limit) && $limit > 0) {
-            $limitClause = "LIMIT " . intval($limit);
-        }
-
-        // load the query and do the replacements.
-        $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getPublishedTags.sql");
-        $query = $this->f->str_replace('{slug}', $slug, $query);
-        $query = $this->f->str_replace('{limit}', $limitClause, $query);
-        $query = $this->doTableNameReplacements($query);
-        $query = $this->f->str_replace('{recognizedCategories}', $recognizedCategories, $query);
-
-        $result = $this->queryAndGetResults($query, array('result_type' => OBJECT));
-        $queryError = is_string($result['last_error'] ?? '') ? ($result['last_error'] ?? '') : '';
-        if ($queryError && !$this->classifyAndHandleInfrastructureError($queryError)) {
-            $this->logger->errorMessage("Error executing query. Err: " . $queryError . ", Query: " . $query);
-        }
-        $rows = is_array($result['rows']) ? $result['rows'] : array();
-
-        $rows = $this->addURLToTermsRows($rows);
-
-        return $rows;
-    }
-    
-    /**
-     * @param array<int, object> $rows
-     * @return array<int, object>
-     */
-    function addURLToTermsRows($rows) {
-    	// add url data
-    	global $wp_rewrite;
-    	$extraPermaStructureCache = array();
-    	foreach ($rows as $row) {
-    		$taxonomy = isset($row->taxonomy) ? (string)$row->taxonomy : '';
-    		if (!array_key_exists($taxonomy, $extraPermaStructureCache)) {
-    			$extraPermaStructureCache[$taxonomy] = $wp_rewrite->get_extra_permastruct($taxonomy);
-    		}
-    		$struct = $extraPermaStructureCache[$taxonomy];
-    		
-    		$slug = isset($row->slug) ? (string)$row->slug : '';
-    		$url = str_replace('%' . $taxonomy . '%', $slug, $struct);
-    		
-    		// TODO verify one of the urls?
-    		/*
-    		if (!$verifiedOne) {
-    			$id = $row->term_id;
-    			$link = get_tag_link($id);
-    			$link = get_category_link($id);
-    			// $link should equal $url
-		    	$verifiedOne = true;
-    		}
-    		*/
-    		
-    		/** @var \stdClass $row */
-    		$row->url = $url;
-    	}
-    	
-    	return $rows;
-    }
-    
-    /** Returns rows with the defined categories.
-     * @param int|null $term_id
-     * @param string|null $slug
-     * @param int|null $limit
-     * @return array<int, object>
-     */
-    function getPublishedCategories($term_id = null, $slug = null, $limit = null) {
-        global $wpdb;
-        $abj404logic = abj_service('plugin_logic');
-
-        // get the valid post types
-        $options = $abj404logic->getOptions();
-
-        $recognizedCategories = $this->buildCategorySqlList($options);
-        if ($recognizedCategories === '') {
-            $recognizedCategories = "''";
-        }
-
-        if ($term_id != null) {
-            // Cast to integer for safety even though term_id is currently always null from callers
-            $term_id = "*/ and {wp_terms}.term_id = " . intval($term_id) . "\n";
-        }
-
-        if ($slug != null) {
-            // Sanitize invalid UTF-8 before SQL to prevent database errors
-            $slug = $this->f->sanitizeInvalidUTF8($slug);
-            $slug = "*/ and {wp_terms}.slug = '" . esc_sql($slug) . "'\n";
-        }
-
-        $limitClause = '';
-        if ($limit !== null && is_numeric($limit) && $limit > 0) {
-            $limitClause = "LIMIT " . intval($limit);
-        }
-
-        // load the query and do the replacements.
-        $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getPublishedCategories.sql");
-        $query = $this->f->str_replace('{recognizedCategories}', $recognizedCategories, $query);
-        $query = $this->f->str_replace('{term_id}', $term_id !== null ? (string)$term_id : '', $query);
-        $query = $this->f->str_replace('{slug}', $slug, $query);
-        $query = $this->f->str_replace('{limit}', $limitClause, $query);
-        $query = $this->doTableNameReplacements($query);
-
-        $result = $this->queryAndGetResults($query, array('result_type' => OBJECT));
-        $queryError = is_string($result['last_error'] ?? '') ? ($result['last_error'] ?? '') : '';
-        if ($queryError && !$this->classifyAndHandleInfrastructureError($queryError)) {
-            $this->logger->errorMessage("Error executing query. Err: " . $queryError . ", Query: " . $query);
-        }
-        $rows = is_array($result['rows']) ? $result['rows'] : array();
-
-        $rows = $this->addURLToTermsRows($rows);
-
-        return $rows;
-    }
+    // Published-content lookup queries (getPublishedPagesAndPostsIDs,
+    // getPublishedImagesIDs, getPublishedTags, addURLToTermsRows,
+    // getPublishedCategories) live in DataAccessTrait_PublishedContent.
 
     /** Delete stored redirects based on passed in POST data.
      * @return string

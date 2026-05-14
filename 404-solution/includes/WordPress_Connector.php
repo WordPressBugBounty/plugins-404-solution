@@ -205,6 +205,8 @@ class ABJ_404_Solution_WordPress_Connector {
             'ABJ_404_Solution_WordPress_Connector::addMainSettingsPageLink');
         add_action('admin_enqueue_scripts',
             'ABJ_404_Solution_WordPress_Connector::add_scripts', 11);
+        add_action('admin_enqueue_scripts',
+            'ABJ_404_Solution_WordPress_Connector::enqueueSupportRequestAssetsOnPluginsPage', 11);
         add_action('admin_head',
             'ABJ_404_Solution_WordPress_Connector::outputCriticalThemeCSS', 1);
 
@@ -220,6 +222,8 @@ class ABJ_404_Solution_WordPress_Connector {
 
         ABJ_404_Solution_Ajax_EngineProfiles::registerActions();
         ABJ_404_Solution_Ajax_SettingsModeToggle::init();
+        ABJ_404_Solution_Ajax_SupportRequest::init();
+        ABJ_404_Solution_Ajax_SupportRequestPreview::init();
         ABJ_404_Solution_UninstallModal::init();
         ABJ_404_Solution_SetupWizard::init();
         if (class_exists('ABJ_404_Solution_Privacy')) {
@@ -328,8 +332,7 @@ class ABJ_404_Solution_WordPress_Connector {
         }
 
         if ($isListPage || $isStatsPage) {
-            ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-view-updater', plugin_dir_url(__FILE__) . 'ajax/view_updater.js',
-                    array('jquery', 'jquery-ui-autocomplete'));
+            self::enqueueViewUpdaterModules(plugin_dir_url(__FILE__) . 'ajax/');
         }
 
         if ($isLogsPage) {
@@ -398,6 +401,8 @@ class ABJ_404_Solution_WordPress_Connector {
             array()
         );
 
+        self::registerSupportRequestAssets();
+
         ABJ_404_Solution_WPUtils::my_wp_enq_style('abj404solution-styles', ABJ404_URL . 'includes/html/404solutionStyles.css',
                 array());
         ABJ_404_Solution_WPUtils::my_wp_enq_style('abj404solution-themes', ABJ404_URL . 'includes/html/adminThemes.css',
@@ -411,6 +416,117 @@ class ABJ_404_Solution_WordPress_Connector {
         } catch (Throwable $e) {
             self::reportAdminRuntimeError('admin_enqueue_scripts', $e);
         }
+    }
+
+    /**
+     * Enqueue the reusable support-request button assets. Loaded on
+     * every plugin admin page so any screen can drop a
+     * SupportRequestButton::render() mount-point without a per-screen
+     * enqueue checklist that drifts as new mount points are added.
+     *
+     * The inline bootstrap exposes window.ABJ404.ajaxurl plus
+     * window.ABJ404.nonces.{support_request, support_request_preview}
+     * so the JS client and the modal component can both reach the
+     * nonces without wp_localize_script's per-handle binding.
+     *
+     * @return void
+     */
+    /**
+     * Enqueue the support-request button assets specifically for the
+     * wp-admin/plugins.php screen so the row-meta link added by
+     * `addPluginRowMeta()` can open its consent modal in-place. The
+     * plugin's main `add_scripts()` enqueue is gated to the plugin's
+     * settings page and would skip plugins.php otherwise.
+     *
+     * Scope: this hook runs on every admin page but no-ops unless the
+     * current screen is plugins.php, keeping the asset footprint tight.
+     *
+     * @param string $hook the admin page slug WP passes to admin_enqueue_scripts
+     * @return void
+     */
+    static function enqueueSupportRequestAssetsOnPluginsPage($hook) {
+        if ($hook !== 'plugins.php') {
+            return;
+        }
+        try {
+            self::registerSupportRequestAssets();
+        } catch (Throwable $e) {
+            self::reportAdminRuntimeError('admin_enqueue_scripts:plugins.php', $e);
+        }
+    }
+
+    /**
+     * Enqueue the view-updater module bundle (the AJAX-driven admin table
+     * orchestration). Split out of add_scripts() to keep that function under
+     * the ModularityTest body-line cap. Enqueue order matters: every file
+     * below uses globals defined by the modules listed before it; the
+     * bootstrap (view_updater.js) declares the jQuery.ready entry point and
+     * must load LAST so the helpers are defined when ready fires.
+     * WordPress's $deps array enforces this ordering on the emitted
+     * <script> tags. The B20 nonce-refresh helper exposes
+     * abj404AjaxWithNonceRetry which every sibling uses via a soft typeof
+     * reference, so its enqueue must precede them.
+     *
+     * @param string $vuBase URL prefix for the ajax/ assets directory.
+     * @return void
+     */
+    private static function enqueueViewUpdaterModules(string $vuBase): void {
+        $enq = array('ABJ_404_Solution_WPUtils', 'my_wp_enq_scrpt');
+        $enq('abj404-view-updater-nonce-refresh',
+            $vuBase . 'view_updater_nonce_refresh.js', array('jquery'));
+        $enq('abj404-view-updater-stage-diagnostics',
+            $vuBase . 'view_updater_stage_diagnostics.js', array('jquery'));
+        $enq('abj404-view-updater-compare',
+            $vuBase . 'view_updater_compare.js', array('jquery'));
+        $enq('abj404-view-updater-toast',
+            $vuBase . 'view_updater_toast.js', array('jquery'));
+        $enq('abj404-view-updater-stats', $vuBase . 'view_updater_stats.js',
+            array('jquery', 'abj404-view-updater-toast', 'abj404-view-updater-nonce-refresh'));
+        $enq('abj404-view-updater-build-advance', $vuBase . 'view_updater_build_advance.js',
+            array('jquery', 'abj404-view-updater-stage-diagnostics', 'abj404-view-updater-nonce-refresh'));
+        $enq('abj404-view-updater-table-init', $vuBase . 'view_updater_table_init.js',
+            array('jquery', 'abj404-view-updater-toast', 'abj404-view-updater-stats',
+                'abj404-view-updater-nonce-refresh'));
+        $enq('abj404-view-updater-table-warmup', $vuBase . 'view_updater_table_warmup.js',
+            array('jquery', 'abj404-view-updater-stage-diagnostics',
+                'abj404-view-updater-build-advance', 'abj404-view-updater-table-init',
+                'abj404-view-updater-nonce-refresh'));
+        $enq('abj404-view-updater-pagination', $vuBase . 'view_updater_pagination.js',
+            array('jquery', 'abj404-view-updater-compare', 'abj404-view-updater-stage-diagnostics',
+                'abj404-view-updater-build-advance', 'abj404-view-updater-table-init',
+                'abj404-view-updater-table-warmup', 'abj404-view-updater-toast',
+                'abj404-view-updater-nonce-refresh'));
+        $enq('abj404-view-updater', $vuBase . 'view_updater.js',
+            array('jquery', 'jquery-ui-autocomplete',
+                'abj404-view-updater-stage-diagnostics', 'abj404-view-updater-compare',
+                'abj404-view-updater-toast', 'abj404-view-updater-stats',
+                'abj404-view-updater-build-advance', 'abj404-view-updater-table-init',
+                'abj404-view-updater-table-warmup', 'abj404-view-updater-pagination',
+                'abj404-view-updater-nonce-refresh'));
+    }
+
+    private static function registerSupportRequestAssets(): void {
+        ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-support-request-client',
+            plugin_dir_url(__FILE__) . 'ajax/SupportRequest.js', array());
+        ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-support-request-button',
+            ABJ404_URL . 'includes/js/support-request-button.js',
+            array('abj404-support-request-client'));
+        if (!function_exists('wp_add_inline_script')) {
+            return;
+        }
+        $supportNonce = wp_create_nonce(ABJ_404_Solution_Ajax_SupportRequest::NONCE_ACTION);
+        $previewNonce = wp_create_nonce(ABJ_404_Solution_Ajax_SupportRequestPreview::NONCE_ACTION);
+        $ajaxUrl = function_exists('admin_url') ? admin_url('admin-ajax.php') : '/wp-admin/admin-ajax.php';
+        $payload = wp_json_encode(array(
+            'ajaxurl' => $ajaxUrl,
+            'nonces' => array(
+                'support_request' => $supportNonce,
+                'support_request_preview' => $previewNonce,
+            ),
+        ));
+        $bootstrap = 'window.ABJ404=window.ABJ404||{};Object.assign(window.ABJ404,'
+            . (is_string($payload) ? $payload : '{}') . ');';
+        wp_add_inline_script('abj404-support-request-client', $bootstrap, 'before');
     }
 
     /** Detect if dark mode is enabled from various sources.
@@ -666,7 +782,19 @@ class ABJ_404_Solution_WordPress_Connector {
     }
 
     /**
-     * Adds a "Send Feedback" link to the plugin row on the Plugins page.
+     * Adds a "Send debug log to developer" link to the plugin row on
+     * the Plugins page. The link opens the support-request consent
+     * modal in-place on wp-admin/plugins.php (handled by
+     * support-request-button.js, which attaches to elements matching
+     * .abj404-support-request-link). Opening in-place is deliberate:
+     * the Plugins listing is the screen an admin reaches when the
+     * plugin's own Settings page is broken, so the modal must not
+     * depend on Settings rendering correctly.
+     *
+     * The href falls back to the same-page anchor `#abj404-support-request`
+     * so the link is still well-formed if support-request-button.js
+     * fails to load. The modal itself is the only path that transmits
+     * the support-request payload; clicking the link never POSTs.
      *
      * @param array<int|string, string> $links
      * @param string $file
@@ -676,10 +804,10 @@ class ABJ_404_Solution_WordPress_Connector {
         if ($file !== ABJ404_NAME) {
             return $links;
         }
-        $email   = defined('ABJ404_AUTHOR_EMAIL') ? ABJ404_AUTHOR_EMAIL : '404solution@ajexperience.com';
-        $subject = rawurlencode('Feedback: 404 Solution');
-        $links[] = '<a href="mailto:' . esc_attr($email) . '?subject=' . $subject . '">'
-            . esc_html__('Send Feedback', '404-solution') . '</a>';
+        $links[] = '<a href="#abj404-support-request"'
+            . ' class="abj404-support-request-link"'
+            . ' data-triggered-from="plugins_row_action">'
+            . esc_html__('Send debug log to developer', '404-solution') . '</a>';
         return $links;
     }
 

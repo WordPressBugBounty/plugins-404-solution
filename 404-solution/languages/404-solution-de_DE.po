@@ -278,6 +278,9 @@ msgstr "Feedback erfolgreich gesendet."
 msgid "Note: Feedback email could not be sent."
 msgstr "Hinweis: Feedback-E-Mail konnte nicht gesendet werden."
 
+msgid "Thanks for the feedback!"
+msgstr "Vielen Dank für das Feedback!"
+
 msgid "All"
 msgstr "Alle"
 
@@ -1636,8 +1639,8 @@ msgid "Error: Invalid language selected"
 msgstr "Fehler: Ungültige Sprache ausgewählt"
 
 #: includes/html/adminOptionsGeneral.html
-msgid "When an error is detected by the plugin, email the entire log file to the developer. This is not required for the plugin to function, but it is helpful for the developer and for future versions of the plugin. This reveals: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when an issue is reported). Log files are checked daily when maintenance is run."
-msgstr "Wenn ein Fehler vom Plugin erkannt wird, wird die gesamte Protokolldatei per E-Mail an den Entwickler gesendet. Dies ist nicht erforderlich, damit das Plugin funktioniert, aber es ist hilfreich für den Entwickler und für zukünftige Versionen des Plugins. Dies offenbart: alles im Debug-Protokoll, die Admin-E-Mail-Adresse, installierte PHP-Erweiterungen, aktive Plugins, PHP-Version, WordPress-Version, MySQL-Version, insgesamt veröffentlichte Seiten und Beiträge usw. (alles, was bei der Meldung eines Problems gefragt wird). Protokolldateien werden täglich während der Wartung überprüft."
+msgid "When the plugin detects an error, it transmits a copy of the debug log to the developer for diagnosis. Transmission may be by email or by HTTPS upload to a developer-operated server; the contents are the same. This is not required for the plugin to work, but it helps the developer fix bugs in future versions. The report includes: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when a support issue is opened). Reports are checked daily when maintenance runs."
+msgstr "Wenn das Plugin einen Fehler erkennt, übermittelt es eine Kopie des Debug-Protokolls zur Diagnose an den Entwickler. Die Übermittlung kann per E-Mail oder per HTTPS-Upload an einen vom Entwickler betriebenen Server erfolgen; die Inhalte sind identisch. Dies ist nicht erforderlich, damit das Plugin funktioniert, aber es hilft dem Entwickler, Fehler in zukünftigen Versionen zu beheben. Der Bericht enthält: alles im Debug-Protokoll, die Administrator-E-Mail-Adresse, installierte PHP-Erweiterungen, aktive Plugins, PHP-Version, WordPress-Version, MySQL-Version, insgesamt veröffentlichte Seiten und Beiträge usw. (alles, was beim Öffnen eines Support-Tickets gefragt wird). Berichte werden täglich bei der Wartung überprüft."
 
 #: includes/html/viewSuggestions.html
 msgid "Display the closest matching pages by using the shortcode [abj404_solution_page_suggestions]."
@@ -3762,3 +3765,79 @@ msgstr "Die Weiterleitungstabelle wird vorbereitet. Bitte warten."
 #: includes/DataAccessTrait_ViewQueriesStaged.php
 msgid "(404 page)"
 msgstr "(404-Seite)"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "Please wait before sending another support request."
+msgstr "Bitte warten Sie, bevor Sie eine weitere Supportanfrage senden."
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "Invalid support request source."
+msgstr "Ungültige Quelle der Supportanfrage."
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "Failed to send support request. Please try again later."
+msgstr "Supportanfrage konnte nicht gesendet werden. Bitte versuchen Sie es später erneut."
+
+#: includes/ViewTrait_Settings.php
+msgid "Need help? Contact the developer"
+msgstr "Brauchen Sie Hilfe? Wenden Sie sich an den Entwickler"
+
+#: includes/ViewTrait_Settings.php
+msgid "Having trouble? Send your debug log to the developer. This sends a one-time diagnostic report (URLs, PHP/WP/DB versions, a debug log excerpt, active plugins, site URL) so we can diagnose the issue without asking you to copy-paste anything."
+msgstr "Probleme? Senden Sie Ihr Debug-Protokoll an den Entwickler. Dies sendet einmalig einen Diagnosebericht (URLs, PHP/WP/DB-Versionen, Auszug aus dem Debug-Protokoll, aktive Plugins, Website-URL), damit wir das Problem diagnostizieren können, ohne dass Sie etwas kopieren und einfügen müssen."
+
+#: includes/WordPress_Connector.php
+msgid "Send debug log to developer"
+msgstr "Debug-Protokoll an Entwickler senden"
+
+#: includes/html/toolsImportForm.html
+msgid "Overwrite existing redirects when from URL already exists (otherwise duplicate rows are skipped)."
+msgstr "Vorhandene Weiterleitungen überschreiben, wenn die Quell-URL bereits existiert (andernfalls werden doppelte Zeilen übersprungen)."
+
+#: includes/ImportExportService.php
+msgid "Import paused at row %1$d. %2$d redirect(s) imported so far. Re-upload the same file to resume from row %1$d."
+msgstr "Import pausiert bei Zeile %1$d. Bisher %2$d Weiterleitung(en) importiert. Laden Sie dieselbe Datei erneut hoch, um ab Zeile %1$d fortzufahren."
+
+#: includes/ImportExportService.php
+msgid "The file seems to have loaded okay. %d existing redirect(s) were overwritten. Please check the redirects page."
+msgstr "Die Datei scheint korrekt geladen worden zu sein. %d vorhandene Weiterleitung(en) wurden überschrieben. Bitte überprüfen Sie die Weiterleitungsseite."
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "HTTP %d from the developer endpoint"
+msgstr "HTTP %d vom Entwickler-Endpunkt"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "the request never reached the developer endpoint"
+msgstr "die Anfrage hat den Entwickler-Endpunkt nie erreicht"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "the report could not be packaged (%s)"
+msgstr "der Bericht konnte nicht gepackt werden (%s)"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "transport failure: %s"
+msgstr "Übertragungsfehler: %s"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "the HTTP transport failed for an unknown reason"
+msgstr "der HTTP-Transport ist aus unbekanntem Grund fehlgeschlagen"
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "Email fallback via wp_mail() also failed. Check that this site can send mail."
+msgstr "Der E-Mail-Fallback über wp_mail() ist ebenfalls fehlgeschlagen. Prüfen Sie, ob diese Website E-Mails senden kann."
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "No email fallback was attempted."
+msgstr "Es wurde kein E-Mail-Fallback versucht."
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "Could not send support request: %1$s. %2$s"
+msgstr "Supportanfrage konnte nicht gesendet werden: %1$s. %2$s"
+
+#: includes/UninstallModal.php
+msgid "Privacy details (retention, erasure path, processing region): %s"
+msgstr "Datenschutzangaben (Aufbewahrungsdauer, Löschweg, Verarbeitungsregion): %s"
+
+#: includes/UninstallModal.php
+msgid "Include technical details (site URL, system info, plugin counts, and a sanitized log excerpt) to help diagnose the issue"
+msgstr "Technische Angaben einschließen (Adresse der Website, Systemdaten, Anzahl der Erweiterungen sowie ein bereinigter Protokollauszug), um die Fehlersuche zu erleichtern"

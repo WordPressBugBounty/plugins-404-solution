@@ -901,6 +901,15 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	    		if ($ddlEntry['bareTableName'] === 'abj404_logsv2') {
 	    			$this->ensureLogsv2CanonicalUrlColumn($tableName);
 	    		}
+	    		// Same logic for the redirects side. canonical_url is required by
+	    		// setupRedirect() and was added in 4.1.11; on a small fraction of
+	    		// sites dbDelta silently fails to add it, so every captured 404
+	    		// emits "Unknown column 'canonical_url' in 'field list'" until
+	    		// verifyColumns eventually retries. Eagerly running the targeted
+	    		// add closes that window.
+	    		if ($ddlEntry['bareTableName'] === 'abj404_redirects') {
+	    			$this->ensureRedirectsCanonicalUrlColumn($tableName);
+	    		}
 
 	    		$this->verifyColumns($tableName, $query);
 	    	}
@@ -1112,6 +1121,11 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
                 $this->backfillRedirectsCanonicalUrl();
                 $this->renameAbj404TablesToLowerCase();
 
+                // Canonical self-heal prologue runs after schema creation so
+                // SelfHealingPrologueReachabilityTest sees per-subsite activation
+                // reach the same recovery primitives as the daily cron.
+                $this->runSelfHealPrologue();
+
                 ABJ_404_Solution_PluginLogic::doRegisterCrons();
 
                 $logic = abj_service('plugin_logic');
@@ -1158,6 +1172,12 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
                 $this->backfillRedirectsCanonicalUrl();
                 $this->renameAbj404TablesToLowerCase();
                 $this->correctIssuesAfter();
+
+                // Canonical self-heal prologue closes the per-subsite upgrade
+                // batch so SelfHealingPrologueReachabilityTest can prove the
+                // multisite upgrade path reaches the same recovery primitives
+                // as the daily cron tick.
+                $this->runSelfHealPrologue();
 
                 $logic = abj_service('plugin_logic');
                 $logic->doUpdateDBVersionOption();
@@ -1276,7 +1296,11 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
     	if (count($updateCols) > 0 ||
     		count($createCols) > 0) {
     	
-    		$this->logger->errorMessage("There are still differences after updating the " . 
+    		// Persistent post-update diff is usually a benign DDL-normalizer mismatch
+    		// (parser misreads a comment, column landed in a slightly-different form).
+    		// Plugin keeps functioning, so log at warn (stays in debug log without
+    		// crossing the email-threshold reporter). Defensive coding philosophy #8.
+    		$this->logger->warn("There are still differences after updating the " .
     			$tableName . " table. " . print_r($tableDifferences, true));
     		
     	} else if ($updatesWereNeeded) {

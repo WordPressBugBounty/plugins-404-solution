@@ -59,7 +59,9 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
             $this->isIncorrectKeyFileError($errorText) ||
             $this->isCrashedTableError($errorText) ||
             $this->isDeadlockOrLockTimeoutError($errorText) ||
+            $this->isGaleraConflictError($errorText) ||
             $this->isTransientConnectionError($errorText) ||
+            $this->isQueryTimeoutError($errorText) ||
             $this->isAccessDeniedError($errorText)
         ) {
             $this->logger->warn("Server-side DB issue (handled): " . $errorText);
@@ -86,6 +88,24 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
         );
         foreach ($transientMarkers as $marker) {
             if ($this->f->strpos($lower, $marker) !== false) {
+                return true;
+            }
+        }
+        // Numeric client-error codes for the connection-drop class. Some PDO
+        // / driver surfaces (and translated MySQL builds where the English
+        // text is missing) emit "(2006)", "[2006]", "errno 2006", or a
+        // SQLSTATE-formatted "SQLSTATE[HY000]: General error: 2006 ..." with
+        // no canonical "server has gone away" wording. Match the unambiguous
+        // bracketed / parenthesized / errno-prefixed forms so a bare "2006"
+        // appearing in some unrelated text (year, ID, row count) does not
+        // misclassify. 2006 = CR_SERVER_GONE_ERROR, 2013 = CR_SERVER_LOST.
+        foreach (array('2006', '2013') as $code) {
+            if ($this->f->strpos($lower, '[' . $code . ']') !== false
+                || $this->f->strpos($lower, '(' . $code . ')') !== false
+                || $this->f->strpos($lower, 'errno ' . $code) !== false
+                || $this->f->strpos($lower, 'errno: ' . $code) !== false
+                || $this->f->strpos($lower, 'error: ' . $code . ' ') !== false
+                || $this->f->strpos($lower, 'error ' . $code . ':') !== false) {
                 return true;
             }
         }
@@ -273,6 +293,40 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
             $this->f->strpos($lower, 'lock wait timeout exceeded') !== false ||
             $this->f->strpos($lower, 'error 1213') !== false ||
             $this->f->strpos($lower, 'error 1205') !== false);
+    }
+
+    /**
+     * Detect MariaDB Galera optimistic-concurrency rejections.
+     *
+     * Galera (wsrep) clusters use optimistic concurrency control: a node
+     * accepts a write locally, then certifies it against the cluster on
+     * commit. If another node already wrote to the same row, certification
+     * fails and the local transaction is rolled back with errno 1020 /
+     * ER_CHECKREAD ("Record has changed since last read in table 'X'").
+     * Other related markers carry "wsrep_" or "cluster conflict" wording.
+     *
+     * Structurally this is the same retry-able conflict shape as InnoDB
+     * deadlock (errno 1213) and lock-wait timeout (errno 1205), but the
+     * error wording is different so isDeadlockOrLockTimeoutError() does
+     * not match. Like deadlock, the next cron tick can simply retry; it
+     * is a server-side coordination failure, not a plugin bug, and must
+     * be logged at WARN (not ERROR, which emails the admin).
+     *
+     * Source: 4.1.15 site (ohafiatv) running MariaDB 11.8.3 emitted 3 of
+     * these errors from updatePermalinkCache.sql; another cluster node was
+     * writing the same {prefix}_abj404_permalink_cache row.
+     *
+     * @param string $errorText
+     * @return bool
+     */
+    private function isGaleraConflictError(string $errorText): bool {
+        if (!is_string($errorText) || $errorText === '') {
+            return false;
+        }
+        $lower = strtolower($errorText);
+        return ($this->f->strpos($lower, 'record has changed since last read') !== false ||
+            $this->f->strpos($lower, 'wsrep_local_state') !== false ||
+            $this->f->strpos($lower, 'cluster conflict') !== false);
     }
 
     /**
@@ -536,6 +590,28 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
     }
 
     /**
+     * The staged-view-build pipeline owns three transient tables
+     * (view_build, view_done, view_deleteme). They are created and dropped
+     * between build cycles by design; discoverPermanentDDLFiles() already
+     * excludes them from createDatabaseTables(). A SELECT that hits a
+     * swap-window race against any of them is not a corruption signal and
+     * must not surface the missing_table admin notice or engage the 1h
+     * repair cooldown.
+     *
+     * @param string $errorText
+     * @return bool
+     */
+    private function isTransientViewBuildTableError(string $errorText): bool {
+        if ($errorText === '') {
+            return false;
+        }
+        $lower = strtolower($errorText);
+        return ($this->f->strpos($lower, '_abj404_view_build') !== false ||
+            $this->f->strpos($lower, '_abj404_view_done') !== false ||
+            $this->f->strpos($lower, '_abj404_view_deleteme') !== false);
+    }
+
+    /**
      * Attempt one auto-repair pass for missing plugin tables, then retry query once.
      *
      * @param string $query
@@ -544,6 +620,26 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
      */
     private function attemptMissingTableRepairAndRetry($query, &$result) {
         if (self::$tableRepairInProgress) {
+            return;
+        }
+
+        // Transient staged-view-build tables (view_build, view_done, view_deleteme)
+        // are owned by the staged-build pipeline and are created and dropped
+        // between cycles. discoverPermanentDDLFiles() excludes them from
+        // createDatabaseTables(), so the repair path cannot recreate them and
+        // would fall straight into the failed-repair branch, setting the
+        // missing_table admin notice on every plugin page and engaging a 1h
+        // cooldown that blocks legit missing-table repair for the redirects /
+        // logsv2 / etc. core tables. Silently degrade: clear last_error so the
+        // caller treats the swap-window race as an empty result, and skip the
+        // notice / cooldown side effects entirely.
+        $observedError = is_string($result['last_error']) ? $result['last_error'] : '';
+        if ($this->isTransientViewBuildTableError($observedError)) {
+            $this->logger->debugMessage(
+                "Transient staged-view-build table missing (swap-window race, expected): "
+                . $observedError
+            );
+            $result['last_error'] = '';
             return;
         }
 
@@ -627,7 +723,14 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
                     return;
                 }
 
-                // Repair failed — now escalate to ERROR so it triggers email notification.
+                // Repair failed. Log at WARN, not ERROR. Per the self-healing
+                // philosophy in CLAUDE.md (item 4): "Notify if recovery fails ...
+                // Never send email." The admin notice set below is the user-facing
+                // surface, gated to the plugin's own admin page. errorMessage()
+                // triggers the daily email digest; warn() does not. Previously
+                // this site emailed the developer once per cooldown expiry (every
+                // 1h) for any permanently-broken table, which is the email-storm
+                // pattern Bruno's and the kstal-site logs both exhibit.
                 // Include the specific table that failed plus an explicit post-CREATE
                 // existence check so the debug log distinguishes "CREATE didn't materialize
                 // the table" (concurrency race, swallowed SQL error in queryAndGetResults,
@@ -637,12 +740,12 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
                     ? " Table: " . $missingTable . "."
                     : '';
                 $existenceContext = $tableStillMissing
-                    ? ' Table is still missing after CREATE TABLE ran — '
+                    ? ' Table is still missing after CREATE TABLE ran. '
                     . 'createDatabaseTables() did not materialize this table '
                     . '(likely a concurrent DROP, swallowed SQL error in queryAndGetResults, '
                     . 'or insufficient CREATE TABLE privileges).'
                     : '';
-                $this->logger->errorMessage("Missing plugin table auto-repair failed."
+                $this->logger->warn("Missing plugin table auto-repair failed."
                     . $tableContext
                     . $existenceContext
                     . " Original error: " . $originalSqlError
@@ -652,10 +755,23 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
                 // the plugin screen so the admin knows to investigate.
                 // Never email; never show on all wp-admin pages.
                 $this->setRuntimeFlag($repairCooldownKey, $this->clock()->now() + $cooldownTtlSeconds, $cooldownTtlSeconds);
-                $tableLabel = ($missingTable !== '') ? "'" . $missingTable . "' " : '';
-                $adminMsg = 'A plugin database table ' . $tableLabel
-                    . 'is missing and could not be repaired automatically. '
-                    . 'Try deactivating and reactivating 404 Solution, or verify that your database user has CREATE TABLE privileges.';
+                $tableLabel = ($missingTable !== '') ? "'" . $missingTable . "'" : 'a plugin database table';
+                $rawError = is_string($result['last_error']) ? $result['last_error'] : '';
+                $adminMsg =
+                      '404 Solution cannot function correctly: the database table '
+                    . $tableLabel . ' is missing, and the plugin tried to recreate it '
+                    . 'but the CREATE TABLE statement could not be executed. '
+                    . 'This almost always means the WordPress database user does not '
+                    . 'have permission to run CREATE TABLE (and likely ALTER TABLE / '
+                    . 'CREATE INDEX) on this database. Until this is fixed, the plugin '
+                    . 'cannot record 404s, serve redirects, or generate suggestions. '
+                    . 'To fix it: ask your hosting provider or database administrator '
+                    . 'to grant CREATE, ALTER, and INDEX privileges to the WordPress '
+                    . 'database user for this site, then reload this page. '
+                    . 'Alternatively, restore the missing table from a recent database backup.';
+                if ($rawError !== '') {
+                    $adminMsg .= ' Original database error: ' . $rawError;
+                }
                 if ($prefixDiag !== '') {
                     $adminMsg .= ' ' . $prefixDiag;
                 }
@@ -663,7 +779,7 @@ trait ABJ_404_Solution_DataAccess_ErrorClassificationTrait {
                     'type'         => 'missing_table',
                     'message'      => $this->localizeOrDefault($adminMsg),
                     'timestamp'    => $this->clock()->now(),
-                    'error_string' => $result['last_error'],
+                    'error_string' => $rawError,
                 );
                 $this->setRuntimeFlag('abj404_plugin_db_notice', $noticePayload, 86400);
             }

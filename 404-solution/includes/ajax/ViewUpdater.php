@@ -40,7 +40,62 @@ class ABJ_404_Solution_ViewUpdater {
                 array($me, 'fetchInflightStage'));
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_ajaxAdvanceViewBuild',
                 array($me, 'advanceViewBuild'));
+        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_ajaxRefreshAdminNonces',
+                array($me, 'refreshAdminNonces'));
         // wp_ajax_nopriv_ is for normal users
+    }
+
+    /**
+     * Admin nonce action verbs JS call sites consume. Keep in sync with
+     * view_updater_nonce_refresh.js NONCE_DATA_ATTRS and the wp_verify_nonce()
+     * calls below + in Ajax_TrendData.php.
+     * @return string[]
+     */
+    public static function adminNonceActions(): array {
+        return array('abj404_updatePaginationLink', 'abj404_fetchInflightStage',
+            'abj404_refreshStatsDashboard', 'abj404_refreshHealthBar', 'abj404_trendData');
+    }
+
+    /**
+     * B20: mint fresh admin AJAX nonces for the page so the JS retry helper
+     * recovers transparently from a 12-24h-idle expired nonce. No nonce on
+     * the request itself (the caller's nonce expired by definition); the
+     * userIsPluginAdmin() capability gate is the only authorisation - which
+     * also handles the genuinely-logged-out case (full page refresh needed).
+     * @return void
+     */
+    function refreshAdminNonces() {
+        $abj404logic = abj_service('plugin_logic');
+        $ctx = self::startAjaxDebugContext(array('action' => 'ajaxRefreshAdminNonces',
+            'request_uri' => $_SERVER['REQUEST_URI'] ?? '',
+            'user_id' => function_exists('get_current_user_id') ? get_current_user_id() : 0));
+        try {
+            if (!$abj404logic->userIsPluginAdmin()) {
+                self::safeLogAjaxFailure('AJAX unauthorized in ajaxRefreshAdminNonces.', $ctx);
+                self::markAjaxResponseSent();
+                self::sendJsonResponseAndExit(self::buildAjaxErrorResponse('Unauthorized', null, false), 403);
+                return;
+            }
+            if (ABJ_404_Solution_Ajax_Php::checkRateLimit('refresh_admin_nonces', 60, 60)) {
+                self::safeLogAjaxFailure('AJAX rate limit in ajaxRefreshAdminNonces.', $ctx);
+                self::markAjaxResponseSent();
+                self::sendJsonResponseAndExit(self::buildAjaxErrorResponse(
+                    'Rate limit exceeded. Please try again later.', null, false), 429);
+                return;
+            }
+            $nonces = array();
+            foreach (self::adminNonceActions() as $action) {
+                $nonces[$action] = wp_create_nonce($action);
+            }
+            self::markAjaxResponseSent();
+            self::sendJsonResponseAndExit(array('success' => true,
+                'data' => array('nonces' => $nonces)), 200);
+        } catch (Throwable $e) {
+            self::safeLogAjaxFailure('AJAX exception in ajaxRefreshAdminNonces.', $ctx, $e);
+            self::markAjaxResponseSent();
+            self::sendJsonResponseAndExit(self::buildAjaxErrorResponse(
+                'Server error while refreshing nonces.', null, false), 500);
+        }
     }
 
     /**
@@ -165,7 +220,7 @@ class ABJ_404_Solution_ViewUpdater {
     private static function getStageDiagnostics($stage) {
         $map = array(
             'table_redirects' => array(
-                'query_label' => 'getAdminRedirectsPageTable() -> getRedirectsForView() / getRedirectsForView.sql',
+                'query_label' => 'getAdminRedirectsPageTable() -> read redirects rows from staged view snapshot',
                 'what_happening' => 'Loading Redirects table rows',
             ),
             'redirect_status_counts' => array(
@@ -173,7 +228,7 @@ class ABJ_404_Solution_ViewUpdater {
                 'what_happening' => 'Counting Redirects status tabs',
             ),
             'table_captured' => array(
-                'query_label' => 'getCapturedURLSPageTable() -> getRedirectsForView() / getRedirectsForView.sql',
+                'query_label' => 'getCapturedURLSPageTable() -> read captured rows from staged view snapshot',
                 'what_happening' => 'Loading Captured 404 URLs table rows',
             ),
             'captured_status_counts' => array(
@@ -185,11 +240,11 @@ class ABJ_404_Solution_ViewUpdater {
                 'what_happening' => 'Loading Logs table rows',
             ),
             'paginationLinksTop' => array(
-                'query_label' => 'getPaginationLinks(top) -> getRedirectsForViewCount() / getRedirectsForView.sql',
+                'query_label' => 'getPaginationLinks(top) -> read top pagination count from staged view snapshot',
                 'what_happening' => 'Rendering top pagination links',
             ),
             'paginationLinksBottom' => array(
-                'query_label' => 'getPaginationLinks(bottom) -> getRedirectsForViewCount() / getRedirectsForView.sql',
+                'query_label' => 'getPaginationLinks(bottom) -> read bottom pagination count from staged view snapshot',
                 'what_happening' => 'Rendering bottom pagination links',
             ),
             'table_cache_rows' => array(
@@ -732,9 +787,9 @@ class ABJ_404_Solution_ViewUpdater {
                     // if PluginLogic is broken. Avoid current_user_can() to keep delegated admin semantics
                     // centralized in PluginLogic.
                     if (function_exists('wp_get_current_user')) {
-                        $user = wp_get_current_user();
-                        if (is_object($user) && property_exists($user, 'roles') && is_array($user->roles)) {
-                            $isPluginAdmin = in_array('administrator', $user->roles, true);
+                        $user = ABJ_404_Solution_UserRef::fromWpUser(wp_get_current_user());
+                        if ($user !== null) {
+                            $isPluginAdmin = $user->isAdministrator();
                         }
                     }
                     if (!$isPluginAdmin && function_exists('is_super_admin') && is_super_admin()) {

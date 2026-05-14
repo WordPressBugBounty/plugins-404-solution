@@ -59,6 +59,7 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
         } else if ($action == "emptyRedirectTrash") {
             if (check_admin_referer('abj404_bulkProcess') && is_admin()) {
                 $abj404logic->doEmptyTrash('abj404_redirects');
+                $this->dao->markViewDoneInvalidatedByAdminMutation();
                 $message = __('All trashed URLs have been deleted!', '404-solution');
             } else {
                 $this->logger->debugMessage("Unexpected result. How did we get here? is_admin: " .
@@ -67,6 +68,7 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
         } else if ($action == "emptyCapturedTrash") {
             if (check_admin_referer('abj404_bulkProcess') && is_admin()) {
                 $abj404logic->doEmptyTrash('abj404_captured');
+                $this->dao->markViewDoneInvalidatedByAdminMutation();
                 $message = __('All trashed URLs have been deleted!', '404-solution');
             } else {
                 $this->logger->debugMessage("Unexpected result. How did we get here? is_admin: " .
@@ -75,6 +77,7 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
         } else if ($action == "purgeRedirects") {
             if (check_admin_referer('abj404_purgeRedirects') && is_admin()) {
                 $message = $this->dao->deleteSpecifiedRedirects();
+                $this->dao->markViewDoneInvalidatedByAdminMutation();
             } else {
                 $this->logger->debugMessage("Unexpected result. How did we get here? is_admin: " .
                         is_admin() . ", Action: " . $action . ", Sub: " . $sub);
@@ -141,6 +144,7 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
         } else if ($action == "importFromPlugin") {
             if (check_admin_referer('abj404_importFromPlugin') && is_admin()) {
                 $message = $this->handleActionImportFromPlugin();
+                $this->dao->markViewDoneInvalidatedByAdminMutation();
             } else {
                 $this->logger->debugMessage("Unexpected result. How did we get here? is_admin: " .
                         is_admin() . ", Action: " . $action . ", Sub: " . $sub);
@@ -154,6 +158,7 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
                     return '';
                 }
                 $message = $abj404logic->doBulkAction($action, array_map('absint', $_POST['idnum']));
+                $this->dao->markViewDoneInvalidatedByAdminMutation();
             } else {
                 $this->logger->debugMessage("Unexpected result. How did we get here? is_admin: " .
                         is_admin() . ", Action: " . $action . ", Sub: " . $sub);
@@ -193,6 +198,7 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
                     if ($trash == 0 && $subpage === 'abj404_captured' && $filter === ABJ404_TRASH_FILTER) {
                         $this->dao->updateRedirectTypeStatus($id, (string)ABJ404_STATUS_CAPTURED);
                     }
+                    $this->dao->markViewDoneInvalidatedByAdminMutation();
                     if ($trash == 1) {
                         $message = __('Redirect moved to trash successfully!', '404-solution');
                     } else {
@@ -236,6 +242,10 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
         if (($this->dao->getPostOrGetSanitize('action') == 'importRedirectsFile') && $this->userIsPluginAdmin()) {
             check_admin_referer('abj404_importRedirectsFile'); // this verifies the nonce (must match View.php form nonce)
             $result = $this->doImportFile();
+            // Admin-initiated mutation: force a fresh view_done rebuild before
+            // the next AJAX fetch so the newly-imported rows appear on the
+            // redirects table immediately, not on the next cron rebuild.
+            $this->dao->markViewDoneInvalidatedByAdminMutation();
             return $result;
         }
 
@@ -279,6 +289,10 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
                 } else {
                     $rowsAffected = is_scalar($result['rows_affected']) ? (string)$result['rows_affected'] : '0';
                     $message = sprintf(__("Records imported: %s", '404-solution'), esc_html($rowsAffected));
+                    // Admin-initiated mutation: force a fresh view_done rebuild
+                    // before the next AJAX fetch so the newly-imported rows
+                    // appear on the redirects table immediately.
+                    $this->dao->markViewDoneInvalidatedByAdminMutation();
                 }
 
             } catch (Exception $e) {
@@ -302,6 +316,7 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
             if (is_admin() && $this->verifyLinkNonce('abj404_removeRedirect')) {
                 if ($this->f->regexMatch('[0-9]+', $_GET['id'])) {
                     $this->dao->deleteRedirect(absint($_GET['id']));
+                    $this->dao->markViewDoneInvalidatedByAdminMutation();
                     $message = __('Redirect Removed Successfully!', '404-solution');
                 }
             }
@@ -343,6 +358,7 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
 
                     $message = $this->dao->updateRedirectTypeStatus(absint($id), (string)$newstatus);
                     if ($message == "") {
+                        $this->dao->markViewDoneInvalidatedByAdminMutation();
                         if ($newstatus == ABJ404_STATUS_CAPTURED) {
                             $message = sprintf(__('Removed 404 URL from %s list successfully!', '404-solution'), $successActionName);
                         } else {
@@ -659,6 +675,7 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
                 if ($id > 0) {
                     $this->dao->saveRedirectConditions($id, $sanitizedConditions);
                 }
+                $this->dao->markViewDoneInvalidatedByAdminMutation();
 
             } else if ($ids_multiple != "") {
                 // get the redirect data for each ID.
@@ -670,6 +687,7 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
                     $this->dao->updateRedirect($tdType, $tdDest,
                             $redirectUrl, $redirectId, $code, (string)$statusType);
                 }
+                $this->dao->markViewDoneInvalidatedByAdminMutation();
 
             } else {
                 $this->logger->errorMessage("Issue determining which redirect(s) to update. " .
@@ -810,6 +828,13 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
             $this->dao->setupRedirect($manualURL, (string)$statusType,
                     $tdType2, $tdDest2,
                     sanitize_text_field($code), 0);
+            // Admin-initiated mutation: force a fresh view_done rebuild
+            // before the next AJAX fetch so the new row appears
+            // immediately on the redirects table. invalidateViewDone()
+            // alone serves stale-but-present (fbc270d8) which is correct
+            // for cron/maintenance but hides the admin's own change
+            // until the next background rebuild.
+            $this->dao->markViewDoneInvalidatedByAdminMutation();
 
         } else {
             $message .= __('Error: Data not formatted properly.', '404-solution') . "<BR/>";

@@ -13,6 +13,8 @@ if (!defined('ABSPATH')) {
  *   1. Persisted progress tracking: per-stage option-name conventions plus
  *      get/set/clear helpers. Stage runners call readProgressOption /
  *      writeProgressOption to checkpoint resume state across PHP requests.
+ *      Includes prefix-at-S1 capture and the SQL mode / max_allowed_packet
+ *      session probe.
  *
  *   2. Staged SQL execution: load a SQL template from
  *      includes/sql/getRedirectsForViewStaged/, perform table-name and
@@ -21,11 +23,12 @@ if (!defined('ABSPATH')) {
  *      tolerant variant for re-runnable index DDL.
  *
  *   3. Build-side state probes: table existence (view_done, view_build,
- *      view_deleteme), freshness staleness check, GET_LOCK / RELEASE_LOCK,
- *      and the cron rebuild scheduler.
+ *      view_deleteme) and the view_done freshness / hard-stale-notice gate.
  *
- * Sibling to ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait; both are
- * mixed into ABJ_404_Solution_DataAccess. Properties declared here are
+ * Build-writer serialization (GET_LOCK / RELEASE_LOCK + option-row fallback)
+ * and the cron rebuild scheduler live on the sibling trait
+ * ABJ_404_Solution_DataAccess_ViewBuildLockAndCronTrait. All three traits
+ * are mixed into ABJ_404_Solution_DataAccess; properties declared here are
  * visible to the staged-build trait inside the composing class.
  */
 trait ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait {
@@ -67,6 +70,10 @@ trait ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait {
     private static $viewBuildProgressOptionNames = array(
         'started_at'    => 'abj404_view_build_started_at',
         'current_stage' => 'abj404_view_build_current_stage',
+        'last_started_stage' => 'abj404_view_build_last_started_stage',
+        'last_started_at'    => 'abj404_view_build_last_started_at',
+        'last_completed_stage' => 'abj404_view_build_last_completed_stage',
+        'last_completed_at'    => 'abj404_view_build_last_completed_at',
         's2_high_water' => 'abj404_view_build_s2_high_water',
         's4_high_water' => 'abj404_view_build_s4_high_water',
         's5_high_water' => 'abj404_view_build_s5_high_water',
@@ -135,6 +142,19 @@ trait ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait {
         if ($name === '') {
             return $default;
         }
+        // Broken-cache bypass for high-stakes reads (current_stage,
+        // s2/s4/s5_high_water). A prior verifyOptionWriteCoherent() set the
+        // abj404_option_cache_incoherent transient because wp_cache_delete +
+        // retry could not get a fresh value. Without this bypass the next
+        // read of current_stage returns the stale cached 0 and every
+        // advanceViewBuildOnce re-enters S1.
+        if (in_array($shortName, self::$viewBuildProgressHighStakesShortNames, true)
+                && function_exists('get_transient')
+                && get_transient('abj404_option_cache_incoherent') !== false
+                && function_exists('wp_cache_delete')) {
+            wp_cache_delete($name, 'options');
+            wp_cache_delete('alloptions', 'options');
+        }
         $value = get_option($name, $default);
         return is_scalar($value) ? max(0, intval($value)) : $default;
     }
@@ -181,12 +201,63 @@ trait ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait {
         // cost is non-trivial and a single tick of stale streak data is
         // harmless.
         if (in_array($shortName, self::$viewBuildProgressHighStakesShortNames, true)) {
-            $this->verifyOptionWriteCoherent($name, $intValue);
+            $writeOk = $this->verifyOptionWriteCoherent($name, $intValue);
+            $readBack = function_exists('get_option') ? get_option($name, null) : null;
+            $this->logViewBuildProgressOptionWrite($shortName, $name, $intValue, $writeOk, $readBack, 'coherent');
             return;
         }
         // autoload=false so progress writes (potentially many per request)
         // don't bloat the alloptions cache that loads on every WP page.
-        update_option($name, $intValue, false);
+        $writeOk = update_option($name, $intValue, false);
+        $readBack = function_exists('get_option') ? get_option($name, null) : null;
+        $this->logViewBuildProgressOptionWrite($shortName, $name, $intValue, $writeOk, $readBack, 'direct');
+    }
+
+    /**
+     * Log only the stage-resume metadata writes that are needed to diagnose
+     * S1 success-vs-progress-write failures without flooding logs for every
+     * batched high-water update.
+     *
+     * @param string $shortName
+     * @param string $optionName
+     * @param int    $expected
+     * @param mixed  $updateReturn
+     * @param mixed  $readBack
+     * @param string $path
+     * @return void
+     */
+    private function logViewBuildProgressOptionWrite(
+        string $shortName,
+        string $optionName,
+        int $expected,
+        $updateReturn,
+        $readBack,
+        string $path
+    ): void {
+        if (!in_array($shortName, array(
+            'started_at',
+            'current_stage',
+            'last_started_stage',
+            'last_started_at',
+            'last_completed_stage',
+            'last_completed_at',
+        ), true)) {
+            return;
+        }
+        if (!is_object($this->logger) || !method_exists($this->logger, 'debugMessage')) {
+            return;
+        }
+
+        $readBackForLog = is_scalar($readBack) ? (string)$readBack : gettype($readBack);
+        $this->logger->debugMessage(sprintf(
+            '[staged] view build progress option write: key=%s option=%s expected=%d path=%s update_option_return=%s read_back=%s',
+            $shortName,
+            $optionName,
+            $expected,
+            $path,
+            $updateReturn ? 'true' : 'false',
+            substr($readBackForLog, 0, 240)
+        ));
     }
 
     /**
@@ -222,15 +293,35 @@ trait ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait {
         if (!function_exists('update_option') || !function_exists('get_option')) {
             return false;
         }
+        // Capture the prior persisted value so a first-read-back-fail WARN
+        // (below, for current_stage only) can carry prior + new + observed,
+        // letting support see whether the cache returned the previous value
+        // or some unrelated state from a parallel request.
+        $prior = get_option($optionName, null);
         update_option($optionName, $expected, false);
         $actual = get_option($optionName, null);
         if ($this->optionReadBackMatches($actual, $expected)) {
             return true;
         }
-        // First read disagrees with the just-written value: flush both
-        // candidate cache keys and retry. Use a typeof-guarded call because
-        // wp_cache_delete is part of WP core but not loaded in unit-test
-        // bootstraps that don't pull in cache.php.
+        // First read disagrees with the just-written value. Surface a WARN
+        // for current_stage specifically (the most diagnostically valuable
+        // stage-progress key) so the signal survives a site with DEBUG off.
+        // Other high-stakes keys (s2/s4/s5_high_water) stay silent on the
+        // first miss to avoid log volume; they still hit the persistent-
+        // mismatch WARN further down if the retry also fails.
+        if ($this->isCurrentStageOptionName($optionName) && is_object($this->logger)
+                && method_exists($this->logger, 'warn')) {
+            $this->logger->warn(sprintf(
+                '[staged] option write incoherent (first read-back) on %s: prior=%s new=%s observed=%s; flushing cache and retrying',
+                $optionName,
+                is_scalar($prior)    ? (string)$prior    : '<non-scalar>',
+                is_scalar($expected) ? (string)$expected : '<non-scalar>',
+                is_scalar($actual)   ? (string)$actual   : '<non-scalar>'
+            ));
+        }
+        // Flush both candidate cache keys and retry. Use a typeof-guarded
+        // call because wp_cache_delete is part of WP core but not loaded
+        // in unit-test bootstraps that don't pull in cache.php.
         if (function_exists('wp_cache_delete')) {
             wp_cache_delete($optionName, 'options');
             // alloptions is the bundled bucket WP loads on every page; even
@@ -248,6 +339,7 @@ trait ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait {
         // transient and log a warning. Don't email -- this is a host-config
         // problem, not a plugin defect.
         if (function_exists('set_transient')) {
+            // allow-cache-empty: payload is diagnostic state; empty observed/error fields are still actionable.
             set_transient(
                 'abj404_option_cache_incoherent',
                 array(
@@ -278,17 +370,45 @@ trait ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait {
     }
 
     /**
+     * Whether the fully-prefixed option name refers to the view-build
+     * `current_stage` key (the prefix component varies by site). Used by
+     * verifyOptionWriteCoherent() to scope its first-read-back-fail WARN to
+     * the most diagnostically valuable stage-progress key.
+     *
+     * @param string $optionName
+     * @return bool
+     */
+    private function isCurrentStageOptionName(string $optionName): bool {
+        $suffix = self::$viewBuildProgressOptionNames['current_stage'] ?? '';
+        if ($suffix === '') {
+            return false;
+        }
+        $len = strlen($suffix);
+        return $len > 0 && substr($optionName, -$len) === $suffix;
+    }
+
+    /**
      * Loose-equal read-back comparison. WP option values round-trip through
      * serialize() and may come back as a different scalar type than written
      * (int 4 -> string "4"). The semantic question is "did the persisted
      * value reflect the write," so we compare via string casts when both
      * sides are scalar; otherwise fall back to ==.
      *
+     * Null asymmetry is treated as a mismatch. PHP's loose-equal would
+     * otherwise have `null == 0`, `null == ''`, `null == false` all return
+     * true, so a cache layer that served null ("option not found") for a
+     * value-of-zero write (s2/s4/s5_high_water reset on a fresh build) would
+     * have spuriously passed verification. An unwritten cache slot is not
+     * the same value as a written falsy value.
+     *
      * @param mixed $actual
      * @param mixed $expected
      * @return bool
      */
     private function optionReadBackMatches($actual, $expected): bool {
+        if (($actual === null) !== ($expected === null)) {
+            return false;
+        }
         if (is_scalar($actual) && is_scalar($expected)) {
             return (string)$actual === (string)$expected;
         }
@@ -846,6 +966,139 @@ trait ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait {
         return $this->stagedTableExists($this->viewDoneTableName());
     }
 
+    /**
+     * Cheap "does view_done have at least one row" probe used by
+     * viewDoneIsServeable() to make the post-invalidate stale-but-present
+     * decision honest. Without this, viewDoneIsServeable() might report a
+     * just-promoted-but-empty buffer as serveable; the admin would render
+     * an empty redirects screen indefinitely with no rebuild scheduled.
+     *
+     * SELECT 1 ... LIMIT 1 is the cheapest existence query MySQL can do;
+     * within a request the result is memoized inside viewDoneIsServeable()
+     * so the probe fires once even on hot AJAX paths.
+     *
+     * @return bool
+     */
+    private function viewDoneHasRows(): bool {
+        if (!$this->viewDoneTableExists()) {
+            return false;
+        }
+        $sql = 'SELECT 1 FROM `' . $this->viewDoneTableName() . '` LIMIT 1';
+        $result = $this->queryAndGetResults($sql, array('log_errors' => false));
+        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+        return !empty($rows);
+    }
+
+    /**
+     * Option name for the floor timestamp on the data currently stored in
+     * the view_done table. Distinct from viewDoneFreshnessOptionName():
+     *
+     *   - viewDoneFreshnessOptionName() (built_at): cleared on invalidate.
+     *     "Last build that has not been invalidated." Drives the freshness
+     *     TTL gate that decides whether to schedule a background rebuild.
+     *
+     *   - viewDoneDataBuiltAtOptionName() (data_built_at): preserved across
+     *     invalidate. "When was the snapshot currently on disk produced."
+     *     Drives the hard-stale notice and lets us answer "how old is the
+     *     data the admin is looking at" honestly even after invalidation.
+     *
+     * @return string
+     */
+    private function viewDoneDataBuiltAtOptionName(): string {
+        return $this->getLowercasePrefix() . 'abj404_view_done_data_built_at';
+    }
+
+    /**
+     * Unix timestamp when the data currently in the view_done table was
+     * produced. Survives invalidateViewDone() so the read path can compute
+     * an honest "data on disk is N hours old" age regardless of whether the
+     * freshness signal has been cleared.
+     *
+     * @return int
+     */
+    private function viewDoneDataBuiltAt(): int {
+        if (!function_exists('get_option')) {
+            return 0;
+        }
+        $built = get_option($this->viewDoneDataBuiltAtOptionName(), 0);
+        return is_scalar($built) ? max(0, intval($built)) : 0;
+    }
+
+    /**
+     * Set a deduplicated admin notice when the data in view_done is older
+     * than VIEW_DONE_HARD_STALE_NOTICE_AGE_SECONDS. Surfaced on the plugin's
+     * own admin screen by abj404_show_view_build_cron_notices in
+     * 404-solution.php; never sent via email or shown wp-admin-wide.
+     *
+     * Same 24h dedup TTL as the other view-build notices so the three
+     * notice families share a consistent lifecycle.
+     *
+     * @param int $ageSeconds Current age of data on disk.
+     * @return void
+     */
+    private function setViewDoneHardStaleNotice(int $ageSeconds): void {
+        if (!function_exists('set_transient')) {
+            return;
+        }
+        $key = 'abj404_view_done_hard_stale';
+        if (function_exists('get_transient') && get_transient($key) !== false) {
+            return; // dedup window still active
+        }
+        $hours = max(1, intval(floor($ageSeconds / 3600)));
+        $template = $this->localizeOrDefaultViewBuildNotice(
+            'The 404 Solution redirects table data is more than %d hours old. '
+            . 'A background rebuild is scheduled but has not completed; the '
+            . 'redirects screen is showing the most recent successful snapshot. '
+            . 'Check WordPress cron health and the staged-build progress.'
+        );
+        $payload = array(
+            'type'         => 'view_done_hard_stale',
+            'message'      => sprintf($template, $hours),
+            'timestamp'    => time(),
+            'error_string' => '',
+            'age_hours'    => $hours,
+        );
+        // allow-cache-empty: notice payload is intentional; error_string is empty by definition for stale-data state.
+        set_transient($key, $payload, ABJ_404_Solution_ViewBuildConfig::VIEW_BUILD_DEGRADED_NOTICE_TTL_SECONDS);
+    }
+
+    /**
+     * Self-heal: clear the hard-stale notice when a successful build
+     * completes and the data on disk is no longer stale. Called from
+     * markViewDoneBuildCompleted() so the notice does not linger for the
+     * full 24h dedup TTL after the build catches up.
+     *
+     * @return void
+     */
+    private function clearViewDoneHardStaleNotice(): void {
+        if (function_exists('delete_transient')) {
+            delete_transient('abj404_view_done_hard_stale');
+        }
+    }
+
+    /**
+     * Read-path hook: when serving stale data from view_done, surface the
+     * hard-stale notice if the data is older than the configured threshold.
+     *
+     * No-ops when data_built_at is missing (legacy installs that pre-date
+     * the data-built-at signal) so a one-time migration does not generate
+     * spurious 24h notices on the first read after upgrade. The next
+     * successful build sets the signal and from then on the staleness
+     * check is honest.
+     *
+     * @return void
+     */
+    private function maybeRaiseViewDoneHardStaleNotice(): void {
+        $built = $this->viewDoneDataBuiltAt();
+        if ($built <= 0) {
+            return;
+        }
+        $age = time() - $built;
+        if ($age >= ABJ_404_Solution_ViewBuildConfig::VIEW_DONE_HARD_STALE_NOTICE_AGE_SECONDS) {
+            $this->setViewDoneHardStaleNotice($age);
+        }
+    }
+
     /** @param string $tableName @return bool */
     private function stagedTableExists(string $tableName): bool {
         global $wpdb;
@@ -853,6 +1106,7 @@ trait ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait {
             return false;
         }
         /** @var \wpdb $wpdb */
+        // DAO-bypass-approved: prepare only; execution still routes through queryAndGetResults().
         $sql = $wpdb->prepare('SHOW TABLES LIKE %s', $tableName);
         if (!is_string($sql) || $sql === '') {
             return false;
@@ -883,420 +1137,12 @@ trait ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait {
     }
 
     /**
-     * Per-request memo of whether session-scoped GET_LOCK is supported on
-     * this host. null = not yet probed; true = a prior probe returned
-     * got=1; false = a prior probe returned NULL or the function is
-     * unrecognized (managed/sharded MySQL: PlanetScale, Vitess, certain
-     * ProxySQL routings). Once unsupported, we skip the GET_LOCK round
-     * trip and go straight to the option-row fallback for the rest of the
-     * request.
-     *
-     * @var bool|null
-     */
-    private static $namedLockSupportedThisRequest = null;
-
-    /**
-     * Fires the "fallback in use" log line at info level once per request
-     * even when many `acquireViewBuildLock` calls take the fallback path.
-     * Diagnostics only; no correctness impact.
-     *
-     * @var bool
-     */
-    private static $fallbackLockLoggedThisRequest = false;
-
-    /**
-     * Tracks whether the most recent successful acquire used the option-row
-     * fallback (true) or the native GET_LOCK (false), so the matching
-     * `releaseViewBuildLock` releases the correct primitive.
-     *
-     * @var bool
-     */
-    private $usingTransientFallbackLock = false;
-
-    /** @var string  Last detected reason for falling back; surfaced in the notice. */
-    private $lastNamedLockUnsupportedReason = '';
-    /** @var string  Last detected error string from GET_LOCK; surfaced in the notice. */
-    private $lastNamedLockUnsupportedError = '';
-
-    /**
-     * @param int $timeoutSeconds  GET_LOCK wait-time. 0 (default) is the
-     *   non-blocking acquire used by every steady-state path: if cron or a
-     *   sibling tab holds the lock, we yield immediately so the caller can
-     *   return locked=true. Use a positive value only for the diagnostic
-     *   force-rebuild path, where we want to block until the in-flight
-     *   build releases so we can own the next one.
-     *
-     * On managed/sharded MySQL hosts where session-scoped named locks are
-     * unavailable (`GET_LOCK` returns NULL or "function does not exist"),
-     * falls back to a wp_options-row advisory lock acquired with
-     * `add_option` semantics. This serializes concurrent workers on a
-     * single-master WordPress site even when the database layer cannot.
-     * Documented in `ViewBuildLockUnavailabilityTest`.
-     *
-     * @return bool
-     */
-    private function acquireViewBuildLock(int $timeoutSeconds = 0): bool {
-        $name = $this->getLowercasePrefix() . ABJ_404_Solution_ViewBuildConfig::VIEW_DONE_BUILD_LOCK_NAME;
-
-        // Once we've classified the host as "named locks unsupported" in
-        // this request, don't pay the round-trip on every subsequent
-        // acquire. Re-check happens on the next request because the static
-        // is request-scoped.
-        if (self::$namedLockSupportedThisRequest === false) {
-            $this->ensureFallbackLockNoticeAndLog();
-            return $this->acquireTransientFallbackLock($name);
-        }
-
-        $timeout = max(0, $timeoutSeconds);
-        $sql = "SELECT GET_LOCK('" . esc_sql($name) . "', " . $timeout . ") AS got";
-        $result = $this->queryAndGetResults($sql, array('log_errors' => false));
-
-        $err = isset($result['last_error']) && is_string($result['last_error'])
-            ? trim($result['last_error']) : '';
-        if ($err !== '' && $this->isNamedLockUnsupportedError($err)) {
-            self::$namedLockSupportedThisRequest = false;
-            $this->lastNamedLockUnsupportedReason = 'function_unsupported';
-            $this->lastNamedLockUnsupportedError = $err;
-            $this->ensureFallbackLockNoticeAndLog();
-            return $this->acquireTransientFallbackLock($name);
-        }
-
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
-        if (!empty($rows) && is_array($rows[0]) && array_key_exists('got', $rows[0])) {
-            $got = $rows[0]['got'];
-            if ($got === null) {
-                // NULL: per the MySQL manual, GET_LOCK returns NULL on an
-                // error. On sharded/managed hosts (PlanetScale, Vitess) it
-                // is also returned as a "no-op" indicator. Either way the
-                // session-scoped lock did not engage; treat as unsupported.
-                self::$namedLockSupportedThisRequest = false;
-                $this->lastNamedLockUnsupportedReason = 'returned_null';
-                $this->lastNamedLockUnsupportedError = '';
-                $this->ensureFallbackLockNoticeAndLog();
-                return $this->acquireTransientFallbackLock($name);
-            }
-            $intGot = is_scalar($got) ? intval($got) : 0;
-            if ($intGot === 1) {
-                if (self::$namedLockSupportedThisRequest === null) {
-                    self::$namedLockSupportedThisRequest = true;
-                }
-                $this->usingTransientFallbackLock = false;
-                return true;
-            }
-            // got=0 (or any other integer): another connection holds the
-            // lock. Normal contention; do NOT fall back, the other worker
-            // is already advancing the build.
-            return false;
-        }
-
-        // No rows and no recognized "unsupported" error string: ambiguous.
-        // Treat as lock unavailable rather than guessing fallback is needed.
-        return false;
-    }
-
-    /** @return void */
-    private function releaseViewBuildLock(): void {
-        // @utf8-audit: opt-out - $name is built from $wpdb->prefix + a class
-        // constant; never user input, cannot contain invalid UTF-8 bytes.
-        $name = $this->getLowercasePrefix() . ABJ_404_Solution_ViewBuildConfig::VIEW_DONE_BUILD_LOCK_NAME;
-        if ($this->usingTransientFallbackLock) {
-            $this->usingTransientFallbackLock = false;
-            if (function_exists('delete_option')) {
-                delete_option($this->transientFallbackLockOptionName($name));
-            }
-            return;
-        }
-        $this->queryAndGetResults("SELECT RELEASE_LOCK('" . esc_sql($name) . "')",
-            array('log_errors' => false));
-    }
-
-    /**
-     * Acquire the option-row advisory lock that stands in for GET_LOCK on
-     * hosts where named locks are unavailable. Race-safe: `add_option`
-     * fails when the option already exists, so at most one worker wins
-     * the contended add. Stale locks from a prior crashed worker are
-     * cleared when their stored expiry timestamp has passed.
-     *
-     * @param string $name  Already-prefixed lock identifier shared with GET_LOCK.
-     * @return bool
-     */
-    private function acquireTransientFallbackLock(string $name): bool {
-        if (!function_exists('add_option') || !function_exists('get_option')) {
-            return false;
-        }
-        $optionName = $this->transientFallbackLockOptionName($name);
-        $now = time();
-        $ttl = ABJ_404_Solution_ViewBuildConfig::VIEW_BUILD_TRANSIENT_LOCK_TTL_SECONDS;
-        $expiresAt = $now + $ttl;
-
-        // Stale-lock recovery: if the existing option's expiry has passed,
-        // the prior holder crashed without releasing. Delete and try again.
-        $existing = get_option($optionName, 0);
-        $existingExpires = is_scalar($existing) ? intval($existing) : 0;
-        if ($existingExpires > 0 && $existingExpires <= $now && function_exists('delete_option')) {
-            delete_option($optionName);
-        }
-
-        // add_option returns false if the option row already exists. This
-        // is the race-safe primitive: even with N parallel PHP workers
-        // racing on the same option, at most one wins. set_transient is
-        // NOT race-safe in this way (it overwrites), so we deliberately
-        // use add_option directly.
-        $added = add_option($optionName, (string)$expiresAt, '', false);
-        if ($added) {
-            $this->usingTransientFallbackLock = true;
-            return true;
-        }
-        return false;
-    }
-
-    /** @param string $name @return string */
-    private function transientFallbackLockOptionName(string $name): string {
-        return $name . '_transient_lock';
-    }
-
-    /**
-     * Match a `last_error` string against the patterns that indicate the
-     * MySQL host does not support session-scoped named locks. Conservative:
-     * we only return true when the error specifically names GET_LOCK as
-     * unrecognized; any other DB error stays in the "lock unavailable,
-     * try later" bucket.
-     *
-     * @param string $err
-     * @return bool
-     */
-    private function isNamedLockUnsupportedError(string $err): bool {
-        $errLow = strtolower($err);
-        if (strpos($errLow, 'get_lock') === false) {
-            return false;
-        }
-        return strpos($errLow, 'does not exist') !== false
-            || strpos($errLow, 'unknown function') !== false
-            || strpos($errLow, 'er_sp_does_not_exist') !== false
-            || strpos($errLow, 'is not allowed') !== false
-            || strpos($errLow, 'not allowed in this context') !== false;
-    }
-
-    /**
-     * Surface a deduplicated admin notice for the fallback path and emit
-     * the info-level "fallback in use" log line once per request.
-     *
-     * The notice transient is refreshed on every fallback acquire (cheap
-     * and idempotent) so admins on hosts where named locks come and go
-     * still see an up-to-date "still on fallback" indicator. The log line
-     * is gated on a per-request static so a steady-state host that
-     * acquires the lock dozens of times per request only produces a
-     * single info entry.
-     *
-     * @return void
-     */
-    private function ensureFallbackLockNoticeAndLog(): void {
-        if (function_exists('set_transient')) {
-            set_transient(
-                'abj404_view_build_get_lock_unsupported_notice',
-                array(
-                    'reason'  => $this->lastNamedLockUnsupportedReason !== ''
-                        ? $this->lastNamedLockUnsupportedReason : 'unknown',
-                    'error'   => substr($this->lastNamedLockUnsupportedError, 0, 500),
-                    'when'    => time(),
-                    'message' => 'This database does not support session-scoped GET_LOCK named locks. '
-                        . 'The plugin is using a WordPress option-row fallback to coordinate the staged view-build. '
-                        . 'Common on PlanetScale, Vitess, and split-routing ProxySQL deployments.',
-                ),
-                ABJ_404_Solution_ViewBuildConfig::VIEW_BUILD_DEGRADED_NOTICE_TTL_SECONDS
-            );
-        }
-        if (!self::$fallbackLockLoggedThisRequest) {
-            self::$fallbackLockLoggedThisRequest = true;
-            $message = '[staged] view-build lock: GET_LOCK unsupported on this host '
-                . '(reason=' . ($this->lastNamedLockUnsupportedReason !== ''
-                    ? $this->lastNamedLockUnsupportedReason : 'unknown')
-                . '); using option-row fallback.';
-            if (is_object($this->logger) && method_exists($this->logger, 'infoMessage')) {
-                $this->logger->infoMessage($message);
-            } elseif (is_object($this->logger) && method_exists($this->logger, 'debugMessage')) {
-                $this->logger->debugMessage($message);
-            }
-        }
-    }
-
-    /**
-     * Resets the per-request lock-fallback memos so a fresh request starts
-     * by probing GET_LOCK on the host again. Tests use this to drive the
-     * per-request lifecycle inside a single PHP process.
-     *
-     * @return void
-     */
-    public static function resetViewBuildLockFallbackMemos(): void {
-        self::$namedLockSupportedThisRequest = null;
-        self::$fallbackLockLoggedThisRequest = false;
-    }
-
-    /**
-     * Probe whether the build lock primitive on this host actually
-     * serializes the writer connection. On split-routing deployments
-     * (ProxySQL/Vitess/MaxScale read-write split, PlanetScale branch
-     * replicas), `SELECT GET_LOCK` may be routed to a replica session
-     * that holds a session-scoped lock without preventing two writer
-     * connections from running concurrent DDL. The classic symptom is
-     * two staged-build workers both passing `acquireViewBuildLock` and
-     * both attempting the S11 RENAME swap.
-     *
-     * The probe acquires the build lock, writes a unique nonce to
-     * wp_options, reads it back through the same code path, and verifies
-     * the round trip. A passing probe is consistent with single-master
-     * routing; a failing probe is a strong signal the lock did not
-     * serialize the writer and the caller should switch to the option-row
-     * fallback.
-     *
-     * Public so {@see ABJ_404_Solution_DataAccess} exposes it for the
-     * lock-coverage test suite and any future health-check page.
-     *
-     * @return bool  true when the probe round-tripped successfully through
-     *   the held lock; false on any inability to acquire / write / read /
-     *   verify.
-     */
-    public function verifyBuildLockSerializesWriter(): bool {
-        if (!$this->acquireViewBuildLock(0)) {
-            return false;
-        }
-        try {
-            if (!function_exists('update_option') || !function_exists('get_option')) {
-                return false;
-            }
-            $optionName = $this->getLowercasePrefix() . 'abj404_view_build_lock_writer_probe';
-            try {
-                $nonce = bin2hex(random_bytes(8));
-            } catch (\Throwable $t) {
-                $nonce = (string)mt_rand() . '_' . (string)microtime(true);
-            }
-            update_option($optionName, $nonce, false);
-            $readBack = get_option($optionName, '');
-            if (function_exists('delete_option')) {
-                delete_option($optionName);
-            }
-            return is_string($readBack) && $readBack === $nonce;
-        } finally {
-            $this->releaseViewBuildLock();
-        }
-    }
-
-    /** @return void */
-    private function scheduleViewDoneRebuild(int $delaySeconds = 1): void {
-        if (!function_exists('wp_next_scheduled') || !function_exists('wp_schedule_single_event')) {
-            return;
-        }
-        $hook = 'abj404_rebuildViewDone';
-        // DISABLE_WP_CRON: wp_schedule_single_event still returns true (the
-        // event is registered in the option) but no PHP process advances it
-        // unless an external cron hits wp-cron.php. Same failure mode the
-        // N-gram subsystem detects at DatabaseUpgradesEtcTrait_NGram.php:53.
-        // Surface a deduplicated admin notice so the build is not silently
-        // stuck, then continue scheduling so a manual admin trigger or
-        // external cron can still pick the event up.
-        if (defined('DISABLE_WP_CRON') && constant('DISABLE_WP_CRON')) {
-            $this->setViewBuildCronStuckNotice();
-        }
-        $next = wp_next_scheduled($hook);
-        if ($next !== false) {
-            return;
-        }
-        // Pass wp_error=true so a failed schedule returns a WP_Error we can
-        // route into a notice instead of silently dropping. WP cron schedule
-        // can fail when the cron lock is held, the cron option is unwritable,
-        // or a custom cron implementation rejects the event.
-        $scheduled = wp_schedule_single_event(
-            time() + max(1, intval($delaySeconds)),
-            $hook,
-            array(),
-            true
-        );
-        $isError = (function_exists('is_wp_error') && is_wp_error($scheduled));
-        if ($scheduled === false) {
-            $this->setViewBuildScheduleFailedNotice('');
-        } elseif ($isError) {
-            $errMsg = '';
-            if (is_object($scheduled) && method_exists($scheduled, 'get_error_message')) {
-                $msg = $scheduled->get_error_message();
-                $errMsg = is_string($msg) ? $msg : '';
-            }
-            $this->setViewBuildScheduleFailedNotice($errMsg);
-        }
-    }
-
-    /**
-     * Deduplicated admin notice (24h transient) telling the admin that
-     * WP-Cron is disabled so the staged view-build will not advance unless
-     * an external cron is configured or the admin reopens the Redirects
-     * screen. Companion to the N-gram subsystem detection.
-     *
-     * @return void
-     */
-    private function setViewBuildCronStuckNotice(): void {
-        if (!function_exists('set_transient')) {
-            return;
-        }
-        $key = 'abj404_view_build_stuck_wp_cron_disabled';
-        if (function_exists('get_transient') && get_transient($key) !== false) {
-            return; // dedup window still active
-        }
-        $payload = array(
-            'type'         => 'view_build_stuck_cron_disabled',
-            'message'      => $this->localizeOrDefaultViewBuildNotice(
-                'WordPress cron is disabled (DISABLE_WP_CRON) and no external '
-                . 'cron has been observed running wp-cron.php recently. The 404 '
-                . 'Solution staged view-build will not advance in the background '
-                . 'until cron runs. To resolve: either remove DISABLE_WP_CRON from '
-                . 'wp-config.php, or configure a system cron job that requests '
-                . 'wp-cron.php every few minutes.'
-            ),
-            'timestamp'    => time(),
-            'error_string' => '',
-        );
-        set_transient($key, $payload, 86400);
-    }
-
-    /**
-     * Deduplicated admin notice (24h transient) when wp_schedule_single_event
-     * itself returns false / WP_Error -- the cron lock is held, the cron
-     * option is unwritable, or a custom cron implementation rejected the
-     * event. Distinct from the DISABLE_WP_CRON case: scheduling itself
-     * failed, so the build will not advance even with external cron.
-     *
-     * @param string $detail
-     * @return void
-     */
-    private function setViewBuildScheduleFailedNotice(string $detail): void {
-        if (!function_exists('set_transient')) {
-            return;
-        }
-        $key = 'abj404_view_build_cron_schedule_failed';
-        if (function_exists('get_transient') && get_transient($key) !== false) {
-            return; // dedup window still active
-        }
-        $message = 'Scheduling the 404 Solution staged view-build cron event failed. '
-            . 'The build will not advance in the background until this clears. '
-            . 'This usually indicates the WordPress cron lock is held, the cron '
-            . 'option is unwritable, or a custom cron implementation rejected '
-            . 'the event. Check your hosting provider and any cron-replacement '
-            . 'plugins.';
-        if ($detail !== '') {
-            $message .= ' (' . $detail . ')';
-        }
-        $payload = array(
-            'type'         => 'view_build_schedule_failed',
-            'message'      => $this->localizeOrDefaultViewBuildNotice($message),
-            'timestamp'    => time(),
-            'error_string' => $detail,
-        );
-        set_transient($key, $payload, 86400);
-    }
-
-    /**
      * Tiny helper so the staged-build notices read the same way as the
      * existing setPluginDbNotice() copy: call __() when WordPress is loaded,
-     * otherwise return the raw English. Kept local to the trait because
-     * setPluginDbNotice's localizeOrDefault() is private to DataAccess.php.
+     * otherwise return the raw English. Kept local to the helpers trait
+     * (rather than DataAccess.php's private localizeOrDefault()) so the
+     * sibling lock-and-cron trait can reach it via $this-> on the composing
+     * class without exposing the private DataAccess method.
      *
      * @param string $text
      * @return string

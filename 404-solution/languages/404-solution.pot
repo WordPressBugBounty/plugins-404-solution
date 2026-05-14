@@ -957,7 +957,7 @@ msgid "Failed to schedule N-gram cache rebuild. Please try again or check your W
 msgstr ""
 
 #: includes/html/adminOptionsGeneral.html
-msgid "When an error is detected by the plugin, email the entire log file to the developer. This is not required for the plugin to function, but it is helpful for the developer and for future versions of the plugin. This reveals: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when an issue is reported). Log files are checked daily when maintenance is run."
+msgid "When the plugin detects an error, it transmits a copy of the debug log to the developer for diagnosis. Transmission may be by email or by HTTPS upload to a developer-operated server; the contents are the same. This is not required for the plugin to work, but it helps the developer fix bugs in future versions. The report includes: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when a support issue is opened). Reports are checked daily when maintenance runs."
 msgstr ""
 
 #: includes/html/viewSuggestions.html
@@ -1204,6 +1204,10 @@ msgstr ""
 
 #: includes/UninstallModal.php
 msgid "Feedback could not be sent."
+msgstr ""
+
+#: includes/UninstallModal.php
+msgid "Thanks for the feedback!"
 msgstr ""
 
 #: includes/WordPress_Connector.php
@@ -2733,4 +2737,16 @@ msgstr ""
 
 #: includes/DataAccessTrait_ViewQueriesStaged.php
 msgid "(404 page)"
+msgstr ""
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "Please wait before sending another support request."
+msgstr ""
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "Invalid support request source."
+msgstr ""
+
+#: includes/ajax/Ajax_SupportRequest.php
+msgid "Failed to send support request. Please try again later."
 msgstr ""
