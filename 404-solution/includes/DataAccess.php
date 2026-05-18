@@ -9,6 +9,7 @@ require_once __DIR__ . '/DataAccessTrait_Maintenance.php';
 require_once __DIR__ . '/DataAccessTrait_Connection.php';
 require_once __DIR__ . '/DataAccessTrait_ViewMetadata.php';
 require_once __DIR__ . '/DataAccessTrait_ViewQueries.php';
+require_once __DIR__ . '/DataAccessTrait_ViewQueriesHitsLifecycle.php';
 require_once __DIR__ . '/DataAccessTrait_ViewQueriesStaged.php';
 require_once __DIR__ . '/DataAccessTrait_ViewBuildStageCallbacks.php';
 require_once __DIR__ . '/DataAccessTrait_ViewQueriesStagedRead.php';
@@ -18,6 +19,9 @@ require_once __DIR__ . '/DataAccessTrait_ViewBuildLockAndCron.php';
 require_once __DIR__ . '/DataAccessTrait_ViewBuildPhpEnvProbe.php';
 require_once __DIR__ . '/DataAccessTrait_ViewBuildSessionEnvProbe.php';
 require_once __DIR__ . '/DataAccessTrait_ViewBuildHostFailurePolicy.php';
+require_once __DIR__ . '/DataAccessTrait_ViewBuildForceRestart.php';
+require_once __DIR__ . '/DataAccessTrait_MutationWatermarkSeam.php';
+require_once __DIR__ . '/DataAccessTrait_AdminMutationGate.php';
 require_once __DIR__ . '/DataAccessTrait_ViewSnapshotCache.php';
 require_once __DIR__ . '/DataAccessTrait_QueryTimeouts.php';
 require_once __DIR__ . '/DataAccessTrait_Logs.php';
@@ -200,16 +204,21 @@ class ABJ_404_Solution_DataAccess {
     use ABJ_404_Solution_DataAccess_ConnectionTrait;
     use ABJ_404_Solution_DataAccess_ViewMetadataTrait;
     use ABJ_404_Solution_DataAccess_ViewQueriesTrait;
+    use ABJ_404_Solution_DataAccess_ViewQueriesHitsLifecycleTrait;
     use ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait;
     use ABJ_404_Solution_DataAccess_ViewBuildStageRunnerTrait;
     use ABJ_404_Solution_DataAccess_ViewBuildStageCallbacksTrait;
     use ABJ_404_Solution_DataAccess_ViewQueriesStagedReadTrait;
     use ABJ_404_Solution_DataAccess_ViewBuildAdaptiveTrait;
     use ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait;
+    use ABJ_404_Solution_DataAccess_ViewBuildStartedWatermarkTrait;
     use ABJ_404_Solution_DataAccess_ViewBuildLockAndCronTrait;
     use ABJ_404_Solution_DataAccess_ViewBuildPhpEnvProbeTrait;
     use ABJ_404_Solution_DataAccess_ViewBuildSessionEnvProbeTrait;
     use ABJ_404_Solution_DataAccess_ViewBuildHostFailurePolicyTrait;
+    use ABJ_404_Solution_DataAccess_ViewBuildForceRestartTrait;
+    use ABJ_404_Solution_DataAccess_MutationWatermarkSeamTrait;
+    use ABJ_404_Solution_DataAccess_AdminMutationGateTrait;
     use ABJ_404_Solution_DataAccess_ViewSnapshotCacheTrait;
     use ABJ_404_Solution_DataAccess_LogsTrait;
     use ABJ_404_Solution_DataAccess_LogsHitsRebuildTrait;
@@ -424,6 +433,7 @@ class ABJ_404_Solution_DataAccess {
         $result = array('version' => $apiVersion, 'last_updated' => $apiLastUpdated);
         if (function_exists('set_transient')) {
             $ttl = defined('DAY_IN_SECONDS') ? DAY_IN_SECONDS : 86400;
+            // allow-cache-empty: $result always carries a version string (fallback to ABJ404_VERSION when plugins_api omits it); is_wp_error early-returns above
             set_transient($cacheKey, $result, $ttl);
         }
         return $result;
@@ -1092,7 +1102,7 @@ class ABJ_404_Solution_DataAccess {
         }
 
         if ($options['log_errors'] && $result['last_error'] != '') {
-            if ($this->f->strpos($result['last_error'], 
+            if ($this->f->strpos($result['last_error'],
                     " is marked as crashed ") !== false) {
                 $this->repairTable($result['last_error']);
             }
@@ -1104,6 +1114,9 @@ class ABJ_404_Solution_DataAccess {
             if ($this->isIncorrectKeyFileError($result['last_error'])) {
                 $this->repairCorruptedTableAndRetry($query, $result);
             }
+
+            // Self-heal short-circuit: repair-and-retry above clears last_error by reference; without this return the downstream classifier sees '' and emits a spurious ERROR-level "Ugh. SQL query error: ," entry that triggers the dev email digest.
+            if ($result['last_error'] === '') { return $result; }
 
             // ignore any specific errors.
             $reportError = true;

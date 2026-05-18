@@ -95,38 +95,6 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         return $this->getLowercasePrefix() . 'abj404_view_done_built_at';
     }
 
-    /**
-     * Option storing the unix timestamp of the most recent ADMIN-INITIATED
-     * mutation (add/edit/trash/delete via the redirects UI). Distinct from
-     * the freshness signal cleared by invalidateViewDone() (cron, maintenance,
-     * upgrade, correctCollations also call invalidateViewDone but must keep
-     * fbc270d8 stale-serving). Sites whose admin clicks Save expect the
-     * just-saved row to render immediately, not the pre-mutation snapshot.
-     *
-     * viewDoneIsServeable() consults this option together with the
-     * data_built_at floor: while a mutation timestamp is more recent than
-     * the latest fresh build, view_done is treated as unserveable so the
-     * AJAX gate returns viewBuildPending and the JS poller waits for a
-     * build that covers the mutation.
-     *
-     * Bounded to 5 minutes via MUTATION_INVALIDATED_SANITY_SECONDS so a
-     * broken cron / stuck build cannot keep view_done unserveable forever.
-     *
-     * @return string
-     */
-    private function viewDoneMutationInvalidatedAtOptionName(): string {
-        return $this->getLowercasePrefix() . 'abj404_view_done_mutation_invalidated_at';
-    }
-
-    /** @return int Unix timestamp of the last admin-initiated mutation, or 0. */
-    private function viewDoneMutationInvalidatedAt(): int {
-        if (!function_exists('get_option')) {
-            return 0;
-        }
-        $val = get_option($this->viewDoneMutationInvalidatedAtOptionName(), 0);
-        return is_scalar($val) ? max(0, intval($val)) : 0;
-    }
-
     // Foreground admin/AJAX flows hold this lease briefly so staged-build
     // diagnostics reach the browser instead of being hidden inside cron. Cron
     // checks foregroundViewBuildLeaseActive() and reschedules itself instead
@@ -170,7 +138,16 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
             && is_numeric($tableOptions['_abj404_query_timeout'])
             ? max(0, intval($tableOptions['_abj404_query_timeout'])) : 0;
         if (!empty($tableOptions['_abj404_force_view_rebuild'])) {
-            $this->invalidateViewDone();
+            // Diagnostic ?_abj404_force_view_rebuild=1 path: discard the
+            // runner's in-flight state and start fresh. Non-blocking
+            // acquire: if a sibling cron / AJAX advance holds the lock,
+            // we skip the cleanup and fall through to serve-stale; the
+            // already-running build will publish on its own. This is the
+            // Phase 3a / Phase 4 successor to the direct invalidateViewDone()
+            // pre-call -- the runner-owned primitive preserves the published
+            // view_done snapshot for parallel readers until the new S11
+            // RENAME swap, which is the intended force-rebuild contract.
+            $this->forceRestartViewBuild(0);
         }
         $builtAt = $this->viewDoneBuiltAt();
         $isFresh = $builtAt > 0
@@ -247,24 +224,13 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
             $this->viewDoneIsServeableCache = false;
             return false;
         }
-        // Admin-mutation gate: when the admin just added/edited/trashed/
-        // deleted a redirect, the snapshot on disk does not yet reflect
-        // their change. Returning serveable here would let the AJAX fetch
-        // hand back the pre-mutation rows; the admin would not see their
-        // own action take effect until the next cron rebuild. Treat as
-        // unserveable so the gate returns viewBuildPending and the JS
-        // poller waits for a build that covers the mutation. Bounded by
-        // MUTATION_INVALIDATED_SANITY_SECONDS so a stuck build cannot
-        // block the page indefinitely; after that window the gate falls
-        // back to fbc270d8 stale-serving plus the hard-stale notice.
-        $mutationAt = $this->viewDoneMutationInvalidatedAt();
-        if ($mutationAt > 0
-                && $mutationAt > time() - ABJ_404_Solution_ViewBuildConfig::VIEW_DONE_MUTATION_INVALIDATED_SANITY_SECONDS) {
-            $dataBuiltAt = $this->viewDoneDataBuiltAt();
-            if ($dataBuiltAt <= $mutationAt) {
-                $this->viewDoneIsServeableCache = false;
-                return false;
-            }
+        // Admin-mutation gate (Phase 4 watermark mechanism, owned by
+        // ABJ_404_Solution_DataAccess_AdminMutationGateTrait). Blocks
+        // reads while built_watermark < the watermark the admin observed
+        // at click-Save time, OR until the sanity window elapses.
+        if ($this->adminMutationGateBlocks()) {
+            $this->viewDoneIsServeableCache = false;
+            return false;
         }
         // Empty view_done is NOT serveable when there has never been a
         // successful build: rendering an empty admin screen during a cold
@@ -296,33 +262,6 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         }
         $this->viewDoneIsServeableCache = false;
         return false;
-    }
-
-    /**
-     * Mark view_done as needing a fresh build because the admin just
-     * mutated a redirect through the UI (add/edit/trash/delete). Sets the
-     * mutation-invalidated-at option which gates viewDoneIsServeable()
-     * until markViewDoneBuildCompleted() runs (or the sanity timeout
-     * VIEW_DONE_MUTATION_INVALIDATED_SANITY_SECONDS elapses).
-     *
-     * Differs from invalidateViewDone() (which serves stale-but-present
-     * per fbc270d8 to avoid Loading-redirects on slow hosts during cron /
-     * maintenance / correctCollations). Admin actions need immediate
-     * feedback: after clicking Save, the user expects to see the new row,
-     * not the snapshot from before. This method is the single seam
-     * controllers call to opt into that stricter contract.
-     *
-     * Composes invalidateViewDone() so the existing freshness-clear /
-     * progress-clear / buffer-drop / rebuild-schedule lifecycle still
-     * runs; the new mutation flag is purely additive.
-     *
-     * @return void
-     */
-    public function markViewDoneInvalidatedByAdminMutation(): void {
-        if (function_exists('update_option')) {
-            update_option($this->viewDoneMutationInvalidatedAtOptionName(), time(), false);
-        }
-        $this->invalidateViewDone();
     }
 
     /**
@@ -378,9 +317,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         // needs to block reads. Leaving it set would force "Loading
         // redirects" for the full 5-minute sanity window after every
         // admin save even though fresh data is on disk.
-        if (function_exists('delete_option')) {
-            delete_option($this->viewDoneMutationInvalidatedAtOptionName());
-        }
+        $this->clearAdminMutationGateOptions();
         $this->invalidateViewDoneServeableCache();
     }
 
@@ -491,10 +428,14 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
                 // Whatever the prior lock holder produced (cron, sibling tab,
                 // a finished S11 swap) we discard inside the locked region
                 // so the rebuild happens fresh under the caller's request
-                // context. invalidateViewDone() also flips the per-request
-                // serveability cache so getViewBuildProgress() at the end
-                // reflects the rebuilt state, not the stale-cached one.
-                $this->invalidateViewDone();
+                // context. The inside-lock cleanup helper drops the buffer,
+                // clears progress + S1 prefix capture, and clears the
+                // active-build started-watermark stamp; it also flips the
+                // per-request serveability cache so getViewBuildProgress()
+                // at the end reflects the rebuilt state. Direct call to
+                // the runner-owned inside-lock helper avoids reacquiring
+                // the lock (we already hold it).
+                $this->runForceRestartCleanupInsideLock();
                 // Force-rebuild also clears any per-stage permanent skip
                 // markers and the build-halted gate from a prior host
                 // failure. The admin pressed "rebuild" explicitly, so
@@ -881,9 +822,9 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         // buffer in place rather than re-running S1-S11 from scratch
         // -- but only when an integrity probe says the buffer is
         // plausibly complete. Without the integrity check we could
-        // publish a partially-built buffer (S2 stopped halfway, or
-        // invalidateViewDone() cleared progress while a redirect edit
-        // had also added rows we never picked up).
+        // publish a partially-built buffer (S2 stopped halfway, or a
+        // force-rebuild cleared progress while a redirect edit had
+        // also added rows we never picked up).
         if ($haveBuild && !$haveDone) {
             if (!$this->bufferIntegrityPassesForPromote($tempBuildTable)) {
                 $this->logger->infoMessage(sprintf(
@@ -1001,38 +942,27 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         return $diff <= 1;
     }
 
-    /**
-     * Mark the served view_done table stale so the next request triggers a
-     * rebuild. Hooked from invalidateViewSnapshotCache() so redirect
-     * create/update/delete invalidates the precomputed view too. Also clears
-     * any in-flight progress AND drops view_build / view_deleteme in the
-     * same call (gated by SHOW TABLES so steady-state invalidate stays
-     * cheap), making the "progress lost but buffer present" state unreachable
-     * so the next request never classifies a leftover buffer as an orphan
-     * to drop (Troy 2026-05: two "[staged] reconcile: dropped orphan
-     * view_build" INFO lines 6 min apart). Buffer-drop helper lives in
-     * DataAccessTrait_ViewBuildStageCallbacks.
-     *
-     * @return void
-     */
-    public function invalidateViewDone(): void {
-        if (function_exists('delete_option')) {
-            delete_option($this->viewDoneFreshnessOptionName());
-            foreach (self::$viewBuildProgressOptionNames as $optName) {
-                delete_option($this->getLowercasePrefix() . $optName);
-            }
-        }
-        // The S1-prefix capture is part of the same fresh-start lifecycle:
-        // a redirect-edit invalidation forces the next request to S1 from
-        // scratch, so the prior capture is no longer authoritative.
-        $this->clearPrefixAtStageOne();
-        $this->dropTransientBuffersIfPresent();
-        $this->invalidateViewDoneServeableCache();
-        // Kick off a background rebuild and surface any cron-stuck /
-        // schedule-failure conditions to the admin via deduplicated notice.
-        // scheduleViewDoneRebuild() is idempotent (checks wp_next_scheduled).
-        $this->scheduleViewDoneRebuild();
-    }
+    // invalidateViewDone() was deleted in Phase 4 of the staged view-build
+    // watermark refactor (see docs/refactor-staged-view-build-watermark.md).
+    // The god-method conflated three concepts (logical invalidation, runner
+    // lifecycle, reader policy) and was the seam through which external code
+    // destroyed runner-owned state. Replacements, by intent:
+    //
+    //   - Source data changed (admin/REST/CLI/AJAX/cron mutation): call
+    //     bumpMutationWatermark() (DataAccessTrait_MutationWatermarkSeam).
+    //     For admin form actions that also need the strict admin-visibility
+    //     gate, call markViewDoneInvalidatedByAdminMutation()
+    //     (DataAccessTrait_AdminMutationGate) which composes the watermark
+    //     bump with the observed-watermark gate option.
+    //   - Discard + restart the in-flight build (admin "rebuild now",
+    //     diagnostic ?abj404_force_view_rebuild=1 paths): call
+    //     forceRestartViewBuild() (DataAccessTrait_ViewBuildForceRestart).
+    //   - Schedule a cron rebuild without other side effects: call
+    //     scheduleViewDoneRebuild() (DataAccessTrait_ViewBuildLockAndCron).
+    //
+    // The semantic-forbidden-operation lint in StagedBuildOwnershipLintTest
+    // (lint d) enforces that no future code introduces a new caller of
+    // ->invalidateViewDone( anywhere in includes/.
 
     // progressOptionName / readProgressOption / writeProgressOption /
     // clearAllProgressOptions live on the sibling
@@ -1116,6 +1046,48 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
             }
         }
         return $budget > 0.1 ? $budget : 0.1;
+    }
+
+    /**
+     * Release the build lock and immediately reacquire it (non-blocking).
+     * Called between every stage of the staged view build so the lock hold
+     * is bounded by the duration of a single stage rather than the cumulative
+     * 11-stage wall time.
+     *
+     * Why this exists: production error reports #14 (ajasha.de, S4), #15
+     * (greyleafmedia.com, S11), #16 (p2p-game.com, S5), and #17 (remiancelin.fr,
+     * S11), all plugin 4.1.18 via wp-cron, traced to a connection-drop race.
+     * GET_LOCK was acquired once and held across the full S1-S11 run. On
+     * shared hosting the MySQL connection dropped mid-hold (wait_timeout or
+     * pool eviction); wpdb auto-reconnected with no lock; a second cron tick
+     * acquired the (now freed) lock, ran reconcile Case 3, and dropped
+     * view_build out from under the first worker. The first worker then
+     * queried a missing table: "Table doesn't exist" (MariaDB) or "Can't find
+     * .frm file" (MySQL 5.7).
+     *
+     * Per-stage release bounds the connection-drop exposure window to a
+     * single stage, and a sibling worker that takes the lock between our
+     * stages sees the persisted current_stage / started_at and resumes from
+     * where we left off rather than running reconcile against a partial build.
+     *
+     * @return bool  true when the lock was reacquired and the caller should
+     *               continue with the next stage; false when a sibling worker
+     *               took the lock in the gap -- the caller must yield this
+     *               tick. RELEASE_LOCK / delete_option of a lock we no longer
+     *               hold is a no-op, so the caller's outer try/finally release
+     *               is harmless even on the yield path.
+     */
+    private function releaseAndReacquireBetweenStages(): bool {
+        $this->releaseViewBuildLock();
+        if (!$this->acquireViewBuildLock(0)) {
+            $this->logger->infoMessage(
+                '[staged] runStagedBuildOnce: released build lock between stages; '
+                . 'another worker took it during the gap. Yielding this tick; '
+                . 'the next cron / AJAX advance will resume from the persisted current_stage.'
+            );
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -1231,11 +1203,12 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
                 '[staged] runStagedBuildOnce: fresh start (%s); current_stage=%d',
                 $reason, $currentStage
             ));
-            // Fresh start: scrap any partial state. An abandoned partial
-            // build older than the resume TTL is not safe to continue;
-            // wp_posts/wp_terms/wp_options state may have drifted.
-            $this->clearAllProgressOptions();
-            $this->dropTransientStagedTables();
+            // Scrap any partial state. An abandoned partial build older
+            // than the resume TTL is not safe to continue; wp_posts /
+            // wp_terms / wp_options state may have drifted. Also wipes
+            // the Phase-2 active stamp (kept outside the progress
+            // registry so it survives the S11 happy-path clear).
+            $this->performFreshStartCleanup();
         } else {
             // INFO (not DEBUG): see fresh-start branch above. The pair
             // (fresh start vs. resuming) is the entry point for any
@@ -1264,6 +1237,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
             // Capture $wpdb->prefix BEFORE the S1 callback so subsequent
             // stage entries can detect a mid-build switch_to_blog().
             $this->capturePrefixAtBuildStart();
+            $this->stampStartedWatermarksAtS1Entry();
             // Probe sql_mode + max_allowed_packet for THIS connection. The
             // probe persists in `view_build_state` and (best-effort) clears
             // STRICT_TRANS_TABLES / ONLY_FULL_GROUP_BY for the build session
@@ -1296,7 +1270,9 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         }
 
         if ($stage < 2) {
+            if (!$this->releaseAndReacquireBetweenStages()) { return false; }
             if ($this->haltIfPrefixChangedSinceStageOne(2)) { return false; }
+            if ($this->gateAbortIfMutationWatermarkAdvanced(2)) { return false; }
             $r = $this->runTimedViewBuildStage(2, 'staged_build_s2_insert', function () {
                 return $this->stageInsertRedirectsBatched();
             });
@@ -1308,7 +1284,9 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         }
 
         if ($stage < 3) {
+            if (!$this->releaseAndReacquireBetweenStages()) { return false; }
             if ($this->haltIfPrefixChangedSinceStageOne(3)) { return false; }
+            if ($this->gateAbortIfMutationWatermarkAdvanced(3)) { return false; }
             if ($this->isStageMarkedSkipped(3)) {
                 // Permanent host-side denial recorded on a prior tick.
                 // Advance current_stage past S3 without touching the SQL.
@@ -1333,7 +1311,9 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         }
 
         if ($stage < 4) {
+            if (!$this->releaseAndReacquireBetweenStages()) { return false; }
             if ($this->haltIfPrefixChangedSinceStageOne(4)) { return false; }
+            if ($this->gateAbortIfMutationWatermarkAdvanced(4)) { return false; }
             $r = $this->runTimedViewBuildStage(4, 'staged_build_s4_update_posts', function () {
                 return $this->stageUpdatePostsBatched();
             });
@@ -1345,7 +1325,9 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         }
 
         if ($stage < 5) {
+            if (!$this->releaseAndReacquireBetweenStages()) { return false; }
             if ($this->haltIfPrefixChangedSinceStageOne(5)) { return false; }
+            if ($this->gateAbortIfMutationWatermarkAdvanced(5)) { return false; }
             $r = $this->runTimedViewBuildStage(5, 'staged_build_s5_update_terms', function () {
                 return $this->stageUpdateTermsBatched();
             });
@@ -1357,7 +1339,9 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         }
 
         if ($stage < 6) {
+            if (!$this->releaseAndReacquireBetweenStages()) { return false; }
             if ($this->haltIfPrefixChangedSinceStageOne(6)) { return false; }
+            if ($this->gateAbortIfMutationWatermarkAdvanced(6)) { return false; }
             $this->markBuildStage('staged_build_s6_update_home');
             $r = $this->runTimedViewBuildStage(6, 'staged_build_s6_update_home', function () {
                 $this->stageUpdateHome();
@@ -1370,7 +1354,9 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         }
 
         if ($stage < 7) {
+            if (!$this->releaseAndReacquireBetweenStages()) { return false; }
             if ($this->haltIfPrefixChangedSinceStageOne(7)) { return false; }
+            if ($this->gateAbortIfMutationWatermarkAdvanced(7)) { return false; }
             $this->markBuildStage('staged_build_s7_update_external');
             $r = $this->runTimedViewBuildStage(7, 'staged_build_s7_update_external', function () {
                 $this->stageUpdateExternal();
@@ -1383,7 +1369,9 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         }
 
         if ($stage < 8) {
+            if (!$this->releaseAndReacquireBetweenStages()) { return false; }
             if ($this->haltIfPrefixChangedSinceStageOne(8)) { return false; }
+            if ($this->gateAbortIfMutationWatermarkAdvanced(8)) { return false; }
             $this->markBuildStage('staged_build_s8_update_special');
             $r = $this->runTimedViewBuildStage(8, 'staged_build_s8_update_special', function () {
                 $this->stageUpdateSpecial();
@@ -1396,7 +1384,9 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         }
 
         if ($stage < 9) {
+            if (!$this->releaseAndReacquireBetweenStages()) { return false; }
             if ($this->haltIfPrefixChangedSinceStageOne(9)) { return false; }
+            if ($this->gateAbortIfMutationWatermarkAdvanced(9)) { return false; }
             if ($this->isStageMarkedSkipped(9)) {
                 $this->writeProgressOption('current_stage', 9);
                 $stage = 9;
@@ -1428,7 +1418,9 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         }
 
         if ($stage < 10) {
+            if (!$this->releaseAndReacquireBetweenStages()) { return false; }
             if ($this->haltIfPrefixChangedSinceStageOne(10)) { return false; }
+            if ($this->gateAbortIfMutationWatermarkAdvanced(10)) { return false; }
             if ($this->isStageMarkedSkipped(10)) {
                 $this->writeProgressOption('current_stage', 10);
                 $stage = 10;
@@ -1450,20 +1442,13 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait {
         }
 
         if ($stage < 11) {
+            if (!$this->releaseAndReacquireBetweenStages()) { return false; }
             if ($this->haltIfPrefixChangedSinceStageOne(11)) { return false; }
+            if ($this->gateAbortIfMutationWatermarkAdvanced(11)) { return false; }
             $this->markBuildStage('staged_build_s11_swap');
-            $r = $this->runTimedViewBuildStage(11, 'staged_build_s11_swap', function () {
-                $this->stageRenameSwap();
-            });
-            if ($r === false || $r === 'halted') {
-                return false;
-            }
-            // Build fully done. markViewDoneBuildCompleted() updates both
-            // freshness and data-built-at signals, clears the hard-stale
-            // admin notice, and resets the serveability cache.
+            if (!$this->runS11SwapWithPreRenameWatermarkRecheck()) { return false; }
+            $this->publishBuiltWatermarkFromActiveBuildStartedWatermark();
             $this->markViewDoneBuildCompleted();
-            // Wipe progress so the next rebuild starts clean.
-            // clearAllProgressOptions() also clears the prefix_at_s1 capture.
             $this->clearAllProgressOptions();
         }
 

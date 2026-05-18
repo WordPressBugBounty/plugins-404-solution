@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 	Author:      Aaron J
 	Author URI:  https://www.ajexperience.com/404-solution/
 
-	Version: 4.1.18
+	Version: 4.1.19
 	Requires at least: 5.0
 	Requires PHP: 7.4
 
@@ -145,6 +145,7 @@ function abj404_autoloader($class) {
 				$inc . 'DataAccessTrait_Connection.php',
 				$inc . 'DataAccessTrait_ViewMetadata.php',
 				$inc . 'DataAccessTrait_ViewQueries.php',
+				$inc . 'DataAccessTrait_ViewQueriesHitsLifecycle.php',
 				$inc . 'DataAccessTrait_ViewQueriesStaged.php',
 				$inc . 'DataAccessTrait_ViewBuildStageRunner.php',
 				$inc . 'DataAccessTrait_ViewBuildStageCallbacks.php',
@@ -155,6 +156,10 @@ function abj404_autoloader($class) {
 				$inc . 'DataAccessTrait_ViewBuildPhpEnvProbe.php',
 				$inc . 'DataAccessTrait_ViewBuildSessionEnvProbe.php',
 				$inc . 'DataAccessTrait_ViewBuildHostFailurePolicy.php',
+				$inc . 'DataAccessTrait_ViewBuildStartedWatermark.php',
+				$inc . 'DataAccessTrait_ViewBuildForceRestart.php',
+				$inc . 'DataAccessTrait_MutationWatermarkSeam.php',
+				$inc . 'DataAccessTrait_AdminMutationGate.php',
 				$inc . 'DataAccessTrait_ViewSnapshotCache.php',
 				$inc . 'DataAccessTrait_Logs.php',
 				$inc . 'DataAccessTrait_LogsHitsRebuild.php',
@@ -208,6 +213,9 @@ function abj404_autoloader($class) {
 				$inc . 'ajax/AjaxSecurityTrait.php',
 			),
 			'ABJ_404_Solution_Ajax_SupportRequestPreview' => array(
+				$inc . 'ajax/AjaxSecurityTrait.php',
+			),
+			'ABJ_404_Solution_Ajax_RestoreDefaults' => array(
 				$inc . 'ajax/AjaxSecurityTrait.php',
 			),
 			'ABJ_404_Solution_ViewUpdater' => array(

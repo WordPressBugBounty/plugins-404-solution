@@ -438,6 +438,136 @@ trait ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait {
     }
 
     /**
+     * Per-build watermark stamp machinery -- option-name helpers, raw
+     * read/write, the stage-boundary advance gate, and the
+     * stamp/clear/publish methods -- lives on
+     * {@see ABJ_404_Solution_DataAccess_ViewBuildStartedWatermarkTrait}.
+     * The orchestrator and abort/fresh-start methods below call into it
+     * via `$this->` (both traits compose into ABJ_404_Solution_DataAccess).
+     */
+
+    /**
+     * One-call cleanup for the fresh-start branch of runStagedBuildOnce:
+     * scrap progress options (registry + Phase-2 active stamp), drop any
+     * leftover buffer tables. Pulled out of the orchestrator so the
+     * body line count stays within the per-function cap.
+     *
+     * last_build_started_watermark is intentionally NOT cleared here: it
+     * is diagnostic-only and survives across fresh-start boundaries (and
+     * gets overwritten on the next S1 entry stamp).
+     *
+     * @return void
+     */
+    private function performFreshStartCleanup(): void {
+        $this->clearAllProgressOptions();
+        $this->clearActiveBuildStartedWatermark();
+        $this->dropTransientStagedTables();
+    }
+
+    /**
+     * Single-call boundary gate. Returns true (and runs the abort
+     * cleanup) when the live mutation watermark has advanced past the
+     * S1-entry stamp; the orchestrator pairs this with `return false`
+     * to drop out of runStagedBuildOnce. Keeping the gate to one line
+     * per stage in the orchestrator (rather than four) is what holds
+     * runStagedBuildOnce within the project's per-function line cap.
+     *
+     * @param int $aboutToRunStage  Stage about to fire (2..11).
+     * @return bool  True when an abort was triggered.
+     */
+    private function gateAbortIfMutationWatermarkAdvanced(int $aboutToRunStage): bool {
+        if (!$this->mutationWatermarkAdvancedSinceBuildStart()) {
+            return false;
+        }
+        $this->abortStagedBuildForMutationWatermarkAdvance($aboutToRunStage);
+        return true;
+    }
+
+    /**
+     * S11 swap that fires the CLAUDE.md R6 pre-RENAME action hook
+     * (`abj404_view_build_before_rename_swap`) and re-checks the
+     * mutation watermark immediately after. The re-check closes the
+     * race between the S10/S11 boundary gate and the actual RENAME
+     * TABLE statement: a mutation that lands inside that window must
+     * not see the buffer get promoted to view_done. Returning false
+     * from the closure marks the stage 'yielded' (NOT 'completed'),
+     * preventing markViewBuildStageCompleted from firing and the
+     * orchestrator from publishing built_watermark for a build that
+     * never swapped.
+     *
+     * @return bool  True when the swap completed cleanly (orchestrator
+     *               should publish built_watermark); false when the
+     *               stage aborted / halted / yielded (orchestrator
+     *               should return false from runStagedBuildOnce). On
+     *               abort, this method runs the abort cleanup itself.
+     */
+    private function runS11SwapWithPreRenameWatermarkRecheck(): bool {
+        $aborted = false;
+        $result = $this->runTimedViewBuildStage(11, 'staged_build_s11_swap', function () use (&$aborted) {
+            if (function_exists('do_action')) {
+                do_action('abj404_view_build_before_rename_swap');
+            }
+            if ($this->mutationWatermarkAdvancedSinceBuildStart()) {
+                $aborted = true;
+                return false;
+            }
+            $this->stageRenameSwap();
+        });
+        if ($aborted) {
+            $this->abortStagedBuildForMutationWatermarkAdvance(11);
+            return false;
+        }
+        return $result !== false && $result !== 'halted';
+    }
+
+    /**
+     * Abort the in-flight build cleanly because an external mutation
+     * bumped the watermark. Runner owns the buffer and the progress
+     * markers, so it owns the cleanup: drop the buffer, wipe progress
+     * (including active_build_started_watermark so the next tick
+     * re-stamps from scratch). built_watermark is intentionally left
+     * alone -- it records the LAST SUCCESSFUL build's coverage, not the
+     * aborted run. last_build_started_watermark is also intentionally
+     * left alone -- it is diagnostic-only and its purpose is to survive
+     * abort so an operator can see "the most recent build attempt
+     * stamped against watermark X, then aborted".
+     *
+     * The build lock is released by the try/finally in advanceViewBuildOnce
+     * once runStagedBuildOnce returns false; this method does not touch it.
+     * scheduleViewDoneRebuild is likewise the caller's responsibility
+     * (advanceViewBuildOnce already calls it on a non-complete tick).
+     *
+     * @param int $aboutToRunStage  Stage the gate fired before (2..11).
+     * @return void
+     */
+    private function abortStagedBuildForMutationWatermarkAdvance(int $aboutToRunStage): void {
+        // Read the active stamp BEFORE clearing it so the diagnostic log
+        // line below carries the value we aborted against. Reading post-
+        // clear would always show -1 and erase the most useful field for
+        // debugging "why did this build abort?" tickets.
+        $startedForLog = $this->readActiveBuildStartedWatermark();
+        $this->dropTransientBuffersIfPresent();
+        $this->clearAllProgressOptions();
+        // active_build_started_watermark lives outside the progress
+        // registry so the happy path (S11 completion) leaves it observable
+        // to the next tick's pre-image read. The abort path explicitly
+        // clears it so the abort-then-fresh-restart loop re-stamps from
+        // the live current() rather than reusing the aborted run's
+        // pre-image.
+        $this->clearActiveBuildStartedWatermark();
+        if (is_object($this->logger) && method_exists($this->logger, 'infoMessage')) {
+            $current = class_exists('ABJ_404_Solution_MutationWatermark')
+                ? ABJ_404_Solution_MutationWatermark::current() : -1;
+            $this->logger->infoMessage(sprintf(
+                '[staged] runStagedBuildOnce: mutation watermark advanced '
+                . '(started=%d, current=%d); aborting before stage %d. '
+                . 'Buffer dropped, progress cleared; next tick rebuilds from S0.',
+                $startedForLog, $current, $aboutToRunStage
+            ));
+        }
+    }
+
+    /**
      * Option name used to persist the `$wpdb->prefix` captured at S1. Kept
      * deliberately NOT site-prefixed so that within a single request we can
      * still tell when `switch_to_blog()` has flipped `$wpdb->prefix` out
@@ -1010,9 +1140,10 @@ trait ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait {
 
     /**
      * Unix timestamp when the data currently in the view_done table was
-     * produced. Survives invalidateViewDone() so the read path can compute
-     * an honest "data on disk is N hours old" age regardless of whether the
-     * freshness signal has been cleared.
+     * produced. Survives every freshness-signal clear (admin mutation,
+     * cron-fired rebuild, force-restart) so the read path can compute an
+     * honest "data on disk is N hours old" age regardless of whether the
+     * built_at marker has been reset.
      *
      * @return int
      */

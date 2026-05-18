@@ -11,14 +11,11 @@ if (!defined('ABSPATH')) {
 trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
 
     /** Do the passed in action and return the associated message.
-     * @global type $abj404logic
      * @param string $action
      * @param string $sub
      * @return string
      */
     function handlePluginAction($action, &$sub) {
-        $abj404logic = abj_service('plugin_logic');
-
         $message = "";
         $message = array_key_exists('display-this-message', $_POST) ?
         	sanitize_text_field($_POST['display-this-message']) : '';
@@ -58,7 +55,7 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
             }
         } else if ($action == "emptyRedirectTrash") {
             if (check_admin_referer('abj404_bulkProcess') && is_admin()) {
-                $abj404logic->doEmptyTrash('abj404_redirects');
+                $this->doEmptyTrash('abj404_redirects');
                 $this->dao->markViewDoneInvalidatedByAdminMutation();
                 $message = __('All trashed URLs have been deleted!', '404-solution');
             } else {
@@ -67,7 +64,7 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
             }
         } else if ($action == "emptyCapturedTrash") {
             if (check_admin_referer('abj404_bulkProcess') && is_admin()) {
-                $abj404logic->doEmptyTrash('abj404_captured');
+                $this->doEmptyTrash('abj404_captured');
                 $this->dao->markViewDoneInvalidatedByAdminMutation();
                 $message = __('All trashed URLs have been deleted!', '404-solution');
             } else {
@@ -149,6 +146,13 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
                 $this->logger->debugMessage("Unexpected result. How did we get here? is_admin: " .
                         is_admin() . ", Action: " . $action . ", Sub: " . $sub);
             }
+        } else if ($action == "undoRegexAutoPromote") {
+            if (check_admin_referer('abj404undoRegexAutoPromote') && is_admin()) {
+                $message = $this->handleActionUndoRegexAutoPromote();
+            } else {
+                $this->logger->debugMessage("Unexpected result. How did we get here? is_admin: " .
+                        is_admin() . ", Action: " . $action . ", Sub: " . $sub);
+            }
         } else if ($this->f->substr($action . '', 0, 4) == "bulk") {
             if (check_admin_referer('abj404_bulkProcess') && is_admin()) {
                 if (!isset($_POST['idnum'])) {
@@ -157,7 +161,7 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
                         esc_html($action));
                     return '';
                 }
-                $message = $abj404logic->doBulkAction($action, array_map('absint', $_POST['idnum']));
+                $message = $this->doBulkAction($action, array_map('absint', $_POST['idnum']));
                 $this->dao->markViewDoneInvalidatedByAdminMutation();
             } else {
                 $this->logger->debugMessage("Unexpected result. How did we get here? is_admin: " .
@@ -668,8 +672,21 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
             if ($fromURL != "") {
                 $id = isset($_POST['id']) && is_scalar($_POST['id']) ? (int)$_POST['id'] : 0;
                 $code = isset($_POST['code']) && is_string($_POST['code']) ? $_POST['code'] : '';
+                // Server-side regex auto-promotion. Mirrors the JS detector
+                // at includes/ajax/redirect_to_ajax.js so a paste-and-submit
+                // with JS disabled (or any path the browser does not reach)
+                // still flips MANUAL to REGEX when the from_url contains
+                // unambiguous regex metachars. Also applies the bare-`*`
+                // to `.*` glob fixup so the stored pattern compiles.
+                $originalFromURL = $fromURL;
+                $autoPromote = $this->maybeAutoPromoteRegex($statusType, $fromURL);
+                $statusType = $autoPromote['statusType'];
+                $fromURL = $autoPromote['url'];
                 $this->dao->updateRedirect($tdType, $tdDest,
                         $fromURL, $id, $code, (string)$statusType, $startTs, $endTs);
+                if ($autoPromote['autoPromoted']) {
+                    $this->saveRegexAutoPromoteNotice($id, $originalFromURL, $fromURL, $autoPromote['urlRewritten']);
+                }
 
                 // Save conditions only for single-redirect edits (bulk edit has no conditions UI).
                 if ($id > 0) {
@@ -825,15 +842,26 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
             // which would incorrectly discard code=0 (Meta Refresh).
             $code = isset($_POST['code']) && is_scalar($_POST['code']) && (string)$_POST['code'] !== '' ? (string)$_POST['code'] : '301';
 
-            $this->dao->setupRedirect($manualURL, (string)$statusType,
+            // Server-side regex auto-promotion. Same rationale as in
+            // updateRedirectData(): cover paths the JS detector cannot reach.
+            $originalManualURL = $manualURL;
+            $autoPromoteAdd = $this->maybeAutoPromoteRegex($statusType, $manualURL);
+            $statusType = $autoPromoteAdd['statusType'];
+            $manualURL = $autoPromoteAdd['url'];
+
+            $newRedirectId = $this->dao->setupRedirect($manualURL, (string)$statusType,
                     $tdType2, $tdDest2,
                     sanitize_text_field($code), 0);
-            // Admin-initiated mutation: force a fresh view_done rebuild
-            // before the next AJAX fetch so the new row appears
-            // immediately on the redirects table. invalidateViewDone()
-            // alone serves stale-but-present (fbc270d8) which is correct
-            // for cron/maintenance but hides the admin's own change
-            // until the next background rebuild.
+            if ($autoPromoteAdd['autoPromoted']) {
+                $this->saveRegexAutoPromoteNotice((int)$newRedirectId, $originalManualURL, $manualURL, $autoPromoteAdd['urlRewritten']);
+            }
+            // Admin-initiated mutation: bump the watermark so the build
+            // runner notices the new source data at the next stage
+            // boundary, and record the post-increment value against the
+            // admin-visibility gate so the next AJAX fetch waits for a
+            // build whose built_watermark covers it (the stale-serving
+            // contract from fbc270d8 is preserved for cron/maintenance
+            // paths but the admin sees their own change immediately).
             $this->dao->markViewDoneInvalidatedByAdminMutation();
 
         } else {
@@ -843,6 +871,108 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
         }
 
         return $message;
+    }
+
+    /**
+     * Server-side regex auto-promotion. When the admin posts a from_url
+     * that contains unambiguous regex metachars but does not check
+     * "Treat as regex", flip the status to REGEX automatically and apply
+     * the glob-to-regex fixup (bare `*` becomes `.*`) so the stored
+     * pattern compiles at runtime.
+     *
+     * This is the server-side counterpart to the JS auto-check in
+     * includes/ajax/redirect_to_ajax.js: same intent, different reach.
+     * The JS handler covers anyone who types into the admin form with
+     * JS enabled. This handler covers the paste-and-submit, JS-disabled,
+     * and programmatic-POST paths the JS detector never sees.
+     *
+     * When the admin explicitly checked the "Treat as regex" box, we
+     * leave the pattern untouched (no glob fixup): they meant exactly
+     * what they wrote, even if it is weird like `(foo)*`.
+     *
+     * @param int $statusTypeIn The status already decided from the POST
+     *   checkbox (ABJ404_STATUS_MANUAL or ABJ404_STATUS_REGEX).
+     * @param string $fromURL The raw from_url posted by the admin.
+     * @return array{statusType: int, url: string, autoPromoted: bool, urlRewritten: bool}
+     */
+    private function maybeAutoPromoteRegex($statusTypeIn, $fromURL) {
+        $result = array(
+            'statusType' => (int)$statusTypeIn,
+            'url' => is_string($fromURL) ? $fromURL : '',
+            'autoPromoted' => false,
+            'urlRewritten' => false,
+        );
+
+        if ((int)$statusTypeIn === ABJ404_STATUS_REGEX) {
+            return $result;
+        }
+        if (!ABJ_404_Solution_RegexAutoPromote::looksLikeUnambiguousRegex($result['url'])) {
+            return $result;
+        }
+
+        $result['statusType'] = ABJ404_STATUS_REGEX;
+        $result['autoPromoted'] = true;
+        $glob = ABJ_404_Solution_RegexAutoPromote::applyGlobFixup($result['url']);
+        $result['url'] = $glob['url'];
+        $result['urlRewritten'] = $glob['changed'];
+
+        return $result;
+    }
+
+    /**
+     * Persist a regex auto-promote event for the current user so the
+     * next admin page render can show a notice with [Edit] and [Undo]
+     * links. Thin wrapper around the static helper; kept here so the
+     * call site in updateRedirectData()/addAdminRedirect() reads at the
+     * level of the surrounding code.
+     *
+     * @param int $redirectId The id of the row that was just saved.
+     * @param string $originalURL The from_url the admin posted (pre-rewrite).
+     * @param string $newURL The from_url that was actually stored.
+     * @param bool $urlRewritten True when the glob fixup mutated the URL.
+     * @return void
+     */
+    private function saveRegexAutoPromoteNotice($redirectId, $originalURL, $newURL, $urlRewritten) {
+        ABJ_404_Solution_RegexAutoPromote::saveNotice($redirectId, $originalURL, $newURL, $urlRewritten);
+    }
+
+    /**
+     * Handle the "Undo regex auto-promotion" admin action. Restores the
+     * row's status to MANUAL and its from_url to the original value the
+     * admin posted (before the glob-fixup rewrite).
+     *
+     * Nonce: abj404undoRegexAutoPromote. The nonce ensures the link in
+     * the auto-promote notice is the only way to invoke this action.
+     *
+     * @return string Human-readable result message.
+     */
+    function handleActionUndoRegexAutoPromote() {
+        $notice = ABJ_404_Solution_RegexAutoPromote::readNotice();
+        if ($notice === null || $notice['redirect_id'] <= 0) {
+            return __('Error: No regex auto-promotion to undo.', '404-solution');
+        }
+        $redirectsTable = $this->dao->doTableNameReplacements('{wp_abj404_redirects}');
+        $sql = "UPDATE `" . $redirectsTable . "` SET `url` = %s, `status` = %d WHERE `id` = %d";
+        $this->dao->queryAndGetResults($sql, array('query_params' => array(
+            $notice['original_url'],
+            (int)ABJ404_STATUS_MANUAL,
+            (int)$notice['redirect_id'],
+        )));
+        // The raw UPDATE above bypasses the setupRedirect/updateRedirect
+        // chain that normally bumps the mutation watermark via
+        // invalidateStatusCountsCache. Bump explicitly so markView below
+        // observes a fresh watermark and the next admin read sees the
+        // reverted URL/status (without this, observed == built_watermark
+        // and the gate never fires; view_done keeps serving the
+        // pre-undo /oops/.* row).
+        $this->dao->bumpMutationWatermark();
+        $this->dao->markViewDoneInvalidatedByAdminMutation();
+        ABJ_404_Solution_RegexAutoPromote::clearNotice();
+        return sprintf(
+            /* translators: %s = the original from_url string that was restored */
+            __('Regex auto-promotion undone. Restored "%s" with status Manual.', '404-solution'),
+            $notice['original_url']
+        );
     }
 
     /**
@@ -872,6 +1002,16 @@ trait ABJ_404_Solution_PluginLogicTrait_AdminActions {
 
         $importer = new ABJ_404_Solution_CrossPluginImporter($this->dao, $this->logger);
         $count    = $importer->importFrom($source);
+
+        // Admin-initiated mutation: force a fresh view_done rebuild before the
+        // next AJAX fetch so the newly-imported rows appear on the redirects
+        // table immediately, not on the next cron rebuild. Mirrors the CSV
+        // import path above; without this the rows land in wp_abj404_redirects
+        // but the admin-visibility gate stays open and the cached view_done
+        // snapshot keeps serving pre-import rows.
+        if ($count > 0) {
+            $this->dao->markViewDoneInvalidatedByAdminMutation();
+        }
 
         return sprintf(
             /* translators: %d = number of redirects imported */

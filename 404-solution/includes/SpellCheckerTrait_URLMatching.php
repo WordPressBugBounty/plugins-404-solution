@@ -24,6 +24,43 @@ trait SpellCheckerTrait_URLMatching {
 
 		$regexURLsRows = $this->dao->getRedirectsWithRegEx();
 
+		// Runtime fallback: also consider MANUAL rows whose stored from_url
+		// contains an unambiguous regex metacharacter. These can exist when
+		// the row was created before the server-side auto-promote landed
+		// (older plugin versions), through a direct DB write, or via a
+		// CSV import path that pre-dated the widened sniff. The stored
+		// status is NOT mutated here; the next save/import on the row
+		// will sweep it into REGEX through the normal path.
+		//
+		// The glob fixup is applied to the in-memory copy of the URL only
+		// so a literal `/sales/*` stored by an older version compiles to
+		// `/sales/.*` and actually matches `/sales/foo`. Without this
+		// step, the pattern would hit PCRE "nothing to repeat" and the
+		// row would silently fail to match (the loop's @-suppressed
+		// preg_match returns false in that case).
+		$manualWithMetachars = $this->dao->getManualRedirectsWithRegexMetachars();
+		if (!empty($manualWithMetachars)) {
+			$filtered = array();
+			foreach ($manualWithMetachars as $manualRow) {
+				$manualUrl = isset($manualRow['url']) && is_string($manualRow['url']) ? $manualRow['url'] : '';
+				if (!ABJ_404_Solution_RegexAutoPromote::looksLikeUnambiguousRegex($manualUrl)) {
+					continue;
+				}
+				$glob = ABJ_404_Solution_RegexAutoPromote::applyGlobFixup($manualUrl);
+				$manualRow['url'] = $glob['url'];
+				$filtered[] = $manualRow;
+			}
+			if (!empty($filtered)) {
+				if ($isDebug) {
+					$this->logger->debugMessage(
+						"Runtime regex fallback: trying " . count($filtered) .
+						" MANUAL row(s) with regex metachars against URL: " . $requestedURL
+					);
+				}
+				$regexURLsRows = array_merge($regexURLsRows, $filtered);
+			}
+		}
+
 		foreach ($regexURLsRows as $row) {
 			$regexURL = $row['url'];
 
@@ -33,7 +70,12 @@ trait SpellCheckerTrait_URLMatching {
 			}
 			$regexURLStr = is_string($regexURL) ? $regexURL : '';
 			$preparedURL = $this->getPreparedRegexPattern($regexURLStr);
-			if ($this->f->regexMatch($preparedURL, $requestedURL)) {
+			// Suppress PHP warnings from invalid stored patterns. Bad rows can
+			// reach here from older imports, manual admin edits, or direct DB
+			// writes; treating them as non-match keeps a single bad row from
+			// polluting every 404 request's log. Same idiom as
+			// RedirectConditionEvaluator.php:316 (`@preg_match` in case 'regex').
+			if (@$this->f->regexMatch($preparedURL, $requestedURL)) {
 				if ($isDebug) {
 					abj_service('request_context')->debug_info = 'Cleared after regex.';
 				}
@@ -63,7 +105,10 @@ trait SpellCheckerTrait_URLMatching {
 				$hasReplacementToken = ($this->f->strpos($permLinkStr, '$') !== false);
 				if ($hasCaptureGroup && $hasReplacementToken) {
 					$results = array();
-					$this->f->regexMatch($regexURLStr, $requestedURL, $results);
+					// Pattern already proved itself valid in the gate above;
+					// suppress here too in case e.g. a different prepared-vs-raw
+					// shape compiles inconsistently.
+					@$this->f->regexMatch($regexURLStr, $requestedURL, $results);
 
 					// do a repacement for all of the groups found.
 					$final = $permLinkStr;

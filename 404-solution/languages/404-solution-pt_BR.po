@@ -3843,3 +3843,71 @@ msgstr "Detalhes de privacidade (retenção, fluxo de apagamento, região de pro
 #: includes/UninstallModal.php
 msgid "Include technical details (site URL, system info, plugin counts, and a sanitized log excerpt) to help diagnose the issue"
 msgstr "Incluir detalhes técnicos (endereço do site, informações do sistema, quantidade de extensões e um trecho do registro depurado) para ajudar a diagnosticar o problema"
+
+#: includes/ViewTrait_UI.php
+msgid "Detected as a regex pattern. Stored \"%1$s\" as \"%2$s\"."
+msgstr "Detectado como padrão regex. \"%1$s\" armazenado como \"%2$s\"."
+
+#: includes/ViewTrait_UI.php
+msgid "Detected as a regex pattern. Stored \"%s\" with Regex status."
+msgstr "Detectado como padrão regex. \"%s\" armazenado com status Regex."
+
+#: includes/ViewTrait_UI.php
+msgid "404 Solution:"
+msgstr "Solução 404:"
+
+#: includes/ViewTrait_UI.php
+msgid "Undo regex auto-promotion and restore Manual status?"
+msgstr "Desfazer a auto-promoção de regex e restaurar o status Manual?"
+
+#: includes/ViewTrait_UI.php
+msgid "Undo"
+msgstr "Desfazer"
+
+#: includes/PluginLogicTrait_AdminActions.php
+msgid "Error: No regex auto-promotion to undo."
+msgstr "Erro: Nenhuma auto-promoção de regex para desfazer."
+
+#: includes/PluginLogicTrait_AdminActions.php
+msgid "Regex auto-promotion undone. Restored \"%s\" with status Manual."
+msgstr "Auto-promoção de regex desfeita. \"%s\" restaurado com status Manual."
+
+#: includes/ImportExportService.php
+msgid "Invalid regex pattern at line %d: %s (%s)"
+msgstr "Padrão regex inválido na linha %d: %s (%s)"
+
+#: includes/ImportExportService.php
+msgid "Invalid regex pattern: %s (%s)"
+msgstr "Padrão regex inválido: %s (%s)"
+
+#: includes/ImportExportService.php
+msgid "pattern is empty"
+msgstr "o padrão está vazio"
+
+#: includes/ImportExportService.php
+msgid "cannot find a safe delimiter character"
+msgstr "não é possível encontrar um caractere delimitador seguro"
+
+#: includes/ViewTrait_UI.php
+msgid "Restore Defaults"
+msgstr "Restaurar padrões"
+
+#: includes/ViewTrait_UI.php
+msgid "Restore Default Settings?"
+msgstr "Restaurar configurações padrão?"
+
+#: includes/ViewTrait_UI.php
+msgid "This will reset all plugin settings to their default values. This cannot be undone. Your redirect rules and 404 logs will not be affected."
+msgstr "Isso redefinirá todas as configurações do plugin para os valores padrão. Esta ação não pode ser desfeita. Suas regras de redirecionamento e logs 404 não serão afetados."
+
+#: includes/PluginLogicTrait_SettingsUpdate.php
+msgid "Error: 404 destination URL exceeds the maximum length of %d characters"
+msgstr "Erro: a URL de destino 404 excede o comprimento máximo de %d caracteres"
+
+#: includes/PluginLogicTrait_SettingsUpdate.php
+msgid "Error: Admin notification threshold must be a non-negative number"
+msgstr "Erro: o limiar de notificação do administrador deve ser um número não negativo"
+
+#: includes/ajax/Ajax_RestoreDefaults.php
+msgid "Settings restored to defaults."
+msgstr "Configurações restauradas para os padrões."

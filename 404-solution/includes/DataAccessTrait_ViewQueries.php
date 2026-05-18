@@ -262,11 +262,70 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
     }
 
     /**
+     * Per-request "bulk mutation in progress" flag. When set, per-row
+     * invalidateStatusCountsCache() calls short-circuit to a no-op so a
+     * 10K-row CSV import does not fire 60K invalidation queries (each row
+     * cascades to bumpMutationWatermark + delete_option +
+     * delete_transient × N + DELETE FROM view_cache; for a 10K import
+     * this took ~63s before this guard). The bulk caller is responsible
+     * for issuing ONE final invalidation (typically via
+     * markViewDoneInvalidatedByAdminMutation()) after the bulk write
+     * completes, so admin reads see the imported rows immediately.
+     *
+     * Implemented as a static on the DAO instance ($this only because
+     * trait scoping requires it) so the flag survives across multiple
+     * setupRedirect() calls within one request without needing every
+     * caller to thread a parameter through.
+     *
+     * @var bool
+     */
+    public static $bulkMutationInProgress = false;
+
+    /**
+     * Open/close the bulk-mutation window. Bulk importers (CSV import,
+     * sitemap regeneration, future bulk admin actions) wrap their per-row
+     * loop with this. The callable is invoked while the flag is set;
+     * exceptions are rethrown but the flag is always restored.
+     *
+     * On window close, issues exactly one bumpMutationWatermark() to
+     * represent the entire batch as a single mutation tick. Without this
+     * the per-row chain bumps are all suppressed and a later
+     * markViewDoneInvalidatedByAdminMutation() call would observe the
+     * pre-batch counter, leaving the admin-visibility gate un-raised
+     * and the next read returning the stale snapshot (the failure mode
+     * WpCliMutationEndToEndCharacterizationTest::testCliBulkAddFromCsv
+     * pins). The bump fires even when the callable returned early or
+     * threw, because the side effect of "we entered a mutation window"
+     * is what the watermark documents -- whether downstream rows landed
+     * is the caller's concern.
+     *
+     * @template T
+     * @param callable():T $work
+     * @return T
+     */
+    public function runWithDeferredInvalidation(callable $work) {
+        $prior = self::$bulkMutationInProgress;
+        self::$bulkMutationInProgress = true;
+        try {
+            return $work();
+        } finally {
+            self::$bulkMutationInProgress = $prior;
+            $this->bumpMutationWatermark();
+        }
+    }
+
+    /**
      * Invalidate cached status counts.
      * Call this when redirects are created, updated, or deleted.
+     *
+     * No-op when {@see self::$bulkMutationInProgress} is set; the bulk
+     * caller must issue one final invalidation after the loop completes.
      */
     /** @return void */
     function invalidateStatusCountsCache(): void {
+        if (self::$bulkMutationInProgress) {
+            return;
+        }
         delete_transient(self::CACHE_KEY_REDIRECT_STATUS);
         delete_transient(self::CACHE_KEY_CAPTURED_STATUS);
         delete_transient(self::CACHE_KEY_HIGH_IMPACT_CAPTURED);
@@ -283,16 +342,43 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
      * @return void
      */
     function invalidateViewSnapshotCache(): void {
-        // Mark the precomputed view_done table stale. The next request
-        // triggers a rebuild (subject to the per-request guard).
-        $this->invalidateViewDone();
+        // Source-mutation signal (Phase 4 of the staged view-build watermark
+        // refactor; see docs/refactor-staged-view-build-watermark.md). Every
+        // DAO mutator (deleteRedirect, setupRedirect, updateRedirect,
+        // updateRedirectTypeStatus, moveRedirectsToTrash, removeDuplicatesCron,
+        // purgeRedirectsByStatus) routes through invalidateStatusCountsCache()
+        // -> here. Bump the per-blog mutation watermark so the staged-build
+        // runner observes it at the next stage boundary and either aborts
+        // the in-flight build cleanly (so the next build covers the new row)
+        // or, if the build is already running for an earlier watermark, the
+        // active_build_started_watermark gate keeps the runner from
+        // publishing a snapshot that misses the mutation.
+        $this->bumpMutationWatermark();
 
-        // Clear all rows from the view cache table. The 'log_errors' => false
-        // option signals to queryAndGetResults() that this is a best-effort
-        // operation: the cache expires naturally via TTL if the DELETE fails,
-        // so the DAO layer handles the failure quietly without re-throwing.
+        // Clear view_done freshness so the read path's TTL check trips and
+        // a rebuild gets scheduled on the next request. The runner remains
+        // the sole owner of progress markers, the S1 prefix capture, and
+        // the transient buffer tables: external code (this seam included)
+        // must not touch them. scheduleViewDoneRebuild() is idempotent
+        // (wp_next_scheduled short-circuit) so concurrent mutators do not
+        // pile up cron events.
+        if (function_exists('delete_option')) {
+            delete_option($this->viewDoneFreshnessOptionName());
+        }
+        $this->invalidateViewDoneServeableCache();
+        $this->scheduleViewDoneRebuild();
+
+        // Clear all rows from the view cache table. log_errors=false marks
+        // this as a best-effort operation (the cache expires naturally via
+        // TTL if the DELETE fails). skip_repair=true blocks the missing-
+        // table auto-create + retry path: a missing view_cache means
+        // "nothing to invalidate"; spinning up the full createDatabaseTables
+        // flow to make the DELETE succeed is wasteful in production and in
+        // tests it cascades correctCollations -> bumpMutationWatermark, which
+        // breaks the "exactly one bump per source-data mutation" contract
+        // pinned by MixedSourceConcurrentMutationIntegrationTest.
         $query = "DELETE FROM {wp_abj404_view_cache} WHERE 1=1";
-        $this->queryAndGetResults($query, array('log_errors' => false));
+        $this->queryAndGetResults($query, array('log_errors' => false, 'skip_repair' => true));
 
         // Clear WordPress transients for view row and count snapshots.
         // The transient keys are hashed (e.g. abj404_view_rows_<md5>), so
@@ -537,6 +623,53 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         return $rows;
     }
 
+    /**
+     * Find MANUAL redirects whose `url` column contains an unambiguous
+     * regex metacharacter (`* [ ] | ^ \ { }`). These are rows the admin
+     * created via a pre-auto-promote path (older plugin version, direct
+     * DB write, CSV import before the 4.1.x sniff was widened) that
+     * really should be treated as regex. The runtime fallback in
+     * SpellCheckerTrait_URLMatching tries them as regex without
+     * mutating the stored status; the auto-promote on next save sweeps
+     * them into the regular regex query.
+     *
+     * The LIKE filter is deliberately broad to keep the query simple;
+     * the runtime caller re-checks with the precise PHP-side helper
+     * (looksLikeUnambiguousRegex) before treating any row as regex.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    function getManualRedirectsWithRegexMetachars() {
+        $query = "select \n  {wp_abj404_redirects}.id,\n  {wp_abj404_redirects}.url,\n  {wp_abj404_redirects}.status,\n"
+                . "  {wp_abj404_redirects}.type,\n  {wp_abj404_redirects}.final_dest,\n  {wp_abj404_redirects}.code,\n"
+                . "  {wp_abj404_redirects}.timestamp,\n {wp_posts}.id as wp_post_id\n ";
+        $query .= "from {wp_abj404_redirects}\n " .
+                "  LEFT OUTER JOIN {wp_posts} \n " .
+                "    on {wp_abj404_redirects}.final_dest = {wp_posts}.id \n ";
+
+        // SQL-side prefilter using INSTR per metachar. INSTR avoids LIKE's
+        // wildcard/escape semantics so we do not have to special-case
+        // the backslash byte. The PHP-side caller re-checks each row with
+        // looksLikeUnambiguousRegex(), so a few false positives here
+        // are harmless; the goal is to never miss a row that should be
+        // considered. Set matches the helper class.
+        $query .= "where status = " . ABJ404_STATUS_MANUAL . " \n " .
+                "     and disabled = 0 \n " .
+                "     and (INSTR(`url`, '*') > 0 " .
+                "       OR INSTR(`url`, '[') > 0 " .
+                "       OR INSTR(`url`, ']') > 0 " .
+                "       OR INSTR(`url`, '|') > 0 " .
+                "       OR INSTR(`url`, '^') > 0 " .
+                "       OR INSTR(`url`, '\\\\') > 0 " .
+                "       OR INSTR(`url`, '{') > 0 " .
+                "       OR INSTR(`url`, '}') > 0)";
+        $results = $this->queryAndGetResults($query);
+
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = is_array($results['rows']) ? $results['rows'] : array();
+        return $rows;
+    }
+
     /** Returns the redirects that are in place.
      * @global type $wpdb
      * @param string $sub either "redirects" or "captured".
@@ -608,6 +741,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         if ($canUseSnapshotCache && $snapshotCacheKey !== '') {
             $this->setViewRowsSnapshotToTable($snapshotCacheKey, $sub, $rows, self::VIEW_SNAPSHOT_CACHE_TTL_SECONDS);
             if (function_exists('set_transient')) {
+                // allow-cache-empty: empty $rows is a legitimate result on a fresh install (no redirects yet); error paths early-return above without reaching this line
                 set_transient($snapshotCacheKey, $rows, self::VIEW_SNAPSHOT_CACHE_TTL_SECONDS);
             }
         }
@@ -726,6 +860,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
                     $countCacheKey = $this->getViewSnapshotCacheKey('abj404_view_count', $sub, $tableOptions);
                 }
                 if ($canUseSnapshotCache && $countCacheKey !== '') {
+                    // allow-cache-empty: $countValue=0 is a legitimate result when no rows match the search filter; the staged pending/error paths throw above without reaching this line
                     set_transient($countCacheKey, $countValue, self::VIEW_SNAPSHOT_CACHE_TTL_SECONDS);
                 }
                 return $countValue;
@@ -820,15 +955,19 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
 
         $scoreRangeClause = '';
         $rawScoreRange = is_string($tableOptions['score_range'] ?? '') ? ($tableOptions['score_range'] ?? 'all') : 'all';
+        // Each `wp_abj404_redirects.*` reference below is the SQL alias bound by the
+        // `FROM {wp_abj404_redirects} wp_abj404_redirects` clause in the assembled
+        // query, not a hardcoded table-name literal. Per-line markers keep the
+        // lint window (+/- 1 line) honest.
         switch ($rawScoreRange) {
-            case 'high': $scoreRangeClause = 'AND wp_abj404_redirects.score >= 80'; break;
-            case 'medium': $scoreRangeClause = 'AND wp_abj404_redirects.score >= 50 AND wp_abj404_redirects.score < 80'; break;
-            case 'low': $scoreRangeClause = 'AND wp_abj404_redirects.score IS NOT NULL AND wp_abj404_redirects.score < 50'; break;
-            case 'manual': $scoreRangeClause = 'AND wp_abj404_redirects.score IS NULL'; break;
+            case 'high': $scoreRangeClause = 'AND wp_abj404_redirects.score >= 80'; break; // allow-prefix-literal: SQL alias, see comment above
+            case 'medium': $scoreRangeClause = 'AND wp_abj404_redirects.score >= 50 AND wp_abj404_redirects.score < 80'; break; // allow-prefix-literal: SQL alias
+            case 'low': $scoreRangeClause = 'AND wp_abj404_redirects.score IS NOT NULL AND wp_abj404_redirects.score < 50'; break; // allow-prefix-literal: SQL alias
+            case 'manual': $scoreRangeClause = 'AND wp_abj404_redirects.score IS NULL'; break; // allow-prefix-literal: SQL alias
         }
 
         $query = "SELECT COUNT(*) AS count\n" .
-                 "FROM {wp_abj404_redirects} wp_abj404_redirects\n" .
+                 "FROM {wp_abj404_redirects} wp_abj404_redirects\n" . // allow-prefix-literal: second token is the SQL alias name, not a table reference
                  "WHERE 1 and status IN (" . $statusTypes . ") AND disabled = " . intval($trashValue) . "\n" .
                  $scoreRangeClause;
 
@@ -883,10 +1022,11 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
                 // covers rows from upgraded sites where the chunked backfill
                 // hasn't reached yet — those rows merge in via the original
                 // expression so behavior matches pre-upgrade exactly.
+                // wp_abj404_redirects below is the SQL alias from the assembled FROM clause, not a hardcoded table name.
                 $logsTableJoin = "  LEFT OUTER JOIN {wp_abj404_logs_hits} logstable \n " .
                         "  on binary logstable.requested_url = " .
-                        "binary COALESCE(wp_abj404_redirects.canonical_url, " .
-                        "concat('/', trim(both '/' from wp_abj404_redirects.url))) \n ";
+                        "binary COALESCE(wp_abj404_redirects.canonical_url, " . // allow-prefix-literal: SQL alias
+                        "concat('/', trim(both '/' from wp_abj404_redirects.url))) \n "; // allow-prefix-literal: SQL alias
             } else {
                 // Fall back to null columns if table creation failed
                 $this->logger->debugMessage("logs_hits table not available, falling back to null columns");
@@ -945,23 +1085,23 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
                 $order = 'ASC';
             }
             $orderByString = "order by published_status asc, " . $orderBy . " " . $order .
-                ", wp_abj404_redirects.url ASC, wp_abj404_redirects.id " . $order;
+                ", wp_abj404_redirects.url ASC, wp_abj404_redirects.id " . $order; // allow-prefix-literal: SQL alias bound by `FROM {wp_abj404_redirects} wp_abj404_redirects`
         }
 
-        // Score range filter clause.
+        // Score range filter clause. wp_abj404_redirects below is the SQL alias from the assembled FROM clause, not a hardcoded table name.
         $rawScoreRange = is_string($tableOptions['score_range'] ?? '') ? ($tableOptions['score_range'] ?? 'all') : 'all';
         switch ($rawScoreRange) {
             case 'high':
-                $scoreRangeClause = 'AND wp_abj404_redirects.score >= 80';
+                $scoreRangeClause = 'AND wp_abj404_redirects.score >= 80'; // allow-prefix-literal: SQL alias
                 break;
             case 'medium':
-                $scoreRangeClause = 'AND wp_abj404_redirects.score >= 50 AND wp_abj404_redirects.score < 80';
+                $scoreRangeClause = 'AND wp_abj404_redirects.score >= 50 AND wp_abj404_redirects.score < 80'; // allow-prefix-literal: SQL alias
                 break;
             case 'low':
-                $scoreRangeClause = 'AND wp_abj404_redirects.score IS NOT NULL AND wp_abj404_redirects.score < 50';
+                $scoreRangeClause = 'AND wp_abj404_redirects.score IS NOT NULL AND wp_abj404_redirects.score < 50'; // allow-prefix-literal: SQL alias
                 break;
             case 'manual':
-                $scoreRangeClause = 'AND wp_abj404_redirects.score IS NULL';
+                $scoreRangeClause = 'AND wp_abj404_redirects.score IS NULL'; // allow-prefix-literal: SQL alias
                 break;
             default:
                 $scoreRangeClause = '';
@@ -1100,6 +1240,7 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
     function prepare_query_wp($query, $data) {
         global $wpdb;
         list($prepared_query, $ordered_values) = $this->prepare_query($query, $data);
+        // DAO-bypass-approved: $wpdb->prepare is read-only string formatting; callers execute the result through queryAndGetResults
         return $wpdb->prepare($prepared_query, $ordered_values);
     }
     
@@ -1130,321 +1271,6 @@ trait ABJ_404_Solution_DataAccess_ViewQueriesTrait {
         }, $query);
             
         return [$prepared_query !== null ? $prepared_query : $query, $ordered_values];
-    }
-    
-    /** @return void */
-    function maybeUpdateRedirectsForViewHitsTable(): void {
-        // Record that we checked during this request (used for admin tooltip UX).
-        $this->setRuntimeFlag(self::HITS_TABLE_LAST_CHECKED_FLAG, time(), 86400);
-
-        // Piggyback on the captured-404s tab render: also schedule a
-        // 15-second logsv2.canonical_url backfill at shutdown if there's
-        // legacy NULL-row backlog. The shutdown handler holds a worker
-        // for the budget but the admin response is already flushed by
-        // fastcgi_finish_request, so the user doesn't perceive the wait.
-        // The function is internally deduped + gated on column existence,
-        // probe results, and the backfill-complete option, so calling it
-        // unconditionally is cheap.
-        if (function_exists('abj_service')) {
-            $upgradesEtc = abj_service('database_upgrades');
-            if (is_object($upgradesEtc) && method_exists($upgradesEtc, 'scheduleLogsv2CanonicalUrlBackfill')) {
-                $upgradesEtc->scheduleLogsv2CanonicalUrlBackfill();
-            }
-        }
-
-        if ($this->shouldSkipNonEssentialDbWrites()) {
-            $this->logger->debugMessage(__FUNCTION__ . " skipped due to temporary DB write cooldown.");
-            $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'paused', 86400);
-            return;
-        }
-
-        // Check if the table exists
-        if (!$this->logsHitsTableExists()) {
-            // Defer creation to shutdown hook so the admin page loads immediately.
-            // The view query gracefully falls back to null hits columns when the
-            // table doesn't exist (getRedirectsForViewQuery checks logsHitsTableExists).
-            // On sites with large logsv2 tables the INSERT...SELECT that populates
-            // the hits table can take minutes, which exceeds proxy timeouts (e.g.
-            // Cloudflare's 100-second limit → HTTP 524).
-            $this->logger->debugMessage(__FUNCTION__ . " table doesn't exist, deferring creation to shutdown hook.");
-            $this->scheduleHitsTableRebuild();
-            return;
-        }
-
-        // Diagnostic: track the max_log_id age signal so a stalled rollup
-        // surfaces a broken-cron admin notice instead of silently showing
-        // stale hit-count columns. Self-heals when the gap closes.
-        $this->recordLogsHitsRollupStalenessSignal();
-
-        // Check if rebuild is needed (logs have changed since last build)
-        if (!$this->hitsTableNeedsRebuild()) {
-            // No new log entries - skip rebuild to reduce server load
-            $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'not_needed', 86400);
-            return;
-        }
-
-        // Table exists and logs have changed - defer to shutdown hook
-        $this->scheduleHitsTableRebuild();
-    }
-
-    /**
-     * Schedule the hits table to be rebuilt at shutdown.
-     *
-     * Uses a static flag to ensure the hook is only registered once per request,
-     * even if multiple calls to getRedirectsForView with hits sorting occur.
-     *
-     * The shutdown hook runs after the response is sent, so the admin sees the page
-     * immediately with existing data, and fresh data is available on next load.
-     */
-    /** @return void */
-    function scheduleHitsTableRebuild(): void {
-        if ($this->shouldSkipNonEssentialDbWrites()) {
-            $this->logger->debugMessage(__FUNCTION__ . " skipped due to temporary DB write cooldown.");
-            $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'paused', 86400);
-            return;
-        }
-        if (!self::$hitsTableRebuildScheduled) {
-            if ($this->isHitsTableRebuildLocked()) {
-                $this->logger->debugMessage(__FUNCTION__ . " skipping scheduling because another rebuild is already running.");
-                $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'running', 86400);
-                return;
-            }
-
-            $rawScheduledFlag = $this->getRuntimeFlag(self::HITS_TABLE_LAST_SCHEDULED_FLAG);
-            $lastScheduled = is_scalar($rawScheduledFlag) ? (int)$rawScheduledFlag : 0;
-            if ($lastScheduled > 0 && (time() - $lastScheduled) < self::HITS_TABLE_SCHEDULE_COOLDOWN_SECONDS) {
-                $this->logger->debugMessage(__FUNCTION__ . " skipping scheduling due to cooldown.");
-                $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'cooldown', 86400);
-                return;
-            }
-
-            self::$hitsTableRebuildScheduled = true;
-            $this->setRuntimeFlag(self::HITS_TABLE_LAST_SCHEDULED_FLAG, time(), 86400);
-            $this->setRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG, 'scheduled', 86400);
-            if ($this->shouldScheduleHitsTableRebuildViaCron()) {
-                $this->logger->debugMessage(__FUNCTION__ . " scheduling hits table rebuild via WP-Cron.");
-                if (function_exists('wp_schedule_single_event')) {
-                    wp_schedule_single_event(time() + 5, 'abj404_updateLogsHitsTableAction');
-                }
-                return;
-            }
-
-            $this->logger->debugMessage(__FUNCTION__ . " scheduling hits table rebuild for shutdown hook.");
-            add_action('shutdown', function(): void { $this->createRedirectsForViewHitsTable(); });
-        }
-    }
-
-    /** @return bool */
-    private function shouldScheduleHitsTableRebuildViaCron(): bool {
-        if (function_exists('wp_doing_ajax') && wp_doing_ajax()) {
-            return true;
-        }
-        $scriptName = isset($_SERVER['SCRIPT_NAME']) && is_string($_SERVER['SCRIPT_NAME'])
-            ? $_SERVER['SCRIPT_NAME'] : '';
-        if ($scriptName !== '' && basename($scriptName) === 'admin-ajax.php') {
-            return true;
-        }
-        $pagenow = isset($GLOBALS['pagenow']) && is_string($GLOBALS['pagenow'])
-            ? $GLOBALS['pagenow'] : '';
-        return $pagenow === 'admin-ajax.php';
-    }
-
-    private function getHitsTableRebuildLockOptionName(): string {
-        return $this->getLowercasePrefix() . 'abj404_logs_hits_rebuild_lock';
-    }
-
-    /** @return bool */
-    private function isHitsTableRebuildLocked(): bool {
-        if (!function_exists('get_option')) {
-            return false;
-        }
-        $lockValue = get_option($this->getHitsTableRebuildLockOptionName(), false);
-        if ($lockValue === false || $lockValue === null || $lockValue === '') {
-            return false;
-        }
-        // Defensive: if lock is corrupted (non-numeric), clear it so rebuilds can resume.
-        if (!is_numeric($lockValue)) {
-            if (function_exists('delete_option')) {
-                delete_option($this->getHitsTableRebuildLockOptionName());
-            }
-            return false;
-        }
-        $lockTimestamp = (int)$lockValue;
-        if ($lockTimestamp > 0 && (time() - $lockTimestamp) > self::HITS_TABLE_REBUILD_LOCK_TTL_SECONDS) {
-            if (function_exists('delete_option')) {
-                delete_option($this->getHitsTableRebuildLockOptionName());
-            }
-            return false;
-        }
-        return true;
-    }
-
-    /** @return int|null */
-    function getLogsHitsTableLastCheckedAt() {
-        $rawTsFlag = $this->getRuntimeFlag(self::HITS_TABLE_LAST_CHECKED_FLAG);
-        $ts = is_scalar($rawTsFlag) ? (int)$rawTsFlag : 0;
-        return $ts > 0 ? $ts : null;
-    }
-
-    /** @return int|null */
-    function getLogsHitsTableLastScheduledAt() {
-        $rawTsFlag2 = $this->getRuntimeFlag(self::HITS_TABLE_LAST_SCHEDULED_FLAG);
-        $ts = is_scalar($rawTsFlag2) ? (int)$rawTsFlag2 : 0;
-        return $ts > 0 ? $ts : null;
-    }
-
-    /** @return string */
-    function getLogsHitsTableLastDecision(): string {
-        $v = $this->getRuntimeFlag(self::HITS_TABLE_LAST_DECISION_FLAG);
-        return is_string($v) ? $v : '';
-    }
-
-    /** @return bool */
-    private function acquireHitsTableRebuildLock(): bool {
-        if (!function_exists('add_option')) {
-            return true;
-        }
-        if ($this->isHitsTableRebuildLocked()) {
-            return false;
-        }
-        return (bool)add_option(
-            $this->getHitsTableRebuildLockOptionName(),
-            (string)time(),
-            '',
-            false
-        );
-    }
-
-    /** @return void */
-    private function releaseHitsTableRebuildLock(): void {
-        if (function_exists('delete_option')) {
-            delete_option($this->getHitsTableRebuildLockOptionName());
-        }
-    }
-
-    /** @return bool */
-    private function logsHitsTableExistsViaShowTables(): bool {
-        global $wpdb;
-        if (!isset($wpdb) || !method_exists($wpdb, 'prepare')) {
-            return false;
-        }
-        $tableName = $this->doTableNameReplacements('{wp_abj404_logs_hits}');
-        /** @var wpdb $wpdb */
-        $showTablesQuery = $wpdb->prepare("SHOW TABLES LIKE %s", $tableName);
-        if ($showTablesQuery === null) {
-            return false;
-        }
-        $fallback = $this->queryAndGetResults($showTablesQuery, array('log_errors' => false));
-        if (empty($fallback['rows'])) {
-            return false;
-        }
-        $fbRows = is_array($fallback['rows']) ? $fallback['rows'] : array();
-        $firstRow = isset($fbRows[0]) ? $fbRows[0] : null;
-        if (!is_array($firstRow)) {
-            return false;
-        }
-        $value = reset($firstRow);
-        return ((string)$value === (string)$tableName);
-    }
-
-    /**
-     * Check if the logs_hits table exists.
-     * Used to verify table was created before using it in queries.
-     * @return bool
-     */
-    function logsHitsTableExists() {
-        $query = "SELECT 1 FROM information_schema.tables WHERE table_name = '{wp_abj404_logs_hits}' AND table_schema = DATABASE() LIMIT 1";
-        $query = $this->doTableNameReplacements($query);
-        $results = $this->queryAndGetResults($query);
-        if ($results['rows'] != null && !empty($results['rows'])) {
-            return true;
-        }
-        if (!empty($results['last_error'])) {
-            // Some hosts restrict information_schema access; fall back to SHOW TABLES.
-            return $this->logsHitsTableExistsViaShowTables();
-        }
-        return false;
-    }
-
-    /**
-     * Get the maximum log ID from the logs table.
-     *
-     * Used to detect if logs have changed since the hits table was last built.
-     * O(1) query using primary key index.
-     *
-     * @return int Maximum log ID, or 0 if table is empty
-     */
-    function getMaxLogId() {
-        $query = "SELECT MAX(id) FROM {wp_abj404_logsv2}";
-        $query = $this->doTableNameReplacements($query);
-        $results = $this->queryAndGetResults($query);
-
-        $resultRows = is_array($results['rows']) ? $results['rows'] : array();
-        if (empty($resultRows)) {
-            return 0;
-        }
-
-        $row = $resultRows[0];
-        // Handle both object and array results
-        $maxId = is_array($row) ? array_values($row)[0] : (array_values((array)$row)[0] ?? 0);
-        return (int)($maxId ?? 0);
-    }
-
-    /** @return int */
-    function getMinLogId() {
-        $query = "SELECT MIN(id) FROM {wp_abj404_logsv2}";
-        $query = $this->doTableNameReplacements($query);
-        $results = $this->queryAndGetResults($query);
-
-        $resultRows = is_array($results['rows']) ? $results['rows'] : array();
-        if (empty($resultRows)) {
-            return 0;
-        }
-
-        $row = $resultRows[0];
-        $minId = is_array($row) ? array_values($row)[0] : (array_values((array)$row)[0] ?? 0);
-        return is_numeric($minId) ? (int)$minId : 0;
-    }
-
-    /**
-     * Get the stored max log ID from the hits table comment.
-     *
-     * Comment format: "elapsed_time|max_log_id" (e.g., "0.35|12345")
-     *
-     * @return int Stored max log ID, or 0 if not found
-     */
-    function getStoredMaxLogId() {
-        $query = "SELECT table_comment FROM information_schema.tables WHERE table_name = '{wp_abj404_logs_hits}' AND table_schema = DATABASE()";
-        $query = $this->doTableNameReplacements($query);
-        $results = $this->queryAndGetResults($query);
-
-        $storedRows = is_array($results['rows']) ? $results['rows'] : array();
-        if (empty($storedRows)) {
-            if (!empty($results['last_error'])) {
-                $statusRow = $this->getLogsHitsTableStatusRow();
-                $commentFromStatus = $statusRow['comment'] ?? '';
-                if ($commentFromStatus !== '') {
-                    $parts = explode('|', is_string($commentFromStatus) ? $commentFromStatus : '');
-                    if (count($parts) >= 2) {
-                        return (int)$parts[1];
-                    }
-                }
-            }
-            return 0;
-        }
-
-        $row = is_array($storedRows[0] ?? null) ? $storedRows[0] : array();
-        $row = array_change_key_case($row);
-        $comment = $row['table_comment'] ?? '';
-
-        // Parse comment format: "elapsed_time|max_log_id"
-        $parts = explode('|', is_string($comment) ? $comment : '');
-        if (count($parts) >= 2) {
-            return (int)$parts[1];
-        }
-
-        // Old format (just elapsed time) or empty - treat as needing rebuild
-        return 0;
     }
 
     /**

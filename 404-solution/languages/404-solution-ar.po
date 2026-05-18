@@ -3872,3 +3872,71 @@ msgstr "تفاصيل الخصوصية (مدة الاحتفاظ، مسار الم
 #: includes/UninstallModal.php
 msgid "Include technical details (site URL, system info, plugin counts, and a sanitized log excerpt) to help diagnose the issue"
 msgstr "أرفق التفاصيل التقنية (عنوان الموقع، معلومات النظام، عدد الإضافات، ومقتطف سجل منقّى) للمساعدة في تشخيص المشكلة"
+
+#: includes/ViewTrait_UI.php
+msgid "Detected as a regex pattern. Stored \"%1$s\" as \"%2$s\"."
+msgstr "تم اكتشاف نمط تعبير منتظم. تم تخزين \"%1$s\" كـ \"%2$s\"."
+
+#: includes/ViewTrait_UI.php
+msgid "Detected as a regex pattern. Stored \"%s\" with Regex status."
+msgstr "تم اكتشاف نمط تعبير منتظم. تم تخزين \"%s\" بحالة تعبير منتظم."
+
+#: includes/ViewTrait_UI.php
+msgid "404 Solution:"
+msgstr "404 سولوشن:"
+
+#: includes/ViewTrait_UI.php
+msgid "Undo regex auto-promotion and restore Manual status?"
+msgstr "التراجع عن الترقية التلقائية للتعبير المنتظم واستعادة الحالة اليدوية؟"
+
+#: includes/ViewTrait_UI.php
+msgid "Undo"
+msgstr "تراجع"
+
+#: includes/PluginLogicTrait_AdminActions.php
+msgid "Error: No regex auto-promotion to undo."
+msgstr "خطأ: لا توجد ترقية تلقائية للتعبير المنتظم للتراجع عنها."
+
+#: includes/PluginLogicTrait_AdminActions.php
+msgid "Regex auto-promotion undone. Restored \"%s\" with status Manual."
+msgstr "تم التراجع عن الترقية التلقائية للتعبير المنتظم. تم استعادة \"%s\" بالحالة اليدوية."
+
+#: includes/ImportExportService.php
+msgid "Invalid regex pattern at line %d: %s (%s)"
+msgstr "نمط تعبير منتظم غير صالح في السطر %d: %s (%s)"
+
+#: includes/ImportExportService.php
+msgid "Invalid regex pattern: %s (%s)"
+msgstr "نمط تعبير منتظم غير صالح: %s (%s)"
+
+#: includes/ImportExportService.php
+msgid "pattern is empty"
+msgstr "النمط فارغ"
+
+#: includes/ImportExportService.php
+msgid "cannot find a safe delimiter character"
+msgstr "لا يمكن العثور على حرف محدد آمن"
+
+#: includes/ViewTrait_UI.php
+msgid "Restore Defaults"
+msgstr "استعادة الإعدادات الافتراضية"
+
+#: includes/ViewTrait_UI.php
+msgid "Restore Default Settings?"
+msgstr "هل تريد استعادة الإعدادات الافتراضية؟"
+
+#: includes/ViewTrait_UI.php
+msgid "This will reset all plugin settings to their default values. This cannot be undone. Your redirect rules and 404 logs will not be affected."
+msgstr "سيؤدي هذا إلى إعادة تعيين جميع إعدادات الإضافة إلى قيمها الافتراضية. لا يمكن التراجع عن هذا الإجراء. لن تتأثر قواعد إعادة التوجيه وسجلات 404."
+
+#: includes/PluginLogicTrait_SettingsUpdate.php
+msgid "Error: 404 destination URL exceeds the maximum length of %d characters"
+msgstr "خطأ: عنوان URL الوجهة 404 يتجاوز الحد الأقصى للطول %d حرف"
+
+#: includes/PluginLogicTrait_SettingsUpdate.php
+msgid "Error: Admin notification threshold must be a non-negative number"
+msgstr "خطأ: يجب أن يكون حد إشعار المسؤول رقمًا غير سالب"
+
+#: includes/ajax/Ajax_RestoreDefaults.php
+msgid "Settings restored to defaults."
+msgstr "تم استعادة الإعدادات إلى القيم الافتراضية."
