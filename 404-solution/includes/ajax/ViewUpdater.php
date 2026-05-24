@@ -11,7 +11,6 @@ class ABJ_404_Solution_ViewUpdater {
 
     use ABJ_404_Solution_AjaxFailureLoggingTrait;
 
-    private const INFLIGHT_STAGE_EVENT_LIMIT = 5000;
 
 	/** @var self|null */
 	private static $instance = null;
@@ -146,222 +145,11 @@ class ABJ_404_Solution_ViewUpdater {
     }
 
     /**
-     * Update the in-flight stage marker for the current AJAX request.  Sets
-     * `$context['stage']` and — when a client requestId is present — also
-     * writes a short-lived transient so a follow-up `ajaxFetchInflightStage`
-     * call can read which phase the server was in when a client-side timeout
-     * fired (no response, no body, no headers reach the browser).
-     *
-     * Transient TTL is intentionally short (60s) — diagnostics that arrive
-     * after a minute aren't useful for the user-visible error notice anyway.
-     *
-     * @param array<string, mixed> $context  Passed by reference; mutated in place.
-     * @param string $stage  Stage label (e.g. 'table_captured', 'paginationLinksTop').
-     * @return void
-     */
-    private static function setStage(&$context, $stage) {
-        if (!is_array($context)) {
-            $context = array();
-        }
-        $diagnostics = self::getStageDiagnostics($stage);
-        $context['stage'] = $stage;
-        $context['query_label'] = $diagnostics['query_label'];
-        $context['what_happening'] = $diagnostics['what_happening'];
-        if (isset($GLOBALS['abj404_ajax_context']) && is_array($GLOBALS['abj404_ajax_context'])) {
-            $GLOBALS['abj404_ajax_context']['stage'] = $stage;
-            $GLOBALS['abj404_ajax_context']['query_label'] = $diagnostics['query_label'];
-            $GLOBALS['abj404_ajax_context']['what_happening'] = $diagnostics['what_happening'];
-        }
-
-        $requestId = isset($context['requestId']) && is_string($context['requestId']) ? $context['requestId'] : '';
-        if ($requestId === '') {
-            return;
-        }
-        if (!function_exists('set_transient')) {
-            return;
-        }
-        $event = array(
-            'stage' => (string)$stage,
-            'query_label' => $diagnostics['query_label'],
-            'what_happening' => $diagnostics['what_happening'],
-            'time_ms' => (int)round(microtime(true) * 1000),
-        );
-        $events = array();
-        if (function_exists('get_transient')) {
-            $existing = @get_transient('abj404_inflight_' . $requestId);
-            if (is_array($existing) && is_array($existing['events'] ?? null)) {
-                $events = $existing['events'];
-            }
-        }
-        $lastEvent = !empty($events) ? $events[count($events) - 1] : null;
-        $lastStage = is_array($lastEvent) && isset($lastEvent['stage']) && is_string($lastEvent['stage'])
-            ? $lastEvent['stage'] : '';
-        if ($lastStage !== (string)$stage) {
-            $events[] = $event;
-            if (count($events) > self::INFLIGHT_STAGE_EVENT_LIMIT) {
-                $events = array_slice($events, -self::INFLIGHT_STAGE_EVENT_LIMIT);
-            }
-        }
-        // Diagnostics — best effort. Never let a transient write failure
-        // mask the real query error we're trying to diagnose. The
-        // @-suppression converts any wpdb/network warning into a no-op.
-        @set_transient('abj404_inflight_' . $requestId, array(
-            'stage' => (string)$stage,
-            'query_label' => $diagnostics['query_label'],
-            'what_happening' => $diagnostics['what_happening'],
-            'events' => $events,
-        ), 60);
-    }
-
-    /**
      * @param string $stage
-     * @return array{query_label: string, what_happening: string}
-     */
-    private static function getStageDiagnostics($stage) {
-        $map = array(
-            'table_redirects' => array(
-                'query_label' => 'getAdminRedirectsPageTable() -> read redirects rows from staged view snapshot',
-                'what_happening' => 'Loading Redirects table rows',
-            ),
-            'redirect_status_counts' => array(
-                'query_label' => 'getRedirectStatusCounts()',
-                'what_happening' => 'Counting Redirects status tabs',
-            ),
-            'table_captured' => array(
-                'query_label' => 'getCapturedURLSPageTable() -> read captured rows from staged view snapshot',
-                'what_happening' => 'Loading Captured 404 URLs table rows',
-            ),
-            'captured_status_counts' => array(
-                'query_label' => 'getCapturedStatusCounts()',
-                'what_happening' => 'Counting Captured 404 URLs status tabs',
-            ),
-            'table_logs' => array(
-                'query_label' => 'getAdminLogsPageTable() -> getLogRecords()',
-                'what_happening' => 'Loading Logs table rows',
-            ),
-            'paginationLinksTop' => array(
-                'query_label' => 'getPaginationLinks(top) -> read top pagination count from staged view snapshot',
-                'what_happening' => 'Rendering top pagination links',
-            ),
-            'paginationLinksBottom' => array(
-                'query_label' => 'getPaginationLinks(bottom) -> read bottom pagination count from staged view snapshot',
-                'what_happening' => 'Rendering bottom pagination links',
-            ),
-            'table_cache_rows' => array(
-                'query_label' => 'getRedirectsForView',
-                'what_happening' => 'Warming table row snapshot',
-            ),
-            'table_cache_count' => array(
-                'query_label' => 'getRedirectsForViewCount',
-                'what_happening' => 'Warming table count snapshot',
-            ),
-            'high_impact_count' => array(
-                'query_label' => 'getHighImpactCapturedCount()',
-                'what_happening' => 'Counting high-impact captured URLs',
-            ),
-            // Sub-stages of the staged view-build pipeline (see
-            // DataAccessTrait_ViewQueriesStaged::runStagedBuildOnce). These
-            // are emitted by markBuildStage() during cold-cache builds so the
-            // .abj404-refresh-status element can show step-by-step progress
-            // instead of a single frozen "stage 1" label for the whole build.
-            'staged_build_s1_create' => array(
-                'query_label' => 'CREATE TABLE wp_abj404_view_build',
-                'what_happening' => 'Creating build buffer (1/11)',
-            ),
-            'staged_build_s2_insert' => array(
-                'query_label' => 'INSERT INTO wp_abj404_view_build SELECT FROM wp_abj404_redirects',
-                'what_happening' => 'Bulk-loading redirects into build buffer (2/11)',
-            ),
-            'staged_build_s3_index_fd' => array(
-                'query_label' => 'ALTER TABLE wp_abj404_view_build ADD INDEX idx_fd_int',
-                'what_happening' => 'Adding pre-join indexes (3/11)',
-            ),
-            'staged_build_s4_update_posts' => array(
-                'query_label' => 'UPDATE wp_abj404_view_build LEFT JOIN wp_posts',
-                'what_happening' => 'Filling published-status from wp_posts (4/11)',
-            ),
-            'staged_build_s5_update_terms' => array(
-                'query_label' => 'UPDATE wp_abj404_view_build LEFT JOIN wp_terms',
-                'what_happening' => 'Filling published-status from wp_terms (5/11)',
-            ),
-            'staged_build_s6_update_home' => array(
-                'query_label' => 'UPDATE wp_abj404_view_build (HOME)',
-                'what_happening' => 'Filling HOME-typed redirects (6/11)',
-            ),
-            'staged_build_s7_update_external' => array(
-                'query_label' => 'UPDATE wp_abj404_view_build (EXTERNAL)',
-                'what_happening' => 'Filling EXTERNAL-typed redirects (7/11)',
-            ),
-            'staged_build_s8_update_special' => array(
-                'query_label' => 'UPDATE wp_abj404_view_build (404-displayed)',
-                'what_happening' => 'Filling 404-displayed redirects (8/11)',
-            ),
-            'staged_build_s9_update_hits' => array(
-                'query_label' => 'UPDATE wp_abj404_view_build LEFT JOIN wp_abj404_logs_hits',
-                'what_happening' => 'Filling hit counts (9/11)',
-            ),
-            'staged_build_s10_index_sort' => array(
-                'query_label' => 'ALTER TABLE wp_abj404_view_build ADD INDEX (sort indexes)',
-                'what_happening' => 'Adding read-side sort indexes (10/11)',
-            ),
-            'staged_build_s11_swap' => array(
-                'query_label' => 'RENAME TABLE wp_abj404_view_build TO wp_abj404_view_done',
-                'what_happening' => 'Atomic table swap (11/11)',
-            ),
-        );
-        if (array_key_exists($stage, $map)) {
-            return $map[$stage];
-        }
-        // Sub-stage with a free-form ":detail" suffix (e.g. the batched insert
-        // emits 'staged_build_s2_insert:batch 4/12'). Strip the detail to find
-        // the base label, then append the detail to what_happening so the GUI
-        // shows "Bulk-loading redirects into build buffer (2/11) — batch 4/12".
-        $colonPos = is_string($stage) ? strpos((string)$stage, ':') : false;
-        if ($colonPos !== false) {
-            $base = substr((string)$stage, 0, $colonPos);
-            $detail = trim(substr((string)$stage, $colonPos + 1));
-            if (array_key_exists($base, $map)) {
-                $entry = $map[$base];
-                if ($detail !== '') {
-                    $entry['what_happening'] = $entry['what_happening'] . ' — ' . $detail;
-                }
-                return $entry;
-            }
-        }
-        return array(
-            'query_label' => (string)$stage,
-            'what_happening' => 'Running AJAX stage ' . (string)$stage,
-        );
-    }
-
-    /**
-     * Public version of setStage() that reads the AJAX requestId from the
-     * global context rather than requiring a `&$context` reference.  Used by
-     * code paths (e.g. the staged view-build pipeline) that run beneath
-     * DataAccess and don't have $context threaded through.
-     *
-     * Best-effort: if no AJAX context exists (background cron, CLI), this is
-     * a no-op — no transient is written and no global is mutated.
-     *
-     * @param string $stage  Stage label.  May be a known key in
-     *                       getStageDiagnostics(), or `<key>:<detail>` where
-     *                       detail is appended to what_happening for mid-stage
-     *                       progress messages (e.g. 'staged_build_s2_insert:batch 4/12').
      * @return void
      */
     public static function markInflightStage($stage) {
-        if (!isset($GLOBALS['abj404_ajax_context']) || !is_array($GLOBALS['abj404_ajax_context'])) {
-            return;
-        }
-        $rawContext = $GLOBALS['abj404_ajax_context'];
-        $context = array();
-        foreach ($rawContext as $key => $value) {
-            if (is_string($key)) {
-                $context[$key] = $value;
-            }
-        }
-        self::setStage($context, (string)$stage);
-        $GLOBALS['abj404_ajax_context'] = $context;
+        ABJ_404_Solution_AjaxStageDiagnostics::markInflightStage($stage);
     }
 
     /**
@@ -545,24 +333,195 @@ class ABJ_404_Solution_ViewUpdater {
 
         return $out;
     }
+
+    /** @return ABJ_404_Solution_Functions|ABJ_404_Solution_DataAccess */
+    private static function getRequestReader() {
+        $container = ABJ_404_Solution_ServiceContainer::getInstance();
+        if ($container->has('functions')) {
+            /** @var ABJ_404_Solution_Functions $functions */
+            $functions = $container->get('functions');
+            return $functions;
+        }
+        /** @var ABJ_404_Solution_Functions $functions */
+        $functions = abj_service('functions');
+        return $functions;
+    }
     
+
+    /**
+     * Fetch table data and tab counts for a given admin subpage.
+     *
+     * @param string $subpage
+     * @param ABJ_404_Solution_View $view
+     * @param ABJ_404_Solution_ViewReadServiceInterface $viewReadService
+     * @param array<string, mixed> $context
+     * @return array<string, mixed>
+     */
+    private static function fetchTableDataForSubpage(string $subpage, $view, $viewReadService, array &$context): array {
+        $data = array();
+        if ($subpage == 'abj404_redirects') {
+            ABJ_404_Solution_AjaxStageDiagnostics::setStage($context, 'table_redirects');
+            $data['table'] = $view->getAdminRedirectsPageTable($subpage);
+
+            // Include tab counts so the page shell can render instantly with
+            // placeholders and fill them in. The slower health-bar query
+            // (getHighImpactCapturedCount, see refreshHealthBar()) is fetched
+            // in a separate AJAX call so it never blocks first paint of the table.
+            ABJ_404_Solution_AjaxStageDiagnostics::setStage($context, 'redirect_status_counts');
+            $statusCounts = $viewReadService->getRedirectStatusCounts();
+            // Tab counts keyed by filter value for JS tab updates.
+            $data['tabCounts'] = array(
+                '0' => $statusCounts['all'] ?? 0,
+                (string)ABJ404_STATUS_MANUAL => $statusCounts['manual'] ?? 0,
+                (string)ABJ404_STATUS_AUTO => $statusCounts['auto'] ?? 0,
+                (string)ABJ404_TRASH_FILTER => $statusCounts['trash'] ?? 0,
+            );
+
+        } else if ($subpage == 'abj404_captured') {
+            ABJ_404_Solution_AjaxStageDiagnostics::setStage($context, 'table_captured');
+            $data['table'] = $view->getCapturedURLSPageTable($subpage);
+
+            // Include tab counts so the page shell can render instantly.
+            ABJ_404_Solution_AjaxStageDiagnostics::setStage($context, 'captured_status_counts');
+            $statusCounts = $viewReadService->getCapturedStatusCounts();
+            $data['statusCounts'] = $statusCounts;
+            // Tab counts keyed by filter value for JS tab updates.
+            // Includes the "handled" composite count for simple mode.
+            $data['tabCounts'] = array(
+                '0' => $statusCounts['all'] ?? 0,
+                (string)ABJ404_STATUS_CAPTURED => $statusCounts['captured'] ?? 0,
+                (string)ABJ404_STATUS_IGNORED => $statusCounts['ignored'] ?? 0,
+                (string)ABJ404_STATUS_LATER => $statusCounts['later'] ?? 0,
+                (string)ABJ404_TRASH_FILTER => $statusCounts['trash'] ?? 0,
+                (string)ABJ404_HANDLED_FILTER => ($statusCounts['ignored'] ?? 0) + ($statusCounts['later'] ?? 0) + ($statusCounts['trash'] ?? 0),
+            );
+
+        } else if ($subpage == 'abj404_logs') {
+            ABJ_404_Solution_AjaxStageDiagnostics::setStage($context, 'table_logs');
+            $data['table'] = $view->getAdminLogsPageTable($subpage);
+
+        } else {
+            $data['table'] = 'Error: Unexpected subpage requested.';
+        }
+        return $data;
+    }
+
+    /**
+     * Handle exceptions thrown during getPaginationLinks execution.
+     *
+     * @param Throwable $e
+     * @param mixed $viewBuildOrchestrator
+     * @param string $subpage
+     * @param string $cacheMode
+     * @param bool $isPluginAdmin
+     * @param array<string, mixed> $context
+     * @return void
+     */
+    private static function handlePaginationLinksException(
+        Throwable $e, $viewBuildOrchestrator, string $subpage, string $cacheMode,
+        bool $isPluginAdmin, array $context
+    ): void {
+        // Race recovery: viewDoneIsServeable() can race with invalidateViewDone();
+        // surface the pending shape the JS poller already handles, never a 500.
+        $pending = ABJ_404_Solution_ViewBuildPendingResponseBuilder::find($e);
+        if ($pending !== null) {
+            self::markAjaxResponseSent();
+            self::getAndClearAjaxBufferedOutput();
+            self::sendJsonResponseAndExit(
+                ABJ_404_Solution_ViewBuildPendingResponseBuilder::fetchResponse($viewBuildOrchestrator, $subpage, $cacheMode, $pending),
+                200
+            );
+            return;
+        }
+        // Determine admin status for diagnostics (never shown to non-admins).
+        // If PluginLogic is broken/throws, fall back to WordPress capability checks so real admins can still see details.
+        if (!$isPluginAdmin) {
+            $abj404logic = abj_service('plugin_logic');
+            if (is_object($abj404logic) && method_exists($abj404logic, 'userIsPluginAdmin')) {
+                try {
+                    $isPluginAdmin = (bool)$abj404logic->userIsPluginAdmin();
+                } catch (Throwable $ignored) { // allow-silent-catch: admin-status detection; PluginLogic may be the broken component, default to non-admin (hide details)
+                    $isPluginAdmin = false;
+                }
+            }
+            if (!$isPluginAdmin) {
+                // Best-effort fallback: treat WordPress administrators as plugin admins for debugging
+                // if PluginLogic is broken. Avoid current_user_can() to keep delegated admin semantics
+                // centralized in PluginLogic.
+                if (function_exists('wp_get_current_user')) {
+                    $user = ABJ_404_Solution_UserRef::fromWpUser(wp_get_current_user());
+                    if ($user !== null) {
+                        $isPluginAdmin = $user->isAdministrator();
+                    }
+                }
+                if (!$isPluginAdmin && function_exists('is_super_admin') && is_super_admin()) {
+                    $isPluginAdmin = true;
+                }
+            }
+            if (isset($GLOBALS['abj404_ajax_context']) && is_array($GLOBALS['abj404_ajax_context'])) {
+                $GLOBALS['abj404_ajax_context']['is_plugin_admin'] = $isPluginAdmin;
+            }
+        }
+
+        $details = array(
+            'exception' => array(
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ),
+            'context' => $context,
+        );
+        if (isset($GLOBALS['wpdb']) && is_object($GLOBALS['wpdb'])) {
+            $lastQuery = $GLOBALS['wpdb']->last_query ?? '';
+            $details['wpdb'] = array(
+                'last_error' => $GLOBALS['wpdb']->last_error ?? '',
+                'last_query_redacted' => self::redactSqlShape($lastQuery),
+                'last_query_length' => is_string($lastQuery) ? strlen($lastQuery) : 0,
+            );
+        }
+        $viewQueryDiagnostics = self::extractViewQueryDiagnostics($e);
+        if ($viewQueryDiagnostics !== null) {
+            $details['view_query_diagnostics'] = $viewQueryDiagnostics;
+        }
+
+        // Always log to the plugin debug file, regardless of admin status.
+        self::safeLogAjaxFailure('AJAX exception in ajaxUpdatePaginationLinks.', $details, $e);
+        $capturedOutput = self::getAndClearAjaxBufferedOutput();
+        if ($capturedOutput !== '') {
+            $details['buffered_output'] = substr($capturedOutput, 0, 8000);
+        }
+
+        self::markAjaxResponseSent();
+        $payload = self::buildAjaxErrorResponse(
+            'Server error while updating the table.',
+            $details,
+            $isPluginAdmin
+        );
+        self::sendJsonResponseAndExit($payload, 500);
+    }
+
     /** @return void */
     function getPaginationLinks() {
-        $abj404dao = abj_service('data_access');
+        $functions = self::getRequestReader();
+        /** @var ABJ_404_Solution_ViewBuildOrchestratorInterface $viewBuildOrchestrator */
+        $viewBuildOrchestrator = abj_service('view_build_orchestrator');
+        /** @var ABJ_404_Solution_ViewReadServiceInterface $viewReadService */
+        $viewReadService = abj_service('view_read_service');
         $abj404logic = abj_service('plugin_logic');
         global $abj404view;
         
-        $rowsPerPage = absint($abj404dao->getPostOrGetSanitize('rowsPerPage'));
-        $subpage = $abj404dao->getPostOrGetSanitize('subpage');
-        $nonce = $abj404dao->getPostOrGetSanitize('nonce');
-        $page = $abj404dao->getPostOrGetSanitize('page', '');
-        $filterText = $abj404dao->getPostOrGetSanitize('filterText', '');
-        $filter = $abj404dao->getPostOrGetSanitize('filter', '');
-        $detectOnly = ((string)$abj404dao->getPostOrGetSanitize('detectOnly', '0') === '1');
-        $cacheModeRaw = (string)$abj404dao->getPostOrGetSanitize('cacheMode', 'normal');
+        $rowsPerPage = absint($functions->getPostOrGetSanitize('rowsPerPage'));
+        $subpage = $functions->getPostOrGetSanitize('subpage');
+        $nonce = $functions->getPostOrGetSanitize('nonce');
+        $page = $functions->getPostOrGetSanitize('page', '');
+        $filterText = $functions->getPostOrGetSanitize('filterText', '');
+        $filter = $functions->getPostOrGetSanitize('filter', '');
+        $detectOnly = ((string)$functions->getPostOrGetSanitize('detectOnly', '0') === '1');
+        $cacheModeRaw = (string)$functions->getPostOrGetSanitize('cacheMode', 'normal');
         $cacheMode = in_array($cacheModeRaw, array('normal', 'cache_or_pending', 'refresh_cache'), true)
             ? $cacheModeRaw : 'normal';
-        $currentSignature = strtolower(trim((string)$abj404dao->getPostOrGetSanitize('currentSignature', '')));
+        $currentSignature = strtolower(trim((string)$functions->getPostOrGetSanitize('currentSignature', '')));
         if (strlen($currentSignature) > 128) {
             $currentSignature = substr($currentSignature, 0, 128);
         }
@@ -639,15 +598,10 @@ class ABJ_404_Solution_ViewUpdater {
             // per call.  No HTTP 500 path from build pressure can happen here.
             if (($subpage === 'abj404_redirects' || $subpage === 'abj404_captured')
                     && !$detectOnly
-                    && is_object($abj404dao)
-                    && method_exists($abj404dao, 'viewDoneIsServeable')
-                    && !$abj404dao->viewDoneIsServeable()) {
+                    && !$viewBuildOrchestrator->viewDoneIsServeable()) {
                 $stage = ($subpage === 'abj404_captured') ? 'table_captured' : 'table_redirects';
-                self::setStage($context, $stage);
-                $progress = method_exists($abj404dao, 'getViewBuildProgress')
-                    ? $abj404dao->getViewBuildProgress()
-                    : array('status' => 'pending', 'stage' => 0, 'of' => 11,
-                        'build_started' => 0, 'progress_text' => 'not yet started');
+                ABJ_404_Solution_AjaxStageDiagnostics::setStage($context, $stage);
+                $progress = $viewBuildOrchestrator->getViewBuildProgress();
                 self::markAjaxResponseSent();
                 self::getAndClearAjaxBufferedOutput();
                 self::sendJsonResponseAndExit(array(
@@ -663,12 +617,11 @@ class ABJ_404_Solution_ViewUpdater {
             if ($cacheMode === 'cache_or_pending'
                     && !$detectOnly
                     && ($subpage === 'abj404_redirects' || $subpage === 'abj404_captured')
-                    && is_object($abj404dao)
-                    && method_exists($abj404dao, 'viewTableSnapshotAvailable')) {
+                    && is_object($viewReadService)) {
                 $stage = ($subpage === 'abj404_captured') ? 'table_captured' : 'table_redirects';
-                self::setStage($context, $stage);
+                ABJ_404_Solution_AjaxStageDiagnostics::setStage($context, $stage);
                 $tableOptions = $abj404logic->getTableOptions($subpage);
-                if (!$abj404dao->viewTableSnapshotAvailable($subpage, $tableOptions)) {
+                if (!$viewReadService->viewTableSnapshotAvailable($subpage, $tableOptions)) {
                     self::markAjaxResponseSent();
                     self::getAndClearAjaxBufferedOutput();
                     self::sendJsonResponseAndExit(array(
@@ -681,51 +634,7 @@ class ABJ_404_Solution_ViewUpdater {
                 }
             }
 
-            $data = array();
-            if ($subpage == 'abj404_redirects') {
-                self::setStage($context, 'table_redirects');
-                $data['table'] = $view->getAdminRedirectsPageTable($subpage);
-
-                // Include tab counts so the page shell can render instantly with
-                // placeholders and fill them in. The slower health-bar query
-                // (getHighImpactCapturedCount, see refreshHealthBar()) is fetched
-                // in a separate AJAX call so it never blocks first paint of the table.
-                self::setStage($context, 'redirect_status_counts');
-                $statusCounts = $abj404dao->getRedirectStatusCounts();
-                // Tab counts keyed by filter value for JS tab updates.
-                $data['tabCounts'] = array(
-                    '0' => $statusCounts['all'] ?? 0,
-                    (string)ABJ404_STATUS_MANUAL => $statusCounts['manual'] ?? 0,
-                    (string)ABJ404_STATUS_AUTO => $statusCounts['auto'] ?? 0,
-                    (string)ABJ404_TRASH_FILTER => $statusCounts['trash'] ?? 0,
-                );
-
-            } else if ($subpage == 'abj404_captured') {
-                self::setStage($context, 'table_captured');
-                $data['table'] = $view->getCapturedURLSPageTable($subpage);
-
-                // Include tab counts so the page shell can render instantly.
-                self::setStage($context, 'captured_status_counts');
-                $statusCounts = $abj404dao->getCapturedStatusCounts();
-                $data['statusCounts'] = $statusCounts;
-                // Tab counts keyed by filter value for JS tab updates.
-                // Includes the "handled" composite count for simple mode.
-                $data['tabCounts'] = array(
-                    '0' => $statusCounts['all'] ?? 0,
-                    (string)ABJ404_STATUS_CAPTURED => $statusCounts['captured'] ?? 0,
-                    (string)ABJ404_STATUS_IGNORED => $statusCounts['ignored'] ?? 0,
-                    (string)ABJ404_STATUS_LATER => $statusCounts['later'] ?? 0,
-                    (string)ABJ404_TRASH_FILTER => $statusCounts['trash'] ?? 0,
-                    (string)ABJ404_HANDLED_FILTER => ($statusCounts['ignored'] ?? 0) + ($statusCounts['later'] ?? 0) + ($statusCounts['trash'] ?? 0),
-                );
-
-            } else if ($subpage == 'abj404_logs') {
-                self::setStage($context, 'table_logs');
-                $data['table'] = $view->getAdminLogsPageTable($subpage);
-
-            } else {
-                $data['table'] = 'Error: Unexpected subpage requested.';
-            }
+            $data = self::fetchTableDataForSubpage($subpage, $view, $viewReadService, $context);
 
             $tableSignature = '';
             if (is_object($view) && method_exists($view, 'getCurrentTableDataSignature')) {
@@ -748,9 +657,9 @@ class ABJ_404_Solution_ViewUpdater {
                 );
             }
 
-            self::setStage($context, 'paginationLinksTop');
+            ABJ_404_Solution_AjaxStageDiagnostics::setStage($context, 'paginationLinksTop');
             $data['paginationLinksTop'] = $view->getPaginationLinks($subpage);
-            self::setStage($context, 'paginationLinksBottom');
+            ABJ_404_Solution_AjaxStageDiagnostics::setStage($context, 'paginationLinksBottom');
             $data['paginationLinksBottom'] = $view->getPaginationLinks($subpage, false);
 
             self::markAjaxResponseSent();
@@ -759,99 +668,29 @@ class ABJ_404_Solution_ViewUpdater {
             return;
 
         } catch (Throwable $e) {
-            // Race recovery: viewDoneIsServeable() can race with invalidateViewDone();
-            // surface the pending shape the JS poller already handles, never a 500.
-            $pending = ABJ_404_Solution_ViewBuildPendingResponseBuilder::find($e);
-            if ($pending !== null) {
-                self::markAjaxResponseSent();
-                self::getAndClearAjaxBufferedOutput();
-                self::sendJsonResponseAndExit(
-                    ABJ_404_Solution_ViewBuildPendingResponseBuilder::fetchResponse($abj404dao, $subpage, $cacheMode, $pending),
-                    200
-                );
-                return;
-            }
-            // Determine admin status for diagnostics (never shown to non-admins).
-            // If PluginLogic is broken/throws, fall back to WordPress capability checks so real admins can still see details.
-            if (!$isPluginAdmin) {
-                $abj404logic = abj_service('plugin_logic');
-                if (is_object($abj404logic) && method_exists($abj404logic, 'userIsPluginAdmin')) {
-                    try {
-                        $isPluginAdmin = (bool)$abj404logic->userIsPluginAdmin();
-                    } catch (Throwable $ignored) {
-                        $isPluginAdmin = false;
-                    }
-                }
-                if (!$isPluginAdmin) {
-                    // Best-effort fallback: treat WordPress administrators as plugin admins for debugging
-                    // if PluginLogic is broken. Avoid current_user_can() to keep delegated admin semantics
-                    // centralized in PluginLogic.
-                    if (function_exists('wp_get_current_user')) {
-                        $user = ABJ_404_Solution_UserRef::fromWpUser(wp_get_current_user());
-                        if ($user !== null) {
-                            $isPluginAdmin = $user->isAdministrator();
-                        }
-                    }
-                    if (!$isPluginAdmin && function_exists('is_super_admin') && is_super_admin()) {
-                        $isPluginAdmin = true;
-                    }
-                }
-                if (isset($GLOBALS['abj404_ajax_context']) && is_array($GLOBALS['abj404_ajax_context'])) {
-                    $GLOBALS['abj404_ajax_context']['is_plugin_admin'] = $isPluginAdmin;
-                }
-            }
-
-            $details = array(
-                'exception' => array(
-                    'message' => $e->getMessage(),
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine(),
-                    'trace' => $e->getTraceAsString(),
-                ),
-                'context' => $context,
+            // allow-silent-catch: handlePaginationLinksException embeds/logs the throwable in the AJAX response path.
+            self::handlePaginationLinksException(
+                $e, $viewBuildOrchestrator, $subpage, $cacheMode, $isPluginAdmin, $context
             );
-            if (isset($GLOBALS['wpdb']) && is_object($GLOBALS['wpdb'])) {
-                $lastQuery = $GLOBALS['wpdb']->last_query ?? '';
-                $details['wpdb'] = array(
-                    'last_error' => $GLOBALS['wpdb']->last_error ?? '',
-                    'last_query_redacted' => self::redactSqlShape($lastQuery),
-                    'last_query_length' => is_string($lastQuery) ? strlen($lastQuery) : 0,
-                );
-            }
-            $viewQueryDiagnostics = self::extractViewQueryDiagnostics($e);
-            if ($viewQueryDiagnostics !== null) {
-                $details['view_query_diagnostics'] = $viewQueryDiagnostics;
-            }
-
-            // Always log to the plugin debug file, regardless of admin status.
-            self::safeLogAjaxFailure('AJAX exception in ajaxUpdatePaginationLinks.', $details, $e);
-            $capturedOutput = self::getAndClearAjaxBufferedOutput();
-            if ($capturedOutput !== '') {
-                $details['buffered_output'] = substr($capturedOutput, 0, 8000);
-            }
-
-            self::markAjaxResponseSent();
-            $payload = self::buildAjaxErrorResponse(
-                'Server error while updating the table.',
-                $details,
-                $isPluginAdmin
-            );
-            self::sendJsonResponseAndExit($payload, 500);
             return;
         }
     }
 
     /** @return void */
     function warmTableCache() {
-        $abj404dao = abj_service('data_access');
+        $functions = self::getRequestReader();
+        /** @var ABJ_404_Solution_ViewBuildOrchestratorInterface $viewBuildOrchestrator */
+        $viewBuildOrchestrator = abj_service('view_build_orchestrator');
+        /** @var ABJ_404_Solution_ViewReadServiceInterface $viewReadService */
+        $viewReadService = abj_service('view_read_service');
         $abj404logic = abj_service('plugin_logic');
 
-        $rowsPerPage = absint($abj404dao->getPostOrGetSanitize('rowsPerPage'));
-        $subpage = $abj404dao->getPostOrGetSanitize('subpage');
-        $nonce = $abj404dao->getPostOrGetSanitize('nonce');
-        $page = $abj404dao->getPostOrGetSanitize('page', '');
-        $filterText = $abj404dao->getPostOrGetSanitize('filterText', '');
-        $filter = $abj404dao->getPostOrGetSanitize('filter', '');
+        $rowsPerPage = absint($functions->getPostOrGetSanitize('rowsPerPage'));
+        $subpage = $functions->getPostOrGetSanitize('subpage');
+        $nonce = $functions->getPostOrGetSanitize('nonce');
+        $page = $functions->getPostOrGetSanitize('page', '');
+        $filterText = $functions->getPostOrGetSanitize('filterText', '');
+        $filter = $functions->getPostOrGetSanitize('filter', '');
 
         $isPluginAdmin = false;
         $context = array(
@@ -913,12 +752,8 @@ class ABJ_404_Solution_ViewUpdater {
             // the JS poller must advance the build via ajaxAdvanceViewBuild
             // before the snapshot warm can start.  Returning ready=false here
             // keeps the placeholder hydration loop running until then.
-            if (is_object($abj404dao) && method_exists($abj404dao, 'viewDoneIsServeable')
-                    && !$abj404dao->viewDoneIsServeable()) {
-                $progress = method_exists($abj404dao, 'getViewBuildProgress')
-                    ? $abj404dao->getViewBuildProgress()
-                    : array('status' => 'pending', 'stage' => 0, 'of' => 11,
-                        'build_started' => 0, 'progress_text' => 'not yet started');
+            if (!$viewBuildOrchestrator->viewDoneIsServeable()) {
+                $progress = $viewBuildOrchestrator->getViewBuildProgress();
                 self::markAjaxResponseSent();
                 self::getAndClearAjaxBufferedOutput();
                 self::sendJsonResponseAndExit(array(
@@ -935,12 +770,11 @@ class ABJ_404_Solution_ViewUpdater {
 
             $tableOptions = $abj404logic->getTableOptions($subpage);
             $stage = 'table_cache_rows';
-            if (is_object($abj404dao) && method_exists($abj404dao, 'viewRowsSnapshotAvailable')
-                    && $abj404dao->viewRowsSnapshotAvailable($subpage, $tableOptions)) {
+            if ($viewReadService->viewRowsSnapshotAvailable($subpage, $tableOptions)) {
                 $stage = 'table_cache_count';
             }
-            self::setStage($context, $stage);
-            $warmup = $abj404dao->warmViewTableSnapshotStage($subpage, $tableOptions);
+            ABJ_404_Solution_AjaxStageDiagnostics::setStage($context, $stage);
+            $warmup = $viewReadService->warmViewTableSnapshotStage($subpage, $tableOptions);
 
             self::markAjaxResponseSent();
             self::getAndClearAjaxBufferedOutput();
@@ -955,7 +789,7 @@ class ABJ_404_Solution_ViewUpdater {
                 self::markAjaxResponseSent();
                 self::getAndClearAjaxBufferedOutput();
                 self::sendJsonResponseAndExit(
-                    ABJ_404_Solution_ViewBuildPendingResponseBuilder::warmResponse($abj404dao, $pending),
+                    ABJ_404_Solution_ViewBuildPendingResponseBuilder::warmResponse($viewBuildOrchestrator, $pending),
                     200
                 );
                 return;
@@ -965,7 +799,7 @@ class ABJ_404_Solution_ViewUpdater {
                 if (is_object($abj404logic) && method_exists($abj404logic, 'userIsPluginAdmin')) {
                     try {
                         $isPluginAdmin = (bool)$abj404logic->userIsPluginAdmin();
-                    } catch (Throwable $ignored) {
+                    } catch (Throwable $ignored) { // allow-silent-catch: admin-status detection; PluginLogic may be the broken component, default to non-admin (hide details)
                         $isPluginAdmin = false;
                     }
                 }
@@ -1001,13 +835,15 @@ class ABJ_404_Solution_ViewUpdater {
 
     /** @return void */
     function refreshStatsDashboard() {
-        $abj404dao = abj_service('data_access');
+        $functions = self::getRequestReader();
+        /** @var ABJ_404_Solution_StatsRepositoryInterface $statsRepository */
+        $statsRepository = abj_service('stats_repository');
         $abj404logic = abj_service('plugin_logic');
 
-        $nonce = $abj404dao->getPostOrGetSanitize('nonce');
-        $page = $abj404dao->getPostOrGetSanitize('page', '');
-        $subpage = $abj404dao->getPostOrGetSanitize('subpage', '');
-        $currentHash = $abj404dao->getPostOrGetSanitize('currentHash', '');
+        $nonce = $functions->getPostOrGetSanitize('nonce');
+        $page = $functions->getPostOrGetSanitize('page', '');
+        $subpage = $functions->getPostOrGetSanitize('subpage', '');
+        $currentHash = $functions->getPostOrGetSanitize('currentHash', '');
 
         $isPluginAdmin = false;
         $context = array(
@@ -1045,7 +881,7 @@ class ABJ_404_Solution_ViewUpdater {
                 return;
             }
 
-            $snapshot = $abj404dao->refreshStatsDashboardSnapshot(false);
+            $snapshot = $statsRepository->refreshStatsDashboardSnapshot(false);
             $newHash = $snapshot['hash'];
             $hasUpdate = ($newHash !== '' && ($currentHash === '' || $newHash !== $currentHash));
 
@@ -1066,7 +902,7 @@ class ABJ_404_Solution_ViewUpdater {
                 if (is_object($abj404logic) && method_exists($abj404logic, 'userIsPluginAdmin')) {
                     try {
                         $isPluginAdmin = (bool)$abj404logic->userIsPluginAdmin();
-                    } catch (Throwable $ignored) {
+                    } catch (Throwable $ignored) { // allow-silent-catch: admin-status detection; PluginLogic may be the broken component, default to non-admin (hide details)
                         $isPluginAdmin = false;
                     }
                 }
@@ -1110,12 +946,16 @@ class ABJ_404_Solution_ViewUpdater {
      * @return void
      */
     function refreshHealthBar() {
-        $abj404dao = abj_service('data_access');
+        $functions = self::getRequestReader();
+        /** @var ABJ_404_Solution_ViewReadServiceInterface $viewReadService */
+        $viewReadService = abj_service('view_read_service');
+        /** @var ABJ_404_Solution_LogsRepositoryInterface $logsRepository */
+        $logsRepository = abj_service('logs_repository');
         $abj404logic = abj_service('plugin_logic');
 
-        $nonce = $abj404dao->getPostOrGetSanitize('nonce');
-        $page = $abj404dao->getPostOrGetSanitize('page', '');
-        $subpage = $abj404dao->getPostOrGetSanitize('subpage', '');
+        $nonce = $functions->getPostOrGetSanitize('nonce');
+        $page = $functions->getPostOrGetSanitize('page', '');
+        $subpage = $functions->getPostOrGetSanitize('subpage', '');
 
         $isPluginAdmin = false;
         $context = array(
@@ -1155,17 +995,17 @@ class ABJ_404_Solution_ViewUpdater {
                 return;
             }
 
-            self::setStage($context, 'redirect_status_counts');
-            $statusCounts = $abj404dao->getRedirectStatusCounts();
+            ABJ_404_Solution_AjaxStageDiagnostics::setStage($context, 'redirect_status_counts');
+            $statusCounts = $viewReadService->getRedirectStatusCounts();
             // Provide the captured filter constant so JS can build the "View" link.
             $statusCounts['_capturedFilter'] = ABJ404_STATUS_CAPTURED;
 
-            self::setStage($context, 'high_impact_count');
-            $rollupAvailable = $abj404dao->logsHitsTableExists();
+            ABJ_404_Solution_AjaxStageDiagnostics::setStage($context, 'high_impact_count');
+            $rollupAvailable = $logsRepository->logsHitsTableExists();
             if ($rollupAvailable) {
-                $highImpactCapturedCount = (int)$abj404dao->getHighImpactCapturedCount();
+                $highImpactCapturedCount = (int)$viewReadService->getHighImpactCapturedCount();
             } else {
-                $abj404dao->scheduleHitsTableRebuild();
+                $logsRepository->scheduleHitsTableRebuild();
                 $highImpactCapturedCount = null;
             }
 
@@ -1186,7 +1026,7 @@ class ABJ_404_Solution_ViewUpdater {
                 if (is_object($abj404logic) && method_exists($abj404logic, 'userIsPluginAdmin')) {
                     try {
                         $isPluginAdmin = (bool)$abj404logic->userIsPluginAdmin();
-                    } catch (Throwable $ignored) {
+                    } catch (Throwable $ignored) { // allow-silent-catch: admin-status detection; PluginLogic may be the broken component, default to non-admin (hide details)
                         $isPluginAdmin = false;
                     }
                 }
@@ -1233,10 +1073,10 @@ class ABJ_404_Solution_ViewUpdater {
      * @return void
      */
     function fetchInflightStage() {
-        $abj404dao = abj_service('data_access');
+        $functions = self::getRequestReader();
         $abj404logic = abj_service('plugin_logic');
 
-        $nonce = $abj404dao->getPostOrGetSanitize('nonce');
+        $nonce = $functions->getPostOrGetSanitize('nonce');
         $requestId = self::readClientRequestId();
 
         try {
@@ -1296,7 +1136,7 @@ class ABJ_404_Solution_ViewUpdater {
                     }
                 } else if (is_string($value)) {
                     $stage = $value;
-                    $diagnostics = self::getStageDiagnostics($stage);
+                    $diagnostics = ABJ_404_Solution_AjaxStageDiagnostics::getStageDiagnostics($stage);
                     $queryLabel = $diagnostics['query_label'];
                     $whatsHappening = $diagnostics['what_happening'];
                 }
@@ -1310,10 +1150,7 @@ class ABJ_404_Solution_ViewUpdater {
             ), 200);
             return;
 
-        } catch (Throwable $e) {
-            // Diagnostics endpoint, never fail loudly.  An admin-side notice
-            // that says "stage: (lookup failed)" is a worse outcome than
-            // "stage: (unknown)".
+        } catch (Throwable $e) { // allow-silent-catch: diagnostics endpoint is best-effort; surfacing a lookup failure is worse than returning empty stage
             self::sendJsonResponseAndExit(array('stage' => ''), 200);
             return;
         }
@@ -1338,14 +1175,16 @@ class ABJ_404_Solution_ViewUpdater {
      * @return void
      */
     function advanceViewBuild() {
-        $abj404dao = abj_service('data_access');
+        $functions = self::getRequestReader();
+        /** @var ABJ_404_Solution_ViewBuildOrchestratorInterface $viewBuildOrchestrator */
+        $viewBuildOrchestrator = abj_service('view_build_orchestrator');
         $abj404logic = abj_service('plugin_logic');
 
-        $nonce = $abj404dao->getPostOrGetSanitize('nonce');
-        $page = $abj404dao->getPostOrGetSanitize('page', '');
-        $subpage = $abj404dao->getPostOrGetSanitize('subpage', '');
+        $nonce = $functions->getPostOrGetSanitize('nonce');
+        $page = $functions->getPostOrGetSanitize('page', '');
+        $subpage = $functions->getPostOrGetSanitize('subpage', '');
         $requestId = self::readClientRequestId();
-        $forceViewRebuild = ((string)$abj404dao->getPostOrGetSanitize('forceViewRebuild', '0') === '1');
+        $forceViewRebuild = ((string)$functions->getPostOrGetSanitize('forceViewRebuild', '0') === '1');
 
         $isPluginAdmin = false;
         $context = array(
@@ -1385,7 +1224,7 @@ class ABJ_404_Solution_ViewUpdater {
                 return;
             }
 
-            if (!is_object($abj404dao) || !method_exists($abj404dao, 'advanceViewBuildOnce')) {
+            if (!is_object($viewBuildOrchestrator) || !method_exists($viewBuildOrchestrator, 'advanceViewBuildOnce')) {
                 self::markAjaxResponseSent();
                 self::getAndClearAjaxBufferedOutput();
                 self::sendJsonResponseAndExit(array(
@@ -1411,18 +1250,18 @@ class ABJ_404_Solution_ViewUpdater {
             // Phase 3a step 2 / c554) preserves the existing view_done
             // snapshot for parallel readers until the new S11 RENAME publishes
             // a fresh one, which is the intended force-rebuild contract.
-            if ($forceViewRebuild && method_exists($abj404dao, 'forceRestartViewBuild')) {
-                $abj404dao->forceRestartViewBuild(0);
+            if ($forceViewRebuild && method_exists($viewBuildOrchestrator, 'forceRestartViewBuild')) {
+                $viewBuildOrchestrator->forceRestartViewBuild(0);
             }
 
-            self::tryClaimForegroundViewBuildLease($abj404dao);
+            self::tryClaimForegroundViewBuildLease($viewBuildOrchestrator);
             // Pass forceRebuild down so advanceViewBuildOnce takes the lock
             // with a 30s timeout (waiting for any in-flight cron/sibling
             // build to finish), re-invalidates inside the locked region,
             // and runs the build under THIS request's AJAX context. That is
             // what makes every staged_build_s* sub-stage event reach the
             // browser's "AJAX Load Times / Debug Info" panel.
-            $progress = $abj404dao->advanceViewBuildOnce($forceViewRebuild);
+            $progress = $viewBuildOrchestrator->advanceViewBuildOnce($forceViewRebuild);
             $statusValue = is_array($progress) && isset($progress['status']) && is_string($progress['status'])
                 ? $progress['status'] : 'pending';
 
@@ -1440,7 +1279,7 @@ class ABJ_404_Solution_ViewUpdater {
                 if (is_object($abj404logic) && method_exists($abj404logic, 'userIsPluginAdmin')) {
                     try {
                         $isPluginAdmin = (bool)$abj404logic->userIsPluginAdmin();
-                    } catch (Throwable $ignored) {
+                    } catch (Throwable $ignored) { // allow-silent-catch: admin-status detection; PluginLogic may be the broken component, default to non-admin (hide details)
                         $isPluginAdmin = false;
                     }
                 }

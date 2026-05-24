@@ -214,7 +214,7 @@ trait ViewTrait_RedirectsTable {
         $html .= '</tr></thead>';
         $html .= '<tbody id="the-list">';
 
-        $rows = $this->dao->getRedirectsForView($sub, $tableOptions);
+        $rows = $this->viewReadService->getRedirectsForView($sub, $tableOptions);
         /** @var array<int, array<string, mixed>> $typedRows */
         $typedRows = array_values(array_filter($rows, 'is_array'));
         $this->rememberTableDataSignature($sub, $typedRows);
@@ -706,88 +706,6 @@ trait ViewTrait_RedirectsTable {
      * @param string $selectedCode The currently selected code value (e.g. '301').
      * @return void
      */
-    /**
-     * Get a plain-language label for an HTTP redirect code.
-     * Used in Simple mode to replace technical numeric codes.
-     *
-     * @param string $code The numeric redirect code (e.g. '301', '302').
-     * @return string Human-readable label.
-     */
-    private static function getPlainLanguageCodeLabel(string $code): string {
-        $labels = array(
-            '301' => __('Permanent', '404-solution'),
-            '308' => __('Permanent', '404-solution'),
-            '302' => __('Temporary', '404-solution'),
-            '307' => __('Temporary', '404-solution'),
-            '410' => __('Gone', '404-solution'),
-            '451' => __('Blocked', '404-solution'),
-            '0'   => __('Meta Refresh', '404-solution'),
-        );
-        return isset($labels[$code]) ? $labels[$code] : $code;
-    }
-
-    private function echoRedirectTypeButtonGrid(string $selectedCode): void {
-        $isSimple = $this->logic->getSettingsMode() === 'simple';
-
-        echo '<div class="abj404-form-group">';
-        echo '<label class="abj404-form-label">' . esc_html__('Redirect Type', '404-solution') . '</label>';
-        echo '<input type="hidden" id="code" name="code" value="' . esc_attr($selectedCode) . '">';
-        echo '<div class="abj404-redirect-type-grid">';
-
-        if ($isSimple) {
-            // Simple mode: show only Permanent and Temporary
-            $codeButtons = array(
-                301 => array(__('Permanent', '404-solution'),  __('Best for moved pages', '404-solution')),
-                302 => array(__('Temporary', '404-solution'),  __('Best for seasonal or test pages', '404-solution')),
-            );
-        } else {
-            $codeButtons = array(
-                301 => array(__('301', '404-solution'),          __('Permanent', '404-solution')),
-                302 => array(__('302', '404-solution'),          __('Temporary', '404-solution')),
-                307 => array(__('307', '404-solution'),          __('Temp, method-safe', '404-solution')),
-                308 => array(__('308', '404-solution'),          __('Perm, method-safe', '404-solution')),
-                410 => array(__('410', '404-solution'),          __('Gone', '404-solution')),
-                451 => array(__('451', '404-solution'),          __('Legal reasons', '404-solution')),
-                0   => array(__('Meta Refresh', '404-solution'), __('HTTP 200 + meta tag', '404-solution')),
-            );
-        }
-
-        foreach ($codeButtons as $code => $labels) {
-            $isActive = ((string)$code === $selectedCode) ? ' abj404-redirect-type-btn--active' : '';
-            $isFull   = ($code === 0) ? ' abj404-redirect-type-btn--full' : '';
-            echo '<button type="button"'
-                . ' class="abj404-redirect-type-btn' . $isActive . $isFull . '"'
-                . ' data-code="' . esc_attr((string)$code) . '"'
-                . ' onclick="abj404SelectRedirectType(this)">';
-            echo '<strong>' . esc_html($labels[0]) . '</strong>';
-            echo '<span>' . esc_html($labels[1]) . '</span>';
-            echo '</button>';
-        }
-        echo '</div>';
-        if ($isSimple) {
-            echo '<p class="abj404-form-help">' . esc_html__('Permanent is best for most redirects. Use Temporary if the page may come back.', '404-solution') . '</p>';
-        } else {
-            echo '<p class="abj404-form-help">' . esc_html__('Use 301 for permanent page moves. Use 302 for A/B tests or seasonal pages.', '404-solution') . '</p>';
-        }
-        echo '</div>';
-        echo '<script type="text/javascript">';
-        echo 'if (typeof window.abj404SelectRedirectType === "undefined") {';
-        echo '    window.abj404SelectRedirectType = function(btn) {';
-        echo '        var grid = btn.closest(".abj404-redirect-type-grid");';
-        echo '        grid.querySelectorAll(".abj404-redirect-type-btn").forEach(function(b) {';
-        echo '            b.classList.remove("abj404-redirect-type-btn--active");';
-        echo '        });';
-        echo '        btn.classList.add("abj404-redirect-type-btn--active");';
-        echo '        var hidden = document.getElementById("code");';
-        echo '        if (hidden) {';
-        echo '            hidden.value = btn.dataset.code;';
-        echo '            if (typeof jQuery !== "undefined") { jQuery("#code").trigger("change"); }';
-        echo '        }';
-        echo '    };';
-        echo '}';
-        echo '</script>';
-    }
-
 	    /**
 	     * Get modern pagination HTML
 	     */
@@ -805,9 +723,9 @@ trait ViewTrait_RedirectsTable {
 	        // Use appropriate count method based on sub type
 	        $logsidInt = (int)$logsid;
 	        if ($sub == 'abj404_logs') {
-	            $totalRows = $this->dao->getLogsCount($logsidInt);
+	            $totalRows = $this->viewReadService->getLogsCount($logsidInt);
 	        } else {
-	            $totalRows = $this->dao->getRedirectsForViewCount($sub, $tableOptions);
+	            $totalRows = $this->viewReadService->getRedirectsForViewCount($sub, $tableOptions);
 	        }
         $rawPerpage = array_key_exists('perpage', $tableOptions) && is_scalar($tableOptions['perpage']) ? $tableOptions['perpage'] : 25;
         $perPage = intval($rawPerpage);
@@ -909,10 +827,47 @@ trait ViewTrait_RedirectsTable {
      * @return string
      */
     function getAdminRedirectsPageTable($sub) {
-        
         $tableOptions = $this->logic->getTableOptions($sub);
-        
-        // these are used for a GET request so they're not translated.
+        $columns = $this->buildRedirectsColumnDefs($tableOptions);
+
+        $html = "<table class=\"abj404-table\"><thead>";
+        $html .= $this->getTableColumns($sub, $columns);
+        $html .= "</thead><tbody id=\"the-list\">";
+
+        $deadDestIds = function_exists('get_transient') ? get_transient('abj404_dead_dest_ids') : false;
+        if (!is_array($deadDestIds)) {
+            $deadDestIds = array();
+        }
+
+        $rows = $this->viewReadService->getRedirectsForView($sub, $tableOptions);
+        /** @var array<int, array<string, mixed>> $typedRedirectRows */
+        $typedRedirectRows = array_values(array_filter($rows, 'is_array'));
+        $this->rememberTableDataSignature($sub, $typedRedirectRows);
+        $displayed = 0;
+        $y = 1;
+        foreach ($typedRedirectRows as $row) {
+            $html .= $this->buildRedirectRowHTML($row, $sub, $tableOptions, $deadDestIds, $y);
+            $y = ($y === 0) ? 1 : 0;
+            $displayed++;
+        }
+        if ($displayed == 0) {
+            $html .= "<tr>\n" .
+                "<td colspan=\"10\" class=\"abj404-empty-state\">" .
+                "<div class=\"abj404-empty-state-icon\">📋</div>" .
+                "<h3>" . __('No Redirect Records To Display', '404-solution') . "</h3>" .
+                "<p>" . __('Redirects will appear here once created.', '404-solution') . "</p>" .
+                "</td></tr>";
+        }
+        $html .= "</tbody></table>";
+
+        return $html;
+    }
+
+    /**
+     * @param array<string, mixed> $tableOptions
+     * @return array<string, array<string, string>>
+     */
+    private function buildRedirectsColumnDefs(array $tableOptions): array {
         $columns = array();
         $columns['url']['title'] = __('URL', '404-solution');
         $columns['url']['orderby'] = "url";
@@ -946,24 +901,18 @@ trait ViewTrait_RedirectsTable {
         $columns['last_used']['orderby'] = "last_used";
         $columns['last_used']['width'] = "10%";
         $columns['last_used']['title_attr_html'] = $hitsTooltip;
+        return $columns;
+    }
 
-        $html = "<table class=\"abj404-table\"><thead>";
-        $html .= $this->getTableColumns($sub, $columns);
-        $html .= "</thead><tbody id=\"the-list\">";
-        
-        $deadDestIds = function_exists('get_transient') ? get_transient('abj404_dead_dest_ids') : false;
-        if (!is_array($deadDestIds)) {
-            $deadDestIds = array();
-        }
-
-        $rows = $this->dao->getRedirectsForView($sub, $tableOptions);
-        /** @var array<int, array<string, mixed>> $typedRedirectRows */
-        $typedRedirectRows = array_values(array_filter($rows, 'is_array'));
-        $this->rememberTableDataSignature($sub, $typedRedirectRows);
-        $displayed = 0;
-        $y = 1;
-        foreach ($typedRedirectRows as $row) {
-            $displayed++;
+    /**
+     * @param array<string, mixed> $row
+     * @param string $sub
+     * @param array<string, mixed> $tableOptions
+     * @param array<mixed> $deadDestIds
+     * @param int $y
+     * @return string
+     */
+    private function buildRedirectRowHTML(array $row, string $sub, array $tableOptions, array $deadDestIds, int $y): string {
             $rowType = $row['type'] ?? 0;
             $rowStatus = $row['status'] ?? 0;
             $rowFinalDest = is_string($row['final_dest'] ?? '') ? (string)($row['final_dest'] ?? '') : '';
@@ -979,51 +928,9 @@ trait ViewTrait_RedirectsTable {
                 $statusTitle = __('Unknown', '404-solution');
             }
 
-            $link = "";
-            $title = __('Visit', '404-solution') . " ";
-            if ($rowType == ABJ404_TYPE_EXTERNAL) {
-                if ($rowFinalDest !== '') {
-                    $link = $rowFinalDest;
-                    $title .= $rowFinalDest;
-                }
-            } else if ($rowType == ABJ404_TYPE_CAT) {
-                if ($rowFinalDest !== '') {
-                    $permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($rowFinalDest . "|" . ABJ404_TYPE_CAT, 0);
-                    $link = is_string($permalink['link']) ? $permalink['link'] : '';
-                    $title .= __('Category:', '404-solution') . " " . (is_string($permalink['title']) ? $permalink['title'] : '');
-                }
-            } else if ($rowType == ABJ404_TYPE_TAG) {
-                if ($rowFinalDest !== '') {
-                    $permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($rowFinalDest . "|" . ABJ404_TYPE_TAG, 0);
-                    $link = is_string($permalink['link']) ? $permalink['link'] : '';
-                    $title .= __('Tag:', '404-solution') . " " . (is_string($permalink['title']) ? $permalink['title'] : '');
-                }
-            } else if ($rowType == ABJ404_TYPE_HOME) {
-                $permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($rowFinalDest . "|" . ABJ404_TYPE_HOME, 0);
-                $link = is_string($permalink['link']) ? $permalink['link'] : '';
-                $title .= __('Home Page:', '404-solution') . " " . (is_string($permalink['title']) ? $permalink['title'] : '');
-            } else if ($rowType == ABJ404_TYPE_POST) {
-                if ($rowFinalDest !== '') {
-                    $permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($rowFinalDest . "|" . ABJ404_TYPE_POST, 0);
-                    $link = is_string($permalink['link']) ? $permalink['link'] : '';
-                    $title .= is_string($permalink['title']) ? $permalink['title'] : '';
-                }
-                
-            } else if ($rowType == ABJ404_TYPE_404_DISPLAYED) {
-            	$permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($rowFinalDest . "|" . ABJ404_TYPE_404_DISPLAYED, 0);
-            	// for custom 404 page use the link
-            	$link = is_string($permalink['link']) ? $permalink['link'] : '';
-            	$title .= is_string($permalink['title']) ? $permalink['title'] : '';
-            	
-            	// for the normal 404 page just use #
-            	if ($rowFinalDest == '0') {
-            	    $link = '';
-            	}
-            	
-            } else {
-                $this->logger->errorMessage("Unexpected row type while displaying table: " . $rowType);
-            }
-            
+            $destLink = $this->resolveRedirectDestLink($rowType, $rowFinalDest);
+            $link = $destLink['link'];
+            $title = $destLink['title'];
             if ($link != '') {
                 $link = "href='" . esc_url($link) . "'";
             }
@@ -1141,39 +1048,11 @@ trait ViewTrait_RedirectsTable {
                 $lastUsedClass = 'abj404-never-used';
             }
 
-            // Legacy variables for backwards compatibility
-            $editlinkHTML = '';
-            $logslinkHTML = '';
-            $deletePermanentlyHTML = '';
-            
-            $destinationExists = '';
-            $destinationDoesNotExist = 'display: none;';
-            $destinationWarningText = __("This page doesn't exist or is not published so the redirect won't work.", '404-solution');
-            if ($destinationIsMissing) {
-                $destinationExists = 'display: none;';
-                $destinationDoesNotExist = '';
-                $destinationWarningText = __('Destination missing. Edit this redirect and choose a destination.', '404-solution');
-                if (trim((string)$destForView) === '') {
-                    $destForView = __('(Destination missing)', '404-solution');
-                }
-            }
-            if (array_key_exists('published_status', $row)) {
-                if ($row['published_status'] == '0') {
-                    $destinationExists = 'display: none;';
-                    $destinationDoesNotExist = '';
-                    if (trim((string)$destForView) === '') {
-                        $destForView = __('(Destination unavailable)', '404-solution');
-                    }
-                }
-            }
-
-            // Dead destination: destination exists in DB but is generating 404s
-            $rowIdStr = is_scalar($row['id'] ?? '') ? (string) ($row['id'] ?? '') : '';
-            if (in_array($rowIdStr, $deadDestIds, true)) {
-                $destinationExists    = 'display: none;';
-                $destinationDoesNotExist = '';
-                $destinationWarningText = __('Destination returned 404 recently — redirect suspended until destination is restored.', '404-solution');
-            }
+            $destWarning = $this->resolveDestinationWarnings($row, $rowType, $rowFinalDest, $destForView, $destinationIsMissing, $deadDestIds);
+            $destinationExists = $destWarning['exists'];
+            $destinationDoesNotExist = $destWarning['notExists'];
+            $destinationWarningText = $destWarning['text'];
+            $destForView = $destWarning['destForView'];
 
             // URL regex warning visibility
             $urlIsNormal = '';
@@ -1187,87 +1066,156 @@ trait ViewTrait_RedirectsTable {
             $rowId = is_scalar($row['id'] ?? '') ? (string)($row['id'] ?? '') : '';
             $fullVisitorURL = esc_url(home_url($rowUrl));
 
-            $htmlTemp = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/html/tableRowPageRedirects.html");
-            $htmlTemp = $this->f->str_replace('{rowid}', $rowId, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{rowClass}', $class, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{visitorURL}', $fullVisitorURL, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{rowURL}', esc_html($rowUrl), $htmlTemp);
-
-            // URL regex warning
-            $htmlTemp = $this->f->str_replace('{url-is-normal}', $urlIsNormal, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{url-looks-like-regex}', $urlLooksLikeRegexWarning, $htmlTemp);
-
-            // Modern row action buttons
-            $htmlTemp = $this->f->str_replace('{editBtnHTML}', $editBtnHTML, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{logsBtnHTML}', $logsBtnHTML, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{trashBtnHTML}', $trashBtnHTML, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{deleteBtnHTML}', $deleteBtnHTML, $htmlTemp);
-
-            // Badge classes
-            $htmlTemp = $this->f->str_replace('{statusBadgeClass}', $statusBadgeClass, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{codeBadgeClass}', $codeBadgeClass, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{lastUsedClass}', $lastUsedClass, $htmlTemp);
-
-	            $htmlTemp = $this->f->str_replace('{link}', $link, $htmlTemp);
-	            $htmlTemp = $this->f->str_replace('{title}', esc_attr($title), $htmlTemp);
-	            $htmlTemp = $this->f->str_replace('{dest}', esc_attr($destForView), $htmlTemp);
-	            $htmlTemp = $this->f->str_replace('{destination-exists}', $destinationExists, $htmlTemp);
-	            $htmlTemp = $this->f->str_replace('{destination-does-not-exist}', $destinationDoesNotExist, $htmlTemp);
-                $htmlTemp = $this->f->str_replace('{destination-warning-text}', $destinationWarningText, $htmlTemp);
-            $statusForView = is_string($row['status_for_view'] ?? '') ? (string)($row['status_for_view'] ?? '') : '';
-            $typeForView = is_string($row['type_for_view'] ?? '') ? (string)($row['type_for_view'] ?? '') : '';
-            $htmlTemp = $this->f->str_replace('{status}', $statusForView, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{statusTitle}', $statusTitle, $htmlTemp);
             $rowEngine = is_string($row['engine'] ?? '') ? trim((string)($row['engine'] ?? '')) : '';
             $engineHTML = ($rowEngine !== '') ? '<br><span class="abj404-engine-label">' . esc_html($rowEngine) . '</span>' : '';
-            $htmlTemp = $this->f->str_replace('{engineHTML}', $engineHTML, $htmlTemp);
-            $rawScore = $row['score'] ?? null;
-            // Keep {rowScore} empty — score now lives in its own Confidence column.
-            $htmlTemp = $this->f->str_replace('{rowScore}', '', $htmlTemp);
-            if ($rawScore !== null && $rawScore !== '') {
-                $scoreNum = (float)(is_numeric($rawScore) ? $rawScore : 0);
-                $scorePct = number_format($scoreNum, 0);
-                if ($scoreNum >= 80) {
-                    $scoreBadgeClass = 'abj404-score-high';
-                } elseif ($scoreNum >= 50) {
-                    $scoreBadgeClass = 'abj404-score-medium';
-                } else {
-                    $scoreBadgeClass = 'abj404-score-low';
-                }
-                $scoreCell = '<span class="abj404-score-badge ' . $scoreBadgeClass . '">' . esc_html($scorePct) . '%</span>';
-            } else {
-                $noScoreTitle = ($rowEngine !== '')
-                    ? __('No confidence score for this engine', '404-solution')
-                    : __('Manual redirect — no confidence score', '404-solution');
-                $scoreCell = '<span class="abj404-score-manual" title="' . esc_attr($noScoreTitle) . '">—</span>';
-            }
-            $htmlTemp = $this->f->str_replace('{scoreCell}', $scoreCell, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{type}', $typeForView, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{rowCode}', esc_html($codeDisplay), $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{hits}', esc_html((string)$hits), $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{logsLink}', $logslink, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{trashLink}', $trashlink, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{ajaxTrashLink}', $ajaxTrashLink, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{trashtitle}', $trashtitle, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{deletelink}', $deletelink, $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{created_date}',
-                    esc_html((string)wp_date("Y/m/d h:i:s A", abs(is_scalar($row['timestamp'] ?? 0) ? intval($row['timestamp'] ?? 0) : 0))), $htmlTemp);
-            $htmlTemp = $this->f->str_replace('{last_used_date}', esc_html($last), $htmlTemp);
+            $scoreCell = $this->buildScoreCell($row['score'] ?? null, $rowEngine);
+            $statusForView = is_string($row['status_for_view'] ?? '') ? (string)($row['status_for_view'] ?? '') : '';
+            $typeForView = is_string($row['type_for_view'] ?? '') ? (string)($row['type_for_view'] ?? '') : '';
 
-            $htmlTemp = $this->f->doNormalReplacements($htmlTemp);
-            $html .= $htmlTemp;
+            return $this->fillRedirectRowTemplate([
+                '{rowid}' => $rowId, '{rowClass}' => $class,
+                '{visitorURL}' => $fullVisitorURL, '{rowURL}' => esc_html($rowUrl),
+                '{url-is-normal}' => $urlIsNormal, '{url-looks-like-regex}' => $urlLooksLikeRegexWarning,
+                '{editBtnHTML}' => $editBtnHTML, '{logsBtnHTML}' => $logsBtnHTML,
+                '{trashBtnHTML}' => $trashBtnHTML, '{deleteBtnHTML}' => $deleteBtnHTML,
+                '{statusBadgeClass}' => $statusBadgeClass, '{codeBadgeClass}' => $codeBadgeClass,
+                '{lastUsedClass}' => $lastUsedClass,
+                '{link}' => $link, '{title}' => esc_attr($title),
+                '{dest}' => esc_attr($destForView),
+                '{destination-exists}' => $destinationExists,
+                '{destination-does-not-exist}' => $destinationDoesNotExist,
+                '{destination-warning-text}' => $destinationWarningText,
+                '{status}' => $statusForView, '{statusTitle}' => $statusTitle,
+                '{engineHTML}' => $engineHTML, '{rowScore}' => '', '{scoreCell}' => $scoreCell,
+                '{type}' => $typeForView, '{rowCode}' => esc_html($codeDisplay),
+                '{hits}' => esc_html((string)$hits),
+                '{logsLink}' => $logslink, '{trashLink}' => $trashlink,
+                '{ajaxTrashLink}' => $ajaxTrashLink, '{trashtitle}' => $trashtitle,
+                '{deletelink}' => $deletelink,
+                '{created_date}' => esc_html((string)wp_date("Y/m/d h:i:s A", abs(is_scalar($row['timestamp'] ?? 0) ? intval($row['timestamp'] ?? 0) : 0))),
+                '{last_used_date}' => esc_html($last),
+            ]);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @param mixed $rowType
+     * @param string $rowFinalDest
+     * @param string $destForView
+     * @param bool $destinationIsMissing
+     * @param array<mixed> $deadDestIds
+     * @return array{exists: string, notExists: string, text: string, destForView: string}
+     */
+    private function resolveDestinationWarnings(array $row, $rowType, string $rowFinalDest, string $destForView, bool $destinationIsMissing, array $deadDestIds): array {
+        $exists = '';
+        $notExists = 'display: none;';
+        $text = __("This page doesn't exist or is not published so the redirect won't work.", '404-solution');
+        if ($destinationIsMissing) {
+            $exists = 'display: none;';
+            $notExists = '';
+            $text = __('Destination missing. Edit this redirect and choose a destination.', '404-solution');
+            if (trim((string)$destForView) === '') {
+                $destForView = __('(Destination missing)', '404-solution');
+            }
         }
-        if ($displayed == 0) {
-            $html .= "<tr>\n" .
-                "<td colspan=\"10\" class=\"abj404-empty-state\">" .
-                "<div class=\"abj404-empty-state-icon\">📋</div>" .
-                "<h3>" . __('No Redirect Records To Display', '404-solution') . "</h3>" .
-                "<p>" . __('Redirects will appear here once created.', '404-solution') . "</p>" .
-                "</td></tr>";
+        if (array_key_exists('published_status', $row) && $row['published_status'] == '0') {
+            $exists = 'display: none;';
+            $notExists = '';
+            if (trim((string)$destForView) === '') {
+                $destForView = __('(Destination unavailable)', '404-solution');
+            }
         }
-        $html .= "</tbody></table>";
-        
-        return $html;
+        $rowIdStr = is_scalar($row['id'] ?? '') ? (string) ($row['id'] ?? '') : '';
+        if (in_array($rowIdStr, $deadDestIds, true)) {
+            $exists = 'display: none;';
+            $notExists = '';
+            $text = __('Destination returned 404 recently, redirect suspended until destination is restored.', '404-solution');
+        }
+        return ['exists' => $exists, 'notExists' => $notExists, 'text' => $text, 'destForView' => $destForView];
+    }
+
+    /**
+     * @param array<string, string> $replacements
+     * @return string
+     */
+    private function fillRedirectRowTemplate(array $replacements): string {
+        $htmlTemp = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/html/tableRowPageRedirects.html");
+        foreach ($replacements as $placeholder => $value) {
+            $htmlTemp = $this->f->str_replace($placeholder, $value, $htmlTemp);
+        }
+        return $this->f->doNormalReplacements($htmlTemp);
+    }
+
+    /**
+     * @param mixed $rawScore
+     * @param string $rowEngine
+     * @return string
+     */
+    private function buildScoreCell($rawScore, string $rowEngine): string {
+        if ($rawScore !== null && $rawScore !== '') {
+            $scoreNum = (float)(is_numeric($rawScore) ? $rawScore : 0);
+            $scorePct = number_format($scoreNum, 0);
+            if ($scoreNum >= 80) {
+                $scoreBadgeClass = 'abj404-score-high';
+            } elseif ($scoreNum >= 50) {
+                $scoreBadgeClass = 'abj404-score-medium';
+            } else {
+                $scoreBadgeClass = 'abj404-score-low';
+            }
+            return '<span class="abj404-score-badge ' . $scoreBadgeClass . '">' . esc_html($scorePct) . '%</span>';
+        }
+        $noScoreTitle = ($rowEngine !== '')
+            ? __('No confidence score for this engine', '404-solution')
+            : __('Manual redirect, no confidence score', '404-solution');
+        return '<span class="abj404-score-manual" title="' . esc_attr($noScoreTitle) . '">&#x2014;</span>'; // allow-em-dash: em-dash used as visual placeholder in HTML table cell
+    }
+
+    /**
+     * @param mixed $rowType
+     * @param string $rowFinalDest
+     * @return array{link: string, title: string}
+     */
+    private function resolveRedirectDestLink($rowType, string $rowFinalDest): array {
+        $link = '';
+        $title = __('Visit', '404-solution') . ' ';
+        if ($rowType == ABJ404_TYPE_EXTERNAL) {
+            if ($rowFinalDest !== '') {
+                $link = $rowFinalDest;
+                $title .= $rowFinalDest;
+            }
+        } else if ($rowType == ABJ404_TYPE_CAT) {
+            if ($rowFinalDest !== '') {
+                $permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($rowFinalDest . '|' . ABJ404_TYPE_CAT, 0);
+                $link = is_string($permalink['link']) ? $permalink['link'] : '';
+                $title .= __('Category:', '404-solution') . ' ' . (is_string($permalink['title']) ? $permalink['title'] : '');
+            }
+        } else if ($rowType == ABJ404_TYPE_TAG) {
+            if ($rowFinalDest !== '') {
+                $permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($rowFinalDest . '|' . ABJ404_TYPE_TAG, 0);
+                $link = is_string($permalink['link']) ? $permalink['link'] : '';
+                $title .= __('Tag:', '404-solution') . ' ' . (is_string($permalink['title']) ? $permalink['title'] : '');
+            }
+        } else if ($rowType == ABJ404_TYPE_HOME) {
+            $permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($rowFinalDest . '|' . ABJ404_TYPE_HOME, 0);
+            $link = is_string($permalink['link']) ? $permalink['link'] : '';
+            $title .= __('Home Page:', '404-solution') . ' ' . (is_string($permalink['title']) ? $permalink['title'] : '');
+        } else if ($rowType == ABJ404_TYPE_POST) {
+            if ($rowFinalDest !== '') {
+                $permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($rowFinalDest . '|' . ABJ404_TYPE_POST, 0);
+                $link = is_string($permalink['link']) ? $permalink['link'] : '';
+                $title .= is_string($permalink['title']) ? $permalink['title'] : '';
+            }
+        } else if ($rowType == ABJ404_TYPE_404_DISPLAYED) {
+            $permalink = ABJ_404_Solution_Functions::permalinkInfoToArray($rowFinalDest . '|' . ABJ404_TYPE_404_DISPLAYED, 0);
+            $link = is_string($permalink['link']) ? $permalink['link'] : '';
+            $title .= is_string($permalink['title']) ? $permalink['title'] : '';
+            if ($rowFinalDest == '0') {
+                $link = '';
+            }
+        } else {
+            $this->logger->errorMessage('Unexpected row type while displaying table: ' . $rowType);
+        }
+        return ['link' => $link, 'title' => $title];
     }
     
     /**
@@ -1373,7 +1321,7 @@ trait ViewTrait_RedirectsTable {
             } elseif (isset($_POST['id']) && $this->f->regexMatch('[0-9]+', (string)$_POST['id'])) {
                 $redirectId = absint($_POST['id']);
             }
-            $hasExistingConditions = ($redirectId > 0) && !empty($this->dao->getRedirectConditions($redirectId));
+            $hasExistingConditions = ($redirectId > 0) && !empty($this->redirectsRepository->getRedirectConditions($redirectId));
             $hasAdvancedValues = ($startDate !== '' || $endDate !== '' || $hasExistingConditions);
             $openAttr = $hasAdvancedValues ? ' open' : '';
             echo '<details class="abj404-advanced-options"' . $openAttr . '>';
@@ -1451,173 +1399,6 @@ trait ViewTrait_RedirectsTable {
         $content .= "\n" . '</optgroup>' . "\n";
 
         return $content;
-    }
-
-    /**
-     * Render the Conditions section on the Edit Redirect page.
-     *
-     * Reads the current redirect ID from GET/POST so existing conditions can
-     * be pre-populated.  New redirects (id = 0) render an empty container.
-     *
-     * @return void
-     */
-    private function echoRedirectConditionsSection(): void {
-        $redirectId = 0;
-        if (isset($_GET['id']) && $this->f->regexMatch('[0-9]+', (string)$_GET['id'])) {
-            $redirectId = absint($_GET['id']);
-        } elseif (isset($_POST['id']) && $this->f->regexMatch('[0-9]+', (string)$_POST['id'])) {
-            $redirectId = absint($_POST['id']);
-        }
-
-        $existingConditions = ($redirectId > 0) ? $this->dao->getRedirectConditions($redirectId) : [];
-
-        echo '<div class="abj404-form-group abj404-conditions-section">';
-        echo '<h4>' . esc_html__('Conditions (optional)', '404-solution') . '</h4>';
-        echo '<p class="abj404-form-help">' . esc_html__('This redirect only fires when all conditions are met. Leave empty to always redirect.', '404-solution') . '</p>';
-
-        echo '<div id="abj404-conditions-container">';
-        foreach ($existingConditions as $i => $cond) {
-            $this->echoConditionRow($i, $cond);
-        }
-        echo '</div>';
-
-        echo '<button type="button" onclick="abj404AddConditionRow()" class="button abj404-btn-add-condition">'
-            . esc_html__('+ Add Condition', '404-solution')
-            . '</button>';
-
-        echo '</div>';
-
-        // Hidden template row (display:none) cloned by JS.
-        echo '<script type="text/template" id="abj404-condition-row-template">';
-        $this->echoConditionRow('__IDX__', []);
-        echo '</script>';
-
-        // Inline JS for dynamic condition rows.
-        $this->echoConditionsJavaScript();
-    }
-
-    /**
-     * Render a single condition row.
-     *
-     * @param int|string           $index  Row index (used in field names).
-     * @param array<string, mixed> $cond   Existing condition data (empty = defaults).
-     * @return void
-     */
-    private function echoConditionRow($index, array $cond): void {
-        $logic    = isset($cond['logic'])          && is_string($cond['logic'])          ? $cond['logic']          : 'AND';
-        $type     = isset($cond['condition_type']) && is_string($cond['condition_type']) ? $cond['condition_type'] : '';
-        $operator = isset($cond['operator'])       && is_string($cond['operator'])       ? $cond['operator']       : 'equals';
-        $value    = isset($cond['value'])          && is_string($cond['value'])          ? $cond['value']          : '';
-        $sortOrder = isset($cond['sort_order'])    && is_scalar($cond['sort_order'])     ? (int)$cond['sort_order'] : (int)$index;
-
-        $namePrefix = 'conditions[' . $index . ']';
-
-        echo '<div class="abj404-condition-row" data-index="' . esc_attr((string)$index) . '">';
-
-        // Logic (AND / OR) — shown only on rows after the first.
-        echo '<select name="' . esc_attr($namePrefix . '[logic]') . '" class="abj404-condition-logic" aria-label="' . esc_attr__('Logic', '404-solution') . '">';
-        foreach (['AND' => __('AND', '404-solution'), 'OR' => __('OR', '404-solution')] as $logicVal => $logicLabel) {
-            $sel = ($logic === $logicVal) ? ' selected' : '';
-            echo '<option value="' . esc_attr($logicVal) . '"' . $sel . '>' . esc_html($logicLabel) . '</option>';
-        }
-        echo '</select>';
-
-        // Condition type.
-        $typeOptions = [
-            'login_status' => __('Login Status', '404-solution'),
-            'user_role'    => __('User Role', '404-solution'),
-            'referrer'     => __('Referrer URL', '404-solution'),
-            'user_agent'   => __('User Agent', '404-solution'),
-            'ip_range'     => __('IP Range (CIDR)', '404-solution'),
-            'http_header'  => __('HTTP Header', '404-solution'),
-        ];
-        echo '<select name="' . esc_attr($namePrefix . '[condition_type]') . '" class="abj404-condition-type" aria-label="' . esc_attr__('Condition type', '404-solution') . '">';
-        echo '<option value="">' . esc_html__('— Select type —', '404-solution') . '</option>';
-        foreach ($typeOptions as $typeVal => $typeLabel) {
-            $sel = ($type === $typeVal) ? ' selected' : '';
-            echo '<option value="' . esc_attr($typeVal) . '"' . $sel . '>' . esc_html($typeLabel) . '</option>';
-        }
-        echo '</select>';
-
-        // Operator.
-        $operatorOptions = [
-            'equals'       => __('equals', '404-solution'),
-            'not_equals'   => __('not equals', '404-solution'),
-            'contains'     => __('contains', '404-solution'),
-            'not_contains' => __('does not contain', '404-solution'),
-            'regex'        => __('matches regex', '404-solution'),
-        ];
-        echo '<select name="' . esc_attr($namePrefix . '[operator]') . '" class="abj404-condition-operator" aria-label="' . esc_attr__('Operator', '404-solution') . '">';
-        foreach ($operatorOptions as $opVal => $opLabel) {
-            $sel = ($operator === $opVal) ? ' selected' : '';
-            echo '<option value="' . esc_attr($opVal) . '"' . $sel . '>' . esc_html($opLabel) . '</option>';
-        }
-        echo '</select>';
-
-        // Value input.
-        echo '<input type="text" name="' . esc_attr($namePrefix . '[value]') . '" class="abj404-condition-value abj404-form-input" value="' . esc_attr($value) . '" placeholder="' . esc_attr__('Value', '404-solution') . '" aria-label="' . esc_attr__('Condition value', '404-solution') . '">';
-
-        // Sort order (hidden).
-        echo '<input type="hidden" name="' . esc_attr($namePrefix . '[sort_order]') . '" class="abj404-condition-sort-order" value="' . esc_attr((string)$sortOrder) . '">';
-
-        // Remove button.
-        echo '<button type="button" class="button abj404-remove-condition" onclick="abj404RemoveConditionRow(this)" aria-label="' . esc_attr__('Remove condition', '404-solution') . '">'
-            . esc_html__('Remove', '404-solution')
-            . '</button>';
-
-        echo '</div>';
-    }
-
-    /**
-     * Output inline JavaScript that manages dynamic condition rows.
-     *
-     * @return void
-     */
-    private function echoConditionsJavaScript(): void {
-        $redirectId = 0;
-        if (isset($_GET['id']) && is_scalar($_GET['id']) && ctype_digit((string)$_GET['id'])) {
-            $redirectId = (int)$_GET['id'];
-        } elseif (isset($_POST['id']) && is_scalar($_POST['id']) && ctype_digit((string)$_POST['id'])) {
-            $redirectId = (int)$_POST['id'];
-        }
-        $initialIndex = ($redirectId > 0) ? max(1, count($this->dao->getRedirectConditions($redirectId))) : 1;
-
-        echo '<script type="text/javascript">' . "\n";
-        echo '(function() {' . "\n";
-        echo '    var abj404ConditionIndex = ' . (int)$initialIndex . ';' . "\n";
-        echo "\n";
-        echo '    window.abj404AddConditionRow = function() {' . "\n";
-        echo '        var template = document.getElementById(\'abj404-condition-row-template\');' . "\n";
-        echo '        if (!template) { return; }' . "\n";
-        echo '        var html = template.innerHTML.replace(/__IDX__/g, String(abj404ConditionIndex));' . "\n";
-        echo '        var container = document.getElementById(\'abj404-conditions-container\');' . "\n";
-        echo '        if (!container) { return; }' . "\n";
-        echo '        var div = document.createElement(\'div\');' . "\n";
-        echo '        div.innerHTML = html;' . "\n";
-        echo '        while (div.firstChild) {' . "\n";
-        echo '            container.appendChild(div.firstChild);' . "\n";
-        echo '        }' . "\n";
-        echo '        abj404UpdateConditionSortOrders();' . "\n";
-        echo '        abj404ConditionIndex++;' . "\n";
-        echo '    };' . "\n";
-        echo "\n";
-        echo '    window.abj404RemoveConditionRow = function(btn) {' . "\n";
-        echo '        var row = btn.closest(\'.abj404-condition-row\');' . "\n";
-        echo '        if (row) {' . "\n";
-        echo '            row.parentNode.removeChild(row);' . "\n";
-        echo '            abj404UpdateConditionSortOrders();' . "\n";
-        echo '        }' . "\n";
-        echo '    };' . "\n";
-        echo "\n";
-        echo '    function abj404UpdateConditionSortOrders() {' . "\n";
-        echo '        var rows = document.querySelectorAll(\'#abj404-conditions-container .abj404-condition-row\');' . "\n";
-        echo '        for (var i = 0; i < rows.length; i++) {' . "\n";
-        echo '            var so = rows[i].querySelector(\'.abj404-condition-sort-order\');' . "\n";
-        echo '            if (so) { so.value = String(i); }' . "\n";
-        echo '        }' . "\n";
-        echo '    }' . "\n";
-        echo '}());' . "\n";
-        echo '</script>' . "\n";
     }
 
 }

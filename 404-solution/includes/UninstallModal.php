@@ -180,37 +180,7 @@ class ABJ_404_Solution_UninstallModal {
 
                 <!-- Deactivation Reason -->
                 <h3 style="margin-top: 20px;"><?php _e('Help us improve (Optional)', '404-solution'); ?></h3>
-
-                <div class="abj404-uninstall-reasons">
-                    <label>
-                        <input type="radio" name="abj404-reason" value="temporary">
-                        <?php _e('Temporary deactivation for debugging', '404-solution'); ?>
-                    </label>
-                    <label>
-                        <input type="radio" name="abj404-reason" value="not-working">
-                        <?php _e('The plugin is not working as expected', '404-solution'); ?>
-                    </label>
-                    <label>
-                        <input type="radio" name="abj404-reason" value="found-better">
-                        <?php _e('I found a better plugin', '404-solution'); ?>
-                    </label>
-                    <label>
-                        <input type="radio" name="abj404-reason" value="no-longer-needed">
-                        <?php _e('I no longer need this functionality', '404-solution'); ?>
-                    </label>
-                    <label>
-                        <input type="radio" name="abj404-reason" value="too-complicated">
-                        <?php _e('Too complicated to configure', '404-solution'); ?>
-                    </label>
-                    <label>
-                        <input type="radio" name="abj404-reason" value="performance">
-                        <?php _e('Performance issues', '404-solution'); ?>
-                    </label>
-                    <label>
-                        <input type="radio" name="abj404-reason" value="other">
-                        <?php _e('Other reason', '404-solution'); ?>
-                    </label>
-                </div>
+                <?php self::echoDeactivationReasons(); ?>
 
                 <!-- Conditional follow-up sections (shown based on selected reason) -->
                 <div id="abj404-followup-not-working" class="abj404-followup-section" style="display:none; background: #f6f7f7; border-radius: 4px; border-left: 3px solid #d63638;">
@@ -358,6 +328,41 @@ class ABJ_404_Solution_UninstallModal {
                     ?>
                 </p>
             </div>
+        </div>
+        <?php
+    }
+
+    private static function echoDeactivationReasons(): void {
+        ?>
+        <div class="abj404-uninstall-reasons">
+            <label>
+                <input type="radio" name="abj404-reason" value="temporary">
+                <?php _e('Temporary deactivation for debugging', '404-solution'); ?>
+            </label>
+            <label>
+                <input type="radio" name="abj404-reason" value="not-working">
+                <?php _e('The plugin is not working as expected', '404-solution'); ?>
+            </label>
+            <label>
+                <input type="radio" name="abj404-reason" value="found-better">
+                <?php _e('I found a better plugin', '404-solution'); ?>
+            </label>
+            <label>
+                <input type="radio" name="abj404-reason" value="no-longer-needed">
+                <?php _e('I no longer need this functionality', '404-solution'); ?>
+            </label>
+            <label>
+                <input type="radio" name="abj404-reason" value="too-complicated">
+                <?php _e('Too complicated to configure', '404-solution'); ?>
+            </label>
+            <label>
+                <input type="radio" name="abj404-reason" value="performance">
+                <?php _e('Performance issues', '404-solution'); ?>
+            </label>
+            <label>
+                <input type="radio" name="abj404-reason" value="other">
+                <?php _e('Other reason', '404-solution'); ?>
+            </label>
         </div>
         <?php
     }
@@ -534,12 +539,12 @@ class ABJ_404_Solution_UninstallModal {
         global $wpdb;
 
         // Guard for test environment where DataAccess class may not be loaded
-        if (!class_exists('ABJ_404_Solution_DataAccess')) {
+        if (!class_exists('ABJ_404_Solution_DatabaseCore')) {
             return 0;
         }
 
-        $dao = abj_service('data_access');
-        $table_name = $dao->getPrefixedTableName('abj404_redirects');
+        $dbCore = abj_service('db_core');
+        $table_name = $dbCore->getPrefixedTableName('abj404_redirects');
 
         // Check if table exists
         // DAO-bypass-approved: Diagnostic table-existence probe for redirect-count display
@@ -582,25 +587,25 @@ class ABJ_404_Solution_UninstallModal {
         }
 
         try {
-            $dao = abj_service('data_access');
+            $viewRead = abj_service('view_read_service');
 
             // Get redirect counts by status
-            $redirectCounts = $dao->getRedirectStatusCounts(true);
+            $redirectCounts = $viewRead->getRedirectStatusCounts(true);
             if (is_array($redirectCounts)) {
                 $stats['redirects'] = $redirectCounts;
             }
 
             // Get captured 404s counts by status
-            $capturedCounts = $dao->getCapturedStatusCounts(true);
+            $capturedCounts = $viewRead->getCapturedStatusCounts(true);
             if (is_array($capturedCounts)) {
                 $stats['captured'] = $capturedCounts;
             }
 
             // Get log entry count
-            $stats['log_count'] = $dao->getLogsCount(0);
+            $stats['log_count'] = $viewRead->getLogsCount(0);
 
             // Get log table size
-            $logTableSizeBytes = $dao->getLogDiskUsage();
+            $logTableSizeBytes = $viewRead->getLogDiskUsage();
             if ($logTableSizeBytes > 0) {
                 $stats['log_table_size_mb'] = round($logTableSizeBytes / (1024 * 1024), 2);
             }
@@ -833,7 +838,11 @@ class ABJ_404_Solution_UninstallModal {
      */
     private static function getActivePluginsList() {
         if (!function_exists('get_plugins')) {
-            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+            $pluginFile = ABSPATH . 'wp-admin/includes/plugin.php';
+            if (!is_readable($pluginFile)) {
+                return 'Unavailable: wp-admin/includes/plugin.php not readable';
+            }
+            require_once $pluginFile;
         }
 
         $all_plugins = get_plugins();
@@ -888,6 +897,7 @@ class ABJ_404_Solution_UninstallModal {
 
         // Try information_schema.SCHEMATA first
         $db_name = DB_NAME;
+        // DAO-bypass-approved: Diagnostic database-default charset/collation probe.
         $charset_query = $wpdb->prepare(
             "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME " .
             "FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = %s",
@@ -950,7 +960,7 @@ class ABJ_404_Solution_UninstallModal {
         }
 
         $dbUtils = abj_service('database_upgrades');
-        $dao = abj_service('data_access');
+        $dbCore = abj_service('db_core');
 
         // Get baseline from wp_posts
         $targetTable = $wpdb->prefix . 'posts';
@@ -974,10 +984,16 @@ class ABJ_404_Solution_UninstallModal {
         );
 
         // Discover all plugin tables dynamically so new tables are automatically included.
-        $prefix = $dao->getLowercasePrefix();
+        $prefix = $dbCore->getLowercasePrefix();
         // DAO-bypass-approved: Diagnostic table enumeration for collation snapshot
+        if (is_object($wpdb) && method_exists($wpdb, 'esc_like')) {
+            $escapedPrefix = $wpdb->esc_like($prefix . 'abj404_');
+        } else {
+            $escapedPrefix = addcslashes($prefix . 'abj404_', '_%\\');
+        }
         $rawTables = $wpdb->get_results(
-            $wpdb->prepare("SHOW TABLES LIKE %s", $wpdb->esc_like($prefix . 'abj404_') . '%'),
+            // DAO-bypass-approved: Diagnostic table enumeration needs SHOW TABLES metadata directly.
+            $wpdb->prepare("SHOW TABLES LIKE %s", $escapedPrefix . '%'),
             ARRAY_N
         );
         $pluginTables = array();
@@ -1072,6 +1088,7 @@ class ABJ_404_Solution_UninstallModal {
             return array('error' => 'wpdb methods unavailable');
         }
 
+        // DAO-bypass-approved: Diagnostic table charset/collation metadata probe.
         $query = $wpdb->prepare(
             "SELECT TABLE_COLLATION, ENGINE, " .
             "SUBSTRING_INDEX(TABLE_COLLATION, '_', 1) as TABLE_CHARSET " .
@@ -1138,6 +1155,7 @@ class ABJ_404_Solution_UninstallModal {
         // SHOW TABLE STATUS LIKE requires the table name without database prefix matching
         // DAO-bypass-approved: Diagnostic — fallback metadata probe (SHOW TABLE STATUS)
         $result = $wpdb->get_row(
+            // DAO-bypass-approved: Diagnostic fallback metadata probe needs SHOW TABLE STATUS directly.
             $wpdb->prepare("SHOW TABLE STATUS LIKE %s", $tableName),
             ARRAY_A
         );

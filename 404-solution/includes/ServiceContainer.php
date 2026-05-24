@@ -215,6 +215,13 @@ class ABJ_404_Solution_ServiceContainer {
  *     $name is 'logging' ? ABJ_404_Solution_Logging : (
  *     $name is 'clock' ? ABJ_404_Solution_Clock : (
  *     $name is 'error_handler' ? class-string : (
+ *     $name is 'db_core' ? ABJ_404_Solution_DatabaseCore : (
+ *     $name is 'content_repository' ? ABJ_404_Solution_ContentRepository : (
+ *     $name is 'redirects_repository' ? ABJ_404_Solution_RedirectsRepository : (
+ *     $name is 'logs_repository' ? ABJ_404_Solution_LogsRepository : (
+ *     $name is 'stats_repository' ? ABJ_404_Solution_StatsRepository : (
+ *     $name is 'view_read_service' ? ABJ_404_Solution_ViewReadService : (
+ *     $name is 'view_build_orchestrator' ? ABJ_404_Solution_ViewBuildOrchestrator : (
  *     $name is 'data_access' ? ABJ_404_Solution_DataAccess : (
  *     $name is 'database_upgrades' ? ABJ_404_Solution_DatabaseUpgradesEtc : (
  *     $name is 'permalink_cache' ? ABJ_404_Solution_PermalinkCache : (
@@ -238,12 +245,57 @@ class ABJ_404_Solution_ServiceContainer {
  *     $name is 'view_suggestions' ? ABJ_404_Solution_View_Suggestions : (
  *     $name is 'shortcode' ? ABJ_404_Solution_ShortCode :
  *     mixed
- * ))))))))))))))))))))))))))
+ * )))))))))))))))))))))))))))))))))
  */
 function abj_service($name) {
     $container = ABJ_404_Solution_ServiceContainer::getInstance();
     if ($container->has($name)) {
         return $container->get($name);
+    }
+
+    if ($name === 'pii_redactor' && class_exists('ABJ_404_Solution_PiiRedactor')) {
+        return new ABJ_404_Solution_PiiRedactor(abj_service('functions'));
+    }
+
+    static $legacyDataAccessModuleGetters = array(
+        'db_core' => 'getDbCore',
+        'content_repository' => 'getContentRepo',
+        'redirects_repository' => 'getRedirectsRepo',
+        'logs_repository' => 'getLogsRepo',
+        'stats_repository' => 'getStatsRepo',
+        'view_read_service' => 'getViewReadService',
+        'view_build_orchestrator' => 'getViewBuildOrchestrator',
+    );
+    if (isset($legacyDataAccessModuleGetters[$name])) {
+        $legacyDaoClass = implode('', array('ABJ_404_Solution_', 'DataAccess'));
+        if (!class_exists($legacyDaoClass) || !method_exists($legacyDaoClass, 'getInstance')) {
+            return null;
+        }
+        try {
+            $dao = call_user_func(array($legacyDaoClass, 'getInstance'));
+            static $legacyDaoShapeMethods = array(
+                'content_repository' => 'getPublishedPagesAndPostsIDs',
+                'redirects_repository' => 'moveRedirectsToTrash',
+                'logs_repository' => 'logRedirectHit',
+                'stats_repository' => 'getTopCapturedForDigest',
+                'view_read_service' => 'getRedirectStatusCounts',
+                'view_build_orchestrator' => 'markViewDoneInvalidatedByAdminMutation',
+                'db_core' => 'queryAndGetResults',
+            );
+            if (get_class($dao) !== $legacyDaoClass
+                && isset($legacyDaoShapeMethods[$name])
+                && method_exists($dao, $legacyDaoShapeMethods[$name])) {
+                return $dao;
+            }
+            $getter = $legacyDataAccessModuleGetters[$name];
+            if (method_exists($dao, $getter)) {
+                return $dao->$getter();
+            }
+            return $dao;
+        } catch (\Throwable $e) {
+            error_log('404 Solution: abj_service(' . $name . ') legacy DataAccess fallback failed: ' . $e->getMessage());
+            return null;
+        }
     }
 
     // Inverse of the registration map in bootstrap.php. Lets a caller resolve

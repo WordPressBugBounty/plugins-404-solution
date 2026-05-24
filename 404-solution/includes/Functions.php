@@ -10,6 +10,9 @@ abstract class ABJ_404_Solution_Functions {
     
     /** @var self|null */
     private static $instance = null;
+
+    private const FILE_READ_MAX_ATTEMPTS = 3;
+    private const FILE_READ_RETRY_BASE_US = 10000;
     
     /** @return self */
     public static function getInstance() {
@@ -719,15 +722,24 @@ abstract class ABJ_404_Solution_Functions {
             throw new Exception("Error: Can't find file: " . esc_html($path));
         }
         
-        $fileContents = file_get_contents($path);
+        $readResult = self::fileGetContentsWithTransientRetry($path);
+        $fileContents = $readResult['contents'];
         if ($fileContents !== false) {
+            if (!empty($readResult['warnings'])) {
+                error_log(
+                    '404 Solution: readFileContents recovered after transient file-open failure for '
+                    . $path . '. ' . self::formatFileReadWarnings($readResult['warnings'])
+                );
+            }
             return $dataSupplement['prefix'] . $fileContents . $dataSupplement['suffix'];
         }
+
+        $warningDetails = self::formatFileReadWarnings($readResult['warnings']);
         
         // if we can't read the file that way then try curl.
         if (!function_exists('curl_init')) {
             throw new Exception("Error: Can't read file: " . esc_html($path) .
-                    "\n   file_get_contents didn't work and curl is not installed.");
+                    "\n   file_get_contents didn't work and curl is not installed." . $warningDetails);
         }
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, 'file://' . $path);
@@ -735,10 +747,110 @@ abstract class ABJ_404_Solution_Functions {
         $output = curl_exec($ch);
         
         if ($output == null) {
-            throw new Exception("Error: Can't read file, even with cURL: " . esc_html($path));
+            throw new Exception("Error: Can't read file, even with cURL: " . esc_html($path) . $warningDetails);
+        }
+
+        if ($warningDetails !== '') {
+            error_log(
+                '404 Solution: readFileContents used cURL fallback after file_get_contents failed for '
+                . $path . '. ' . $warningDetails
+            );
         }
         
         return $dataSupplement['prefix'] . $output . $dataSupplement['suffix'];
+    }
+
+    /**
+     * Reads a file while retrying only the transient EINTR-style failures
+     * emitted by Patchwork's stream wrapper under high ParaTest load.
+     *
+     * @param string $path
+     * @return array{contents:string|false,warnings:array<int,array{errno:int,message:string,file:string,line:int}>}
+     */
+    private static function fileGetContentsWithTransientRetry($path): array {
+        $warnings = array();
+
+        for ($attempt = 1; $attempt <= self::FILE_READ_MAX_ATTEMPTS; $attempt++) {
+            $attemptWarnings = array();
+
+            set_error_handler(
+                static function(int $errno, string $errstr, string $errfile = '', int $errline = 0) use (&$attemptWarnings): bool {
+                    if (($errno & (E_WARNING | E_USER_WARNING)) === 0) {
+                        return false;
+                    }
+                    $attemptWarnings[] = array(
+                        'errno' => $errno,
+                        'message' => $errstr,
+                        'file' => $errfile,
+                        'line' => $errline,
+                    );
+                    return true;
+                },
+                E_WARNING | E_USER_WARNING
+            );
+            try {
+                $contents = file_get_contents($path);
+            } finally {
+                restore_error_handler();
+            }
+
+            if ($contents !== false) {
+                return array(
+                    'contents' => $contents,
+                    'warnings' => array_merge($warnings, $attemptWarnings),
+                );
+            }
+
+            $warnings = array_merge($warnings, $attemptWarnings);
+            if (!self::isTransientFileReadWarning($attemptWarnings)) {
+                break;
+            }
+
+            if ($attempt < self::FILE_READ_MAX_ATTEMPTS) {
+                usleep(self::FILE_READ_RETRY_BASE_US * $attempt);
+            }
+        }
+
+        return array(
+            'contents' => false,
+            'warnings' => $warnings,
+        );
+    }
+
+    /**
+     * @param array<int,array{errno:int,message:string,file:string,line:int}> $warnings
+     * @return bool
+     */
+    private static function isTransientFileReadWarning(array $warnings): bool {
+        foreach ($warnings as $warning) {
+            if (strpos(strtolower($warning['message']), 'interrupted system call') !== false) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @param array<int,array{errno:int,message:string,file:string,line:int}> $warnings
+     * @return string
+     */
+    private static function formatFileReadWarnings(array $warnings): string {
+        if (empty($warnings)) {
+            return '';
+        }
+
+        $parts = array();
+        foreach ($warnings as $warning) {
+            $parts[] = sprintf(
+                '[%d] %s in %s:%d',
+                $warning['errno'],
+                $warning['message'],
+                $warning['file'],
+                $warning['line']
+            );
+        }
+
+        return "\n   file_get_contents warnings: " . implode(' | ', $parts);
     }
 
     /**
@@ -962,6 +1074,58 @@ abstract class ABJ_404_Solution_Functions {
         }
 
         return false;
+    }
+
+    // =========================================================================
+    // Request parameter sanitization (relocated from DataAccessTrait_Stats, Phase 4)
+    // =========================================================================
+
+    /**
+     * @param string $name The key to retrieve the value for.
+     * @param string|null $defaultValue The value to return if the value is not set.
+     * @return string The sanitized value.
+     */
+    function getPostOrGetSanitize($name, $defaultValue = null) {
+        $returnValue = isset($_GET[$name]) ? $_GET[$name] : (isset($_POST[$name]) ? $_POST[$name] : null);
+        if ($returnValue === null && $name === 'action') {
+            $returnValue = isset($_GET['abj404action']) ? $_GET['abj404action'] : (isset($_POST['abj404action']) ? $_POST['abj404action'] : null);
+        }
+        if ($returnValue !== null) {
+            if (is_array($returnValue)) {
+                $returnValue = array_map('sanitize_text_field', $returnValue);
+            } else {
+                $returnValue = sanitize_text_field($returnValue);
+            }
+        }
+        $finalValue = $returnValue ?? $defaultValue;
+        return is_string($finalValue) ? $finalValue : (is_string($defaultValue) ? $defaultValue : '');
+    }
+
+    /**
+     * @param string $name The key to retrieve the value for.
+     * @param string|null $defaultValue The value to return if the value is not set.
+     * @return string|array<string>|null The normalized URL value.
+     */
+    function getPostOrGetSanitizeUrl($name, $defaultValue = null) {
+        $returnValue = isset($_GET[$name]) ? $_GET[$name] : (isset($_POST[$name]) ? $_POST[$name] : null);
+        if ($returnValue === null) {
+            return $defaultValue;
+        }
+
+        $f = abj_service('functions');
+        $unslash = function($value) {
+            return function_exists('wp_unslash') ? wp_unslash($value) : $value;
+        };
+
+        if (is_array($returnValue)) {
+            return array_map(function($value) use ($f, $unslash) {
+                $value = $unslash($value);
+                return $f->normalizeUrlString($value);
+            }, $returnValue);
+        }
+
+        $returnValue = $unslash($returnValue);
+        return $f->normalizeUrlString($returnValue);
     }
 
 }

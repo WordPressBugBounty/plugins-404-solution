@@ -5,34 +5,42 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-require_once __DIR__ . '/DataAccessTrait_Maintenance.php';
-require_once __DIR__ . '/DataAccessTrait_Connection.php';
-require_once __DIR__ . '/DataAccessTrait_ViewMetadata.php';
-require_once __DIR__ . '/DataAccessTrait_ViewQueries.php';
-require_once __DIR__ . '/DataAccessTrait_ViewQueriesHitsLifecycle.php';
-require_once __DIR__ . '/DataAccessTrait_ViewQueriesStaged.php';
-require_once __DIR__ . '/DataAccessTrait_ViewBuildStageCallbacks.php';
-require_once __DIR__ . '/DataAccessTrait_ViewQueriesStagedRead.php';
-require_once __DIR__ . '/DataAccessTrait_ViewBuildAdaptive.php';
-require_once __DIR__ . '/DataAccessTrait_ViewBuildHelpers.php';
-require_once __DIR__ . '/DataAccessTrait_ViewBuildLockAndCron.php';
-require_once __DIR__ . '/DataAccessTrait_ViewBuildPhpEnvProbe.php';
-require_once __DIR__ . '/DataAccessTrait_ViewBuildSessionEnvProbe.php';
-require_once __DIR__ . '/DataAccessTrait_ViewBuildHostFailurePolicy.php';
-require_once __DIR__ . '/DataAccessTrait_ViewBuildForceRestart.php';
-require_once __DIR__ . '/DataAccessTrait_MutationWatermarkSeam.php';
-require_once __DIR__ . '/DataAccessTrait_AdminMutationGate.php';
-require_once __DIR__ . '/DataAccessTrait_ViewSnapshotCache.php';
-require_once __DIR__ . '/DataAccessTrait_QueryTimeouts.php';
-require_once __DIR__ . '/DataAccessTrait_Logs.php';
-require_once __DIR__ . '/DataAccessTrait_LogsHitsRebuild.php';
-require_once __DIR__ . '/DataAccessTrait_Redirects.php';
-require_once __DIR__ . '/DataAccessTrait_PublishedContent.php';
-require_once __DIR__ . '/DataAccessTrait_Stats.php';
-require_once __DIR__ . '/DataAccessTrait_ErrorClassification.php';
-require_once __DIR__ . '/DataAccessTrait_SqlErrorReporting.php';
+require_once __DIR__ . '/ViewBuildCollaborator.php';
+require_once __DIR__ . '/ViewQueriesStaged.php';
+require_once __DIR__ . '/ViewBuildStageCallbacks.php';
+require_once __DIR__ . '/ViewBuildStageRunner.php';
+require_once __DIR__ . '/ViewBuildStartedWatermark.php';
+require_once __DIR__ . '/ViewBuildAdaptive.php';
+require_once __DIR__ . '/ViewBuildHelpers.php';
+require_once __DIR__ . '/ViewBuildLockAndCron.php';
+require_once __DIR__ . '/ViewBuildPhpEnvProbe.php';
+require_once __DIR__ . '/ViewBuildSessionEnvProbe.php';
+require_once __DIR__ . '/ViewBuildHostFailurePolicy.php';
+require_once __DIR__ . '/ViewBuildForceRestart.php';
+require_once __DIR__ . '/MutationWatermarkSeam.php';
+require_once __DIR__ . '/AdminMutationGate.php';
+require_once __DIR__ . '/DatabaseRuntimeState.php';
+require_once __DIR__ . '/ViewReadRuntimeState.php';
+require_once __DIR__ . '/DatabaseConnectionManager.php';
+require_once __DIR__ . '/DatabaseQueryTimeoutManager.php';
+require_once __DIR__ . '/ViewBuildOrchestratorInterface.php';
+require_once __DIR__ . '/ViewBuildOrchestrator.php';
+require_once __DIR__ . '/ViewReadServiceInterface.php';
+require_once __DIR__ . '/ViewReadService.php';
+require_once __DIR__ . '/LogsRepositoryInterface.php';
+require_once __DIR__ . '/LogsRepository.php';
+require_once __DIR__ . '/StatsRepositoryInterface.php';
+require_once __DIR__ . '/StatsRepository.php';
+require_once __DIR__ . '/ContentRepositoryInterface.php';
+require_once __DIR__ . '/ContentRepository.php';
+require_once __DIR__ . '/RedirectsRepositoryInterface.php';
+require_once __DIR__ . '/RedirectsRepository.php';
+require_once __DIR__ . '/DatabaseErrorClassifier.php';
+require_once __DIR__ . '/DatabaseSqlErrorReporter.php';
 require_once __DIR__ . '/ViewQueryFailureException.php';
 require_once __DIR__ . '/ViewBuildPendingException.php';
+require_once __DIR__ . '/DatabaseCoreInterface.php';
+require_once __DIR__ . '/DatabaseCore.php';
 
 /* Functions in this class should all reference one of the following variables or support functions that do.
  *      $wpdb, $_GET, $_POST, $_SERVER, $_.*
@@ -41,7 +49,7 @@ require_once __DIR__ . '/ViewBuildPendingException.php';
  * Read the database, Store to the database,
  */
 
-class ABJ_404_Solution_DataAccess {
+class ABJ_404_Solution_DataAccess implements ABJ_404_Solution_ContentRepositoryInterface {
 
     const UPDATE_LOGS_HITS_TABLE_HOOK = 'abj404_updateLogsHitsTableAction';
 
@@ -99,9 +107,9 @@ class ABJ_404_Solution_DataAccess {
     /** @var int Minimum time between full stats snapshot recomputes. */
     const STATS_DASHBOARD_REFRESH_COOLDOWN_SECONDS = 30;
     /** @var int Cooldown when DB query quota is exceeded. */
-    const DB_QUOTA_COOLDOWN_SECONDS = 900;
+    const DB_QUOTA_COOLDOWN_SECONDS = ABJ_404_Solution_DatabaseRuntimeState::DB_QUOTA_COOLDOWN_SECONDS;
     /** @var int Cooldown when DB is read-only or storage is full. */
-    const DB_WRITE_BLOCK_COOLDOWN_SECONDS = 900;
+    const DB_WRITE_BLOCK_COOLDOWN_SECONDS = ABJ_404_Solution_DatabaseRuntimeState::DB_WRITE_BLOCK_COOLDOWN_SECONDS;
 
     /** @var string Runtime flag: last time we checked whether logs-hits needs rebuild (Unix timestamp). */
     const HITS_TABLE_LAST_CHECKED_FLAG = 'abj404_logs_hits_last_checked_at';
@@ -133,56 +141,68 @@ class ABJ_404_Solution_DataAccess {
     /** @var self|null */
     private static $instance = null;
 
-    /** @var bool Whether the hits table rebuild has been scheduled for this request */
-    private static $hitsTableRebuildScheduled = false;
-    /** @var bool Prevent recursive auto-repair attempts on SQL errors. */
-    private static $tableRepairInProgress = false;
-    /** @var bool Prevent recursive invalid-data retry attempts. */
-    private static $invalidDataRetryInProgress = false;
-    /** @var bool Prevent recursive collation auto-recovery. correctCollations()
-     *  emits ALTER TABLE statements that re-enter queryAndGetResults(); without
-     *  this guard a collation error inside correctCollations() would deadlock on
-     *  the cooldown transient and recurse indefinitely. */
-    private static $collationRecoveryInProgress = false;
-    /** @var bool Per-request cache: this server rejected the
-     *  `SET STATEMENT max_statement_time=N FOR ...` timeout wrapper, so
-     *  applyQueryTimeout() must skip wrapping for the rest of the request.
-     *  Reset between requests because server config can change (privilege
-     *  grants, proxy upgrades). See classifySetStatementFailure() and
-     *  retryWithoutSetStatementWrapper(). */
-    private static $setStatementWrapperUnsupported = false;
-    /** @var string Current wpdb result type for queryAndGetResults (ARRAY_A or OBJECT). */
-    private $currentResultType = ARRAY_A;
-    /** @var bool Ensure view cache table DDL runs at most once per request. */
-    private static $viewSnapshotTableEnsured = false;
+    /** @var ABJ_404_Solution_DatabaseCore The extracted database infrastructure layer. */
+    private $dbCore;
+
+    /** @var ABJ_404_Solution_ContentRepository The extracted content/cache repository. */
+    private $contentRepo;
+
+    /** @var ABJ_404_Solution_RedirectsRepository The extracted redirects repository. */
+    private $redirectsRepo;
+
+    /** @var ABJ_404_Solution_LogsRepository The extracted logs repository. */
+    private $logsRepo;
+
+    /** @var ABJ_404_Solution_StatsRepository The extracted stats repository. */
+    private $statsRepo;
+
+    /** @var ABJ_404_Solution_ViewReadService The extracted view read service (Phase 6). */
+    private $viewReadService;
+
+    /** @var ABJ_404_Solution_ViewBuildOrchestrator The extracted view build orchestrator (Phase 7). */
+    private $viewBuildOrchestrator;
+
     /** @param bool $value @return void */
     public static function setViewSnapshotTableEnsured(bool $value): void {
-        self::$viewSnapshotTableEnsured = $value;
+        ABJ_404_Solution_ViewReadService::setViewSnapshotTableEnsured($value);
     }
 
     /**
-     * Reset the per-request "SET STATEMENT wrapper unsupported" cache.
-     * Public because the flag is request-scoped: callers that span requests
-     * (long-lived CLI workers, ParaTest workers reusing the process) need a
-     * way to clear the cache between request-equivalents. Tests use this to
-     * isolate the negative cache from other test methods.
+     * Delegate to DatabaseCore for backward compatibility.
      *
      * @param bool $value
      * @return void
      */
     public static function setSetStatementWrapperUnsupported(bool $value): void {
-        self::$setStatementWrapperUnsupported = $value;
+        ABJ_404_Solution_DatabaseCore::setSetStatementWrapperUnsupported($value);
+    }
+
+    /** @return bool */
+    public static function isSetStatementWrapperUnsupported(): bool {
+        return ABJ_404_Solution_DatabaseCore::isSetStatementWrapperUnsupported();
+    }
+
+    /** @return void */
+    public static function resetViewBuildOncePerRequestGuard(): void {
+        ABJ_404_Solution_ViewBuildOrchestrator::resetViewBuildOncePerRequestGuard();
+    }
+
+    /** @param string $url @return string */
+    public static function computeRedirectsCanonicalUrl($url): string {
+        return ABJ_404_Solution_RedirectsRepository::computeRedirectsCanonicalUrl($url);
+    }
+
+    /** @param string $columnExpr @return string */
+    public static function hitsCanonicalUrlSqlExpression(string $columnExpr): string {
+        return ABJ_404_Solution_RedirectsRepository::hitsCanonicalUrlSqlExpression($columnExpr);
     }
 
     /**
-     * Read the per-request "SET STATEMENT wrapper unsupported" cache.
-     * Used by callers (and tests) that need to confirm whether a previous
-     * query in this request hit the wrapper-rejection path.
-     *
-     * @return bool
+     * @param string|null $raw
+     * @return array<int, array{step: string, outcome: string, detail: string}>|null
      */
-    public static function isSetStatementWrapperUnsupported(): bool {
-        return self::$setStatementWrapperUnsupported;
+    public static function decompressPipelineTrace(?string $raw): ?array {
+        return ABJ_404_Solution_LogsRepository::decompressPipelineTrace($raw);
     }
 
     /** @var ABJ_404_Solution_Functions */
@@ -190,44 +210,6 @@ class ABJ_404_Solution_DataAccess {
 
     /** @var ABJ_404_Solution_Logging */
     private $logger;
-
-    /** @var ABJ_404_Solution_Clock|null Lazy-resolved by clock(); kept null to preserve constructor signature. */
-    private $clock = null;
-    /** @var bool Whether a server-side DB issue was noted this request (for auto-clear). */
-    private $serverSideIssueNoted = false;
-    /** @var bool Whether we already checked for a stale notice transient this request. */
-    private $serverSideIssueChecked = false;
-    /** @var array<string,int> Request-local cached counts for redirects list views. */
-    private $redirectsForViewCountRequestCache = array();
-
-    use ABJ_404_Solution_DataAccess_MaintenanceTrait;
-    use ABJ_404_Solution_DataAccess_ConnectionTrait;
-    use ABJ_404_Solution_DataAccess_ViewMetadataTrait;
-    use ABJ_404_Solution_DataAccess_ViewQueriesTrait;
-    use ABJ_404_Solution_DataAccess_ViewQueriesHitsLifecycleTrait;
-    use ABJ_404_Solution_DataAccess_ViewQueriesStagedTrait;
-    use ABJ_404_Solution_DataAccess_ViewBuildStageRunnerTrait;
-    use ABJ_404_Solution_DataAccess_ViewBuildStageCallbacksTrait;
-    use ABJ_404_Solution_DataAccess_ViewQueriesStagedReadTrait;
-    use ABJ_404_Solution_DataAccess_ViewBuildAdaptiveTrait;
-    use ABJ_404_Solution_DataAccess_ViewBuildHelpersTrait;
-    use ABJ_404_Solution_DataAccess_ViewBuildStartedWatermarkTrait;
-    use ABJ_404_Solution_DataAccess_ViewBuildLockAndCronTrait;
-    use ABJ_404_Solution_DataAccess_ViewBuildPhpEnvProbeTrait;
-    use ABJ_404_Solution_DataAccess_ViewBuildSessionEnvProbeTrait;
-    use ABJ_404_Solution_DataAccess_ViewBuildHostFailurePolicyTrait;
-    use ABJ_404_Solution_DataAccess_ViewBuildForceRestartTrait;
-    use ABJ_404_Solution_DataAccess_MutationWatermarkSeamTrait;
-    use ABJ_404_Solution_DataAccess_AdminMutationGateTrait;
-    use ABJ_404_Solution_DataAccess_ViewSnapshotCacheTrait;
-    use ABJ_404_Solution_DataAccess_LogsTrait;
-    use ABJ_404_Solution_DataAccess_LogsHitsRebuildTrait;
-    use ABJ_404_Solution_DataAccess_RedirectsTrait;
-    use ABJ_404_Solution_DataAccess_PublishedContentTrait;
-    use ABJ_404_Solution_DataAccess_StatsTrait;
-    use ABJ_404_Solution_DataAccess_ErrorClassificationTrait;
-    use ABJ_404_Solution_DataAccess_SqlErrorReportingTrait;
-    use ABJ_404_Solution_DataAccess_QueryTimeoutsTrait;
 
     /** Cache key for redirect status counts */
     const CACHE_KEY_REDIRECT_STATUS = 'abj404_redirect_status_counts';
@@ -254,62 +236,1105 @@ class ABJ_404_Solution_DataAccess {
     /** Maximum number of regex redirects to cache per-request (memory guard) */
     const REGEX_CACHE_MAX_COUNT = 50;
 
-    /** @var array<int, array<string, mixed>>|null Per-request cache for regex redirects (static to persist across getInstance calls) */
-    private static $regexRedirectsCache = null;
+    // $regexRedirectsCache and $regexCacheDisabled moved to RedirectsRepository (Phase 2).
 
-    /** @var bool Flag indicating if regex cache should be skipped (too many redirects) */
-    private static $regexCacheDisabled = false;
+    /** @var bool|null Legacy per-request cache for DAO-shaped test subclasses. */
+    private $legacyViewDoneServeableCache = null;
 
-    /** @var array<int, array<string, mixed>> Queue of log entries to be flushed at shutdown */
-    private static $logQueue = [];
+    /** @var array<string, string> Legacy reflection bridge for view-build progress options. */
+    private static $viewBuildProgressOptionNames = array(
+        'started_at' => 'abj404_view_build_started_at',
+        'current_stage' => 'abj404_view_build_current_stage',
+        'last_started_stage' => 'abj404_view_build_last_started_stage',
+        'last_started_at' => 'abj404_view_build_last_started_at',
+        'last_completed_stage' => 'abj404_view_build_last_completed_stage',
+        'last_completed_at' => 'abj404_view_build_last_completed_at',
+        's2_high_water' => 'abj404_view_build_s2_high_water',
+        's4_high_water' => 'abj404_view_build_s4_high_water',
+        's5_high_water' => 'abj404_view_build_s5_high_water',
+        's2_batch_size' => 'abj404_view_build_s2_batch_size',
+        's4_batch_size' => 'abj404_view_build_s4_batch_size',
+        's5_batch_size' => 'abj404_view_build_s5_batch_size',
+        's3_kill_streak' => 'abj404_view_build_s3_kill_streak',
+        's9_kill_streak' => 'abj404_view_build_s9_kill_streak',
+        's10_kill_streak' => 'abj404_view_build_s10_kill_streak',
+        's1_no_progress_streak' => 'abj404_view_build_s1_no_progress',
+        's2_no_progress_streak' => 'abj404_view_build_s2_no_progress',
+        's3_no_progress_streak' => 'abj404_view_build_s3_no_progress',
+        's4_no_progress_streak' => 'abj404_view_build_s4_no_progress',
+        's5_no_progress_streak' => 'abj404_view_build_s5_no_progress',
+        's6_no_progress_streak' => 'abj404_view_build_s6_no_progress',
+        's7_no_progress_streak' => 'abj404_view_build_s7_no_progress',
+        's8_no_progress_streak' => 'abj404_view_build_s8_no_progress',
+        's9_no_progress_streak' => 'abj404_view_build_s9_no_progress',
+        's10_no_progress_streak' => 'abj404_view_build_s10_no_progress',
+        's11_no_progress_streak' => 'abj404_view_build_s11_no_progress',
+    );
 
-    /** @var bool Whether shutdown hook has been registered */
+    /** @var array<int, array<string, mixed>> Legacy reflection bridge; actual queue is owned by LogsRepository. */
+    private static $logQueue = array();
+    /** @var bool Legacy reflection bridge; actual hook state is owned by LogsRepository. */
     private static $shutdownHookRegistered = false;
-
-    /** @var bool Prevent re-entrancy during flush */
+    /** @var bool Legacy reflection bridge; actual flush state is owned by LogsRepository. */
     private static $isFlushingLogQueue = false;
 
+    /**
+     * @param ABJ_404_Solution_Functions|null $functions
+     * @param ABJ_404_Solution_Logging|null $logging
+     * @param ABJ_404_Solution_DatabaseCore|null $dbCore
+     * @param ABJ_404_Solution_ContentRepository|null $contentRepo
+     * @param ABJ_404_Solution_RedirectsRepository|null $redirectsRepo
+     * @param ABJ_404_Solution_LogsRepository|null $logsRepo
+     * @param ABJ_404_Solution_StatsRepository|null $statsRepo
+     * @param ABJ_404_Solution_ViewReadService|null $viewReadService
+     * @param ABJ_404_Solution_ViewBuildOrchestrator|null $viewBuildOrchestrator
+     */
+    public function __construct($functions = null, $logging = null, $dbCore = null, $contentRepo = null, $redirectsRepo = null, $logsRepo = null, $statsRepo = null, $viewReadService = null, $viewBuildOrchestrator = null) {
+        $this->f = is_object($functions) && method_exists($functions, 'strtolower') ? $functions : abj_service('functions');
+        $this->logger = is_object($logging) && (method_exists($logging, 'debugMessage') || method_exists($logging, 'errorMessage')) ? $logging : abj_service('logging');
 
+        if ($dbCore !== null) {
+            $this->dbCore = $dbCore;
+        } else if (get_class($this) !== __CLASS__
+            && method_exists($this, 'queryAndGetResults')
+            && (new \ReflectionMethod($this, 'queryAndGetResults'))->getDeclaringClass()->getName() !== __CLASS__) {
+            $owner = $this;
+            $this->dbCore = new class($owner, $this->f, $this->logger) extends ABJ_404_Solution_DatabaseCore {
+                private $owner;
+                public function __construct($owner, $functions, $logger) {
+                    $this->owner = $owner;
+                    parent::__construct($functions, $logger);
+                }
+                public function queryAndGetResults($query, $options = array()): array {
+                    return $this->owner->queryAndGetResults($query, $options);
+                }
+                public function doTableNameReplacements($query): string {
+                    if (method_exists($this->owner, 'doTableNameReplacements')
+                        && (new \ReflectionMethod($this->owner, 'doTableNameReplacements'))->getDeclaringClass()->getName() !== 'ABJ_404_Solution_DataAccess') {
+                        return (string)$this->owner->doTableNameReplacements($query);
+                    }
+                    return parent::doTableNameReplacements($query);
+                }
+                public function tableExists($tableName): bool {
+                    if (method_exists($this->owner, 'tableExists')
+                        && (new \ReflectionMethod($this->owner, 'tableExists'))->getDeclaringClass()->getName() !== 'ABJ_404_Solution_DataAccess') {
+                        return (bool)$this->owner->tableExists($tableName);
+                    }
+                    return parent::tableExists($tableName);
+                }
+                public function getLowercasePrefix(): string {
+                    if (method_exists($this->owner, 'getLowercasePrefix')
+                        && (new \ReflectionMethod($this->owner, 'getLowercasePrefix'))->getDeclaringClass()->getName() !== 'ABJ_404_Solution_DataAccess') {
+                        return (string)$this->owner->getLowercasePrefix();
+                    }
+                    return parent::getLowercasePrefix();
+                }
+            };
+        } else {
+            $this->dbCore = new ABJ_404_Solution_DatabaseCore($this->f, $this->logger);
+        }
+        if ($contentRepo !== null) {
+            $this->contentRepo = $contentRepo;
+        } else {
+            $this->contentRepo = new ABJ_404_Solution_ContentRepository($this->dbCore, $this->f, $this->logger);
+        }
+
+        if ($redirectsRepo !== null) {
+            $this->redirectsRepo = $redirectsRepo;
+        } else {
+            $this->redirectsRepo = new ABJ_404_Solution_RedirectsRepository($this->dbCore, $this->f, $this->logger);
+        }
+
+        if ($logsRepo !== null) {
+            $this->logsRepo = $logsRepo;
+        } else if (get_class($this) !== __CLASS__
+            && ((method_exists($this, 'logsHitsTableExists')
+                    && (new \ReflectionMethod($this, 'logsHitsTableExists'))->getDeclaringClass()->getName() !== __CLASS__)
+                || (method_exists($this, 'scheduleHitsTableRebuild')
+                    && (new \ReflectionMethod($this, 'scheduleHitsTableRebuild'))->getDeclaringClass()->getName() !== __CLASS__))) {
+            $owner = $this;
+            $this->logsRepo = new class($owner, $this->dbCore, $this->f, $this->logger) extends ABJ_404_Solution_LogsRepository {
+                private $owner;
+                public function __construct($owner, $dbCore, $functions, $logger) {
+                    $this->owner = $owner;
+                    parent::__construct($dbCore, $functions, $logger);
+                }
+                public function logsHitsTableExists() {
+                    return (bool)$this->owner->logsHitsTableExists();
+                }
+                public function scheduleHitsTableRebuild(): void {
+                    $this->owner->scheduleHitsTableRebuild();
+                }
+            };
+        } else {
+            $this->logsRepo = new ABJ_404_Solution_LogsRepository($this->dbCore, $this->f, $this->logger);
+        }
+
+        if ($statsRepo !== null) {
+            $this->statsRepo = $statsRepo;
+        } else if (get_class($this) !== __CLASS__
+            && method_exists($this, 'getStatsCount')
+            && (new \ReflectionMethod($this, 'getStatsCount'))->getDeclaringClass()->getName() !== __CLASS__) {
+            $owner = $this;
+            $this->statsRepo = new class($owner, $this->dbCore, $this->logsRepo, $this->f, $this->logger) extends ABJ_404_Solution_StatsRepository {
+                private $owner;
+                public function __construct($owner, $dbCore, $logsRepo, $functions, $logger) {
+                    $this->owner = $owner;
+                    parent::__construct($dbCore, $logsRepo, $functions, $logger);
+                }
+                public function getStatsCount($query, array $valueParams) {
+                    return $this->owner->getStatsCount($query, $valueParams);
+                }
+            };
+        } else {
+            $this->statsRepo = new ABJ_404_Solution_StatsRepository($this->dbCore, $this->logsRepo, $this->f, $this->logger);
+        }
+
+        if ($viewReadService !== null) {
+            $this->viewReadService = $viewReadService;
+        } else {
+            $this->viewReadService = new ABJ_404_Solution_ViewReadService(
+                $this->dbCore, $this->logsRepo, $this->redirectsRepo, $this->f, $this->logger
+            );
+        }
+
+        if ($viewBuildOrchestrator !== null) {
+            $this->viewBuildOrchestrator = $viewBuildOrchestrator;
+        } else if (get_class($this) !== __CLASS__
+            && ((method_exists($this, 'runRedirectsForViewStaged')
+                    && (new \ReflectionMethod($this, 'runRedirectsForViewStaged'))->getDeclaringClass()->getName() !== __CLASS__)
+                || (method_exists($this, 'advanceViewBuildOnce')
+                    && (new \ReflectionMethod($this, 'advanceViewBuildOnce'))->getDeclaringClass()->getName() !== __CLASS__)
+                || (method_exists($this, 'runPageLoadFallbackAdvance')
+                    && (new \ReflectionMethod($this, 'runPageLoadFallbackAdvance'))->getDeclaringClass()->getName() !== __CLASS__)
+                || (method_exists($this, 'viewDoneIsServeable')
+                    && (new \ReflectionMethod($this, 'viewDoneIsServeable'))->getDeclaringClass()->getName() !== __CLASS__))) {
+            $owner = $this;
+            $this->viewBuildOrchestrator = new class($owner, $this->dbCore, $this->f, $this->logger) extends ABJ_404_Solution_ViewBuildOrchestrator {
+                private $owner;
+                public function __construct($owner, $dbCore, $functions, $logger) {
+                    $this->owner = $owner;
+                    parent::__construct($dbCore, $functions, $logger);
+                }
+                public function runRedirectsForViewStaged(string $sub, array $tableOptions): array {
+                    return $this->owner->runRedirectsForViewStaged($sub, $tableOptions);
+                }
+                public function runRedirectsForViewCountStaged(string $sub, array $tableOptions): int {
+                    return $this->owner->runRedirectsForViewCountStaged($sub, $tableOptions);
+                }
+                public function advanceViewBuildOnce(bool $forceRebuild = false): array {
+                    if (method_exists($this->owner, 'advanceViewBuildOnce')
+                        && (new \ReflectionMethod($this->owner, 'advanceViewBuildOnce'))->getDeclaringClass()->getName() !== 'ABJ_404_Solution_DataAccess') {
+                        return $this->owner->advanceViewBuildOnce($forceRebuild);
+                    }
+                    return parent::advanceViewBuildOnce($forceRebuild);
+                }
+                public function runPageLoadFallbackAdvance(): array {
+                    if (method_exists($this->owner, 'runPageLoadFallbackAdvance')
+                        && (new \ReflectionMethod($this->owner, 'runPageLoadFallbackAdvance'))->getDeclaringClass()->getName() !== 'ABJ_404_Solution_DataAccess') {
+                        return $this->owner->runPageLoadFallbackAdvance();
+                    }
+                    return parent::runPageLoadFallbackAdvance();
+                }
+                public function viewDoneIsServeable(): bool {
+                    if (method_exists($this->owner, 'viewDoneIsServeable')
+                        && (new \ReflectionMethod($this->owner, 'viewDoneIsServeable'))->getDeclaringClass()->getName() !== 'ABJ_404_Solution_DataAccess') {
+                        return (bool)$this->owner->viewDoneIsServeable();
+                    }
+                    return parent::viewDoneIsServeable();
+                }
+            };
+        } else {
+            $this->viewBuildOrchestrator = new ABJ_404_Solution_ViewBuildOrchestrator(
+                $this->dbCore, $this->f, $this->logger, $this->resolveRebuildHealthState()
+            );
+        }
+        $this->viewBuildOrchestrator->setViewReadService($this->viewReadService);
+        $this->viewBuildOrchestrator->setLogsRepository($this->logsRepo);
+        $this->viewReadService->setViewBuildOrchestrator($this->viewBuildOrchestrator);
+    }
+
+    /** @return ABJ_404_Solution_DatabaseCore */
+    public function getDbCore(): ABJ_404_Solution_DatabaseCore {
+        if ($this->dbCore === null) {
+            $this->dbCore = new ABJ_404_Solution_DatabaseCore($this->f, $this->logger);
+        }
+        return $this->dbCore;
+    }
+
+    public function queryAndGetResults($query, $options = array()) {
+        return $this->getDbCore()->queryAndGetResults($query, $options);
+    }
+
+    /** @return ABJ_404_Solution_RebuildHealthState|null */
+    private function resolveRebuildHealthState() {
+        if (class_exists('ABJ_404_Solution_ServiceContainer')
+                && ABJ_404_Solution_ServiceContainer::safeHas('rebuild_health')) {
+            $service = ABJ_404_Solution_ServiceContainer::safeGet('rebuild_health');
+            if ($service instanceof ABJ_404_Solution_RebuildHealthState) {
+                return $service;
+            }
+        }
+        return null;
+    }
+
+    public function queryScalarInt($query, $options = array()): int {
+        return $this->getDbCore()->queryScalarInt($query, $options);
+    }
+
+    public function doTableNameReplacements($query): string {
+        return $this->getDbCore()->doTableNameReplacements($query);
+    }
+
+    public function getLowercasePrefix(): string {
+        return $this->getDbCore()->getLowercasePrefix();
+    }
+
+    public function getPrefixedTableName($tableSuffix): string {
+        return $this->getDbCore()->getPrefixedTableName($tableSuffix);
+    }
+
+    /** @param string $query @return string */
+    public function extractSqlFilename($query): string {
+        return $this->getDbCore()->extractSqlFilename($query);
+    }
+
+    /** @param string $errorText @return bool */
+    public function classifyAndHandleInfrastructureError(string $errorText): bool {
+        return $this->getDbCore()->classifyAndHandleInfrastructureError($errorText);
+    }
+
+    /** @param mixed $errorText @return bool */
+    public function isInvalidDataError($errorText): bool {
+        return $this->getDbCore()->isInvalidDataError($errorText);
+    }
+
+    /** @param string $errorText @return bool */
+    public function isCollationError(string $errorText): bool {
+        return $this->getDbCore()->isCollationError($errorText);
+    }
+
+    /** @return string */
+    public function diagnosePrefixMismatch(): string {
+        return $this->getDbCore()->diagnosePrefixMismatch();
+    }
+
+    /** @param string $errorText @return bool */
+    public function isMultisiteCrossPrefixError(string $errorText): bool {
+        return $this->getDbCore()->isMultisiteCrossPrefixError($errorText);
+    }
+
+    public function isDeadlockOrLockTimeoutError(string $errorText): bool {
+        return $this->getDbCore()->isDeadlockOrLockTimeoutError($errorText);
+    }
+
+    public function isTransientConnectionError(?string $errorText): bool { return $this->getDbCore()->isTransientConnectionError($errorText); }
+    public function isQuotaLimitError(string $errorText): bool { return $this->getDbCore()->isQuotaLimitError($errorText); }
+    public function isDiskFullError(string $errorText): bool { return $this->getDbCore()->isDiskFullError($errorText); }
+    public function isReadOnlyError(string $errorText): bool { return $this->getDbCore()->isReadOnlyError($errorText); }
+    public function isCrashedTableError(string $errorText): bool { return $this->getDbCore()->isCrashedTableError($errorText); }
+    public function isIncorrectKeyFileError(string $errorText): bool { return $this->getDbCore()->isIncorrectKeyFileError($errorText); }
+    public function isGaleraConflictError(string $errorText): bool { return $this->getDbCore()->isGaleraConflictError($errorText); }
+    public function isMissingPluginTableError(string $errorText): bool { return $this->getDbCore()->isMissingPluginTableError($errorText); }
+    public function isTransientViewBuildTableError(string $errorText): bool { return $this->getDbCore()->isTransientViewBuildTableError($errorText); }
+    public function noteDatabaseIssueFromError(string $errorText): void { $this->getDbCore()->noteDatabaseIssueFromError($errorText); }
+    public function isWriteBlockActive(): bool { return $this->getDbCore()->isWriteBlockActive(); }
+    public function isQuotaCooldownActive(): bool { return $this->getDbCore()->isQuotaCooldownActive(); }
+    public function getRuntimeFlag(string $name) { return $this->getDbCore()->getRuntimeFlag($name); }
+    public function setRuntimeFlag(string $name, $value, int $ttlSeconds = 0): void { $this->getDbCore()->setRuntimeFlag($name, $value, $ttlSeconds); }
+    public function setPluginDbNotice(string $type, string $message, string $errorString = ''): void { $this->getDbCore()->setPluginDbNotice($type, $message, $errorString); }
+    public function attemptMissingTableRepairAndRetry($query, array &$result): void { $this->getDbCore()->attemptMissingTableRepairAndRetry($query, $result); }
+
+    public function getPostOrGetSanitize($name, $defaultValue = null) {
+        if (is_object($this->f) && method_exists($this->f, 'getPostOrGetSanitize')) {
+            return $this->f->getPostOrGetSanitize($name, $defaultValue);
+        }
+        $returnValue = isset($_GET[$name]) ? $_GET[$name] : (isset($_POST[$name]) ? $_POST[$name] : null);
+        if ($returnValue === null && $name === 'action') {
+            $returnValue = isset($_GET['abj404action']) ? $_GET['abj404action'] : (isset($_POST['abj404action']) ? $_POST['abj404action'] : null);
+        }
+        if ($returnValue !== null && function_exists('sanitize_text_field')) {
+            $returnValue = is_array($returnValue) ? array_map('sanitize_text_field', $returnValue) : sanitize_text_field($returnValue);
+        }
+        $finalValue = $returnValue ?? $defaultValue;
+        return is_string($finalValue) ? $finalValue : (is_string($defaultValue) ? $defaultValue : '');
+    }
+
+    public function getPostOrGetSanitizeUrl($name, $defaultValue = null) {
+        if (is_object($this->f) && method_exists($this->f, 'getPostOrGetSanitizeUrl')) {
+            return $this->f->getPostOrGetSanitizeUrl($name, $defaultValue);
+        }
+        $returnValue = isset($_GET[$name]) ? $_GET[$name] : (isset($_POST[$name]) ? $_POST[$name] : null);
+        return $returnValue === null ? $defaultValue : $returnValue;
+    }
+
+    /** @return ABJ_404_Solution_ContentRepository */
+    public function getContentRepo(): ABJ_404_Solution_ContentRepository {
+        if ($this->contentRepo === null) {
+            $this->contentRepo = new ABJ_404_Solution_ContentRepository($this->getDbCore(), $this->f, $this->logger);
+        }
+        return $this->contentRepo;
+    }
+
+    public function getPublishedPagesAndPostsIDs($slug = '', $searchTerm = '',
+        $limitResults = '', $orderResults = '', $extraWhereClause = '') {
+        return $this->getContentRepo()->getPublishedPagesAndPostsIDs(
+            $slug, $searchTerm, $limitResults, $orderResults, $extraWhereClause
+        );
+    }
+
+    /** @return array<int, object> */
+    public function getPublishedImagesIDs() {
+        return $this->getContentRepo()->getPublishedImagesIDs();
+    }
+
+    public function getPublishedTags($slug = null, $limit = null) {
+        return $this->getContentRepo()->getPublishedTags($slug, $limit);
+    }
+
+    public function addURLToTermsRows($rows) {
+        return $this->getContentRepo()->addURLToTermsRows($rows);
+    }
+
+    public function getPublishedCategories($term_id = null, $slug = null, $limit = null) {
+        return $this->getContentRepo()->getPublishedCategories($term_id, $slug, $limit);
+    }
+
+    public function truncatePermalinkCacheTable(): void {
+        $this->getContentRepo()->truncatePermalinkCacheTable();
+    }
+
+    public function removeFromPermalinkCache(int $post_id): void {
+        $this->getContentRepo()->removeFromPermalinkCache($post_id);
+    }
+
+    public function getPermalinkFromCache($id) {
+        return $this->getContentRepo()->getPermalinkFromCache($id);
+    }
+
+    public function getPermalinksByIds(array $ids) {
+        return $this->getContentRepo()->getPermalinksByIds($ids);
+    }
+
+    public function getPermalinkEtcFromCache($id) {
+        return $this->getContentRepo()->getPermalinkEtcFromCache($id);
+    }
+
+    public function getIDsNeededForPermalinkCache() {
+        return $this->getContentRepo()->getIDsNeededForPermalinkCache();
+    }
+
+    public function storeSpellingPermalinksToCache(string $requestedURLRaw, $returnValue): void {
+        $this->getContentRepo()->storeSpellingPermalinksToCache($requestedURLRaw, $returnValue);
+    }
+
+    public function getSpellingPermalinksFromCache(string $requestedURLRaw) {
+        return $this->getContentRepo()->getSpellingPermalinksFromCache($requestedURLRaw);
+    }
+
+    public function deleteSpellingCache(): void {
+        $this->getContentRepo()->deleteSpellingCache();
+    }
+
+    public function getOldSlug($post_id) {
+        return $this->getContentRepo()->getOldSlug($post_id);
+    }
+
+    public function updatePermalinkCache() {
+        return $this->getContentRepo()->updatePermalinkCache();
+    }
+
+    public function updatePermalinkCacheParentPages() {
+        return $this->getContentRepo()->updatePermalinkCacheParentPages();
+    }
+
+    public function getPermalinkCacheCount(): int {
+        return $this->getContentRepo()->getPermalinkCacheCount();
+    }
+
+    /** @return ABJ_404_Solution_RedirectsRepository */
+    public function getRedirectsRepo(): ABJ_404_Solution_RedirectsRepository {
+        if ($this->redirectsRepo === null) {
+            $this->redirectsRepo = new ABJ_404_Solution_RedirectsRepository($this->getDbCore(), $this->f, $this->logger);
+        }
+        return $this->redirectsRepo;
+    }
+
+    /** @return int */
+    public function cleanupOrphanedAutoRedirects(): int {
+        return $this->getRedirectsRepo()->cleanupOrphanedAutoRedirects();
+    }
+
+    public function deleteRedirect($id) {
+        return $this->getRedirectsRepo()->deleteRedirect($id);
+    }
+
+    public function setupRedirect($fromURL, $status, $type, $final_dest, $code, $disabled = 0, $engine = null, $score = null) {
+        return $this->getRedirectsRepo()->setupRedirect($fromURL, $status, $type, $final_dest, $code, $disabled, $engine, $score);
+    }
+
+    public function getActiveRedirectForURL($url, $degradedMode = false) {
+        if (get_class($this) !== __CLASS__
+            && (method_exists($this, 'prepare_query_wp') || method_exists($this, 'queryAndGetResults'))) {
+            $url = $this->f->sanitizeInvalidUTF8($url);
+            if (function_exists('mb_check_encoding') && !mb_check_encoding($url, 'UTF-8')) {
+                return array('id' => 0);
+            }
+            $logic = abj_service('plugin_logic');
+            $candidates = is_object($logic) && method_exists($logic, 'getNormalizedUrlCandidates')
+                ? $logic->getNormalizedUrlCandidates($url)
+                : array($url);
+            foreach ($candidates as $candidate) {
+                $url1 = $candidate;
+                $url2 = substr($candidate, -1) === '/' ? rtrim($candidate, '/') : $candidate . '/';
+                $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/getPermalinkFromURL.sql");
+                $query = $this->prepare_query_wp($query, array("url1" => $url1, "url2" => $url2));
+                $query = $this->doTableNameReplacements($query);
+                $query = $this->f->doNormalReplacements($query);
+                $results = $this->queryAndGetResults($query);
+                $rows = is_array($results['rows'] ?? null) ? $results['rows'] : array();
+                if (!empty($rows)) {
+                    $redirect = array();
+                    foreach ($rows[0] as $key => $value) {
+                        $redirect[$key] = $value;
+                    }
+                    if (!isset($redirect['id'])) {
+                        $redirect['id'] = 0;
+                    }
+                    return $redirect;
+                }
+            }
+            return array('id' => 0);
+        }
+        return $this->getRedirectsRepo()->getActiveRedirectForURL($url, $degradedMode);
+    }
+
+    public function getExistingRedirectForURL($url) {
+        return $this->getRedirectsRepo()->getExistingRedirectForURL($url);
+    }
+
+    public function deleteSpecifiedRedirects() {
+        return $this->getRedirectsRepo()->deleteSpecifiedRedirects();
+    }
+
+    public function getRedirectConditions(int $redirectId): array {
+        return $this->getRedirectsRepo()->getRedirectConditions($redirectId);
+    }
+
+    public function saveRedirectConditions(int $redirectId, array $conditions): void {
+        $this->getRedirectsRepo()->saveRedirectConditions($redirectId, $conditions);
+    }
+
+    public function updateRedirect($type, $dest, $fromURL, $idForUpdate, $redirectCode, $statusType, $startTs = null, $endTs = null) {
+        return $this->getRedirectsRepo()->updateRedirect(
+            $type,
+            $dest,
+            $fromURL,
+            $idForUpdate,
+            $redirectCode,
+            $statusType,
+            $startTs,
+            $endTs
+        );
+    }
+
+    public function getRedirectsByIDs($ids) {
+        return $this->getRedirectsRepo()->getRedirectsByIDs($ids);
+    }
+
+    public function updateRedirectTypeStatus($id, $newstatus) {
+        return $this->getRedirectsRepo()->updateRedirectTypeStatus($id, $newstatus);
+    }
+
+    public function moveRedirectsToTrash($id, $trash) {
+        return $this->getRedirectsRepo()->moveRedirectsToTrash($id, $trash);
+    }
+
+    public function deleteOldRedirectsCron() {
+        return $this->getRedirectsRepo()->deleteOldRedirectsCron();
+    }
+
+    public function limitDebugFileSize(): bool {
+        return $this->getRedirectsRepo()->limitDebugFileSize();
+    }
+
+    public function removeDuplicatesCron(): int {
+        return $this->getRedirectsRepo()->removeDuplicatesCron();
+    }
+
+    public function autoTrashJunkCapturedUrls(array $options): int {
+        return $this->getRedirectsRepo()->autoTrashJunkCapturedUrls($options);
+    }
+
+    /** @return ABJ_404_Solution_LogsRepository */
+    public function getLogsRepo(): ABJ_404_Solution_LogsRepository {
+        if ($this->logsRepo === null) {
+            $this->logsRepo = new ABJ_404_Solution_LogsRepository($this->getDbCore(), $this->f, $this->logger);
+        }
+        return $this->logsRepo;
+    }
+
+    public function isTableFullError(string $error): bool { return $this->getLogsRepo()->isTableFullError($error); }
+
+    public function autoTrimLogsv2IfNeeded(string $tableName, string $errorMessage): bool {
+        return $this->getLogsRepo()->autoTrimLogsv2IfNeeded($tableName, $errorMessage);
+    }
+
+    public function getIsolatedWpdb() { return $this->getLogsRepo()->getIsolatedWpdb(); }
+
+    public function isInnoDBTable(string $tableName): bool { return $this->getDbCore()->isInnoDBTable($tableName); }
+
+    public function getLogRecords($tableOptions) { return $this->getLogsRepo()->getLogRecords($tableOptions); }
+
+    public function sanitizeLogEntry(array $entry): ?array { return $this->getLogsRepo()->sanitizeLogEntry($entry); }
+
+    public function populateLogsData($rows) { return $this->getLogsRepo()->populateLogsData($rows); }
+
+    public function getDistinctLoggedUrls(): array { return $this->getLogsRepo()->getDistinctLoggedUrls(); }
+
+    public function getLogsIDandURL($specificURL = '') { return $this->getLogsRepo()->getLogsIDandURL($specificURL); }
+
+    public function getLogsIDandURLLike($specificURL, $limitResults) {
+        return $this->getLogsRepo()->getLogsIDandURLLike($specificURL, $limitResults);
+    }
+
+    public function queueLogEntry(array $entry): void { $this->getLogsRepo()->queueLogEntry($entry); }
+
+    public function flushLogQueue(): void { $this->getLogsRepo()->flushLogQueue(); }
+
+    public function insertLookupValueAndGetID($valueToInsert) { return $this->getLogsRepo()->insertLookupValueAndGetID($valueToInsert); }
+
+    public function getLookupIDForUser($userName) { return $this->getLogsRepo()->getLookupIDForUser($userName); }
+
+    public function correctDuplicateLookupValues(): void { $this->getLogsRepo()->correctDuplicateLookupValues(); }
+
+    public function getDailyActivityTrend(int $days = 30): array { return $this->getLogsRepo()->getDailyActivityTrend($days); }
+
+    public function logsHitsTableExists() { return $this->getLogsRepo()->logsHitsTableExists(); }
+
+    public function createRedirectsForViewHitsTable(): bool { return $this->getLogsRepo()->createRedirectsForViewHitsTable(); }
+
+    public function scheduleHitsTableRebuild(): void { $this->getLogsRepo()->scheduleHitsTableRebuild(); }
+
+    public function getLogsHitsTableLastUpdated() { return $this->getLogsRepo()->getLogsHitsTableLastUpdated(); }
+
+    public function getLogsHitsTableLastUpdatedHuman() { return $this->getLogsRepo()->getLogsHitsTableLastUpdatedHuman(); }
+
+    public function hitsTableNeedsRebuild() { return $this->getLogsRepo()->hitsTableNeedsRebuild(); }
+
+    public function getMaxLogId() { return $this->getLogsRepo()->getMaxLogId(); }
+
+    public function getMinLogId() { return $this->getLogsRepo()->getMinLogId(); }
+
+    public function getStoredMaxLogId() { return $this->getLogsRepo()->getStoredMaxLogId(); }
+
+    /** @return ABJ_404_Solution_StatsRepository */
+    public function getStatsRepo(): ABJ_404_Solution_StatsRepository {
+        if ($this->statsRepo === null) {
+            $this->statsRepo = new ABJ_404_Solution_StatsRepository($this->getDbCore(), $this->getLogsRepo(), $this->f, $this->logger);
+        }
+        return $this->statsRepo;
+    }
+
+    public function getStatsCount($query, array $valueParams) {
+        return $this->getStatsRepo()->getStatsCount($query, $valueParams);
+    }
+
+    public function getPeriodicStatsSummary($sinceTimestamp, $notFoundDest = '404') {
+        return $this->getStatsRepo()->getPeriodicStatsSummary($sinceTimestamp, $notFoundDest);
+    }
+
+    public function getPeriodicStatsSummariesCached($notFoundDest = '404') {
+        return $this->getStatsRepo()->getPeriodicStatsSummariesCached($notFoundDest);
+    }
+
+    public function getStatsDashboardSnapshot($allowStale = true) {
+        return $this->getStatsRepo()->getStatsDashboardSnapshot($allowStale);
+    }
+
+    public function refreshStatsDashboardSnapshot($force = false) {
+        return $this->getStatsRepo()->refreshStatsDashboardSnapshot($force);
+    }
+
+    public function getEarliestLogTimestamp() {
+        return $this->getStatsRepo()->getEarliestLogTimestamp();
+    }
+
+    public function getTopCapturedForDigest(int $limit): array {
+        return $this->getStatsRepo()->getTopCapturedForDigest($limit);
+    }
+
+    public function buildTopCapturedForDigestQuery(int $limit): string {
+        return $this->getStatsRepo()->buildTopCapturedForDigestQuery($limit);
+    }
+
+    public function getDigestSummaryStats(): array {
+        return $this->getStatsRepo()->getDigestSummaryStats();
+    }
+
+    public function getCapturedCountForNotification(): int {
+        return $this->getStatsRepo()->getCapturedCountForNotification();
+    }
+
+    public function getPostsNeedingContentKeywords(int $limit = 500): array {
+        return $this->getStatsRepo()->getPostsNeedingContentKeywords($limit);
+    }
+
+    public function bulkUpdateContentKeywords(array $idToKeywords): void {
+        $this->getStatsRepo()->bulkUpdateContentKeywords($idToKeywords);
+    }
+
+    /** @return ABJ_404_Solution_ViewReadService */
+    public function getViewReadService(): ABJ_404_Solution_ViewReadService {
+        if ($this->viewReadService === null) {
+            $this->viewReadService = new ABJ_404_Solution_ViewReadService(
+                $this->getDbCore(), $this->getLogsRepo(), $this->getRedirectsRepo(), $this->f, $this->logger
+            );
+            if ($this->viewBuildOrchestrator !== null) {
+                $this->viewReadService->setViewBuildOrchestrator($this->viewBuildOrchestrator);
+            }
+        }
+        return $this->viewReadService;
+    }
+
+    /** @return ABJ_404_Solution_ViewBuildOrchestrator */
+    public function getViewBuildOrchestrator(): ABJ_404_Solution_ViewBuildOrchestrator {
+        if ($this->viewBuildOrchestrator === null) {
+            $this->viewBuildOrchestrator = new ABJ_404_Solution_ViewBuildOrchestrator(
+                $this->getDbCore(), $this->f, $this->logger, $this->resolveRebuildHealthState()
+            );
+            $this->viewBuildOrchestrator->setViewReadService($this->getViewReadService());
+            $this->viewBuildOrchestrator->setLogsRepository($this->getLogsRepo());
+        }
+        return $this->viewBuildOrchestrator;
+    }
+
+    /** @return void */
+    public function claimForegroundViewBuildLease(): void { $this->viewBuildOrchestrator->claimForegroundViewBuildLease(); }
 
     /**
-     * Constructor with dependency injection.
-     * Dependencies are now explicit and visible.
-     *
-     * @param ABJ_404_Solution_Functions|null $functions String manipulation utilities
-     * @param ABJ_404_Solution_Logging|null $logging Logging service
+     * @param string $sub
+     * @param array<string, mixed> $tableOptions
+     * @return array<int, array<string, mixed>>
      */
-    public function __construct($functions = null, $logging = null) {
-        // Use injected dependencies or fall back to getInstance() for backward compatibility
-        $this->f = $functions !== null ? $functions : abj_service('functions');
-        $this->logger = $logging !== null ? $logging : abj_service('logging');
+    public function runRedirectsForViewStaged(string $sub, array $tableOptions): array { return $this->viewBuildOrchestrator->runRedirectsForViewStaged($sub, $tableOptions); }
+
+    public function getRedirectStatusCounts($bypassCache = false): array {
+        return $this->getViewReadService()->getRedirectStatusCounts($bypassCache);
+    }
+
+    public function getCapturedStatusCounts($bypassCache = false): array {
+        return $this->getViewReadService()->getCapturedStatusCounts($bypassCache);
+    }
+
+    public function getHighImpactCapturedCount(): int {
+        return $this->getViewReadService()->getHighImpactCapturedCount();
+    }
+
+    public function getLogsCount($logID) {
+        return $this->getViewReadService()->getLogsCount($logID);
+    }
+
+    public function getRedirectsAll() {
+        return $this->getViewReadService()->getRedirectsAll();
+    }
+
+    public function getRedirectsWithLogs() {
+        return $this->getViewReadService()->getRedirectsWithLogs();
+    }
+
+    public function getRedirectsWithRegEx() {
+        return $this->getViewReadService()->getRedirectsWithRegEx();
+    }
+
+    public function getManualRedirectsWithRegexMetachars() {
+        return $this->getViewReadService()->getManualRedirectsWithRegexMetachars();
+    }
+
+    public function getRedirectsForView($sub, $tableOptions) {
+        return $this->getViewReadService()->getRedirectsForView($sub, $tableOptions);
+    }
+
+    public function getRedirectsForViewCount(string $sub, array $tableOptions): int {
+        return $this->getViewReadService()->getRedirectsForViewCount($sub, $tableOptions);
+    }
+
+    public function getRedirectsForViewQuery($sub, $tableOptions, $queryAllRowsAtOnce, $limitStart, $limitEnd, $selectCountOnly) {
+        return $this->getViewReadService()->getRedirectsForViewQuery(
+            $sub,
+            $tableOptions,
+            $queryAllRowsAtOnce,
+            $limitStart,
+            $limitEnd,
+            $selectCountOnly
+        );
+    }
+
+    public function getTableEngines() { return $this->getViewReadService()->getTableEngines(); }
+
+    public function invalidateStatusCountsCache(): void {
+        $this->getViewReadService()->invalidateStatusCountsCache();
+    }
+
+    public function invalidateViewSnapshotCache(): void {
+        $this->getViewReadService()->invalidateViewSnapshotCache();
+    }
+
+    /** @return bool */
+    public function viewDoneIsServeable(): bool {
+        if (get_class($this) !== __CLASS__ && method_exists($this, 'queryAndGetResults')) {
+            if ($this->legacyViewDoneServeableCache !== null) {
+                return $this->legacyViewDoneServeableCache;
+            }
+            $table = $this->getDbCore()->doTableNameReplacements('{wp_abj404_view_done}');
+            $tableCheck = $this->queryAndGetResults("SHOW TABLES LIKE '" . $table . "'", array('log_errors' => false));
+            if (empty($tableCheck['rows'])) {
+                $this->legacyViewDoneServeableCache = false;
+                return $this->legacyViewDoneServeableCache;
+            }
+
+            $observed = function_exists('get_option') ? (int)get_option($this->mutationWatermarkObservedByAdminActionOptionName(), 0) : 0;
+            $observedAt = function_exists('get_option') ? (int)get_option($this->mutationWatermarkObservedByAdminActionAtOptionName(), 0) : 0;
+            $built = function_exists('get_option') ? (int)get_option($this->builtWatermarkOptionName(), 0) : 0;
+            $sanity = defined('ABJ_404_Solution_ViewBuildConfig::VIEW_DONE_MUTATION_INVALIDATED_SANITY_SECONDS')
+                ? ABJ_404_Solution_ViewBuildConfig::VIEW_DONE_MUTATION_INVALIDATED_SANITY_SECONDS
+                : 300;
+            if ($observed > 0 && $built < $observed && $observedAt > 0 && (time() - $observedAt) <= $sanity) {
+                $this->legacyViewDoneServeableCache = false;
+                return $this->legacyViewDoneServeableCache;
+            }
+
+            $rowCheck = $this->queryAndGetResults("SELECT 1 FROM `" . $table . "` LIMIT 1", array('log_errors' => false));
+            if (!empty($rowCheck['rows'])) {
+                $this->legacyViewDoneServeableCache = true;
+                return $this->legacyViewDoneServeableCache;
+            }
+            $builtAt = function_exists('get_option') ? (int)get_option($this->viewDoneDataBuiltAtOptionName(), 0) : 0;
+            $this->legacyViewDoneServeableCache = $builtAt > 0;
+            return $this->legacyViewDoneServeableCache;
+        }
+        return $this->viewBuildOrchestrator->viewDoneIsServeable();
+    }
+
+    /** @return int */
+    public function getViewDoneBuiltAtTimestamp(): int { return $this->viewBuildOrchestrator->getViewDoneBuiltAtTimestamp(); }
+
+    /** @return void */
+    public function markViewDoneBuildCompleted(): void { $this->legacyViewDoneServeableCache = null; $this->viewBuildOrchestrator->markViewDoneBuildCompleted(); }
+
+    /** @return array<string, mixed> */
+    public function getViewBuildProgress(): array { return $this->viewBuildOrchestrator->getViewBuildProgress(); }
+
+    /**
+     * @param bool $forceRebuild
+     * @return array<string, mixed>
+     */
+    public function advanceViewBuildOnce(bool $forceRebuild = false): array { return $this->viewBuildOrchestrator->advanceViewBuildOnce($forceRebuild); }
+
+    /** @return array{ran:bool, reason:string, progress:array<string,mixed>} */
+    public function runPageLoadFallbackAdvance(): array {
+        if (get_class($this) !== __CLASS__
+            && method_exists($this, 'advanceViewBuildOnce')
+            && (new \ReflectionMethod($this, 'advanceViewBuildOnce'))->getDeclaringClass()->getName() !== __CLASS__) {
+            if ($this->viewBuildOrchestrator->getCronStuckHours() < 24) { return array('ran' => false, 'reason' => 'cron_healthy', 'progress' => $this->getViewBuildProgress()); }
+            if ($this->viewDoneIsServeable()) { return array('ran' => false, 'reason' => 'not_needed', 'progress' => $this->getViewBuildProgress()); }
+            $haveTransientApi = function_exists('get_transient') && function_exists('set_transient');
+            $gateKey = ABJ_404_Solution_ViewBuildConfig::PAGE_LOAD_FALLBACK_GATE_KEY;
+            if ($haveTransientApi && get_transient($gateKey) !== false) { return array('ran' => false, 'reason' => 'gate_active', 'progress' => $this->getViewBuildProgress()); }
+            if ($haveTransientApi) { set_transient($gateKey, 1, (int)ABJ_404_Solution_ViewBuildConfig::PAGE_LOAD_FALLBACK_GATE_SECONDS); }
+            $budgetSeconds = (float)ABJ_404_Solution_ViewBuildConfig::PAGE_LOAD_FALLBACK_BUDGET_SECONDS;
+            $budgetFilter = static function ($incoming) use ($budgetSeconds) {
+                $value = is_scalar($incoming) ? (float)$incoming : $budgetSeconds;
+                return min($value, $budgetSeconds);
+            };
+            $filterRegistered = false;
+            if (function_exists('add_filter')) { add_filter('abj404_view_build_per_stage_budget_seconds', $budgetFilter, 100); $filterRegistered = true; }
+            try {
+                $progress = $this->advanceViewBuildOnce(false);
+            } finally {
+                if ($filterRegistered && function_exists('remove_filter')) { remove_filter('abj404_view_build_per_stage_budget_seconds', $budgetFilter, 100); }
+            }
+            return array('ran' => true, 'reason' => !empty($progress['locked']) ? 'locked' : 'advanced', 'progress' => $progress);
+        }
+        return $this->viewBuildOrchestrator->runPageLoadFallbackAdvance();
     }
 
     /**
-     * Inject a specific clock instance. Tests bind a `FrozenClock` so
-     * cooldown / rate-limit windows can be advanced deterministically.
-     * @param ABJ_404_Solution_Clock $clock @return void
+     * @param string $sub
+     * @param array<string, mixed> $tableOptions
+     * @return int
+     */
+    public function runRedirectsForViewCountStaged(string $sub, array $tableOptions): int { return $this->viewBuildOrchestrator->runRedirectsForViewCountStaged($sub, $tableOptions); }
+
+    /** @return void */
+    public function rebuildViewDoneInBackground(): void { $this->viewBuildOrchestrator->rebuildViewDoneInBackground(); }
+
+    /** @return string */
+    public function reconcileStagedTablesAtRunnerStartup(): string { return $this->viewBuildOrchestrator->reconcileStagedTablesAtRunnerStartup(); }
+
+    /**
+     * @param string $optionName
+     * @param mixed $expected
+     * @return bool
+     */
+    public function verifyOptionWriteCoherent(string $optionName, $expected): bool { return $this->viewBuildOrchestrator->verifyOptionWriteCoherent($optionName, $expected); }
+
+    /** @return void */
+    public function capturePrefixAtBuildStart(): void { $this->viewBuildOrchestrator->capturePrefixAtBuildStart(); }
+
+    /** @return bool */
+    public function verifyPrefixUnchangedSinceStageOne(): bool { return $this->viewBuildOrchestrator->verifyPrefixUnchangedSinceStageOne(); }
+
+    /** @return void */
+    public function clearPrefixAtStageOne(): void { $this->viewBuildOrchestrator->clearPrefixAtStageOne(); }
+
+    /** @return array<string, mixed> */
+    public function probeSqlModeForBuild(): array { return $this->viewBuildOrchestrator->probeSqlModeForBuild(); }
+
+    /** @return array<string, mixed> */
+    public function detectAndAdjustSqlMode(): array { return $this->viewBuildOrchestrator->detectAndAdjustSqlMode(); }
+
+    /** @param string $url @param int $maxLength @return string */
+    public function sanitizeUrlBeforeInsert(string $url, int $maxLength = 0): string { return $this->viewBuildOrchestrator->sanitizeUrlBeforeInsert($url, $maxLength); }
+
+    /** @return bool */
+    public function verifyBuildLockSerializesWriter(): bool { return $this->viewBuildOrchestrator->verifyBuildLockSerializesWriter(); }
+
+    /** @param int $delaySeconds @return void */
+    public function scheduleViewDoneRebuild(int $delaySeconds = 1): void { $this->viewBuildOrchestrator->scheduleViewDoneRebuild($delaySeconds); }
+
+    /** @return array<string, mixed> */
+    public function probePhpEnvironmentForBuild(): array { return $this->viewBuildOrchestrator->probePhpEnvironmentForBuild(); }
+
+    /** @return bool */
+    public function probeSetTimeLimitAvailability(): bool { return $this->viewBuildOrchestrator->probeSetTimeLimitAvailability(); }
+
+    /** @return int */
+    public function probeMemoryLimitForS9(): int { return $this->viewBuildOrchestrator->probeMemoryLimitForS9(); }
+
+    /** @return array<string, mixed> */
+    public function probeFilesystemEnvironmentForBuild(): array { return $this->viewBuildOrchestrator->probeFilesystemEnvironmentForBuild(); }
+
+    /** @return void */
+    public function clearStagedBuildDegradedState(): void { $this->viewBuildOrchestrator->clearStagedBuildDegradedState(); }
+
+    /** @return bool */
+    public function reconcilePostStageElevenState(): bool { return $this->viewBuildOrchestrator->reconcilePostStageElevenState(); }
+
+    /** @return array<string, mixed> */
+    public function probeSessionVariablesAtS1Entry(): array { return $this->viewBuildOrchestrator->probeSessionVariablesAtS1Entry(); }
+
+    /** @return void */
+    public function markViewDoneInvalidatedByAdminMutation(): void { $this->legacyViewDoneServeableCache = null; $this->viewBuildOrchestrator->markViewDoneInvalidatedByAdminMutation(); }
+
+    /** @param int $lockTimeoutSeconds @return bool */
+    public function forceRestartViewBuild(int $lockTimeoutSeconds = 10): bool { return $this->viewBuildOrchestrator->forceRestartViewBuild($lockTimeoutSeconds); }
+
+    /** @return int */
+    public function bumpMutationWatermark(): int { return $this->viewBuildOrchestrator->bumpMutationWatermark(); }
+
+    /** @return void */
+    public function invalidateViewDoneServeableCacheBridge(): void { $this->viewBuildOrchestrator->invalidateViewDoneServeableCacheBridge(); }
+
+    public function invalidateViewDoneServeableCache(): void { $this->viewBuildOrchestrator->invalidateViewDoneServeableCacheBridge(); }
+
+    public function classifyAndHandleStageFailure(int $stageNumber, string $stageKey, string $errMsg, float $started): string {
+        return $this->viewBuildOrchestrator->classifyAndHandleStageFailure($stageNumber, $stageKey, $errMsg, $started);
+    }
+
+    public function stageInsertRedirectsBatched(): bool { return $this->viewBuildOrchestrator->stageInsertRedirectsBatched(); }
+    public function stageUpdatePostsBatched(): bool { return $this->viewBuildOrchestrator->stageUpdatePostsBatched(); }
+    public function stageUpdateTermsBatched(): bool { return $this->viewBuildOrchestrator->stageUpdateTermsBatched(); }
+    public function stageUpdateHome(): void { $this->viewBuildOrchestrator->stageUpdateHome(); }
+    public function runStagedSqlFile(string $relativePath, array $extraTranslations = array()): void { $this->viewBuildOrchestrator->runStagedSqlFile($relativePath, $extraTranslations); }
+    public function runTimedViewBuildStage(int $stageNumber, string $stageKey, callable $callback) { return $this->viewBuildOrchestrator->runTimedViewBuildStage($stageNumber, $stageKey, $callback); }
+    public function isStageMarkedSkipped(int $stageNumber): bool { return $this->viewBuildOrchestrator->isStageMarkedSkipped($stageNumber); }
+
+    public function normalizeViewWarmupState($state): array {
+        $default = array(
+            'status' => 'idle',
+            'stage' => 'rows',
+            'stage_started_at' => 0,
+            'stage_completed_at' => 0,
+            'attempts_by_stage' => array('rows' => 0, 'count' => 0),
+            'timings_by_stage' => array(
+                'rows' => array('last_ms' => 0, 'max_ms' => 0, 'last_completed_at' => 0, 'last_error' => ''),
+                'count' => array('last_ms' => 0, 'max_ms' => 0, 'last_completed_at' => 0, 'last_error' => ''),
+            ),
+        );
+        if (!is_array($state)) {
+            return $default;
+        }
+        $out = array_merge($default, $state);
+        $attempts = is_array($out['attempts_by_stage']) ? $out['attempts_by_stage'] : array();
+        $out['attempts_by_stage'] = array(
+            'rows' => is_scalar($attempts['rows'] ?? 0) ? intval($attempts['rows'] ?? 0) : 0,
+            'count' => is_scalar($attempts['count'] ?? 0) ? intval($attempts['count'] ?? 0) : 0,
+        );
+        $timings = is_array($out['timings_by_stage']) ? $out['timings_by_stage'] : array();
+        $out['timings_by_stage'] = array(
+            'rows' => $this->normalizeViewWarmupStageTiming($timings['rows'] ?? null),
+            'count' => $this->normalizeViewWarmupStageTiming($timings['count'] ?? null),
+        );
+        return $out;
+    }
+
+    private function normalizeViewWarmupStageTiming($timing): array {
+        $default = array('last_ms' => 0, 'max_ms' => 0, 'last_completed_at' => 0, 'last_error' => '');
+        if (!is_array($timing)) {
+            return $default;
+        }
+        $out = array_merge($default, $timing);
+        $out['last_ms'] = is_scalar($out['last_ms']) ? intval($out['last_ms']) : 0;
+        $out['max_ms'] = is_scalar($out['max_ms']) ? intval($out['max_ms']) : 0;
+        $out['last_completed_at'] = is_scalar($out['last_completed_at']) ? intval($out['last_completed_at']) : 0;
+        $out['last_error'] = is_string($out['last_error']) ? $out['last_error'] : '';
+        return $out;
+    }
+
+    /** @return array<string, mixed> */
+    public function getStagedQueryOptionsForRead(): array { return $this->viewBuildOrchestrator->getStagedQueryOptionsForRead(); }
+
+    /** @param string $shortName @param int $default @return int */
+    public function readBuildProgressOption(string $shortName, int $default = 0): int { return $this->viewBuildOrchestrator->readBuildProgressOption($shortName, $default); }
+
+    public function readProgressOption(string $shortName, int $default = 0): int { return $this->viewBuildOrchestrator->readProgressOption($shortName, $default); }
+
+    public function viewBuildPerStageBudgetSeconds(): float { return $this->viewBuildOrchestrator->viewBuildPerStageBudgetSeconds(); }
+
+    public function optionReadBackMatches($actual, $expected): bool { return $this->viewBuildOrchestrator->optionReadBackMatches($actual, $expected); }
+
+    public function viewDoneFreshnessOptionName(): string { return $this->viewBuildOrchestrator->viewDoneFreshnessOptionName(); }
+
+    public function viewDoneDataBuiltAtOptionName(): string { return $this->viewBuildOrchestrator->viewDoneDataBuiltAtOptionName(); }
+
+    public function viewDoneMutationInvalidatedAtOptionName(): string { return $this->viewBuildOrchestrator->viewDoneMutationInvalidatedAtOptionName(); }
+
+    public function builtWatermarkOptionName(): string { return $this->viewBuildOrchestrator->builtWatermarkOptionName(); }
+
+    public function mutationWatermarkObservedByAdminActionOptionName(): string { return $this->viewBuildOrchestrator->mutationWatermarkObservedByAdminActionOptionName(); }
+
+    public function mutationWatermarkObservedByAdminActionAtOptionName(): string { return $this->viewBuildOrchestrator->mutationWatermarkObservedByAdminActionAtOptionName(); }
+
+    /**
+     * Backward-compatibility bridge for facade delegations removed in Phase 8e.
+     * Routes method calls to the extracted sub-service that owns them.
+     *
+     * @param string $name
+     * @param array<int, mixed> $arguments
+     * @return mixed
+     * @throws \BadMethodCallException
+     */
+    public function __call(string $name, array $arguments) {
+        $delegates = [
+            $this->dbCore,
+            $this->logsRepo,
+            $this->redirectsRepo,
+            $this->contentRepo,
+            $this->statsRepo,
+            $this->viewBuildOrchestrator,
+            $this->viewReadService,
+        ];
+        foreach ($delegates as $delegate) {
+            if ($delegate !== null && method_exists($delegate, $name)) {
+                return $delegate->$name(...$arguments);
+            }
+        }
+        throw new \BadMethodCallException(
+            'Method ' . $name . '() not found on ' . static::class . ' or its sub-services.'
+        );
+    }
+
+    /** @param object $wpdb @param bool $allowReconnect @return bool */
+    public function safeCheckConnection($wpdb, bool $allowReconnect = false): bool {
+        return $this->dbCore->safeCheckConnection($wpdb, $allowReconnect);
+    }
+
+    /** @return bool */
+    public function ensureConnection() {
+        return $this->dbCore->ensureConnection();
+    }
+
+    /** @param string $query @return bool */
+    public function queryStartsWithSelect(string $query): bool {
+        return $this->dbCore->queryStartsWithSelect($query);
+    }
+
+    /** @return string */
+    public function stageFailurePolicy(): string {
+        return 'database-core-classifier';
+    }
+
+    /** @param string $query @return bool */
+    public function queryProducesResultRows(string $query): bool {
+        return $this->dbCore->queryProducesResultRows($query);
+    }
+
+    /** @param string $query @param int $timeoutSeconds @return string */
+    public function applyQueryTimeout(string $query, int $timeoutSeconds): string {
+        return $this->dbCore->applyQueryTimeout($query, $timeoutSeconds);
+    }
+
+    /** @return bool */
+    public function isMariaDB(): bool {
+        return $this->dbCore->isMariaDB();
+    }
+
+    /** @param string $query @param int $timeoutSeconds @return string */
+    public function applySelectTimeout(string $query, int $timeoutSeconds): string {
+        return $this->dbCore->applySelectTimeout($query, $timeoutSeconds);
+    }
+
+    /** @param string $query @param int $timeoutSeconds @return string */
+    public function applyNonLeadingSelectTimeout(string $query, int $timeoutSeconds): string {
+        return $this->dbCore->applyNonLeadingSelectTimeout($query, $timeoutSeconds);
+    }
+
+    /** @param string $query @param int $timeoutSeconds @return string */
+    public function applyStatementTimeout(string $query, int $timeoutSeconds): string {
+        return $this->dbCore->applyStatementTimeout($query, $timeoutSeconds);
+    }
+
+    /** @param string $insertSelectQuery @param int $timeoutSeconds @return string */
+    public function applyTimeoutToInsertSelect(string $insertSelectQuery, int $timeoutSeconds): string {
+        return $this->dbCore->applyTimeoutToInsertSelect($insertSelectQuery, $timeoutSeconds);
+    }
+
+    /** @param string $query @return bool */
+    public function queryHasSetStatementWrapper(string $query): bool {
+        return $this->dbCore->queryHasSetStatementWrapper($query);
+    }
+
+    /** @param string $query @return string */
+    public function stripSetStatementWrapper(string $query): string {
+        return $this->dbCore->stripSetStatementWrapper($query);
+    }
+
+    /**
+     * @param string $query
+     * @param array<string, mixed> $result
+     * @param 'OBJECT'|'OBJECT_K'|'ARRAY_A'|'ARRAY_N' $resultType
+     * @return void
+     */
+    public function retryWithoutSetStatementWrapper(string &$query, array &$result, string $resultType): void {
+        $this->dbCore->retryWithoutSetStatementWrapper($query, $result, $resultType);
+    }
+
+    /**
+     * @param ABJ_404_Solution_Clock $clock
+     * @return void
      */
     public function setClock(ABJ_404_Solution_Clock $clock): void {
-        $this->clock = $clock;
+        $this->dbCore->setClock($clock);
     }
 
     /**
-     * Resolve the clock used for time-based operations: injected setter
-     * wins, then container `'clock'` service, then a fresh `SystemClock`
-     * (CLI / fixtures that bypass `bootstrap.php`).
+     * Resolve the clock via DatabaseCore.
+     *
      * @return ABJ_404_Solution_Clock
      */
     protected function clock(): ABJ_404_Solution_Clock {
-        if ($this->clock !== null) { return $this->clock; }
-        if (class_exists('ABJ_404_Solution_ServiceContainer')) {
-            $resolved = ABJ_404_Solution_ServiceContainer::safeGet('clock');
-            if ($resolved instanceof ABJ_404_Solution_Clock) {
-                $this->clock = $resolved;
-                return $this->clock;
-            }
-        }
-        $this->clock = new ABJ_404_Solution_SystemClock();
-        return $this->clock;
+        return $this->dbCore->clock();
     }
 
     /** @return self */
@@ -345,19 +1370,7 @@ class ABJ_404_Solution_DataAccess {
      * @return bool True if table exists, false otherwise
      */
     private function tableExists($tableName) {
-        global $wpdb;
-
-        if (!isset($wpdb)) {
-            return false;
-        }
-
-        // @utf8-audit: opt-out — $tableName is always a system value (built
-        // from $wpdb->prefix or doTableNameReplacements); never user input.
-        // Use SHOW TABLES to check existence (esc_sql avoids prepare() variadic
-        // arg issues with some test mocks while remaining injection-safe for a table name)
-        $table = $wpdb->get_var("SHOW TABLES LIKE '" . esc_sql($tableName) . "'");
-
-        return ($table == $tableName);
+        return $this->dbCore->tableExists($tableName);
     }
 
     /**
@@ -369,17 +1382,7 @@ class ABJ_404_Solution_DataAccess {
      * @return array<int, string>
      */
     private function getTableColumnNames(string $tableName): array {
-        global $wpdb;
-        if (!isset($wpdb)) { return []; }
-        // @utf8-audit: opt-out — $tableName is always a system value (built
-        // from $wpdb->prefix or doTableNameReplacements); never user input.
-        $rows = $wpdb->get_results("SHOW COLUMNS FROM `" . esc_sql($tableName) . "`", ARRAY_A);
-        if (!is_array($rows) || !empty($wpdb->last_error)) { return []; }
-        $columns = [];
-        foreach ($rows as $row) {
-            if (isset($row['Field'])) { $columns[] = $row['Field']; }
-        }
-        return $columns;
+        return $this->dbCore->getTableColumnNames($tableName);
     }
 
     /** @return array{version: string, last_updated: string|null} */
@@ -489,15 +1492,15 @@ class ABJ_404_Solution_DataAccess {
         global $wpdb;
         
         $oldTable = $wpdb->prefix . 'wbz404_redirects';
-        $newTable = $this->doTableNameReplacements('{wp_abj404_redirects}');
+        $newTable = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
         // wp_wbz404_redirects -- old table
         // wp_abj404_redirects -- new table
-        
+
         $query = ABJ_404_Solution_Functions::readFileContents(__DIR__ . "/sql/importDataFromPluginRedirectioner.sql");
         $query = $this->f->str_replace('{OLD_TABLE}', $oldTable, $query);
         $query = $this->f->str_replace('{NEW_TABLE}', $newTable, $query);
-        
-        $result = $this->queryAndGetResults($query);
+
+        $result = $this->dbCore->queryAndGetResults($query);
 
         $this->logger->infoMessage("Importing redirectioner SQL result: " . 
                 wp_kses_post((string)json_encode($result)));
@@ -505,898 +1508,4 @@ class ABJ_404_Solution_DataAccess {
         return $result;
     }
     
-    /**
-     * @param string $query
-     * @return string
-     */
-    function doTableNameReplacements($query) {
-        global $wpdb;
-        
-        $replacements = array();
-        $tables = (isset($wpdb->tables) && is_array($wpdb->tables)) ? $wpdb->tables : array();
-        // Resolve prefix once; null $wpdb (boot-time and unit-test contexts) and
-        // mocks without ->prefix both fall through to 'wp_' instead of triggering
-        // PHP 8+ "Attempt to read property on null" warnings. Infection's
-        // initial-tests phase exits non-zero on any such warning.
-        $prefix = isset($wpdb->prefix) ? $wpdb->prefix : 'wp_';
-        foreach ($tables as $tableName) {
-            $replacements['{wp_' . $tableName . '}'] = $prefix . $tableName;
-        }
-        // wpdb properties are not guaranteed on mocks; provide safe fallbacks.
-        $replacements['{wp_users}'] = isset($wpdb->users) ? $wpdb->users : ($prefix . 'users');
-        $replacements['{wp_prefix}'] = $prefix;
-        $replacements['{wp_prefix_lower}'] = $this->getLowercasePrefix();
-
-        // Resolve {wpdb_collate} so any SQL file can force a consistent collation
-        // on cross-table string expressions (prevents "Illegal mix of collations").
-        $wpdbCollate = 'utf8mb4_unicode_ci';
-        if (isset($wpdb->collate) && !empty($wpdb->collate)) {
-            $sanitized = preg_replace('/[^A-Za-z0-9_]/', '', $wpdb->collate);
-            if ($sanitized !== '' && $sanitized !== null) {
-                $wpdbCollate = $sanitized;
-            }
-        }
-        $replacements['{wpdb_collate}'] = $wpdbCollate;
-
-        // wp database table replacements
-        $query = $this->f->str_replace(array_keys($replacements), array_values($replacements), $query);
-        
-        // custom table replacements.
-        // for some strings (/404solution-site/%BA%D0%25/) the mb_ereg_replace doesn't work.
-        $fpreg = ABJ_404_Solution_FunctionsPreg::getInstance();
-        $query = $fpreg->regexReplace('[{]wp_abj404_(.*?)[}]',
-            $this->getLowercasePrefix() . "abj404_\\1", $query);
-
-        return $query !== null ? $query : '';
-    }
-
-    /**
-     * Get the normalized (lowercase) prefix used for all plugin tables.
-     * This avoids case-sensitive MySQL filesystems from treating mixed-case
-     * prefixes as distinct tables.
-     *
-     * @return string
-     */
-    public function getLowercasePrefix() {
-        global $wpdb;
-        return $this->f->strtolower($wpdb->prefix ?? 'wp_');
-    }
-
-    /**
-     * Build a fully-qualified plugin table name using the normalized prefix.
-     *
-     * @param string $tableSuffix Table name without the WordPress prefix.
-     * @return string
-     */
-    public function getPrefixedTableName($tableSuffix) {
-        return $this->getLowercasePrefix() . ltrim($tableSuffix, '_');
-    }
-    
-    /** Returns the create table statement.
-     * @param string $tableName
-     * @return string
-     */
-    function getCreateTableDDL($tableName) {
-    	$query = "show create table " . $tableName;
-    	$result = $this->queryAndGetResults($query, array('log_errors' => false, 'skip_repair' => true));
-    	$rows = $result['rows'];
-
-    	// Handle case where query returns no results (e.g., in test environment)
-    	if (!is_array($rows) || empty($rows) || !isset($rows[0]) || !is_array($rows[0])) {
-    	    return '';
-    	}
-
-    	$row1 = array_values($rows[0]);
-    	$existingTableSQL = $row1[1];
-
-    	return $existingTableSQL;
-    }
-
-    /**
-     * Resolve a stable source identifier for safe logging.
-     *
-     * Resolution order (most-specific wins):
-     *   1. Explicit `/* abj404:src=ID *​/` marker prepended to inline SQL.
-     *      Use this when the call site is non-obvious (helper wrappers,
-     *      dynamically-built DDL) and you want a stable label that survives
-     *      refactors.
-     *   2. Loaded `.sql` filename — detected via the `/* -- file.sql BEGIN -- *​/`
-     *      wrapper that getDataSupplement() prepends in Functions.php.
-     *   3. Backtrace fallback — the closest non-DAO frame, formatted as
-     *      `File::method` (or `File:line` if no enclosing method).  Ensures
-     *      every queryAndGetResults() call is traceable to its source even
-     *      without an explicit marker.
-     *
-     * Apr/May 2026 error reports (38 of 43 emails) labeled SQL errors
-     * "SQL: inline-query", hiding which call site failed.  After this change
-     * the literal sentinel "inline-query" is no longer returned — the
-     * backtrace fallback always supplies a meaningful identifier.
-     *
-     * @param string $query The SQL query (may contain marker or file wrapper)
-     * @return string Source identifier; never the literal "inline-query".
-     */
-    private function extractSqlFilename($query) {
-        if (is_string($query) && $query !== '') {
-            // 1. Explicit marker — accept identifier characters and a few
-            //    common separators (::, #, ., -) so call sites can pass
-            //    "Class::method", "Class::method#hint", or "module.action".
-            if (preg_match('/\/\*\s*abj404:src=([A-Za-z0-9_:#.\\\\\-]+)\s*\*\//i', $query, $m)) {
-                return $m[1];
-            }
-            // 2. Filename from BEGIN/END wrapper.
-            if (preg_match('/\/\*\s*-+\s*(.+?\.sql)\s+BEGIN\s*-+\s*\*\//i', $query, $m)) {
-                return basename($m[1]);
-            }
-        }
-        // 3. Backtrace fallback — find the closest caller outside DataAccess.php.
-        return $this->resolveCallerFromBacktrace();
-    }
-
-    /**
-     * Walk debug_backtrace() to find the nearest meaningful caller.
-     *
-     * The "meaningful" frame is the one whose body contains the original
-     * call to queryAndGetResults() (or to extractSqlFilename in tests) —
-     * i.e. the SQL-building call site we want to see in error reports.
-     *
-     * Skip rules:
-     *   - Frames whose function is an internal DAO helper (extractSqlFilename,
-     *     resolveCallerFromBacktrace, queryAndGetResults, retry/recovery
-     *     wrappers).  These are infrastructure, not the SQL source.
-     *   - Frames whose function name is a `{closure...}` synthetic, which
-     *     obscures the calling test/helper method.
-     *
-     * Trait methods on the DAO appear with class=ABJ_404_Solution_DataAccess
-     * (because traits are mixed into the using class), but the frame's `file`
-     * still points at the trait file.  We surface the trait file basename in
-     * that case so error reports identify which trait the inline SQL came
-     * from instead of the generic `DataAccess`.
-     *
-     * @return string `Class::method`, `File::method`, or `unknown-source`.
-     */
-    private function resolveCallerFromBacktrace() {
-        static $internalMethods = array(
-            'extractSqlFilename' => true,
-            'resolveCallerFromBacktrace' => true,
-            'queryAndGetResults' => true,
-            'attemptInvalidDataRetry' => true,
-            'attemptMissingTableRepairAndRetry' => true,
-            'repairCorruptedTableAndRetry' => true,
-            'recoverFromCollationMismatchAndRetry' => true,
-            'call_user_func_array' => true,
-            'call_user_func' => true,
-        );
-        // 40 frames is comfortably deeper than any DAO call we see in
-        // practice (typical depth is 4–8); cheap enough on the rare error
-        // path and bounded enough for the budget hook's fast path.
-        $frames = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 40);
-        foreach ($frames as $frame) {
-            $fn = $frame['function'];
-            if ($fn === '' || isset($internalMethods[$fn])) {
-                continue;
-            }
-            // Closures bound to the DAO (and anonymous helper closures in
-            // test code) carry synthetic names like `{closure:/path:line}`.
-            // They obscure the meaningful calling method, so step past them.
-            if (strpos($fn, '{closure') !== false) {
-                continue;
-            }
-            $cls = isset($frame['class']) && is_string($frame['class']) ? $frame['class'] : '';
-            // Patchwork (Brain\Monkey's code instrumentation, used in tests)
-            // wraps userland calls in CallRerouting frames; PHPUnit wraps
-            // tests in TestCase invocation frames.  Skip both so the
-            // resolved source reflects the actual SQL caller, not test
-            // harness plumbing.  Production loads neither.
-            $fullFile = isset($frame['file']) && is_string($frame['file']) ? $frame['file'] : '';
-            if ($cls !== '' && (
-                strpos($cls, 'Patchwork') !== false ||
-                strpos($cls, 'PHPUnit\\') === 0
-            )) {
-                continue;
-            }
-            if (strpos($fn, 'Patchwork\\') !== false) {
-                continue;
-            }
-            if ($fullFile !== '' && (
-                strpos($fullFile, '/patchwork/') !== false ||
-                strpos($fullFile, '\\patchwork\\') !== false
-            )) {
-                continue;
-            }
-            $file = $fullFile !== '' ? basename($fullFile) : '';
-            $fileLabel = preg_replace('/\.php$/i', '', $file);
-            if (!is_string($fileLabel)) {
-                $fileLabel = $file;
-            }
-            // Trait methods report the using-class (DataAccess).  The trait
-            // file basename is what tells us *which* trait, so prefer it.
-            if ($cls === 'ABJ_404_Solution_DataAccess'
-                && $fileLabel !== '' && $fileLabel !== 'DataAccess') {
-                return $fileLabel . '::' . $fn;
-            }
-            if ($cls !== '') {
-                $shortClass = $cls;
-                $nsPos = strrpos($shortClass, '\\');
-                if ($nsPos !== false) {
-                    $shortClass = substr($shortClass, $nsPos + 1);
-                }
-                if (strpos($shortClass, 'ABJ_404_Solution_') === 0) {
-                    $shortClass = substr($shortClass, strlen('ABJ_404_Solution_'));
-                }
-                return $shortClass . '::' . $fn;
-            }
-            if ($fileLabel !== '') {
-                return $fileLabel . '::' . $fn;
-            }
-            return $fn;
-        }
-        return 'unknown-source';
-    }
-
-    /**
-     * Sanitize SQL identifier-like collation names.
-     *
-     * @param string $collation
-     * @return string
-     */
-    private function sanitizeCollationIdentifier($collation) {
-        if (!is_string($collation) || $collation === '') {
-            return '';
-        }
-        $sanitized = preg_replace('/[^A-Za-z0-9_]/', '', $collation);
-        return $sanitized !== null ? $sanitized : '';
-    }
-
-    /**
-     * Resolve an appropriate utf8mb4 collation for CAST/COLLATE comparisons.
-     *
-     * Prefer wpdb connection collation when it's utf8mb4, otherwise fall back
-     * to a safe default.
-     *
-     * @return string
-     */
-    private function getPreferredUtf8mb4Collation() {
-        global $wpdb;
-
-        if (isset($wpdb) && isset($wpdb->collate) && !empty($wpdb->collate)) {
-            $wpdbCollation = $this->sanitizeCollationIdentifier((string)$wpdb->collate);
-            if ($wpdbCollation !== '' && stripos($wpdbCollation, 'utf8mb4') !== false) {
-                return $wpdbCollation;
-            }
-        }
-        return 'utf8mb4_unicode_ci';
-    }
-
-    /**
-     * Attempt one retry for invalid-data errors using wpdb's stripped query helper.
-     *
-     * @param string $query
-     * @param array<string, mixed> $result
-     * @return void
-     */
-    private function attemptInvalidDataRetry($query, &$result) {
-        if (self::$invalidDataRetryInProgress) {
-            return;
-        }
-
-        self::$invalidDataRetryInProgress = true;
-        try {
-            $retryQuery = $this->get_stripped_query_result($query);
-            if (!is_string($retryQuery) || trim($retryQuery) === '' || $retryQuery === $query) {
-                return;
-            }
-
-            global $wpdb;
-            $wpdb->flush();
-            $result['rows'] = $wpdb->get_results($retryQuery, $this->currentResultType);
-            $this->harvestWpdbResult($result);
-        } catch (Throwable $e) {
-            $this->logger->warn("Invalid-data retry failed: " . $e->getMessage());
-        } finally {
-            self::$invalidDataRetryInProgress = false;
-        }
-    }
-
-    /** @return void */
-    private function applyDiagnosticLatencyIfConfigured(): void {
-        if (!function_exists('abj404_get_simulated_db_latency_ms')) {
-            return;
-        }
-        $delayMs = absint(abj404_get_simulated_db_latency_ms());
-        if ($delayMs <= 0) {
-            return;
-        }
-        $delayMs = min(5000, $delayMs);
-        usleep($delayMs * 1000);
-    }
-
-    /**
-     * Harvest standard result fields from $wpdb after a query.
-     *
-     * @param array<string, mixed> $result The result array to populate.
-     * @return void
-     */
-    private function harvestWpdbResult(array &$result): void {
-        global $wpdb;
-        $result['last_error'] = (string)($wpdb->last_error ?? '');
-        $result['last_result'] = $wpdb->last_result ?? array();
-        $result['rows_affected'] = $wpdb->rows_affected ?? 0;
-        $result['insert_id'] = $wpdb->insert_id ?? 0;
-    }
-
-    /**
-     * Build a SQL-safe comma-separated list from recognized_post_types option.
-     *
-     * @param array<string, mixed> $options Plugin options array.
-     * @return string e.g. "'post', 'page'" or '' if empty.
-     */
-    function buildPostTypeSqlList(array $options): string {
-        $rptVal = $options['recognized_post_types'] ?? '';
-        $postTypes = $this->f->explodeNewline(is_string($rptVal) ? $rptVal : '');
-        $recognizedPostTypes = '';
-        foreach ($postTypes as $postType) {
-            $recognizedPostTypes .= "'" . trim($this->f->strtolower($postType)) . "', ";
-        }
-        return rtrim($recognizedPostTypes, ", ");
-    }
-
-    /**
-     * Build a SQL-safe comma-separated list from recognized_categories option.
-     *
-     * @param array<string, mixed> $options Plugin options array.
-     * @return string e.g. "'category', 'post_tag'" or '' if empty.
-     */
-    function buildCategorySqlList(array $options): string {
-        $rcVal = $options['recognized_categories'] ?? '';
-        $categories = $this->f->explodeNewline(is_string($rcVal) ? $rcVal : '');
-        $recognizedCategories = '';
-        foreach ($categories as $category) {
-            $recognizedCategories .= "'" . trim($this->f->strtolower($category)) . "', ";
-        }
-        return rtrim($recognizedCategories, ", ");
-    }
-
-    /**
-     * Set SQL session variables to allow large queries.
-     *
-     * Sets max_join_size and sql_big_selects for the current session only.
-     * Prevents "The SELECT would examine more than MAX_JOIN_SIZE rows" errors.
-     *
-     * @return void
-     */
-    function setSqlBigSelects(): void {
-        $ignoreErrorsOptions = array('log_errors' => false);
-        $this->queryAndGetResults("set session max_join_size = 18446744073709551615",
-            $ignoreErrorsOptions);
-        $this->queryAndGetResults("set session sql_big_selects = 1", $ignoreErrorsOptions);
-    }
-
-    /**
-     * Convenience: run a query that returns a single scalar value and return it
-     * as an int. The query must SELECT exactly one column from the first row;
-     * the column name is irrelevant — the first value of $rows[0] is taken.
-     *
-     * Returns 0 when the query fails, returns no rows, or the value is not
-     * scalar. Tightly typed so callers don't have to repeat the
-     * `is_array($result['rows']) && is_array($result['rows'][0]) && …`
-     * narrowing boilerplate at every COUNT(*) call site.
-     *
-     * @param string $query Any SELECT … that produces exactly one column.
-     * @param array<string, mixed> $options Options to forward to queryAndGetResults().
-     * @return int
-     */
-    public function queryScalarInt($query, $options = array()) {
-        $result = $this->queryAndGetResults($query, $options);
-        $rows = isset($result['rows']) && is_array($result['rows']) ? $result['rows'] : array();
-        if (empty($rows) || !is_array($rows[0])) {
-            return 0;
-        }
-        $first = reset($rows[0]);
-        return is_scalar($first) ? (int)$first : 0;
-    }
-
-    /** Return the results of the query in a variable.
-     * @param string $query
-     * @param array<string, mixed> $options
-     * @return array<string, mixed>
-     */
-    function queryAndGetResults($query, $options = array()) {
-        global $wpdb;
-
-        // Ensure database connection is active (prevents "MySQL server has gone away" errors)
-        $this->ensureConnection();
-
-        $ignoreErrorStrings = array();
-
-        $options = array_merge(array('log_errors' => true,
-            'log_too_slow' => true, 'ignore_errors' => array(),
-            'query_params' => array(), 'skip_repair' => false,
-            'result_type' => ARRAY_A, 'timeout' => 0),
-            $options);
-        $resultType = $options['result_type'] === OBJECT ? OBJECT : ARRAY_A;
-        $this->currentResultType = $resultType;
-
-       	$ignoreErrorStrings = is_array($options['ignore_errors']) ? $options['ignore_errors'] : array();
-        $queryParameters = is_array($options['query_params']) ? $options['query_params'] : array();
-
-        $query = $this->doTableNameReplacements($query);
-
-        if (!empty($queryParameters)) {
-            // WPDB::prepare array support varies across versions/mocks.
-            // Prefer varargs, but fall back to array-as-single-arg for older/custom mocks.
-            /** @var literal-string $queryLiteral */
-            $queryLiteral = $query;
-            try {
-                /** @var wpdb $wpdb */
-                $preparedResult = call_user_func_array(array($wpdb, 'prepare'), array_merge(array($queryLiteral), $queryParameters));
-                $query = is_string($preparedResult) ? $preparedResult : $queryLiteral;
-            } catch (Throwable $t) {
-                $preparedFallback = $wpdb->prepare($queryLiteral, $queryParameters);
-                $query = $preparedFallback !== null ? $preparedFallback : $queryLiteral;
-            }
-        }
-
-        // Apply a DB-level timeout to every query.
-        // Default timeout (60s) prevents any single query from blocking indefinitely.
-        $timeoutRaw = isset($options['timeout']) && is_numeric($options['timeout']) ? (int)$options['timeout'] : 0;
-        $timeoutSeconds = $timeoutRaw > 0 ? $timeoutRaw : 60;
-        $query = $this->applyQueryTimeout($query, $timeoutSeconds);
-
-        $this->applyDiagnosticLatencyIfConfigured();
-
-        $timer = new ABJ_404_Solution_Timer();
-
-        // When log_errors is false, also suppress $wpdb's own error output
-        // (prevents best-effort queries from leaking to debug.log when WP_DEBUG is on).
-        $suppressWpdbErrors = !$options['log_errors'] && method_exists($wpdb, 'suppress_errors');
-        $previousSuppressState = false;
-        if ($suppressWpdbErrors) {
-            /** @var wpdb $wpdb */
-            $previousSuppressState = $wpdb->suppress_errors(true);
-        }
-
-        // Route by query type: SELECT-style queries (SELECT, SHOW, EXPLAIN, DESCRIBE)
-        // produce result rows and use $wpdb->get_results(). Other queries (INSERT,
-        // UPDATE, DELETE, DDL, SET, ...) use $wpdb->query() — get_results() would
-        // call mysqli_num_fields() on a `true` result on PHP 8.1+ and TypeError.
-        // The 4.1.7 SET STATEMENT timeout wrapping also breaks wpdb's leading-keyword
-        // routing, so the detection looks PAST any SET STATEMENT prefix.
-        $producesRows = $this->queryProducesResultRows($query);
-
-        $result = array();
-        try {
-            if ($producesRows) {
-                $result['rows'] = $wpdb->get_results($query, $resultType);
-            } else {
-                $wpdb->query($query);
-                $result['rows'] = array();
-            }
-        } catch (Throwable $e) {
-            $result['elapsed_time'] = $timer->stop();
-            $this->logSqlThrowable($query, $e, $options, $producesRows);
-            if ($suppressWpdbErrors) {
-                /** @var wpdb $wpdb */
-                $wpdb->suppress_errors($previousSuppressState);
-            }
-            throw $e;
-        }
-
-        $result['elapsed_time'] = $timer->stop();
-        $elapsedMs = ((float)$result['elapsed_time']) * 1000.0;
-        if (function_exists('abj404_benchmark_record_db_query')) {
-            abj404_benchmark_record_db_query($elapsedMs);
-        }
-        if (function_exists('abj404_query_budget_record')
-            && class_exists('ABJ_404_Solution_QueryBudgetInstrumentation', false)
-            && ABJ_404_Solution_QueryBudgetInstrumentation::isEnabled()) {
-            // Resolve the source identifier only when the recorder is
-            // actually enabled — extractSqlFilename's debug_backtrace fallback
-            // costs ~100µs per call and runs on every query, so the gate
-            // matters for the always-loaded fast path.  See
-            // ABJ_404_Solution_QueryBudgetInstrumentation for the contract.
-            abj404_query_budget_record($this->extractSqlFilename($query), $elapsedMs, $timeoutSeconds);
-        }
-        $this->harvestWpdbResult($result);
-        $lastErrorForObservedLog = is_string($result['last_error'] ?? null) ? $result['last_error'] : '';
-        if ($lastErrorForObservedLog === '' || !$this->isTransientConnectionError($lastErrorForObservedLog)) {
-            $this->logObservedSqlError($query, $result, $options, $producesRows);
-        }
-
-        if ($producesRows && !is_array($result['rows'])) {
-            // In production (WP_DEBUG off), only log SQL filename to avoid PII exposure
-            $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->extractSqlFilename($query);
-            $this->logger->errorMessage("Query result is not an array. Query: " . $sqlInfo,
-        			new Exception("Query result is not an array."));
-        }
-
-        // SET STATEMENT timeout wrapper rejected by server (SUPER privilege
-        // denied, ProxySQL syntax error, audit-firewall blacklist). Strip
-        // the wrapper, retry, and cache the unsupported flag so subsequent
-        // timeout-wrapped queries in this request skip the wrapper too.
-        // Runs first among the recovery paths because the wrapper is the
-        // outermost layer: every other retry path re-executes $query, so
-        // leaving the wrapper in place would re-trigger the same rejection.
-        $lastErrorForSetStatement = is_string($result['last_error'] ?? null) ? $result['last_error'] : '';
-        if ($lastErrorForSetStatement !== ''
-            && $this->classifySetStatementFailure($lastErrorForSetStatement)
-            && $this->queryHasSetStatementWrapper($query)) {
-            $this->retryWithoutSetStatementWrapper($query, $result, $resultType);
-            // After this point $query holds the unwrapped form; downstream
-            // retry paths see the new error (or none) on the unwrapped statement.
-            $producesRows = $this->queryProducesResultRows($query);
-        }
-
-        if ($result['last_error'] !== '' && $this->isTransientConnectionError($result['last_error'])) {
-            // Retry once after reconnect for transient connection drops.
-            $this->ensureConnection();
-            $wpdb->flush();
-            if ($producesRows) {
-                $result['rows'] = $wpdb->get_results($query, $resultType);
-            } else {
-                $wpdb->query($query);
-                $result['rows'] = array();
-            }
-            $this->harvestWpdbResult($result);
-        }
-
-        if (!$options['skip_repair'] && $result['last_error'] !== '' && $this->isMissingPluginTableError($result['last_error'])) {
-            $this->attemptMissingTableRepairAndRetry($query, $result);
-        }
-
-        if ($result['last_error'] !== '' && $this->isInvalidDataError($result['last_error'])) {
-            $this->attemptInvalidDataRetry($query, $result);
-        }
-
-        // Lock wait timeout (errno 1205) and deadlock (errno 1213): retry once after a
-        // brief pause. Both errors are transient on shared hosting and usually resolve
-        // on the first retry. If the retry also fails, the error is surfaced below.
-        if ($result['last_error'] !== '' && $this->isDeadlockOrLockTimeoutError($result['last_error'])) {
-            /** @var wpdb $wpdb */
-            usleep(50000); // 50 ms — enough for most short-lived locks to release
-            if ($producesRows) {
-                $result['rows'] = $wpdb->get_results($query, $resultType);
-            } else {
-                $wpdb->query($query);
-                $result['rows'] = array();
-            }
-            $this->harvestWpdbResult($result);
-            if ($result['last_error'] !== '' && $this->isDeadlockOrLockTimeoutError($result['last_error'])) {
-                $this->setPluginDbNotice('lock_timeout', $this->localizeOrDefault('A database lock wait timeout occurred. If this persists, contact your host — another process may be holding a long-running lock.'), $result['last_error']);
-            }
-        }
-
-        // Collation mismatch ("Illegal mix of collations" / "Unknown collation"):
-        // run correctCollations() (rate-limited 1×/hour) to converge plugin tables
-        // back to a single utf8mb4 collation, then retry the query once.  This
-        // path is silent — the user is never notified about collation issues.
-        if ($result['last_error'] !== '' && $this->isCollationError($result['last_error'])) {
-            $this->recoverFromCollationMismatchAndRetry($query, $result, $producesRows, $resultType);
-        }
-
-        // Query timeout (MySQL errno 3024 / MariaDB errno 1969): log the slow
-        // query so it appears in debug reports, then return empty results.
-        // Logged at WARN, not ERROR. Timeouts are a host max_statement_time
-        // limit (server-side issue, not a plugin bug). Every caller checks
-        // $result['timed_out'] for graceful fallback. errorMessage() would
-        // trigger the daily developer email digest. Bruno's site
-        // (showmetech.com.br, ~285K captured 404s) emailed every time
-        // getHighImpactCapturedCount() exceeded 60s.
-        if ($result['last_error'] !== '' && $this->isQueryTimeoutError($result['last_error'])) {
-            $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->extractSqlFilename($query);
-            $this->logger->warn(
-                'Query timed out after ' . $timeoutSeconds . 's. ' .
-                'Query: ' . substr(preg_replace('/\s+/', ' ', trim($sqlInfo)) ?? $sqlInfo, 0, 500)
-            );
-            $result['rows'] = array();
-            $result['timed_out'] = true;
-        }
-
-        if ($result['last_error'] !== '') {
-            $this->noteDatabaseIssueFromError($result['last_error']);
-        }
-
-        // Restore $wpdb error reporting after all retry paths have completed.
-        if ($suppressWpdbErrors) {
-            /** @var wpdb $wpdb */
-            $wpdb->suppress_errors($previousSuppressState);
-        }
-
-        if ($options['log_errors'] && $result['last_error'] != '') {
-            if ($this->f->strpos($result['last_error'],
-                    " is marked as crashed ") !== false) {
-                $this->repairTable($result['last_error']);
-            }
-            if ($this->f->strpos($result['last_error'],
-            		"ALTER TABLE causes auto_increment resequencing") !== false &&
-            		$this->f->strpos($result['last_error'], "resulting in duplicate entry") !== false) {
-            		$this->repairDuplicateIDs($result['last_error'], $query);
-            }
-            if ($this->isIncorrectKeyFileError($result['last_error'])) {
-                $this->repairCorruptedTableAndRetry($query, $result);
-            }
-
-            // Self-heal short-circuit: repair-and-retry above clears last_error by reference; without this return the downstream classifier sees '' and emits a spurious ERROR-level "Ugh. SQL query error: ," entry that triggers the dev email digest.
-            if ($result['last_error'] === '') { return $result; }
-
-            // ignore any specific errors.
-            $reportError = true;
-            foreach ($ignoreErrorStrings as $ignoreThis) {
-            	if (is_string($ignoreThis) && strpos($result['last_error'], $ignoreThis) !== false) {
-            		$reportError = false;
-            		break;
-            	}
-            }
-
-            // Server-side and infrastructure errors are not plugin bugs.  They are
-            // already handled by dedicated repair/retry handlers above or by
-            // noteDatabaseIssueFromError() (admin notice + write-block cooldown).
-            // Log as WARN instead of ERROR to avoid triggering dev email reports.
-            $lastErrorForClassification = is_string($result['last_error']) ? $result['last_error'] : '';
-            if ($reportError && (
-                $this->isDiskFullError($lastErrorForClassification) ||
-                $this->isReadOnlyError($lastErrorForClassification) ||
-                $this->isQuotaLimitError($lastErrorForClassification) ||
-                $this->isInvalidDataError($lastErrorForClassification) ||
-                $this->isCollationError($lastErrorForClassification) ||
-                $this->isMissingPluginTableError($lastErrorForClassification) ||
-                $this->isIncorrectKeyFileError($lastErrorForClassification) ||
-                $this->isCrashedTableError($lastErrorForClassification) ||
-                $this->isDeadlockOrLockTimeoutError($lastErrorForClassification) ||
-                $this->isGaleraConflictError($lastErrorForClassification) ||
-                $this->isTransientConnectionError($lastErrorForClassification) ||
-                $this->isQueryTimeoutError($lastErrorForClassification) ||
-                $this->isAccessDeniedError($lastErrorForClassification)
-            )) {
-                $this->logger->warn("Server-side DB issue (handled): " . $lastErrorForClassification);
-                $reportError = false;
-            }
-
-            if ($reportError) {
-                $stripped_query = 'n/a';
-                if ($this->isInvalidDataError($result['last_error'])) {
-                    $strippedResult = $this->get_stripped_query_result($query);
-                    $stripped_query = is_string($strippedResult) ? $strippedResult : 'n/a';
-                }
-                
-                $extraDataQuery = "select @@max_join_size as max_join_size, " . 
-            		"@@sql_big_selects as sql_big_selects, " .
-                    "@@character_set_database as character_set_database";
-            	$someMySQLVariables = $wpdb->get_results($extraDataQuery, ARRAY_A);
-            	$variables = print_r($someMySQLVariables, true);
-
-                // In production (WP_DEBUG off), only log SQL filename to avoid PII exposure
-                $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->extractSqlFilename($query);
-
-                $dbVer = $wpdb->db_version();
-                $this->logger->errorMessage("Ugh. SQL query error: " . (is_string($result['last_error']) ? $result['last_error'] : '') .
-					    ", SQL: " . $sqlInfo .
-	            	    ", Execution time: " . round($timer->getElapsedTime(), 2) .
-	            	    ", DB ver: " . (is_string($dbVer) ? $dbVer : 'unknown') .
-            		    ", Variables: " . $variables .
-            	        ", stripped_query: " . $stripped_query);
-            }
-            
-        } else {
-            if ($options['log_too_slow'] && $timer->getElapsedTime() > 5) {
-                // In production (WP_DEBUG off), only log SQL filename to avoid PII exposure
-                $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->extractSqlFilename($query);
-                $this->logger->debugMessage("Slow query (" . round($timer->getElapsedTime(), 2) . " seconds): " .
-                        $sqlInfo);
-            }
-
-            // Auto-clear the admin notice once queries succeed and cooldowns have expired.
-            // Guard: only run when the query truly succeeded (this else branch also
-            // fires when log_errors is false, which can include failed queries).
-            if ($result['last_error'] === '') {
-                // serverSideIssueNoted is set when an error occurs in this request;
-                // also check once per request if a stale notice transient exists from
-                // a previous request (the flag resets per-process).
-                if (!$this->serverSideIssueNoted && !$this->serverSideIssueChecked) {
-                    $this->serverSideIssueChecked = true;
-                    $existing = $this->getRuntimeFlag('abj404_plugin_db_notice');
-                    // Exclude notice types cleared by a dedicated path, not the
-                    // generic write-block/quota cooldown model: stale_permalink_cache
-                    // (cleared by PermalinkCache flush) and missing_table (cleared
-                    // only by attemptMissingTableRepairAndRetry on repair success;
-                    // a separate abj404_missing_table_repair_cooldown gates retries
-                    // but is not consulted here).
-                    $excludedTypes = array('stale_permalink_cache', 'missing_table');
-                    if (is_array($existing) && !empty($existing['type'])
-                        && !in_array($existing['type'], $excludedTypes, true)) {
-                        $this->serverSideIssueNoted = true;
-                    }
-                }
-                if ($this->serverSideIssueNoted && !$this->isWriteBlockActive() && !$this->isQuotaCooldownActive()) {
-                    $this->clearServerSideDbNotice();
-                }
-            }
-        }
-        
-        return $result;
-    }
-
-    // Engine-aware per-query timeout helpers + query-shape probes are
-    // declared on the sibling ABJ_404_Solution_DataAccess_QueryTimeoutsTrait:
-    //   - queryStartsWithSelect / queryProducesResultRows
-    //   - applyQueryTimeout / applySelectTimeout
-    //   - applyNonLeadingSelectTimeout / applyStatementTimeout
-    //   - isMariaDB / applyTimeoutToInsertSelect
-
-    /**
-     * @param string $key
-     * @param mixed $value
-     * @param int $ttlSeconds
-     * @return void
-     */
-    private function setRuntimeFlag(string $key, $value, int $ttlSeconds): void {
-        if (function_exists('set_transient')) {
-            // allow-cache-empty: passthrough helper. Callers store admin-notice payloads, cooldown timestamps, and lock-state markers, not query results.
-            set_transient($key, $value, $ttlSeconds);
-            return;
-        }
-        if (function_exists('update_option')) {
-            update_option($key, $value, false);
-        }
-    }
-
-    /**
-     * @param string $key
-     * @return mixed
-     */
-    private function getRuntimeFlag(string $key) {
-        if (function_exists('get_transient')) {
-            return get_transient($key);
-        }
-        if (function_exists('get_option')) {
-            return get_option($key, false);
-        }
-        return false;
-    }
-
-    /**
-     * @param string $type
-     * @param string $message
-     * @param string $errorString
-     * @return void
-     */
-    protected function setPluginDbNotice(string $type, string $message, string $errorString = ''): void {
-        $payload = array(
-            'type' => $type,
-            'message' => $message,
-            'timestamp' => $this->clock()->now(),
-            'error_string' => $errorString,
-        );
-        $this->setRuntimeFlag('abj404_plugin_db_notice', $payload, self::DB_WRITE_BLOCK_COOLDOWN_SECONDS);
-    }
-
-    /**
-     * Clear the plugin DB notice only when its current type matches.
-     *
-     * @param string $type
-     * @return void
-     */
-    protected function clearPluginDbNoticeIfType(string $type): void {
-        $existing = $this->getRuntimeFlag('abj404_plugin_db_notice');
-        if (!is_array($existing)) {
-            return;
-        }
-        $currentType = isset($existing['type']) && is_string($existing['type']) ? $existing['type'] : '';
-        if ($currentType !== $type) {
-            return;
-        }
-        $this->clearServerSideDbNotice();
-    }
-
-    /** @return void */
-    private function clearServerSideDbNotice(): void {
-        if (function_exists('delete_transient')) {
-            delete_transient('abj404_plugin_db_notice');
-        } elseif (function_exists('delete_option')) {
-            delete_option('abj404_plugin_db_notice');
-        }
-        $this->serverSideIssueNoted = false;
-    }
-
-    /** @param string $text @return string */
-    private function localizeOrDefault(string $text): string {
-        if (function_exists('__')) {
-            return __($text, '404-solution');
-        }
-        return $text;
-    }
-
-    /** @return bool */
-    private function isWriteBlockActive(): bool {
-        $rawDiskFlag = $this->getRuntimeFlag('abj404_db_disk_full_until');
-        $diskUntil = is_scalar($rawDiskFlag) ? (int)$rawDiskFlag : 0;
-        $rawReadOnlyFlag = $this->getRuntimeFlag('abj404_db_read_only_until');
-        $readOnlyUntil = is_scalar($rawReadOnlyFlag) ? (int)$rawReadOnlyFlag : 0;
-        $now = $this->clock()->now();
-        return ($diskUntil > $now || $readOnlyUntil > $now);
-    }
-
-    /** @return bool */
-    private function shouldSkipNonEssentialDbWrites(): bool {
-        return ($this->isQuotaCooldownActive() || $this->isWriteBlockActive());
-    }
-
-    /**
-     * Attempt REPAIR TABLE after errno 1034 ("Incorrect key file"), then retry the query once.
-     * For plugin tables the retry is attempted after repair. For non-plugin tables the repair
-     * is not our responsibility, but we surface a rate-limited admin notice.
-     *
-     * @param string $query
-     * @param array<string, mixed> $result passed by reference
-     * @return void
-     */
-    private function repairCorruptedTableAndRetry(string $query, array &$result): void {
-        $errorMessage = is_string($result['last_error']) ? $result['last_error'] : '';
-        // Delegate the REPAIR TABLE call (and the non-plugin-table notice) to the trait method.
-        $this->repairTable($errorMessage);
-
-        // Only retry for plugin tables — they may now be healthy.
-        if (stripos($errorMessage, 'abj404') !== false) {
-            global $wpdb;
-            $wpdb->flush();
-            $result['rows'] = $wpdb->get_results($query, $this->currentResultType);
-            $result['last_error'] = (string)($wpdb->last_error ?? '');
-            $result['last_result'] = $wpdb->last_result ?? array();
-            $result['rows_affected'] = $wpdb->rows_affected ?? 0;
-            $result['insert_id'] = $wpdb->insert_id ?? 0;
-            if ($result['last_error'] === '') {
-                $this->logger->infoMessage("Retry after 'Incorrect key file' repair succeeded for plugin table.");
-            }
-        }
-    }
-
-    /** Try to call strip_invalid_text_from_query and return the result.
-     * @param string $query
-     * @return NULL|string|WP_Error
-     */
-    function get_stripped_query_result($query) {
-        try {
-            if (!class_exists('wpdb')) {
-                return null;
-            }
-            if (!method_exists('wpdb', 'strip_invalid_text_from_query')) {
-                return null;
-            }
-            
-            $filename = ABJ404_PATH . 'includes/php/wordpress/WPDBExtension.php';
-            if (!file_exists($filename)) {
-                return null;
-            }
-            require_once $filename;
-
-            $my_custom_db = null;
-            if (class_exists('ABJ_404_Solution_WPDBExtension_PHP7')) {
-                $my_custom_db = new ABJ_404_Solution_WPDBExtension_PHP7(DB_USER, DB_PASSWORD, DB_NAME, DB_HOST);
-                
-            } else if (class_exists('ABJ_404_Solution_WPDBExtension_PHP5')) {
-                $my_custom_db = new ABJ_404_Solution_WPDBExtension_PHP5(DB_USER, DB_PASSWORD, DB_NAME, DB_HOST);
-            }
-            if ($my_custom_db == null) {
-                return null;
-            }
-                        
-            $result = $my_custom_db->public_strip_invalid_text_from_query($query);
-
-            if (is_wp_error($result)) {
-                return 'WP_Error: ' . $result->get_error_message();
-            }
-    
-            return $result;
-    
-        } catch (Throwable $e) {
-            // Surface the swallowed failure so the support-bundle reader can
-            // see the wpdb extension fell through. The function contract
-            // (NULL|string|WP_Error) is preserved by returning null.
-            $this->logger->warn(
-                'get_stripped_query_result failed; returning null: ' . $e->getMessage()
-            );
-            return null;
-        }
-    }
-    
-    /** @param string $errorMessage @return void */
 }

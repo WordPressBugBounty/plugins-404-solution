@@ -4,7 +4,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-require_once dirname(__FILE__) . '/FeedbackTransportTrait_EnvironmentExtras.php';
+require_once dirname(__FILE__) . '/FeedbackEnvironmentExtras.php';
+require_once dirname(__FILE__) . '/PayloadSchema.php';
 
 /**
  * HTTP-first transport for plugin feedback reports.
@@ -33,12 +34,11 @@ require_once dirname(__FILE__) . '/FeedbackTransportTrait_EnvironmentExtras.php'
  */
 class ABJ_404_Solution_FeedbackTransport {
 
-    use ABJ_404_Solution_FeedbackTransport_EnvironmentExtrasTrait;
-
     const TRANSIENT_PREFIX = 'abj404_pending_report_';
     const TRANSIENT_TTL = 86400; // 24 hours
     const CRON_HOOK = 'abj404_send_queued_report';
     const HTTP_TIMEOUT = 10;
+    const DEBUG_LOG_MAX_BYTES = 262144;
 
     /**
      * Records whether the most recent sendNow() call fell back to wp_mail()
@@ -98,11 +98,13 @@ class ABJ_404_Solution_FeedbackTransport {
      * @return void
      */
     public static function queue(array $payload, string $type): void {
+        self::validatePayloadContract($payload, $type);
         $uuid = self::generateUuid();
         $envelope = array(
             'payload' => $payload,
             'type' => $type,
         );
+        // allow-cache-empty: feedback envelope is generated locally and may contain an intentionally empty payload.
         set_transient(self::TRANSIENT_PREFIX . $uuid, $envelope, self::TRANSIENT_TTL);
         wp_schedule_single_event(time(), self::CRON_HOOK, array($uuid));
 
@@ -124,6 +126,8 @@ class ABJ_404_Solution_FeedbackTransport {
      */
     public static function sendNow(array $payload, string $type): bool {
         self::$lastSendUsedFallback = false;
+        self::validatePayloadContract($payload, $type);
+        $payload = self::redactPayloadStrings($payload);
         $started = microtime(true);
         $result = self::httpSend($payload);
         $elapsedMs = (int) round((microtime(true) - $started) * 1000);
@@ -319,7 +323,8 @@ class ABJ_404_Solution_FeedbackTransport {
         $payload['log_table_size_bytes']  = self::tryInt(function () { return self::logTableSizeBytes(); });
         $payload['error_count_in_log']    = self::tryInt(function () { return self::errorCountInLog(); });
         $payload['debug_file_size_bytes'] = self::tryInt(function () { return self::debugFileSizeBytes(); });
-        $payload['environment_extras']    = self::environmentExtras();
+        $payload += self::debugLogPayload($type);
+        $payload['environment_extras']    = (new ABJ_404_Solution_FeedbackEnvironmentExtras())->collect();
 
         if (self::isDevelopmentEnvironment()) {
             $payload['environment_type'] = 'development';
@@ -811,6 +816,22 @@ class ABJ_404_Solution_FeedbackTransport {
     }
 
     /**
+     * Call a string-returning helper, returning an empty string if it throws.
+     *
+     * @param callable $fn
+     * @return string
+     */
+    private static function tryString(callable $fn): string {
+        try {
+            $v = $fn();
+            return is_string($v) ? $v : '';
+        } catch (\Throwable $e) {
+            @error_log('404 Solution: FeedbackTransport string lookup failed: ' . $e->getMessage());
+            return '';
+        }
+    }
+
+    /**
      * Call an array-returning helper, returning [] if it throws.
      *
      * @param callable $fn
@@ -922,7 +943,7 @@ class ABJ_404_Solution_FeedbackTransport {
      * @return array<string, int>
      */
     private static function redirectCountsRaw(): array {
-        $dao = self::dao();
+        $dao = self::viewReadService();
         if ($dao === null || !method_exists($dao, 'getRedirectStatusCounts')) {
             throw new \RuntimeException('DataAccess::getRedirectStatusCounts unavailable');
         }
@@ -945,7 +966,7 @@ class ABJ_404_Solution_FeedbackTransport {
      * @return array<string, int>
      */
     private static function capturedCountsRaw(): array {
-        $dao = self::dao();
+        $dao = self::viewReadService();
         if ($dao === null || !method_exists($dao, 'getCapturedStatusCounts')) {
             throw new \RuntimeException('DataAccess::getCapturedStatusCounts unavailable');
         }
@@ -966,7 +987,7 @@ class ABJ_404_Solution_FeedbackTransport {
      * @return int Row count of {prefix}abj404_logsv2.
      */
     private static function logEntriesCount(): int {
-        $dao = self::dao();
+        $dao = self::viewReadService();
         if ($dao === null || !method_exists($dao, 'getLogsCount')) {
             throw new \RuntimeException('DataAccess::getLogsCount unavailable');
         }
@@ -981,7 +1002,7 @@ class ABJ_404_Solution_FeedbackTransport {
      * @return int data_length + index_length for the log table.
      */
     private static function logTableSizeBytes(): int {
-        $dao = self::dao();
+        $dao = self::viewReadService();
         if ($dao === null || !method_exists($dao, 'getLogDiskUsage')) {
             throw new \RuntimeException('DataAccess::getLogDiskUsage unavailable');
         }
@@ -1034,19 +1055,81 @@ class ABJ_404_Solution_FeedbackTransport {
     }
 
     /**
+     * @param string $type
+     * @return array{debug_log?: string}
+     */
+    private static function debugLogPayload(string $type): array {
+        if ($type !== 'error' && $type !== 'heartbeat') {
+            return array();
+        }
+        return array('debug_log' => self::tryString(function () { return self::debugLogTail(); }));
+    }
+
+    /**
+     * @return string Tail of the plugin debug log capped to the server schema.
+     */
+    private static function debugLogTail(): string {
+        if (!function_exists('abj_service')) {
+            throw new \RuntimeException('abj_service unavailable');
+        }
+        $logger = abj_service('logging');
+        if (!is_object($logger) || !method_exists($logger, 'getDebugFilePath')) {
+            throw new \RuntimeException('Logging::getDebugFilePath unavailable');
+        }
+        $path = $logger->getDebugFilePath();
+        if (!is_string($path) || $path === '' || !is_readable($path)) {
+            return '';
+        }
+
+        $size = @filesize($path);
+        if (!is_int($size) || $size <= 0) {
+            return '';
+        }
+
+        $handle = @fopen($path, 'rb');
+        if (!is_resource($handle)) {
+            throw new \RuntimeException('fopen() failed');
+        }
+
+        try {
+            $offset = max(0, $size - self::DEBUG_LOG_MAX_BYTES);
+            if ($offset > 0 && @fseek($handle, $offset) !== 0) {
+                throw new \RuntimeException('fseek() failed');
+            }
+
+            $remaining = min($size, self::DEBUG_LOG_MAX_BYTES);
+            $contents = '';
+            while ($remaining > 0 && !feof($handle)) {
+                $chunk = @fread($handle, min(8192, $remaining));
+                if ($chunk === false) {
+                    throw new \RuntimeException('fread() failed');
+                }
+                if ($chunk === '') {
+                    break;
+                }
+                $contents .= $chunk;
+                $remaining -= strlen($chunk);
+            }
+            return $contents;
+        } finally {
+            fclose($handle);
+        }
+    }
+
+    /**
      * Service-container lookup for DataAccess, returning null instead of
      * throwing when the container isn't initialized yet (test contexts,
      * early boot before Loader.php runs).
      *
      * @return object|null
      */
-    private static function dao(): ?object {
+    private static function viewReadService(): ?object {
         if (!function_exists('abj_service')) {
             return null;
         }
         // allow-silent-catch: container may not be initialized in early-boot or test contexts; null return signals callers to use zero defaults, no diagnostic info exists yet to log
         try {
-            $svc = abj_service('data_access');
+            $svc = abj_service('view_read_service');
             return is_object($svc) ? $svc : null;
         } catch (\Throwable $e) {
             return null;
@@ -1162,6 +1245,62 @@ class ABJ_404_Solution_FeedbackTransport {
      * @param string $message
      * @return void
      */
+    /**
+     * Run PII redaction over every string value in a payload before it
+     * leaves the plugin (defense-in-depth for the transport layer).
+     *
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private static function redactPayloadStrings(array $payload): array {
+        if (!function_exists('abj_service')) {
+            return $payload;
+        }
+        try {
+            /** @var ABJ_404_Solution_PiiRedactor $redactor */
+            $redactor = abj_service('pii_redactor');
+        } catch (\Throwable $e) {
+            // allow-silent-catch: container not initialized yet (early boot); skip redaction
+            return $payload;
+        }
+        foreach ($payload as $key => $value) {
+            if (is_string($value)) {
+                if (in_array($key, array('user_message', 'reply_email', 'contact_email', 'debug_log_excerpt'), true)) {
+                    continue;
+                }
+                $payload[$key] = $redactor->redact($value);
+            }
+        }
+        return $payload;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @param string $type One of: error, heartbeat, uninstall, support_request
+     */
+    private static function validatePayloadContract(array $payload, string $type): void {
+        static $schemas = null;
+        if ($schemas === null) {
+            $schemaFile = dirname(__FILE__) . '/schema/feedback_payload_schema.php';
+            if (!file_exists($schemaFile)) {
+                return;
+            }
+            $schemas = require $schemaFile;
+        }
+        if (!isset($schemas[$type])) {
+            return;
+        }
+        $violations = ABJ_404_Solution_PayloadSchema::validate($schemas[$type], $payload);
+        if (empty($violations)) {
+            return;
+        }
+        self::log('warn', sprintf(
+            'abj404_transport: payload contract violation for type=%s: %s',
+            $type,
+            implode('; ', $violations)
+        ));
+    }
+
     private static function log(string $level, string $message): void {
         if (function_exists('abj_service')) {
             try {

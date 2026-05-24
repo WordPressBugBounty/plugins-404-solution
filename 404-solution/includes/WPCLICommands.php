@@ -48,7 +48,7 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
     public function list_redirects($args, $assocArgs) {
         require_once __DIR__ . '/DataAccess.php';
 
-        $dao    = abj_service('data_access');
+        $dbCore = abj_service('db_core');
         $status = isset($assocArgs['status']) ? strtolower(trim($assocArgs['status'])) : '';
         $format = isset($assocArgs['format']) ? strtolower(trim($assocArgs['format'])) : 'table';
 
@@ -62,7 +62,7 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
         $types = $this->statusStringToTypes($status);
 
         // Fetch all matching rows (max 2000 rows for CLI safety).
-        $rows = $this->fetchRedirectRows($dao, $types, 2000);
+        $rows = $this->fetchRedirectRows($dbCore, $types, 2000);
 
         if (empty($rows)) {
             \WP_CLI::line('No redirects found.');
@@ -114,7 +114,8 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
     public function create($args, $assocArgs) {
         require_once __DIR__ . '/DataAccess.php';
 
-        $dao = abj_service('data_access');
+        $redirectsRepository = abj_service('redirects_repository');
+        $viewBuildOrchestrator = abj_service('view_build_orchestrator');
 
         $from  = isset($assocArgs['from']) ? trim($assocArgs['from']) : '';
         $to    = isset($assocArgs['to']) ? trim($assocArgs['to']) : '';
@@ -154,9 +155,9 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
         }
 
         $status     = $regex ? (string)ABJ404_STATUS_REGEX : (string)ABJ404_STATUS_MANUAL;
-        $insertedId = $dao->setupRedirect($from, $status, $type, $dest, (string)$code, 0, 'wp-cli');
+        $insertedId = $redirectsRepository->setupRedirect($from, $status, $type, $dest, (string)$code, 0, 'wp-cli');
         if ($insertedId) {
-            $dao->markViewDoneInvalidatedByAdminMutation();
+            $viewBuildOrchestrator->markViewDoneInvalidatedByAdminMutation();
             $displayDest = $isTerminalCode ? "(none — {$code})" : "{$to}";
             \WP_CLI::success("Redirect created (ID: {$insertedId}): {$from} → {$displayDest} [{$code}]");
         } else {
@@ -193,7 +194,8 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
             return;
         }
 
-        $dao = abj_service('data_access');
+        $redirectsRepository = abj_service('redirects_repository');
+        $viewBuildOrchestrator = abj_service('view_build_orchestrator');
         $arg = trim($args[0]);
 
         if (ctype_digit($arg)) {
@@ -205,7 +207,7 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
             }
         } else {
             // Non-numeric — look up by source URL.
-            $redirect = $dao->getExistingRedirectForURL($arg);
+            $redirect = $redirectsRepository->getExistingRedirectForURL($arg);
             if (!isset($redirect['id']) || (int)(is_scalar($redirect['id']) ? $redirect['id'] : 0) === 0) {
                 \WP_CLI::error("No redirect found for URL: {$arg}");
                 return;
@@ -214,10 +216,10 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
             \WP_CLI::line("Resolved '{$arg}' to redirect ID {$id}.");
         }
 
-        $error = $dao->moveRedirectsToTrash($id, 1);
+        $error = $redirectsRepository->moveRedirectsToTrash($id, 1);
 
         if ($error === '') {
-            $dao->markViewDoneInvalidatedByAdminMutation();
+            $viewBuildOrchestrator->markViewDoneInvalidatedByAdminMutation();
             \WP_CLI::success("Redirect ID {$id} moved to trash.");
         } else {
             \WP_CLI::error("No redirect with ID {$id} found, or database error: {$error}");
@@ -238,8 +240,18 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
     public function stats($args, $assocArgs) {
         require_once __DIR__ . '/DataAccess.php';
 
-        $dao      = abj_service('data_access');
-        $snapshot = $dao->getStatsDashboardSnapshot(false);
+        $container = ABJ_404_Solution_ServiceContainer::getInstance();
+        $statsRepository = null;
+        if (!$container->has('stats_repository') && $container->has('data_access')) {
+            $candidate = $container->get('data_access');
+            if (is_object($candidate) && method_exists($candidate, 'getStatsDashboardSnapshot')) {
+                $statsRepository = $candidate;
+            }
+        }
+        if ($statsRepository === null) {
+            $statsRepository = abj_service('stats_repository');
+        }
+        $snapshot = $statsRepository->getStatsDashboardSnapshot(false);
         // getStatsDashboardSnapshot always returns array{refreshed_at, hash, data}.
         $data = is_array($snapshot['data']) ? $snapshot['data'] : array();
 
@@ -292,9 +304,9 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
 
         require_once __DIR__ . '/DataAccess.php';
 
-        $dao = abj_service('data_access');
+        $dbCore = abj_service('db_core');
 
-        $table = $dao->doTableNameReplacements('{wp_abj404_redirects}');
+        $table = $dbCore->doTableNameReplacements('{wp_abj404_redirects}');
         $statusIn = implode(', ', array(
             ABJ404_STATUS_CAPTURED,
             ABJ404_STATUS_IGNORED,
@@ -302,7 +314,7 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
         ));
 
         // Count before confirming so the user knows the blast radius.
-        $count = $dao->queryScalarInt(
+        $count = $dbCore->queryScalarInt(
             "SELECT COUNT(*) AS c FROM `{$table}` WHERE status IN ({$statusIn}) AND disabled = 0"
         );
 
@@ -313,7 +325,7 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
 
         \WP_CLI::confirm("This will permanently delete {$count} captured 404 entr" . ($count === 1 ? 'y' : 'ies') . '. Continue?', $assocArgs);
 
-        $deleteResult = $dao->queryAndGetResults(
+        $deleteResult = $dbCore->queryAndGetResults(
             "DELETE FROM `{$table}` WHERE status IN ({$statusIn}) AND disabled = 0"
         );
 
@@ -366,9 +378,15 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
         require_once __DIR__ . '/DataAccess.php';
         require_once __DIR__ . '/ImportExportService.php';
 
-        $dao     = abj_service('data_access');
-        $logging = abj_service('logging');
-        $svc     = new ABJ_404_Solution_ImportExportService($dao, $logging);
+        $viewReadService = abj_service('view_read_service');
+        $viewBuild       = abj_service('view_build_orchestrator');
+        $logging         = abj_service('logging');
+        $svc     = new ABJ_404_Solution_ImportExportService(
+            abj_service('view_read_service'),
+            abj_service('redirects_repository'),
+            abj_service('content_repository'),
+            $logging
+        );
 
         $fileHandle = fopen($filePath, 'r');
         if ($fileHandle === false) {
@@ -391,7 +409,7 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
         // circuits. Without this, a 10K-row import fires ~60K transient
         // / option / watermark queries; the one end-of-loop markView
         // bump below covers the entire batch.
-        $rowResult = $dao->runWithDeferredInvalidation(function () use (
+        $rowResult = $viewReadService->runWithDeferredInvalidation(function () use (
                 $svc, $fileHandle, $delimiter, $dryRun) {
             $local = array(
                 'headerColumns' => null,
@@ -471,7 +489,7 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
         // the next admin tab read so imported rows appear immediately, matching
         // the admin form path (handleActionImportFile in
         // PluginLogicTrait_AdminActions.php).
-        $dao->markViewDoneInvalidatedByAdminMutation();
+        $viewBuild->markViewDoneInvalidatedByAdminMutation();
         \WP_CLI::success("Import complete. Valid={$validRows}, invalid={$invalidRows}, total={$processedRows}");
     }
 
@@ -506,9 +524,15 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
         $format = isset($assocArgs['format']) ? strtolower(trim($assocArgs['format'])) : 'native';
         $output = isset($assocArgs['output']) ? trim($assocArgs['output']) : '';
 
-        $dao     = abj_service('data_access');
         $logging = abj_service('logging');
-        $svc     = new ABJ_404_Solution_ImportExportService($dao, $logging);
+        /** @var ABJ_404_Solution_ViewReadServiceInterface $viewReadService */
+        $viewReadService = abj_service('view_read_service');
+        $svc     = new ABJ_404_Solution_ImportExportService(
+            $viewReadService,
+            abj_service('redirects_repository'),
+            abj_service('content_repository'),
+            $logging
+        );
 
         $serverFormats = array('htaccess', 'nginx', 'cloudflare', 'netlify', 'vercel');
         if (in_array($format, $serverFormats, true)) {
@@ -547,7 +571,7 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
 
         if ($format === 'redirection') {
             $nativeTemp = sys_get_temp_dir() . '/abj404_export_native_' . time() . '.csv';
-            $dao->doRedirectsExport($nativeTemp);
+            $viewReadService->doRedirectsExport($nativeTemp);
             $error = $svc->convertExportCsvToRedirectionFormat($nativeTemp, $tempFile);
             @unlink($nativeTemp);
             if ($error !== '') {
@@ -555,7 +579,7 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
                 return;
             }
         } else {
-            $dao->doRedirectsExport($tempFile);
+            $viewReadService->doRedirectsExport($tempFile);
         }
 
         if (!file_exists($tempFile)) {
@@ -618,24 +642,25 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
         }
 
         global $wpdb;
-        $dao = abj_service('data_access');
+        $dbCore = abj_service('db_core');
+        $contentRepository = abj_service('content_repository');
         $flushed = array();
 
         if ($type === 'spelling' || $type === 'all') {
-            $dao->deleteSpellingCache();
+            $contentRepository->deleteSpellingCache();
             $flushed[] = 'spelling';
         }
 
         if ($type === 'permalink' || $type === 'all') {
-            $dao->truncatePermalinkCacheTable();
+            $contentRepository->truncatePermalinkCacheTable();
             $flushed[] = 'permalink';
         }
 
         if ($type === 'ngram' || $type === 'all') {
-            $ngramTable = $dao->doTableNameReplacements('{wp_abj404_ngram_cache}');
+            $ngramTable = $dbCore->doTableNameReplacements('{wp_abj404_ngram_cache}');
             // skip_repair: TRUNCATE itself is the recovery path during cache flush;
             // we must not recurse into the missing-table repairer here.
-            $dao->queryAndGetResults(
+            $dbCore->queryAndGetResults(
                 "TRUNCATE TABLE `{$ngramTable}`",
                 ['skip_repair' => true]
             );
@@ -685,10 +710,11 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
         require_once __DIR__ . '/Functions.php';
 
         $url = trim($args[0]);
-        $dao = abj_service('data_access');
+        $redirectsRepository = abj_service('redirects_repository');
+        $viewReadService = abj_service('view_read_service');
 
         // Check for an exact match (manual or auto redirect).
-        $exact = $dao->getExistingRedirectForURL($url);
+        $exact = $redirectsRepository->getExistingRedirectForURL($url);
         if (isset($exact['id']) && (int)(is_scalar($exact['id']) ? $exact['id'] : 0) !== 0) {
             $dest   = isset($exact['final_dest']) && is_scalar($exact['final_dest']) ? (string)$exact['final_dest'] : '';
             $code   = isset($exact['code']) && is_scalar($exact['code']) ? (string)$exact['code'] : '301';
@@ -698,7 +724,7 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
         }
 
         // Check for a regex match.
-        $regexRedirects = $dao->getRedirectsWithRegEx();
+        $regexRedirects = $viewReadService->getRedirectsWithRegEx();
         $f = abj_service('functions');
         foreach ($regexRedirects as $row) {
             $pattern = isset($row['url']) && is_scalar($row['url']) ? (string)$row['url'] : '';
@@ -725,13 +751,13 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
     /**
      * Fetch redirect rows for the given status types (max $limit rows).
      *
-     * @param ABJ_404_Solution_DataAccess $dao
-     * @param array<int, int>             $types Numeric status constants; empty = all redirects.
-     * @param int                         $limit
+     * @param ABJ_404_Solution_DatabaseCoreInterface $dbCore
+     * @param array<int, int>                         $types Numeric status constants; empty = all redirects.
+     * @param int                                     $limit
      * @return array<int, array<string, mixed>>
      */
-    private function fetchRedirectRows($dao, array $types, $limit) {
-        $table = $dao->doTableNameReplacements('{wp_abj404_redirects}');
+    private function fetchRedirectRows($dbCore, array $types, $limit) {
+        $table = $dbCore->doTableNameReplacements('{wp_abj404_redirects}');
         $limit = absint($limit);
 
         if (!empty($types)) {
@@ -747,7 +773,7 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
                   ORDER BY url ASC
                   LIMIT {$limit}";
 
-        $result = $dao->queryAndGetResults($query);
+        $result = $dbCore->queryAndGetResults($query);
         $rows = isset($result['rows']) && is_array($result['rows']) ? $result['rows'] : array();
         $output = [];
         foreach ($rows as $row) {

@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 	Author:      Aaron J
 	Author URI:  https://www.ajexperience.com/404-solution/
 
-	Version: 4.1.19
+	Version: 4.2.0
 	Requires at least: 5.0
 	Requires PHP: 7.4
 
@@ -138,51 +138,26 @@ function abj404_autoloader($class) {
 				$inc . 'ViewTrait_Settings.php',
 				$inc . 'ViewTrait_Redirects.php',
 				$inc . 'ViewTrait_RedirectsTable.php',
+				$inc . 'ViewTrait_RedirectTypeUI.php',
+				$inc . 'ViewTrait_RedirectConditions.php',
 				$inc . 'ViewTrait_Logs.php',
 			),
 			'ABJ_404_Solution_DataAccess' => array(
-				$inc . 'DataAccessTrait_Maintenance.php',
-				$inc . 'DataAccessTrait_Connection.php',
-				$inc . 'DataAccessTrait_ViewMetadata.php',
-				$inc . 'DataAccessTrait_ViewQueries.php',
-				$inc . 'DataAccessTrait_ViewQueriesHitsLifecycle.php',
-				$inc . 'DataAccessTrait_ViewQueriesStaged.php',
-				$inc . 'DataAccessTrait_ViewBuildStageRunner.php',
-				$inc . 'DataAccessTrait_ViewBuildStageCallbacks.php',
-				$inc . 'DataAccessTrait_ViewQueriesStagedRead.php',
-				$inc . 'DataAccessTrait_ViewBuildAdaptive.php',
-				$inc . 'DataAccessTrait_ViewBuildHelpers.php',
-				$inc . 'DataAccessTrait_ViewBuildLockAndCron.php',
-				$inc . 'DataAccessTrait_ViewBuildPhpEnvProbe.php',
-				$inc . 'DataAccessTrait_ViewBuildSessionEnvProbe.php',
-				$inc . 'DataAccessTrait_ViewBuildHostFailurePolicy.php',
-				$inc . 'DataAccessTrait_ViewBuildStartedWatermark.php',
-				$inc . 'DataAccessTrait_ViewBuildForceRestart.php',
-				$inc . 'DataAccessTrait_MutationWatermarkSeam.php',
-				$inc . 'DataAccessTrait_AdminMutationGate.php',
-				$inc . 'DataAccessTrait_ViewSnapshotCache.php',
-				$inc . 'DataAccessTrait_Logs.php',
-				$inc . 'DataAccessTrait_LogsHitsRebuild.php',
-				$inc . 'DataAccessTrait_Redirects.php',
-				$inc . 'DataAccessTrait_PublishedContent.php',
-				$inc . 'DataAccessTrait_Stats.php',
-				$inc . 'DataAccessTrait_ErrorClassification.php',
-				$inc . 'DataAccessTrait_SqlErrorReporting.php',
-				$inc . 'DataAccessTrait_QueryTimeouts.php',
+				$inc . 'DatabaseCore.php',
+				$inc . 'ContentRepository.php',
+				$inc . 'RedirectsRepository.php',
+				$inc . 'LogsRepository.php',
+				$inc . 'StatsRepository.php',
+				$inc . 'ViewReadService.php',
+				$inc . 'ViewBuildOrchestrator.php',
 			),
 			'ABJ_404_Solution_PluginLogic' => array(
-				$inc . 'PluginLogicTrait_UrlNormalization.php',
-				$inc . 'PluginLogicTrait_AdminActions.php',
-				$inc . 'PluginLogicTrait_ImportExport.php',
-				$inc . 'PluginLogicTrait_SettingsUpdate.php',
-				$inc . 'PluginLogicTrait_PageOrdering.php',
-				$inc . 'PluginLogicTrait_Lifecycle.php',
-			),
-			'ABJ_404_Solution_SpellChecker' => array(
-				$inc . 'SpellCheckerTrait_PostListeners.php',
-				$inc . 'SpellCheckerTrait_URLMatching.php',
-				$inc . 'SpellCheckerTrait_CandidateFiltering.php',
-				$inc . 'SpellCheckerTrait_LevenshteinEngine.php',
+				$inc . 'PluginLogicUrlNormalization.php',
+				$inc . 'PluginLogicAdminActions.php',
+				$inc . 'PluginLogicImportExport.php',
+				$inc . 'PluginLogicSettingsUpdate.php',
+				$inc . 'PluginLogicPageOrdering.php',
+				$inc . 'PluginLogicLifecycle.php',
 			),
 			'ABJ_404_Solution_DatabaseUpgradesEtc' => array(
 				$inc . 'DatabaseUpgradesEtcTrait_NGram.php',
@@ -190,6 +165,9 @@ function abj404_autoloader($class) {
 				$inc . 'DatabaseUpgradesEtcTrait_PluginUpdate.php',
 				$inc . 'DatabaseUpgradesEtcTrait_TableRepair.php',
 				$inc . 'DatabaseUpgradesEtcTrait_Indexes.php',
+				$inc . 'DatabaseUpgradesEtcTrait_OrphanAdoption.php',
+				$inc . 'DatabaseUpgradesEtcTrait_MultiSite.php',
+				$inc . 'DatabaseUpgradesEtcTrait_SchemaDiff.php',
 			),
 			// AJAX handler classes that pull in shared traits via `use`.
 			// Without these entries, a corrupted upload that loses the trait
@@ -222,7 +200,13 @@ function abj404_autoloader($class) {
 				$inc . 'ajax/AjaxFailureLoggingTrait.php',
 			),
 			'ABJ_404_Solution_FeedbackTransport' => array(
-				$inc . 'FeedbackTransportTrait_EnvironmentExtras.php',
+				$inc . 'FeedbackEnvironmentExtras.php',
+			),
+			'ABJ_404_Solution_DatabaseCore' => array(
+				$inc . 'DatabaseConnectionManager.php',
+				$inc . 'DatabaseQueryTimeoutManager.php',
+				$inc . 'DatabaseErrorClassifier.php',
+				$inc . 'DatabaseSqlErrorReporter.php',
 			),
 		);
 	}
@@ -370,34 +354,49 @@ if (!function_exists('abj404_shortCodeListener')) {
 				$inc . 'ViewTrait_Settings.php',
 				$inc . 'ViewTrait_Redirects.php',
 				$inc . 'ViewTrait_RedirectsTable.php',
+				$inc . 'ViewTrait_RedirectTypeUI.php',
+				$inc . 'ViewTrait_RedirectConditions.php',
 				$inc . 'ViewTrait_Logs.php',
-				// DataAccess + traits
+				// DataAccess + traits + extracted modules
 				$inc . 'DataAccess.php',
-				$inc . 'DataAccessTrait_Maintenance.php',
-				$inc . 'DataAccessTrait_ViewQueries.php',
-				$inc . 'DataAccessTrait_Logs.php',
-				$inc . 'DataAccessTrait_Redirects.php',
-				$inc . 'DataAccessTrait_PublishedContent.php',
-				$inc . 'DataAccessTrait_Stats.php',
-				// PluginLogic + traits
+				$inc . 'ContentRepositoryInterface.php',
+				$inc . 'ContentRepository.php',
+				$inc . 'RedirectsRepositoryInterface.php',
+				$inc . 'RedirectsRepository.php',
+				$inc . 'LogsRepositoryInterface.php',
+				$inc . 'LogsRepository.php',
+				$inc . 'StatsRepositoryInterface.php',
+				$inc . 'StatsRepository.php',
+				$inc . 'ViewReadServiceInterface.php',
+				$inc . 'ViewReadService.php',
+				$inc . 'ViewBuildOrchestratorInterface.php',
+				$inc . 'ViewBuildOrchestrator.php',
+				$inc . 'DatabaseCoreInterface.php',
+				$inc . 'DatabaseCore.php',
+				// PluginLogic + composition classes
 				$inc . 'PluginLogic.php',
-				$inc . 'PluginLogicTrait_UrlNormalization.php',
-				$inc . 'PluginLogicTrait_AdminActions.php',
-				$inc . 'PluginLogicTrait_ImportExport.php',
-				$inc . 'PluginLogicTrait_SettingsUpdate.php',
-				$inc . 'PluginLogicTrait_PageOrdering.php',
-				$inc . 'PluginLogicTrait_Lifecycle.php',
-				// SpellChecker + traits
+				$inc . 'PluginLogicUrlNormalization.php',
+				$inc . 'PluginLogicAdminActions.php',
+				$inc . 'PluginLogicImportExport.php',
+				$inc . 'PluginLogicSettingsUpdate.php',
+				$inc . 'PluginLogicPageOrdering.php',
+				$inc . 'PluginLogicLifecycle.php',
+				// SpellChecker + delegate classes
 				$inc . 'SpellChecker.php',
-				$inc . 'SpellCheckerTrait_PostListeners.php',
-				$inc . 'SpellCheckerTrait_URLMatching.php',
-				$inc . 'SpellCheckerTrait_CandidateFiltering.php',
-				$inc . 'SpellCheckerTrait_LevenshteinEngine.php',
+				$inc . 'SpellURLMatcher.php',
+				$inc . 'SpellPostListeners.php',
+				$inc . 'SpellLevenshteinEngine.php',
+				$inc . 'SpellCandidateFilter.php',
 				// DatabaseUpgradesEtc + traits
 				$inc . 'DatabaseUpgradesEtc.php',
 				$inc . 'DatabaseUpgradesEtcTrait_NGram.php',
 				$inc . 'DatabaseUpgradesEtcTrait_Maintenance.php',
 				$inc . 'DatabaseUpgradesEtcTrait_PluginUpdate.php',
+				$inc . 'DatabaseUpgradesEtcTrait_TableRepair.php',
+				$inc . 'DatabaseUpgradesEtcTrait_Indexes.php',
+				$inc . 'DatabaseUpgradesEtcTrait_OrphanAdoption.php',
+				$inc . 'DatabaseUpgradesEtcTrait_MultiSite.php',
+				$inc . 'DatabaseUpgradesEtcTrait_SchemaDiff.php',
 				// SQL templates — all files required for correct operation.
 				// A test (SqlFileIntegrityListCompletenessTest) verifies this list
 				// stays in sync with the actual files in includes/sql/.
@@ -1149,8 +1148,8 @@ if (!function_exists('abj404_dailyMaintenanceCronJobListener')) {
 function abj404_dailyMaintenanceCronJobListener() {
     try {
         require_once(plugin_dir_path( __FILE__ ) . "includes/Loader.php");
-        $abj404dao = ABJ_404_Solution_DataAccess::getInstance();
-        $abj404dao->deleteOldRedirectsCron();
+        $redirectsRepo = abj_service('redirects_repository');
+        $redirectsRepo->deleteOldRedirectsCron();
 
         $dbUpgrades = ABJ_404_Solution_DatabaseUpgradesEtc::getInstance();
         $dbUpgrades->runDatabaseMaintenanceTasks();
@@ -1165,8 +1164,8 @@ if (!function_exists('abj404_updateLogsHitsTableListener')) {
 function abj404_updateLogsHitsTableListener() {
     try {
         require_once(plugin_dir_path( __FILE__ ) . "includes/Loader.php");
-        $abj404dao = ABJ_404_Solution_DataAccess::getInstance();
-        $abj404dao->createRedirectsForViewHitsTable();
+        $logsRepo = abj_service('logs_repository');
+        $logsRepo->createRedirectsForViewHitsTable();
     } catch (\Throwable $e) {
         error_log('404 Solution cron (logs/hits): ' . $e->getMessage());
     }
@@ -1255,8 +1254,8 @@ if (!function_exists('abj404_rebuildViewDoneListener')) {
 function abj404_rebuildViewDoneListener() {
     try {
         require_once(plugin_dir_path( __FILE__ ) . "includes/Loader.php");
-        $abj404dao = ABJ_404_Solution_DataAccess::getInstance();
-        $abj404dao->rebuildViewDoneInBackground();
+        $viewBuild = abj_service('view_build_orchestrator');
+        $viewBuild->rebuildViewDoneInBackground();
     } catch (\Throwable $e) {
         error_log('404 Solution cron (view table rebuild): ' . $e->getMessage());
     }
@@ -1456,6 +1455,37 @@ if (!function_exists('abj404_show_view_build_cron_notices')) {
 			'abj404_view_done_hard_stale',
 			'abj404_logs_hits_rollup_stale',
 		);
+		if (class_exists('ABJ_404_Solution_ServiceContainer')
+				&& ABJ_404_Solution_ServiceContainer::safeHas('rebuild_health')) {
+			$rebuildHealth = ABJ_404_Solution_ServiceContainer::safeGet('rebuild_health');
+			if ($rebuildHealth instanceof ABJ_404_Solution_RebuildHealthState) {
+				$payload = $rebuildHealth->getNoticePayload();
+				if (is_array($payload)) {
+					$count = isset($payload['failure_count']) ? (int)$payload['failure_count'] : 0;
+					$class = isset($payload['last_failure_class']) && is_string($payload['last_failure_class'])
+						? $payload['last_failure_class']
+						: 'unknown';
+					$nextAllowed = isset($payload['next_allowed_at']) ? (int)$payload['next_allowed_at'] : 0;
+					$seconds = max(0, $nextAllowed - time());
+					echo '<div class="notice notice-warning"><p><strong>404 Solution:</strong> '
+						. esc_html(sprintf(
+							__('View/hits rebuild paused after %d consecutive failures (class: %s). Next retry in about %d minutes.', '404-solution'),
+							$count,
+							$class,
+							(int)ceil($seconds / 60)
+						)) . '</p>';
+					if (!empty($payload['last_failure_msg']) && is_string($payload['last_failure_msg'])) {
+						echo '<details><summary>' . esc_html(__('Show details', '404-solution'))
+							. '</summary><pre style="white-space:pre-wrap;word-break:break-all;max-width:100%;margin:6px 0;">'
+							. esc_html($payload['last_failure_msg']) . '</pre></details>';
+					}
+					$retryUrl = admin_url('admin.php?page=' . ABJ404_PP . '&subpage=abj404_redirects&abj404_force_view_rebuild=1');
+					echo '<p><a class="button button-secondary" href="' . esc_url($retryUrl) . '">'
+						. esc_html(__('Retry Now', '404-solution')) . '</a></p>';
+					echo '</div>';
+				}
+			}
+		}
 		foreach ($keys as $key) {
 			$notice = get_transient($key);
 			if (!is_array($notice) || empty($notice['message'])) {
