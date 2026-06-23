@@ -19,44 +19,44 @@ body.rtl .abj404-wrap,
 body.rtl .abj404-status-warning,
 [dir="rtl"] .abj404-status-warning {
     border-left: none;
-    border-right: 4px solid var(--abj404-warning-border, #f0b429);
+    border-right: 4px solid var(--abj404-warning-border);
 }
 
 body.rtl .abj404-status-error,
 [dir="rtl"] .abj404-status-error {
     border-left: none;
-    border-right: 4px solid var(--abj404-danger-border, #d63638);
+    border-right: 4px solid var(--abj404-danger-border);
 }
 
 body.rtl .abj404-error-log-entry,
 [dir="rtl"] .abj404-error-log-entry {
     border-left: none;
-    border-right: 4px solid #d63638;
+    border-right: 4px solid var(--abj404-danger-border);
 }
 
 /* ===== Notice and Alert Borders ===== */
 body.rtl .abj404-notice,
 [dir="rtl"] .abj404-notice {
     border-left: none;
-    border-right: 3px solid var(--abj404-accent, #2271b1);
+    border-right: 3px solid var(--abj404-accent);
 }
 
 body.rtl .abj404-highlight,
 [dir="rtl"] .abj404-highlight {
     border-left: none;
-    border-right: 4px solid var(--abj404-primary, #2271b1);
+    border-right: 4px solid var(--abj404-primary);
 }
 
 body.rtl .abj404-danger-highlight,
 [dir="rtl"] .abj404-danger-highlight {
     border-left: none !important;
-    border-right: 4px solid var(--abj404-danger-text, #d63638) !important;
+    border-right: 4px solid var(--abj404-danger-text) !important;
 }
 
 body.rtl .abj404-info-box,
 [dir="rtl"] .abj404-info-box {
     border-left: none;
-    border-right: 4px solid var(--abj404-primary, #2271b1);
+    border-right: 4px solid var(--abj404-primary);
 }
 
 /* ===== Margins - Swap Left/Right ===== */
@@ -108,9 +108,21 @@ body.rtl .abj404-table td,
     text-align: right;
 }
 
-body.rtl .abj404-pagination,
-[dir="rtl"] .abj404-pagination {
+/* Pagination right-justifies via margin-left:auto in LTR; mirror it to the
+   left edge in RTL. */
+body.rtl .abj404-filter-bar .abj404-pagination,
+[dir="rtl"] .abj404-filter-bar .abj404-pagination {
     text-align: left;
+    margin-left: 0;
+    margin-right: auto;
+}
+
+/* The search box right-aligns in the list-top row via margin-left:auto in
+   LTR; mirror it to the left in RTL. */
+body.rtl .abj404-list-top .abj404-search-box,
+[dir="rtl"] .abj404-list-top .abj404-search-box {
+    margin-left: 0;
+    margin-right: auto;
 }
 
 /* ===== Tree Indentation - Swap padding-left to padding-right ===== */
@@ -184,7 +196,7 @@ body.rtl .abj404-tree-level-10,
 body.rtl .abj404-sidebar,
 [dir="rtl"] .abj404-sidebar {
     border-right: none;
-    border-left: 1px solid var(--abj404-border-light, #e0e0e0);
+    border-left: 1px solid var(--abj404-border-light);
 }
 
 body.rtl .abj404-sidebar:last-child,
@@ -314,13 +326,3 @@ body.rtl .abj404-filter-btn,
     margin-right: -5px;
 }
 
-/* ===== Content Tabs ===== */
-body.rtl .abj404-content-tabs,
-[dir="rtl"] .abj404-content-tabs {
-    direction: rtl;
-}
-
-body.rtl .abj404-content-tab,
-[dir="rtl"] .abj404-content-tab {
-    float: right;
-}

@@ -210,6 +210,9 @@ msgstr "<a>Debug-Datei anzeigen</a>."
 msgid "Action Taken"
 msgstr "Durchgeführte Aktion"
 
+msgid "Add"
+msgstr "Hinzufügen"
+
 msgid "Add Redirect"
 msgstr "Weiterleitung hinzufügen"
 
@@ -1842,6 +1845,9 @@ msgstr "Ungültiges Sicherheitstoken"
 msgid "Unauthorized"
 msgstr "Nicht autorisiert"
 
+msgid "Unauthorized: Insufficient permissions"
+msgstr "Nicht autorisiert: Unzureichende Berechtigungen"
+
 msgid "Invalid mode"
 msgstr "Ungültiger Modus"
 
@@ -2082,13 +2088,6 @@ msgid "Data may not be immediately updated. Refresh to see latest changes."
 msgstr "Die Daten werden möglicherweise nicht sofort aktualisiert. Aktualisieren Sie, um die neuesten Änderungen anzuzeigen."
 
 #: includes/View.php
-msgid "Last updated: %s"
-msgstr "Letzte Aktualisierung: %s"
-#: includes/View.php
-msgid "Last checked: %s"
-msgstr "Zuletzt geprueft: %s"
-
-#: includes/View.php
 msgid "Refresh scheduled"
 msgstr "Aktualisierung geplant"
 
@@ -2099,38 +2098,6 @@ msgstr "Aktualisierung laeuft"
 #: includes/View.php
 msgid "Refresh paused"
 msgstr "Aktualisierung pausiert"
-
-#: includes/WordPress_Connector.php
-msgid "second"
-msgstr "zweite"
-
-#: includes/WordPress_Connector.php
-msgid "seconds"
-msgstr "Sekunden"
-
-#: includes/WordPress_Connector.php
-msgid "minute"
-msgstr "Minute"
-
-#: includes/WordPress_Connector.php
-msgid "minutes"
-msgstr "Minuten"
-
-#: includes/WordPress_Connector.php
-msgid "hour"
-msgstr "Stunde"
-
-#: includes/WordPress_Connector.php
-msgid "hours"
-msgstr "Std."
-
-#: includes/WordPress_Connector.php
-msgid "day"
-msgstr "Tag"
-
-#: includes/WordPress_Connector.php
-msgid "ago"
-msgstr "vor"
 
 #: includes/SetupWizard.php
 msgid "Security check failed. Please try again."
@@ -3774,6 +3741,10 @@ msgstr "Bitte warten Sie, bevor Sie eine weitere Supportanfrage senden."
 msgid "Invalid support request source."
 msgstr "Ungültige Quelle der Supportanfrage."
 
+#: includes/ajax/AjaxRequestContractValidator.php
+msgid "Invalid AJAX request."
+msgstr "Ungültige AJAX-Anfrage."
+
 #: includes/ajax/Ajax_SupportRequest.php
 msgid "Failed to send support request. Please try again later."
 msgstr "Supportanfrage konnte nicht gesendet werden. Bitte versuchen Sie es später erneut."
@@ -3933,3 +3904,179 @@ msgstr "Der Neuaufbau der Ansichts-/Treffer-Daten wurde nach %d aufeinanderfolge
 #: 404-solution.php
 msgid "Retry Now"
 msgstr "Jetzt erneut versuchen"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "literal text"
+msgstr "literal text"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "literal"
+msgstr "literal"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "%1$d of %2$d"
+msgstr "%1$d of %2$d"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "%s item"
+msgid_plural "%s items"
+msgstr[0] "%s item"
+msgstr[1] "%s items"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Unknown purge result: %s"
+msgstr "Error: Unknown purge result: %s"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "%s redirect entries were moved to the trash."
+msgstr "%s redirect entries were moved to the trash."
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Unable to update redirect data. Repository result: %s"
+msgstr "Error: Unable to update redirect data. Repository result: %s"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Loading status..."
+msgstr "Loading status..."
+
+#: includes/
+msgid "Loading..."
+msgstr "Laden..."
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Collected URL deletion value must be a number greater than or equal to zero"
+msgstr "Error: Collected URL deletion value must be a number greater than or equal to zero"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Manual redirect deletion value must be a number greater than or equal to zero"
+msgstr "Error: Manual redirect deletion value must be a number greater than or equal to zero"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Log deletion value must be a number greater than or equal to zero"
+msgstr "Error: Log deletion value must be a number greater than or equal to zero"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Auto redirect deletion value must be a number greater than or equal to zero"
+msgstr "Error: Auto redirect deletion value must be a number greater than or equal to zero"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Auto-redirect expiration days must be a number greater than or equal to zero"
+msgstr "Error: Auto-redirect expiration days must be a number greater than or equal to zero"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Maximum log disk usage must be a number greater than zero"
+msgstr "Error: Maximum log disk usage must be a number greater than zero"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Keep my redirects (%d)"
+msgstr "Keep my redirects (%d)"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "%d minutes ago"
+msgstr "%d minutes ago"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "%d hours ago"
+msgstr "%d hours ago"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "%d days ago"
+msgstr "%d days ago"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Unknown status filter. Valid values are: manual, auto, regex (or omit for all active)."
+msgstr "Unknown status filter. Valid values are: manual, auto, regex (or omit for all active)."
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "The \"to\" URL must be a relative path or an http/https URL."
+msgstr "The \"to\" URL must be a relative path or an http/https URL."
+
+msgid "Contact your hosting provider. This is usually caused by a database quota, tablespace limit, or full /tmp partition - not necessarily a full disk."
+msgstr "Wenden Sie sich an Ihren Hosting-Anbieter. Dies wird meist durch ein Datenbankkontingent, ein Tablespace-Limit oder eine volle /tmp-Partition verursacht - nicht zwingend durch eine volle Festplatte."
+
+msgid "A database lock wait timeout occurred. If this persists, contact your host - another process may be holding a long-running lock."
+msgstr "Es ist eine Wartezeituberschreitung bei einer Datenbanksperre aufgetreten. Wenn dies weiterhin auftritt, wenden Sie sich an Ihren Host - moglicherweise halt ein anderer Prozess eine lang laufende Sperre."
+
+msgid "404 Solution cannot function correctly: the database table %s is missing, and the plugin tried to recreate it but the CREATE TABLE statement could not be executed. This almost always means the WordPress database user does not have permission to run CREATE TABLE (and likely ALTER TABLE / CREATE INDEX) on this database. Until this is fixed, the plugin cannot record 404s, serve redirects, or generate suggestions. To fix it: ask your hosting provider or database administrator to grant CREATE, ALTER, and INDEX privileges to the WordPress database user for this site, then reload this page. Alternatively, restore the missing table from a recent database backup."
+msgstr "404 Solution kann nicht korrekt funktionieren: Die Datenbanktabelle %s fehlt, und das Plugin hat versucht, sie neu zu erstellen, aber die CREATE TABLE-Anweisung konnte nicht ausgefuhrt werden. Das bedeutet fast immer, dass der WordPress-Datenbankbenutzer keine Berechtigung hat, CREATE TABLE (und wahrscheinlich ALTER TABLE / CREATE INDEX) in dieser Datenbank auszufuhren. Bis dies behoben ist, kann das Plugin keine 404er aufzeichnen, keine Weiterleitungen ausliefern und keine Vorschlage erzeugen. So beheben Sie es: Bitten Sie Ihren Hosting-Anbieter oder Datenbankadministrator, dem WordPress-Datenbankbenutzer fur diese Website die Rechte CREATE, ALTER und INDEX zu gewahren, und laden Sie diese Seite danach neu. Alternativ konnen Sie die fehlende Tabelle aus einer aktuellen Datenbanksicherung wiederherstellen."
+
+msgid "Original database error: %s"
+msgstr "Ursprunglicher Datenbankfehler: %s"
+
+msgid "A database temporary table is corrupted - this is usually caused by a full or failing disk. Please contact your host. (MySQL error 1034)"
+msgstr "Eine temporare Datenbanktabelle ist beschadigt - dies wird meist durch eine volle oder ausfallende Festplatte verursacht. Bitte wenden Sie sich an Ihren Host. (MySQL-Fehler 1034)"
+
+msgid "Permalink cache appears empty after rebuild - suggestions may be degraded. Try rebuilding again or check available disk space."
+msgstr "Der Permalink-Cache scheint nach dem Neuaufbau leer zu sein - Vorschlage konnen beeintrachtigt sein. Versuchen Sie den Neuaufbau erneut oder prufen Sie den verfugbaren Speicherplatz."
+
+msgid "WordPress cron does not appear to be running. The earliest overdue cron event has been waiting at least %d hours, so cron-dependent plugin features (staged view-build, daily cleanup, log updates, digest emails) are not advancing. To resolve: if DISABLE_WP_CRON is set in wp-config.php either remove it, or configure a system cron job that requests wp-cron.php periodically. To force the redirect view to rebuild right now in your browser (workaround while cron is broken), open the 404 Solution Redirects page with ?abj404_force_view_rebuild=1 appended to the URL."
+msgstr "WordPress-Cron scheint nicht zu laufen. Das fruheste uberfallige Cron-Ereignis wartet seit mindestens %d Stunden, daher kommen cron-abhangige Plugin-Funktionen (stufenweiser View-Aufbau, tagliche Bereinigung, Log-Aktualisierungen, Digest-E-Mails) nicht voran. Losung: Wenn DISABLE_WP_CRON in wp-config.php gesetzt ist, entfernen Sie es oder richten Sie einen System-Cronjob ein, der wp-cron.php regelmassig aufruft. Um die Weiterleitungsansicht jetzt im Browser neu aufzubauen (Ubergangslosung, solange Cron defekt ist), offnen Sie die 404-Solution-Weiterleitungsseite mit angehangtem ?abj404_force_view_rebuild=1."
+
+msgid "Scheduling the 404 Solution staged view-build cron event failed. The build will not advance in the background until this clears. This usually indicates the WordPress cron lock is held, the cron option is unwritable, or a custom cron implementation rejected the event. Check your hosting provider and any cron-replacement plugins. To force the redirect view to rebuild right now in your browser (workaround while cron scheduling is failing), open the 404 Solution Redirects page with ?abj404_force_view_rebuild=1 appended to the URL."
+msgstr "Das Planen des Cron-Ereignisses fur den stufenweisen View-Aufbau von 404 Solution ist fehlgeschlagen. Der Aufbau wird im Hintergrund nicht fortgesetzt, bis dies behoben ist. Dies weist meist darauf hin, dass die WordPress-Cron-Sperre gehalten wird, die Cron-Option nicht beschreibbar ist oder eine eigene Cron-Implementierung das Ereignis abgelehnt hat. Prufen Sie Ihren Hosting-Anbieter und Cron-Ersatz-Plugins. Um die Weiterleitungsansicht jetzt im Browser neu aufzubauen (Ubergangslosung, solange die Cron-Planung fehlschlagt), offnen Sie die 404-Solution-Weiterleitungsseite mit angehangtem ?abj404_force_view_rebuild=1."
+
+msgid "Your PHP memory_limit (%s) is below the recommended 128M; the redirect view rebuild may fail on large sites."
+msgstr "Ihr PHP memory_limit (%s) liegt unter den empfohlenen 128M; der Neuaufbau der Weiterleitungsansicht kann auf grossen Websites fehlschlagen."
+
+msgid "The 404 Solution view-build pipeline detected filesystem host constraints that may degrade the next rebuild: "
+msgstr "Die View-Build-Pipeline von 404 Solution hat Dateisystem-Einschrankungen des Hosts erkannt, die den nachsten Neuaufbau beeintrachtigen konnen: "
+
+msgid "The 404 Solution view-build pipeline detected MySQL session-variable settings that may degrade the next rebuild: "
+msgstr "Die View-Build-Pipeline von 404 Solution hat MySQL-Sitzungsvariablen erkannt, die den nachsten Neuaufbau beeintrachtigen konnen: "
+
+msgid "Original error: %s"
+msgstr "Ursprunglicher Fehler: %s"
+
+msgid "The 404 Solution view-build pipeline halted at stage %d/11."
+msgstr "Die View-Build-Pipeline von 404 Solution wurde bei Stufe %d/11 angehalten."
+
+msgid "The 404 Solution view-build pipeline skipped optional stage %d/11."
+msgstr "Die View-Build-Pipeline von 404 Solution hat die optionale Stufe %d/11 ubersprungen."
+
+msgid "Ask your host to grant the CREATE TEMPORARY TABLES privilege to your WordPress database user so the hits aggregate column can be populated."
+msgstr "Bitten Sie Ihren Host, dem WordPress-Datenbankbenutzer das Recht CREATE TEMPORARY TABLES zu gewahren, damit die Treffer-Aggregatspalte gefullt werden kann."
+
+msgid "Ask your host to grant the ALTER privilege to your WordPress database user."
+msgstr "Bitten Sie Ihren Host, dem WordPress-Datenbankbenutzer das ALTER-Recht zu gewahren."
+
+msgid "Ask your host to grant ALTER + DROP + CREATE on the database used by WordPress so the view-build swap can complete."
+msgstr "Bitten Sie Ihren Host, ALTER + DROP + CREATE fur die von WordPress verwendete Datenbank zu gewahren, damit der View-Build-Austausch abgeschlossen werden kann."
+
+msgid "Ask your host to review your WordPress database user privileges."
+msgstr "Bitten Sie Ihren Host, die Rechte Ihres WordPress-Datenbankbenutzers zu prufen."
+
+msgid "This database does not support session-scoped GET_LOCK named locks. The plugin is using a WordPress option-row fallback to coordinate the staged view-build. Common on PlanetScale, Vitess, and split-routing ProxySQL deployments."
+msgstr "Diese Datenbank unterstutzt keine sitzungsbezogenen GET_LOCK-Namenssperren. Das Plugin verwendet einen WordPress-Optionszeilen-Fallback, um den stufenweisen View-Aufbau zu koordinieren. Haufig bei PlanetScale-, Vitess- und Split-Routing-ProxySQL-Installationen."
+
+# translation-verified: en-fallback awaiting native pass (t_260618_093531_671)
+#: includes/view/View_CapturedURLsTable.php:332
+msgid "Preparing the captured 404s table. The list is still loading and will appear in a moment."
+msgstr "Preparing the captured 404s table. The list is still loading and will appear in a moment."
+
+#: includes/admin/AdminTableColumnHeaders.php:178
+msgid "Sorting by this column is being prepared for your number of URLs (%d%% complete). The list shows newest first until it is ready."
+msgstr "Die Sortierung nach dieser Spalte wird fur Ihre Anzahl an URLs vorbereitet (%d%% abgeschlossen). Bis dahin zeigt die Liste die neuesten Eintrage zuerst."
+
+#: includes/view/View_Shared.php:247
+msgid "Sorting by this column is unavailable on this site. The list shows newest first."
+msgstr "Die Sortierung nach dieser Spalte ist auf dieser Website nicht verfugbar. Die Liste zeigt die neuesten Eintrage zuerst."

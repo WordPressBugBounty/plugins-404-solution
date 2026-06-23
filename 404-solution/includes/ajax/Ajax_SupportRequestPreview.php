@@ -23,11 +23,10 @@ if (!defined('ABSPATH')) {
  *     can preview the payload as many times as they want without
  *     consuming their per-5-minute send budget.
  *
- * Wired in WordPress_Connector::registerAdminHooks() under the action
+ * Wired in WordPressHookRegistrar::registerAdminHooks() under the action
  * name 'wp_ajax_abj404_support_request_preview'.
  */
 class ABJ_404_Solution_Ajax_SupportRequestPreview {
-    use ABJ_404_Solution_AjaxSecurityTrait;
 
     /** Nonce action used by both wp_create_nonce() and wp_verify_nonce(). */
     const NONCE_ACTION = 'abj404_support_request_preview';
@@ -43,6 +42,18 @@ class ABJ_404_Solution_Ajax_SupportRequestPreview {
 
     /** @var self|null */
     private static $instance = null;
+    /**
+     * Test seam: install or clear the cached singleton instance without
+     * private-field reflection. Pass null to reset between tests; pass a
+     * configured instance (or double) to install it (M105 singleton-reset seam).
+     *
+     * @param self|null $instance
+     * @return void
+     */
+    public static function setInstance($instance) {
+        self::$instance = $instance;
+    }
+
 
     /** @return self */
     public static function getInstance(): self {
@@ -71,7 +82,11 @@ class ABJ_404_Solution_Ajax_SupportRequestPreview {
      * @return void
      */
     public function handleRequest(): void {
-        self::requireAdminWithNonce(self::NONCE_ACTION);
+        if (!ABJ_404_Solution_AjaxRequestContractValidator::requireValidCurrentRequest('ajax-support-request-preview')) {
+            return;
+        }
+
+        abj_service('ajax_security_gate')->requireAdminWithNonce(self::NONCE_ACTION);
 
         $triggeredFromRaw = isset($_POST['triggered_from']) && is_scalar($_POST['triggered_from'])
             ? (string)$_POST['triggered_from'] : '';
@@ -179,18 +194,21 @@ class ABJ_404_Solution_Ajax_SupportRequestPreview {
      * @return string
      */
     private static function resolveDebugLogExcerpt(): string {
-        if (!function_exists('abj_service')) {
+        if (!function_exists('abj_service_optional')) {
             return '';
         }
-        try {
-            $logger = abj_service('logging');
-            if (is_object($logger) && method_exists($logger, 'getSanitizedLogExcerptForSupport')) {
+        $logger = abj_service_optional('logging');
+        if (is_object($logger) && method_exists($logger, 'getSanitizedLogExcerptForSupport')) {
+            try {
                 $excerpt = $logger->getSanitizedLogExcerptForSupport();
                 return is_string($excerpt) ? $excerpt : '';
+            } catch (\Throwable $e) {
+                ABJ_404_Solution_FeedbackTransportLog::log(
+                    'warn',
+                    'Support request preview debug-log excerpt unavailable: ' . $e->getMessage()
+                );
+                return '';
             }
-        // allow-silent-catch: log excerpt is best-effort context for the support-request preview; a Logging service failure must not block the user-initiated preview, and the failure is already surfaced via the plugin's own logging path
-        } catch (\Throwable $e) {
-            return '';
         }
         return '';
     }

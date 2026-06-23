@@ -9,7 +9,17 @@ class ABJ_404_Solution_WPNotices {
     
     /** @var array<ABJ_404_Solution_WPNotice> */
     private static $adminNotices = array();
-    
+
+    /**
+     * Test seam: clear the accumulated admin-notice queue without private-field
+     * reflection. Resets to the empty-array default (M105 singleton-reset seam).
+     *
+     * @return void
+     */
+    public static function resetForTests(): void {
+        self::$adminNotices = array();
+    }
+
     /** Display a message with the specified importance level.
      * @param string $noticeLevel see ABJ_404_Solution_WPNotice for notice levels.
      * @param string $message
@@ -43,15 +53,14 @@ class ABJ_404_Solution_WPNotices {
      */
     static function echoAdminNotices() {
     	$f = abj_service('functions');
-    	$abj404logic = abj_service('plugin_logic');
 
     	$allHTML = '';
-    	if (!$abj404logic->userIsPluginAdmin()) {
+    	if (!abj_service('admin_access_policy')->isPluginAdmin()) {
             return '';
         }
 
         foreach (self::$adminNotices as $oneNotice) {
-            $html = ABJ_404_Solution_Functions::readFileContents(ABJ404_PATH . "/includes/html/notice.html");
+            $html = ABJ_404_Solution_FileSystemService::readFileContents(ABJ404_PATH . "/includes/html/notice.html");
             $html = $f->str_replace('{class}', 'notice is-dismissable is-dismissible ' . $oneNotice->getType(), $html);
             $msg = $oneNotice->getMessage();
             $html = $f->str_replace('{message}', esc_html(is_string($msg) ? $msg : (is_scalar($msg) ? (string)$msg : '')), $html);

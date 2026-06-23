@@ -54,7 +54,7 @@ class ABJ_404_Solution_AjaxStageDiagnostics {
             'stage' => (string)$stage,
             'query_label' => $diagnostics['query_label'],
             'what_happening' => $diagnostics['what_happening'],
-            'time_ms' => (int)round(microtime(true) * 1000),
+            'time_ms' => (int)round(abj_clock()->nowFloat() * 1000),
         );
         $events = array();
         if (function_exists('get_transient')) {
@@ -170,8 +170,8 @@ class ABJ_404_Solution_AjaxStageDiagnostics {
                 'what_happening' => 'Adding read-side sort indexes (10/11)',
             ),
             'staged_build_s11_swap' => array(
-                'query_label' => 'RENAME TABLE wp_abj404_view_build TO wp_abj404_view_done', // allow-prefix-literal: display-only diagnostic label.
-                'what_happening' => 'Atomic table swap (11/11)',
+                'query_label' => 'Finalize admin table refresh',
+                'what_happening' => 'Finalizing admin table refresh (11/11)',
             ),
         );
         if (array_key_exists($stage, $map)) {

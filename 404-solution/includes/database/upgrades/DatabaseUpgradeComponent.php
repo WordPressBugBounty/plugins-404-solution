@@ -1,0 +1,184 @@
+<?php
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+/**
+ * Shared dependency carrier for DatabaseUpgradesEtc delegates.
+ */
+abstract class ABJ_404_Solution_DatabaseUpgradeComponent {
+
+    /** @var ABJ_404_Solution_DatabaseUpgradeCoordinator */
+    private $owner;
+
+    /** @var ABJ_404_Solution_DataAccess */
+    protected $dao;
+
+    /** @var ABJ_404_Solution_DatabaseCore */
+    protected $dbCore;
+
+    /** @var ABJ_404_Solution_ContentRepositoryInterface */
+    protected $contentRepo;
+
+    /** @var ABJ_404_Solution_ViewReadServiceInterface */
+    protected $viewRead;
+
+    /** @var ABJ_404_Solution_LogsRepositoryInterface */
+    protected $logsRepo;
+
+    /** @var ABJ_404_Solution_PluginUpdateMetadataRepository */
+    protected $pluginUpdateRepo;
+
+    /** @var ABJ_404_Solution_Logging */
+    protected $logger;
+
+    /** @var ABJ_404_Solution_Functions */
+    protected $f;
+
+    /** @var ABJ_404_Solution_PermalinkCache */
+    protected $permalinkCache;
+
+    /** @var ABJ_404_Solution_SynchronizationUtils */
+    protected $syncUtils;
+
+    /** @var ABJ_404_Solution_PluginLogicInterface */
+    protected $logic;
+
+    /** @var ABJ_404_Solution_NGramFilter */
+    protected $ngramFilter;
+
+    /** @var mixed */
+    protected $ngramExtractor;
+
+    /** @var mixed */
+    protected $ngramCacheRepository;
+
+    /** @var mixed */
+    protected $ngramCoveragePolicy;
+
+    /** @var mixed */
+    protected $ngramRebuilder;
+
+    /** @var ABJ_404_Solution_CronScheduler|null Optional injected cron scheduler; null falls back to abj_cron_scheduler(). */
+    protected $cronScheduler;
+
+    /**
+     * @param array<string, mixed> $deps
+     */
+    public function __construct(ABJ_404_Solution_DatabaseUpgradeCoordinator $owner, array $deps) {
+        $this->owner = $owner;
+        $this->replaceDatabaseUpgradeDependencies($deps);
+    }
+
+    /**
+     * @param array<string, mixed> $deps
+     * @return void
+     */
+    public function replaceDatabaseUpgradeDependencies(array $deps) {
+        foreach ($deps as $name => $value) {
+            $this->$name = $value;
+        }
+    }
+
+    protected function upgrades(): ABJ_404_Solution_DatabaseUpgradeCoordinator {
+        return $this->owner;
+    }
+
+    /**
+     * Case-insensitive "does this column exist" probe. Delegates to the
+     * canonical-url backfill component's implementation so the SHOW COLUMNS
+     * probe has a single source of truth. Components that own the real probe
+     * (the canonical-url backfill) override this; every other component inherits
+     * this shared delegator.
+     *
+     * @param string $tableName  Fully-qualified table name.
+     * @param string $columnName Column to look for.
+     * @return bool
+     */
+    public function columnExists(string $tableName, string $columnName): bool {
+        return $this->upgrades()->canonicalUrlBackfillUpgrade()->columnExists($tableName, $columnName);
+    }
+
+    /**
+     * Read a resumable id cursor from a WordPress option, clamped to a
+     * non-negative int. Shared by the chunked backfill drains so the cursor I/O
+     * has one definition.
+     *
+     * @param string $option
+     * @return int
+     */
+    protected function readCursorOption(string $option): int {
+        if ($option === '' || !function_exists('get_option')) {
+            return 0;
+        }
+        $raw = get_option($option, 0);
+        return max(0, is_scalar($raw) ? (int)$raw : 0);
+    }
+
+    /**
+     * Persist a resumable id cursor to a WordPress option (autoload=false,
+     * non-negative). Shared by the chunked backfill drains.
+     *
+     * @param string $option
+     * @param int $cursor
+     * @return void
+     */
+    protected function writeCursorOption(string $option, int $cursor): void {
+        if ($option === '' || !function_exists('update_option')) {
+            return;
+        }
+        update_option($option, (string)max(0, $cursor), false);
+    }
+
+    /** @return string|null */
+    protected function getUpgradeRuntimeId() {
+        return ABJ_404_Solution_DatabaseUpgradeRuntimeState::getRuntimeId();
+    }
+
+    protected function getCanonicalUrlBackfillChunkSize(): int {
+        return ABJ_404_Solution_DatabaseUpgradeRuntimeState::CANONICAL_URL_BACKFILL_CHUNK_SIZE;
+    }
+
+    protected function getCanonicalUrlBackfillTimeBudgetSec(): float {
+        return ABJ_404_Solution_DatabaseUpgradeRuntimeState::CANONICAL_URL_BACKFILL_TIME_BUDGET_SEC;
+    }
+
+    protected function getLogsv2CanonicalUrlBackfillTimeBudgetSec(): float {
+        return ABJ_404_Solution_DatabaseUpgradeRuntimeState::LOGSV2_CANONICAL_URL_BACKFILL_TIME_BUDGET_SEC;
+    }
+
+    protected function getLogsv2CanonicalUrlBackfillCompleteOption(): string {
+        return ABJ_404_Solution_DatabaseUpgradeRuntimeState::LOGSV2_CANONICAL_URL_BACKFILL_COMPLETE_OPTION;
+    }
+
+    protected function getRedirectsCanonicalUrlBackfillCompleteOption(): string {
+        return ABJ_404_Solution_DatabaseUpgradeRuntimeState::REDIRECTS_CANONICAL_URL_BACKFILL_COMPLETE_OPTION;
+    }
+
+    protected function getRedirectsDenormBackfillChunkSize(): int {
+        return ABJ_404_Solution_DatabaseUpgradeRuntimeState::REDIRECTS_DENORM_BACKFILL_CHUNK_SIZE;
+    }
+
+    protected function getRedirectsDenormBackfillTimeBudgetSec(): float {
+        return ABJ_404_Solution_DatabaseUpgradeRuntimeState::REDIRECTS_DENORM_BACKFILL_TIME_BUDGET_SEC;
+    }
+
+    protected function getRedirectsDenormReconcileChunkSize(): int {
+        return ABJ_404_Solution_DatabaseUpgradeRuntimeState::REDIRECTS_DENORM_RECONCILE_CHUNK_SIZE;
+    }
+
+    protected function getRedirectsDenormReconcileTimeBudgetSec(): float {
+        return ABJ_404_Solution_DatabaseUpgradeRuntimeState::REDIRECTS_DENORM_RECONCILE_TIME_BUDGET_SEC;
+    }
+
+    protected function getRedirectsDenormReconcileCursorOption(): string {
+        return ABJ_404_Solution_DatabaseUpgradeRuntimeState::REDIRECTS_DENORM_RECONCILE_CURSOR_OPTION;
+    }
+
+    /** @return array<int, string> */
+    protected function getPluginTableSuffixes(): array {
+        return ABJ_404_Solution_DatabaseUpgradeRuntimeState::getPluginTableSuffixes();
+    }
+
+}

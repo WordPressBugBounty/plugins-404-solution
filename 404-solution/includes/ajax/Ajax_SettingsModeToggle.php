@@ -10,10 +10,21 @@ if (!defined('ABSPATH')) {
  */
 
 class ABJ_404_Solution_Ajax_SettingsModeToggle {
-    use ABJ_404_Solution_AjaxSecurityTrait;
 
     /** @var self|null */
     private static $instance = null;
+    /**
+     * Test seam: install or clear the cached singleton instance without
+     * private-field reflection. Pass null to reset between tests; pass a
+     * configured instance (or double) to install it (M105 singleton-reset seam).
+     *
+     * @param self|null $instance
+     * @return void
+     */
+    public static function setInstance($instance) {
+        self::$instance = $instance;
+    }
+
 
     /** @return self */
     public static function getInstance(): self {
@@ -38,12 +49,15 @@ class ABJ_404_Solution_Ajax_SettingsModeToggle {
      * @return void
      */
     function handleModeToggle(): void {
-        self::requireAdminWithNonce('abj404_mode_toggle');
+        if (!ABJ_404_Solution_AjaxRequestContractValidator::requireValidCurrentRequest('ajax-settings-mode-toggle')) {
+            return;
+        }
+
+        abj_service('ajax_security_gate')->requireAdminWithNonce('abj404_mode_toggle');
 
         $container = ABJ_404_Solution_ServiceContainer::getInstance();
         /** @var ABJ_404_Solution_Functions $functions */
         $functions = $container->has('functions') ? $container->get('functions') : abj_service('functions');
-        $abj404logic = abj_service('plugin_logic');
 
         $mode = $functions->getPostOrGetSanitize('mode');
 
@@ -54,7 +68,7 @@ class ABJ_404_Solution_Ajax_SettingsModeToggle {
         }
 
         // Set the mode
-        $result = $abj404logic->setSettingsMode($mode);
+        $result = abj_service('settings_mode_preference')->setMode($mode);
 
         if ($result !== false) {
             wp_send_json_success(array(
@@ -67,7 +81,16 @@ class ABJ_404_Solution_Ajax_SettingsModeToggle {
                 $logger->warn('Ajax_SettingsModeToggle::handleModeToggle: setSettingsMode("' . $mode .
                     '") returned false (option write failed or value unchanged). Returning HTTP 500 to AJAX caller.');
             }
-            wp_send_json_error(array('message' => __('Failed to update settings mode', '404-solution')), 500);
+            // Surface the wpdb-reported failure so the admin can self-diagnose
+            // (corrupted user_meta table, read-only DB, etc.). When
+            // update_user_meta() returns false because the value is unchanged
+            // rather than because of a DB error, last_error is empty and the
+            // framing message stands alone.
+            global $wpdb;
+            $dbError = isset($wpdb->last_error) && is_string($wpdb->last_error) ? $wpdb->last_error : '';
+            $framing = __('Failed to update settings mode', '404-solution');
+            $message = $dbError !== '' ? $framing . ' (DB error: ' . $dbError . ')' : $framing;
+            wp_send_json_error(array('message' => $message), 500);
         }
     }
 }

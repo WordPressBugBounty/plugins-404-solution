@@ -14,10 +14,21 @@ if (!defined('ABSPATH')) {
  * preserving the DB_VERSION key so a settings restore does not trigger a schema downgrade.
  */
 class ABJ_404_Solution_Ajax_RestoreDefaults {
-    use ABJ_404_Solution_AjaxSecurityTrait;
 
     /** @var self|null */
     private static $instance = null;
+    /**
+     * Test seam: install or clear the cached singleton instance without
+     * private-field reflection. Pass null to reset between tests; pass a
+     * configured instance (or double) to install it (M105 singleton-reset seam).
+     *
+     * @param self|null $instance
+     * @return void
+     */
+    public static function setInstance($instance) {
+        self::$instance = $instance;
+    }
+
 
     /** @return self */
     public static function getInstance(): self {
@@ -45,20 +56,24 @@ class ABJ_404_Solution_Ajax_RestoreDefaults {
      * @return void
      */
     function handleRestoreDefaults(): void {
-        self::requireAdminWithNonce('abj404_restore_defaults');
+        if (!ABJ_404_Solution_AjaxRequestContractValidator::requireValidCurrentRequest('ajax-restore-defaults')) {
+            return;
+        }
+
+        abj_service('ajax_security_gate')->requireAdminWithNonce('abj404_restore_defaults');
 
         $abj404logic = abj_service('plugin_logic');
 
-        $defaults = $abj404logic->getDefaultOptions();
+        $defaults = ABJ_404_Solution_PluginLogicDefaults::defaults();
 
         // Preserve DB_VERSION so the restore does not appear as a schema
         // downgrade to the upgrade engine.
-        $current = $abj404logic->getOptions(true);
+        $current = abj_service('options_repository')->getOptions(true);
         if (is_array($current) && array_key_exists('DB_VERSION', $current)) {
             $defaults['DB_VERSION'] = $current['DB_VERSION'];
         }
 
-        $abj404logic->updateOptions($defaults);
+        abj_service('options_repository')->updateOptions($defaults);
 
         wp_send_json_success(array(
             'message' => __('Settings restored to defaults.', '404-solution'),

@@ -1,5 +1,5 @@
 
-<div class="abj404-pagination tablenav abj404-pagination-right"
+<div class="abj404-pagination tablenav-pages abj404-pagination-right"
      data-pagination-ajax-url="{data-pagination-ajax-url}"
      data-pagination-ajax-action="{data-pagination-ajax-action}"
      data-pagination-ajax-subpage="{data-pagination-ajax-subpage}"
@@ -13,34 +13,13 @@
      data-pagination-current-score-range="{data-pagination-current-score-range}"
      data-pagination-current-logsid="{data-pagination-current-logsid}"
      data-pagination-auto-refresh="{data-pagination-auto-refresh}"
-     data-pagination-refresh-started-text="{data-pagination-refresh-started-text}"
-     data-pagination-refresh-finished-text="{data-pagination-refresh-finished-text}"
-     data-pagination-refresh-available-text="{data-pagination-refresh-available-text}">
-    {showSearchFilter}
-    <label for="abj404-search-filter" class="abj404-sr-only">{Filter results}</label>
-    <input type="search" id="abj404-search-filter" name="searchFilter" placeholder="{(Type to filter)}" value="{filterText}"
-           data-lpignore='true' disabled aria-describedby="abj404-search-hint" />
-    <span id="abj404-search-hint" class="abj404-sr-only">{Press Enter to search}</span>
-    <!-- This comment allows us to hide or show the search filter. -->
-
-    <div class="abj404-rows-per-page">
-        <label for="abj404-rows-perpage">{TEXT_SHOW_ROWS}</label>
-        <select class="perpage" id="abj404-rows-perpage" name="perpage" onchange="paginationLinksChange(this);">
-            <option value="3">3</option>
-            <option value="5">5</option>
-            <option value="10">10</option>
-            <option value="25">25</option>
-            <option value="50">50</option>
-            <option value="100">100</option>
-            <option value="200">200</option>
-            <option value="500">500</option>
-        </select>
-    </div>
-
-    <div class="abj404-pagination-info">{TEXT_BEFORE_LINKS}</div>
+     data-pagination-refresh-available-text="{data-pagination-refresh-available-text}"
+     data-lazy-backfill-ajax-url="{data-lazy-backfill-ajax-url}"
+     data-lazy-backfill-nonce="{data-lazy-backfill-nonce}">
+    <span class="displaying-num abj404-pagination-info">{TEXT_BEFORE_LINKS}</span>
     <span class="abj404-refresh-status" aria-live="polite"></span>
 
-    <nav class="abj404-pagination-controls" aria-label="{Pagination}">
+    <nav class="pagination-links abj404-pagination-controls" aria-label="{Pagination}">
         {BTN_FIRST_PAGE}
         {BTN_PREV_PAGE}
         <span class="abj404-pagination-text">{TEXT_CURRENT_PAGE}</span>

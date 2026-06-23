@@ -94,6 +94,10 @@ msgstr ""
 msgid "Unauthorized"
 msgstr ""
 
+#: includes/ajax/AjaxSecurityGate.php:96
+msgid "Unauthorized: Insufficient permissions"
+msgstr ""
+
 #: includes/ajax/Ajax_CrossPluginImporter.php:33
 msgid "Invalid source plugin."
 msgstr ""
@@ -237,6 +241,10 @@ msgstr ""
 #: includes/ajax/Ajax_SupportRequest.php:107
 #: includes/ajax/Ajax_SupportRequestPreview.php:94
 msgid "Invalid support request source."
+msgstr ""
+
+#: includes/ajax/AjaxRequestContractValidator.php
+msgid "Invalid AJAX request."
 msgstr ""
 
 #. translators: %d = numeric HTTP status code returned by the developer endpoint.
@@ -2192,6 +2200,12 @@ msgstr ""
 msgid "Loading status…"
 msgstr ""
 
+#: includes/admin/RedirectsTablePagePresenter.php
+#: includes/view/View_CapturedURLsTable.php
+#: includes/admin/AdminLogsPageShell.php
+msgid "Loading..."
+msgstr ""
+
 #: includes/ViewTrait_RedirectsTable.php:402
 #: includes/ViewTrait_UI.php:338
 #: includes/ViewTrait_UI.php:340
@@ -2202,8 +2216,11 @@ msgstr ""
 msgid "The plugin creates these automatically. You only need to act when the status bar above says so."
 msgstr ""
 
-#: includes/ViewTrait_RedirectsTable.php:411
-#: includes/ViewTrait_RedirectsTable.php:689
+#: includes/admin/RedirectAddModalPresenter.php:57
+msgid "Add"
+msgstr ""
+
+#: includes/admin/RedirectsTablePagePresenter.php:131
 msgid "Add Redirect"
 msgstr ""
 
@@ -2711,16 +2728,6 @@ msgstr ""
 
 #: includes/ViewTrait_Shared.php:143
 msgid "Select a page"
-msgstr ""
-
-#: includes/ViewTrait_Shared.php:356
-#, php-format
-msgid "Last updated: %s"
-msgstr ""
-
-#: includes/ViewTrait_Shared.php:362
-#, php-format
-msgid "Last checked: %s"
 msgstr ""
 
 #: includes/ViewTrait_Shared.php:368
@@ -3345,38 +3352,6 @@ msgstr ""
 msgid "Choose at least one URL"
 msgstr ""
 
-#: includes/WordPress_Connector.php:322
-msgid "second"
-msgstr ""
-
-#: includes/WordPress_Connector.php:323
-msgid "seconds"
-msgstr ""
-
-#: includes/WordPress_Connector.php:324
-msgid "minute"
-msgstr ""
-
-#: includes/WordPress_Connector.php:325
-msgid "minutes"
-msgstr ""
-
-#: includes/WordPress_Connector.php:326
-msgid "hour"
-msgstr ""
-
-#: includes/WordPress_Connector.php:327
-msgid "hours"
-msgstr ""
-
-#: includes/WordPress_Connector.php:328
-msgid "day"
-msgstr ""
-
-#: includes/WordPress_Connector.php:330
-msgid "ago"
-msgstr ""
-
 #: includes/WordPress_Connector.php:373
 msgid "Collapse All"
 msgstr ""
@@ -3429,4 +3404,65 @@ msgstr ""
 
 #: includes/WordPress_Connector.php:1458
 msgid "No access token received from authorization."
+msgstr ""
+
+msgid "Contact your hosting provider. This is usually caused by a database quota, tablespace limit, or full /tmp partition - not necessarily a full disk."
+msgstr ""
+
+msgid "A database lock wait timeout occurred. If this persists, contact your host - another process may be holding a long-running lock."
+msgstr ""
+
+msgid "404 Solution cannot function correctly: the database table %s is missing, and the plugin tried to recreate it but the CREATE TABLE statement could not be executed. This almost always means the WordPress database user does not have permission to run CREATE TABLE (and likely ALTER TABLE / CREATE INDEX) on this database. Until this is fixed, the plugin cannot record 404s, serve redirects, or generate suggestions. To fix it: ask your hosting provider or database administrator to grant CREATE, ALTER, and INDEX privileges to the WordPress database user for this site, then reload this page. Alternatively, restore the missing table from a recent database backup."
+msgstr ""
+
+msgid "Original database error: %s"
+msgstr ""
+
+msgid "A database temporary table is corrupted - this is usually caused by a full or failing disk. Please contact your host. (MySQL error 1034)"
+msgstr ""
+
+msgid "Permalink cache appears empty after rebuild - suggestions may be degraded. Try rebuilding again or check available disk space."
+msgstr ""
+
+msgid "WordPress cron does not appear to be running. The earliest overdue cron event has been waiting at least %d hours, so cron-dependent plugin features (staged view-build, daily cleanup, log updates, digest emails) are not advancing. To resolve: if DISABLE_WP_CRON is set in wp-config.php either remove it, or configure a system cron job that requests wp-cron.php periodically. To force the redirect view to rebuild right now in your browser (workaround while cron is broken), open the 404 Solution Redirects page with ?abj404_force_view_rebuild=1 appended to the URL."
+msgstr ""
+
+msgid "Scheduling the 404 Solution staged view-build cron event failed. The build will not advance in the background until this clears. This usually indicates the WordPress cron lock is held, the cron option is unwritable, or a custom cron implementation rejected the event. Check your hosting provider and any cron-replacement plugins. To force the redirect view to rebuild right now in your browser (workaround while cron scheduling is failing), open the 404 Solution Redirects page with ?abj404_force_view_rebuild=1 appended to the URL."
+msgstr ""
+
+msgid "Your PHP memory_limit (%s) is below the recommended 128M; the redirect view rebuild may fail on large sites."
+msgstr ""
+
+msgid "The 404 Solution view-build pipeline detected filesystem host constraints that may degrade the next rebuild: "
+msgstr ""
+
+msgid "The 404 Solution view-build pipeline detected MySQL session-variable settings that may degrade the next rebuild: "
+msgstr ""
+
+msgid "Original error: %s"
+msgstr ""
+
+msgid "The 404 Solution view-build pipeline halted at stage %d/11."
+msgstr ""
+
+msgid "The 404 Solution view-build pipeline skipped optional stage %d/11."
+msgstr ""
+
+msgid "Ask your host to grant the CREATE TEMPORARY TABLES privilege to your WordPress database user so the hits aggregate column can be populated."
+msgstr ""
+
+msgid "Ask your host to grant the ALTER privilege to your WordPress database user."
+msgstr ""
+
+msgid "Ask your host to grant ALTER + DROP + CREATE on the database used by WordPress so the view-build swap can complete."
+msgstr ""
+
+msgid "Ask your host to review your WordPress database user privileges."
+msgstr ""
+
+msgid "This database does not support session-scoped GET_LOCK named locks. The plugin is using a WordPress option-row fallback to coordinate the staged view-build. Common on PlanetScale, Vitess, and split-routing ProxySQL deployments."
+msgstr ""
+
+#: includes/view/View_CapturedURLsTable.php:332
+msgid "Preparing the captured 404s table. The list is still loading and will appear in a moment."
 msgstr ""

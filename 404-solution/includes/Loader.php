@@ -71,7 +71,7 @@ require_once(__DIR__ . '/bootstrap.php');
 // ABJ404_QUERY_BUDGET_LOG env var or constant points to a writable
 // directory.  Implements the deliverable of technique 4 in
 // docs/PROACTIVE_BUG_DISCOVERY.md ("reverse-proxy timeout budget audit").
-require_once(__DIR__ . '/QueryBudgetInstrumentation.php');
+require_once(__DIR__ . '/diagnostics/QueryBudgetInstrumentation.php');
 
 // Initialize the service container
 // This sets up dependency injection for all core services
@@ -84,6 +84,11 @@ ABJ_404_Solution_ErrorHandler::init();
 // is saved — including via WP-CLI (wp post update) and REST API, not only in admin.
 // Moving it outside is_admin() ensures auto-redirects are created in all contexts.
 ABJ_404_Solution_SlugChangeHandler::init();
+
+// Keep the redirects denorm display columns (dest_for_view / published_status)
+// fresh when a targeted post or term changes. Registered in all contexts
+// (admin, WP-CLI, REST) because content changes outside wp-admin too. (Step 3c.)
+ABJ_404_Solution_RedirectsDenormContentHooks::init();
 
 // System page hooks must fire on both admin and frontend
 ABJ_404_Solution_SystemPage::registerHooks();

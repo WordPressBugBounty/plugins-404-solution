@@ -26,6 +26,19 @@ class ABJ_404_Solution_UserRequest {
     /** @var string */
     private $commentPagePart = null;
     
+    /**
+     * Replace the singleton instance. Used by integration tests that need
+     * a pre-populated UserRequest (or a programmable test double) so the
+     * pipeline reads stable path / slug / query-string values without
+     * relying on `$_SERVER['REQUEST_URI']` being set during the test run.
+     *
+     * @param self|null $instance
+     * @return void
+     */
+    public static function setInstance($instance) {
+        self::$instance = $instance;
+    }
+
     /** @return self|null */
     public static function getInstance() {
         if (self::$instance == null) {
@@ -46,8 +59,9 @@ class ABJ_404_Solution_UserRequest {
         $abj404logging = abj_service('logging');
         $f = abj_service('functions');
         $abj404logic = abj_service('plugin_logic');
-        
-        $urlToParse = $f->normalizeUrlString($_SERVER['REQUEST_URI'] ?? '');
+        $sanitizer = abj_service('sanitizer');
+
+        $urlToParse = $sanitizer->normalizeUrlString($_SERVER['REQUEST_URI'] ?? '');
       	
         // if the user somehow requested an invalid URL that's too long then fix it.
         if ($f->strlen($urlToParse) > ABJ404_MAX_URL_LENGTH) {
@@ -74,14 +88,14 @@ class ABJ_404_Solution_UserRequest {
         	while ($f->strpos($urlToParse, "//") !== false) {
         		$urlToParse = $f->str_replace('//', '/', $urlToParse);
         	}
-        	$urlToParse = ltrim($abj404logic->removeHomeDirectory($urlToParse), '/');
+        	$urlToParse = ltrim($abj404logic->urlNormalization()->removeHomeDirectory($urlToParse), '/');
             $urlToParse = get_site_url() . '/' . $urlToParse;
         }
         
         $urlParts = parse_url($urlToParse);
         if (!is_array($urlParts)) {
-            $abj404logging->errorMessage('parse_url returned a non-array value. REQUEST_URI: "' . 
-                    $f->normalizeUrlString($_SERVER['REQUEST_URI']) . '", parse_url result: "' . json_encode($urlParts) . '", ' .
+            $abj404logging->errorMessage('parse_url returned a non-array value. REQUEST_URI: "' .
+                    $sanitizer->normalizeUrlString($_SERVER['REQUEST_URI']) . '", parse_url result: "' . json_encode($urlParts) . '", ' .
                     'urlToParse result: ' . $urlToParse);
             return false;
         }
@@ -90,11 +104,11 @@ class ABJ_404_Solution_UserRequest {
             if ($key === 'query') {
                 // For query strings, preserve reserved characters while removing invalid bytes.
                 parse_str($value, $queryArray);
-                $safeQueryArray = $f->sanitizeUrlComponent($queryArray);
+                $safeQueryArray = $sanitizer->sanitizeUrlComponent($queryArray);
                 $urlParts[$key] = http_build_query(is_array($safeQueryArray) ? $safeQueryArray : $queryArray);
             } else {
                 // Sanitize path/host/etc. without stripping reserved URL characters.
-                $urlParts[$key] = $f->sanitizeUrlComponent($value);
+                $urlParts[$key] = $sanitizer->sanitizeUrlComponent($value);
             }
         }
 
@@ -140,26 +154,22 @@ class ABJ_404_Solution_UserRequest {
         
         /** @var array<string, int|string> $urlPartsSafe */
         $urlPartsSafe = $urlParts;
-        self::$instance = new ABJ_404_Solution_UserRequest($urlToParse, $urlPartsSafe, $urlWithoutCommentPage,
-                $commentPagePart, $queryString);
-            
+        self::$instance = new ABJ_404_Solution_UserRequest(new ABJ_404_Solution_UserRequestParts(
+                $urlToParse, $urlPartsSafe, $urlWithoutCommentPage, $commentPagePart, $queryString));
+
         return true;
     }
     
     /**
-     * @param string $requestURI
-     * @param array<string, int|string> $urlParts
-     * @param string $urlWithoutCommentPage
-     * @param string $commentPagePart
-     * @param string $queryString
+     * @param ABJ_404_Solution_UserRequestParts $parts
      */
-    private function __construct(string $requestURI, array $urlParts, string $urlWithoutCommentPage, string $commentPagePart, string $queryString) {
-        $this->requestURI = $requestURI;
-        $this->urlParts = $urlParts;
-        $this->requestURIWithoutCommentsPage = $urlWithoutCommentPage;
-        $this->commentPagePart = $commentPagePart;
-        
-        $this->queryString = $queryString;
+    private function __construct(ABJ_404_Solution_UserRequestParts $parts) {
+        $this->requestURI = $parts->requestURI;
+        $this->urlParts = $parts->urlParts;
+        $this->requestURIWithoutCommentsPage = $parts->urlWithoutCommentPage;
+        $this->commentPagePart = $parts->commentPagePart;
+
+        $this->queryString = $parts->queryString;
     }
  
     /** @return string|null */
@@ -187,17 +197,16 @@ class ABJ_404_Solution_UserRequest {
     
     /** @return string */
     function getPathWithSortedQueryString(): string {
-        $f = abj_service('functions');
         $requestedURL = $this->getPath();
         /** @var array<string, string> $urlPartsForSort */
         $urlPartsForSort = $this->getUrlParts() ?? array();
-        $urlParts = $f->sortQueryString($urlPartsForSort);
+        $urlParts = abj_service('query_string_helper')->sortQueryString($urlPartsForSort);
         if ($urlParts != null && trim($urlParts) != '') {
         	$requestedURL .= '?' . $urlParts;
         }
         
         // otherwise various queries break.
-        $requestedURL = $f->urlencodeEmojis($requestedURL);
+        $requestedURL = abj_service('url_encoder')->urlencodeEmojis($requestedURL);
 
         return $requestedURL;
     }
@@ -209,7 +218,7 @@ class ABJ_404_Solution_UserRequest {
     function getOnlyTheSlug() {
         $abj404logic = abj_service('plugin_logic');
         $path = $this->getRequestURIWithoutCommentsPage();
-        return $abj404logic->removeHomeDirectory($path);
+        return $abj404logic->urlNormalization()->removeHomeDirectory($path);
     }
 
     /** @return array<string, int|string>|null */

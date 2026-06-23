@@ -13,7 +13,6 @@ if (!defined('ABSPATH')) {
  *   abj404_engine_profiles_delete – Delete a profile by ID.
  */
 class ABJ_404_Solution_Ajax_EngineProfiles {
-    use ABJ_404_Solution_AjaxSecurityTrait;
 
     /** @return void */
     public static function registerActions(): void {
@@ -37,7 +36,11 @@ class ABJ_404_Solution_Ajax_EngineProfiles {
      * @return void
      */
     public static function handleList(): void {
-        self::requireAdminWithNonce('abj404_engine_profiles_nonce');
+        if (!ABJ_404_Solution_AjaxRequestContractValidator::requireValidCurrentRequest('ajax-engine-profiles')) {
+            return;
+        }
+
+        abj_service('ajax_security_gate')->requireAdminWithNonce('abj404_engine_profiles_nonce');
 
         $profiles = ABJ_404_Solution_EngineProfileResolver::getInstance()->getAllProfilesForAdmin();
         wp_send_json_success(['profiles' => $profiles]);
@@ -52,7 +55,11 @@ class ABJ_404_Solution_Ajax_EngineProfiles {
      * @return void
      */
     public static function handleSave(): void {
-        self::requireAdminWithNonce('abj404_engine_profiles_nonce');
+        if (!ABJ_404_Solution_AjaxRequestContractValidator::requireValidCurrentRequest('ajax-engine-profiles')) {
+            return;
+        }
+
+        abj_service('ajax_security_gate')->requireAdminWithNonce('abj404_engine_profiles_nonce');
 
         // Boundary normalizer: $_POST shape probing lives in the VO, not here.
         // See ABJ_404_Solution_EngineProfileSaveRequest.
@@ -97,7 +104,14 @@ class ABJ_404_Solution_Ajax_EngineProfiles {
                     ', name=' . $req->getName() . ', is_regex=' . $req->getIsRegexInt() .
                     '. Returning HTTP 200 with success=false to AJAX caller.');
             }
-            wp_send_json_error(['message' => __('Failed to save engine profile.', '404-solution')]);
+            // Surface the wpdb-reported failure so the admin can self-diagnose
+            // (table missing, column-count mismatch, deadlock, full disk, etc.)
+            // instead of seeing only a canned "Failed to save" message.
+            global $wpdb;
+            $dbError = isset($wpdb->last_error) && is_string($wpdb->last_error) ? $wpdb->last_error : '';
+            $framing = __('Failed to save engine profile.', '404-solution');
+            $message = $dbError !== '' ? $framing . ' (DB error: ' . $dbError . ')' : $framing;
+            wp_send_json_error(['message' => $message]);
             return; // @phpstan-ignore deadCode.unreachable
         }
 
@@ -110,7 +124,11 @@ class ABJ_404_Solution_Ajax_EngineProfiles {
      * @return void
      */
     public static function handleDelete(): void {
-        self::requireAdminWithNonce('abj404_engine_profiles_nonce');
+        if (!ABJ_404_Solution_AjaxRequestContractValidator::requireValidCurrentRequest('ajax-engine-profiles')) {
+            return;
+        }
+
+        abj_service('ajax_security_gate')->requireAdminWithNonce('abj404_engine_profiles_nonce');
 
         $id = isset($_POST['id']) ? absint($_POST['id']) : 0;
 
@@ -126,7 +144,15 @@ class ABJ_404_Solution_Ajax_EngineProfiles {
                 $logger->warn('Ajax_EngineProfiles::handleDelete: deleteProfile(' . (int)$id .
                     ') returned false (row missing or DB error). Returning HTTP 200 with success=false to AJAX caller.');
             }
-            wp_send_json_error(['message' => __('Failed to delete engine profile.', '404-solution')]);
+            // Surface the wpdb-reported failure so the admin can self-diagnose
+            // instead of seeing only a canned "Failed to delete" message. When
+            // the resolver returns false because the row simply wasn't there,
+            // last_error is empty and the framing message stands on its own.
+            global $wpdb;
+            $dbError = isset($wpdb->last_error) && is_string($wpdb->last_error) ? $wpdb->last_error : '';
+            $framing = __('Failed to delete engine profile.', '404-solution');
+            $message = $dbError !== '' ? $framing . ' (DB error: ' . $dbError . ')' : $framing;
+            wp_send_json_error(['message' => $message]);
             return; // @phpstan-ignore deadCode.unreachable
         }
 

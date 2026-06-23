@@ -7,19 +7,20 @@ if (!defined('ABSPATH')) {
 
 /* Funtcions supporting Ajax stuff.  */
 class ABJ_404_Solution_Ajax_TrashLink {
-    use ABJ_404_Solution_AjaxSecurityTrait;
 
     /** Handle trash/restore actions via AJAX.
      * @return void
      */
     static function trashAction(): void {
+        if (!ABJ_404_Solution_AjaxRequestContractValidator::requireValidCurrentRequest('ajax-trash-link')) {
+            return;
+        }
+
         $container = ABJ_404_Solution_ServiceContainer::getInstance();
         /** @var ABJ_404_Solution_Functions $functions */
         $functions = $container->has('functions') ? $container->get('functions') : abj_service('functions');
         /** @var ABJ_404_Solution_RedirectsRepositoryInterface $redirectsRepository */
         $redirectsRepository = abj_service('redirects_repository');
-        /** @var ABJ_404_Solution_ViewBuildOrchestratorInterface $viewBuildOrchestrator */
-        $viewBuildOrchestrator = abj_service('view_build_orchestrator');
         /** @var ABJ_404_Solution_ViewReadServiceInterface $viewReadService */
         $viewReadService = abj_service('view_read_service');
         $abj404logic = abj_service('plugin_logic');
@@ -30,7 +31,7 @@ class ABJ_404_Solution_Ajax_TrashLink {
 
         /** @var ABJ_404_Solution_PluginLogic $abj404logic */
 
-        self::requireAdminWithNonce('abj404_ajaxTrash', '_wpnonce');
+        abj_service('ajax_security_gate')->requireAdminWithNonce('abj404_ajaxTrash', '_wpnonce');
         
         $idToTrash = $functions->getPostOrGetSanitize('id');
         $trashAction = $functions->getPostOrGetSanitize('trash');
@@ -38,11 +39,6 @@ class ABJ_404_Solution_Ajax_TrashLink {
         
         $data = array();
         $data['resultset'] = $redirectsRepository->moveRedirectsToTrash((int)$idToTrash, (int)$trashAction);
-        if (empty($data['resultset'])) {
-            // Mark view_done as needing a rebuild so the next admin AJAX
-            // fetch lands on fresh data that reflects this trash action.
-            $viewBuildOrchestrator->markViewDoneInvalidatedByAdminMutation();
-        }
 
         // Return fresh tab counts so the JS can update the tab badges.
         // Bypass cache since the trash action just changed the counts.

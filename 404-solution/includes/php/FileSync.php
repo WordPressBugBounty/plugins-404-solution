@@ -9,6 +9,19 @@ class ABJ_404_Solution_FileSync {
 	
 	/** @var self|null */
 	private static $instance = null;
+	/**
+	 * Test seam: install or clear the cached singleton instance without
+	 * private-field reflection. Pass null to reset between tests; pass a
+	 * configured instance (or double) to install it. Mirrors the setInstance()
+	 * contract on DataAccess / PluginLogic (M105 singleton-reset seam).
+	 *
+	 * @param self|null $instance
+	 * @return void
+	 */
+	public static function setInstance($instance) {
+	    self::$instance = $instance;
+	}
+
 
 	/** @return self */
 	public static function getInstance(): self {
@@ -34,11 +47,10 @@ class ABJ_404_Solution_FileSync {
 	 */
 	function getOwnerFromFile(string $key): string {
 		$filePath = $this->getSyncFilePath($key);
-		$fileUtils = abj_service('functions');
 
 		// Fixed: TOCTOU race condition - catch exception instead of check-then-read
 		try {
-			$contents = $fileUtils->readFileContents($filePath, false);
+			$contents = ABJ_404_Solution_FileSystemService::readFileContents($filePath, false);
 			return $contents;
 		} catch (Exception $e) { // allow-silent-catch: TOCTOU-safe file read; missing or unreadable file returns empty, caller treats as "no lock owner"
 			return "";
@@ -68,8 +80,7 @@ class ABJ_404_Solution_FileSync {
 	 */
 	function releaseLock(string $uniqueID, string $key): void {
 		$filePath = $this->getSyncFilePath($key);
-		$fileUtils = abj_service('functions');
-		$fileUtils->safeUnlink($filePath);
+		ABJ_404_Solution_FileSystemService::safeUnlink($filePath);
 	}
 	
 }

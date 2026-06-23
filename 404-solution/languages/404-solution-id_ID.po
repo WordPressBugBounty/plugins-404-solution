@@ -14,7 +14,7 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=1; plural=0;\n"
+"Plural-Forms: nplurals=2; plural=n > 1;\n"
 "X-Generator: 404 Solution Translation Generator v2\n"
 "X-Poedit-KeywordsList: __;_e;_n:1,2;_x:1,2c;_ex:1,2c;_nx:4c,1,2;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c;_n_noop:1,2;_nx_noop:3c,1,2;__ngettext_noop:1,2\n"
 "X-Poedit-Basepath: ..\n"
@@ -56,6 +56,7 @@ msgstr "Pengaturan"
 msgid "404 Solution: Migrated %d redirect to subdirectory-independent format."
 msgid_plural "404 Solution: Migrated %d redirects to subdirectory-independent format."
 msgstr[0] "404 Solution: Berhasil memigrasikan %d pengalihan ke format independen subdirektori."
+msgstr[1] "404 Solution: Berhasil memigrasikan %d pengalihan ke format independen subdirektori."
 msgid "%1$s - %2$s of %3$s"
 msgstr "%1$s - %2$s dari %3$s"
 
@@ -208,6 +209,9 @@ msgstr "<a>Lihat</a> file debug."
 
 msgid "Action Taken"
 msgstr "Tindakan yang Diambil"
+
+msgid "Add"
+msgstr "Tambahkan"
 
 msgid "Add Redirect"
 msgstr "Tambahkan Pengalihan"
@@ -1474,12 +1478,14 @@ msgstr "akan cocok dengan URL apa pun yang dimulai dengan"
 msgid "There is <a>%s captured 404 URL</a> that needs to be processed."
 msgid_plural "There are <a>%s captured 404 URLs</a> to be processed."
 msgstr[0] "Ada <a>%s URL 404 yang tercatat</a> yang perlu diproses."
+msgstr[1] "Ada <a>%s URL 404 yang tercatat</a> yang perlu diproses."
 
 #. Plural form with %s
 #: includes/DataAccess.php
 msgid "%s redirect entry was moved to the trash."
 msgid_plural "%s redirect entries were moved to the trash."
 msgstr[0] "%s entri pengalihan dipindahkan ke tong sampah."
+msgstr[1] "%s entri pengalihan dipindahkan ke tong sampah."
 
 #: includes/DatabaseUpgradesEtc.php:119
 msgid "404 Solution: N-gram spell check cache is being built in the background to optimize performance. This may take a few minutes on large sites."
@@ -1699,6 +1705,7 @@ msgstr "Sebelum menonaktifkan, pilih apa yang akan terjadi pada data Anda:"
 msgid "Keep my redirect (%d)"
 msgid_plural "Keep my redirects (%d)"
 msgstr[0] "Simpan pengalihan saya (%d)"
+msgstr[1] "Simpan pengalihan saya (%d)"
 
 #: includes/UninstallModal.php
 msgid "— saves them for later if you reinstall"
@@ -1836,6 +1843,9 @@ msgstr "Token keamanan tidak valid"
 
 msgid "Unauthorized"
 msgstr "Tidak diizinkan"
+
+msgid "Unauthorized: Insufficient permissions"
+msgstr "Tidak diizinkan: Izin tidak memadai"
 
 msgid "Invalid mode"
 msgstr "Mode tidak valid"
@@ -2077,13 +2087,6 @@ msgid "Data may not be immediately updated. Refresh to see latest changes."
 msgstr "Data mungkin tidak segera diperbarui. Segarkan untuk melihat perubahan terbaru."
 
 #: includes/View.php
-msgid "Last updated: %s"
-msgstr "Terakhir diperbarui: %s"
-#: includes/View.php
-msgid "Last checked: %s"
-msgstr "Terakhir diperiksa: %s"
-
-#: includes/View.php
 msgid "Refresh scheduled"
 msgstr "Penyegaran dijadwalkan"
 
@@ -2094,38 +2097,6 @@ msgstr "Penyegaran berjalan"
 #: includes/View.php
 msgid "Refresh paused"
 msgstr "Penyegaran dijeda"
-
-#: includes/WordPress_Connector.php
-msgid "second"
-msgstr "Kedua"
-
-#: includes/WordPress_Connector.php
-msgid "seconds"
-msgstr "detik"
-
-#: includes/WordPress_Connector.php
-msgid "minute"
-msgstr "menit"
-
-#: includes/WordPress_Connector.php
-msgid "minutes"
-msgstr "menit"
-
-#: includes/WordPress_Connector.php
-msgid "hour"
-msgstr "jam"
-
-#: includes/WordPress_Connector.php
-msgid "hours"
-msgstr "jam"
-
-#: includes/WordPress_Connector.php
-msgid "day"
-msgstr "hari"
-
-#: includes/WordPress_Connector.php
-msgid "ago"
-msgstr "yang lalu"
 
 #: includes/SetupWizard.php
 msgid "Security check failed. Please try again."
@@ -2459,14 +2430,17 @@ msgstr "destination-warning-text"
 msgid "%d minute ago"
 msgid_plural "%d minutes ago"
 msgstr[0] "%d menit yang lalu"
+msgstr[1] "%d menit yang lalu"
 
 msgid "%d hour ago"
 msgid_plural "%d hours ago"
 msgstr[0] "%d jam yang lalu"
+msgstr[1] "%d jam yang lalu"
 
 msgid "%d day ago"
 msgid_plural "%d days ago"
 msgstr[0] "%d hari yang lalu"
+msgstr[1] "%d hari yang lalu"
 
 msgid "Database storage appears full (disk/engine space). Plugin write-heavy tasks are temporarily paused."
 msgstr "Penyimpanan basis data tampaknya penuh (ruang disk/mesin). Tugas penulisan intensif plugin dijeda sementara."
@@ -3769,6 +3743,10 @@ msgstr "Harap tunggu sebelum mengirim permintaan dukungan lain."
 msgid "Invalid support request source."
 msgstr "Sumber permintaan dukungan tidak valid."
 
+#: includes/ajax/AjaxRequestContractValidator.php
+msgid "Invalid AJAX request."
+msgstr "Permintaan AJAX tidak valid."
+
 #: includes/ajax/Ajax_SupportRequest.php
 msgid "Failed to send support request. Please try again later."
 msgstr "Gagal mengirim permintaan dukungan. Silakan coba lagi nanti."
@@ -3928,3 +3906,179 @@ msgstr "Pembangunan ulang tampilan/hit dijeda setelah %d kegagalan berturut-turu
 #: 404-solution.php
 msgid "Retry Now"
 msgstr "Coba lagi sekarang"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "literal text"
+msgstr "literal text"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "literal"
+msgstr "literal"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "%1$d of %2$d"
+msgstr "%1$d of %2$d"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "%s item"
+msgid_plural "%s items"
+msgstr[0] "%s item"
+msgstr[1] "%s item"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Unknown purge result: %s"
+msgstr "Error: Unknown purge result: %s"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "%s redirect entries were moved to the trash."
+msgstr "%s redirect entries were moved to the trash."
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Unable to update redirect data. Repository result: %s"
+msgstr "Error: Unable to update redirect data. Repository result: %s"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Loading status..."
+msgstr "Loading status..."
+
+#: includes/
+msgid "Loading..."
+msgstr "Memuat..."
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Collected URL deletion value must be a number greater than or equal to zero"
+msgstr "Error: Collected URL deletion value must be a number greater than or equal to zero"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Manual redirect deletion value must be a number greater than or equal to zero"
+msgstr "Error: Manual redirect deletion value must be a number greater than or equal to zero"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Log deletion value must be a number greater than or equal to zero"
+msgstr "Error: Log deletion value must be a number greater than or equal to zero"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Auto redirect deletion value must be a number greater than or equal to zero"
+msgstr "Error: Auto redirect deletion value must be a number greater than or equal to zero"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Auto-redirect expiration days must be a number greater than or equal to zero"
+msgstr "Error: Auto-redirect expiration days must be a number greater than or equal to zero"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Error: Maximum log disk usage must be a number greater than zero"
+msgstr "Error: Maximum log disk usage must be a number greater than zero"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Keep my redirects (%d)"
+msgstr "Keep my redirects (%d)"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "%d minutes ago"
+msgstr "%d minutes ago"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "%d hours ago"
+msgstr "%d hours ago"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "%d days ago"
+msgstr "%d days ago"
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "Unknown status filter. Valid values are: manual, auto, regex (or omit for all active)."
+msgstr "Unknown status filter. Valid values are: manual, auto, regex (or omit for all active)."
+
+# translation-verified: en-fallback awaiting native pass (i310)
+#: includes/
+msgid "The \"to\" URL must be a relative path or an http/https URL."
+msgstr "The \"to\" URL must be a relative path or an http/https URL."
+
+msgid "Contact your hosting provider. This is usually caused by a database quota, tablespace limit, or full /tmp partition - not necessarily a full disk."
+msgstr "Hubungi penyedia hosting Anda. Hal ini biasanya disebabkan oleh kuota basis data, batas tablespace, atau partisi /tmp yang penuh - belum tentu karena disk yang penuh."
+
+msgid "A database lock wait timeout occurred. If this persists, contact your host - another process may be holding a long-running lock."
+msgstr "Terjadi waktu tunggu kunci basis data yang habis (lock wait timeout). Jika ini terus berlanjut, hubungi host Anda - mungkin ada proses lain yang menahan kunci dalam waktu lama."
+
+msgid "404 Solution cannot function correctly: the database table %s is missing, and the plugin tried to recreate it but the CREATE TABLE statement could not be executed. This almost always means the WordPress database user does not have permission to run CREATE TABLE (and likely ALTER TABLE / CREATE INDEX) on this database. Until this is fixed, the plugin cannot record 404s, serve redirects, or generate suggestions. To fix it: ask your hosting provider or database administrator to grant CREATE, ALTER, and INDEX privileges to the WordPress database user for this site, then reload this page. Alternatively, restore the missing table from a recent database backup."
+msgstr "404 Solution tidak dapat berfungsi dengan benar: tabel basis data %s tidak ada, dan plugin mencoba membuatnya kembali tetapi pernyataan CREATE TABLE tidak dapat dijalankan. Hal ini hampir selalu berarti bahwa pengguna basis data WordPress tidak memiliki izin untuk menjalankan CREATE TABLE (dan kemungkinan juga ALTER TABLE / CREATE INDEX) pada basis data ini. Selama hal ini belum diperbaiki, plugin tidak dapat mencatat 404, menyajikan pengalihan, atau menghasilkan saran. Untuk memperbaikinya: minta penyedia hosting atau administrator basis data Anda untuk memberikan hak akses CREATE, ALTER, dan INDEX kepada pengguna basis data WordPress untuk situs ini, lalu muat ulang halaman ini. Sebagai alternatif, pulihkan tabel yang hilang dari cadangan basis data terbaru."
+
+msgid "Original database error: %s"
+msgstr "Kesalahan basis data asli: %s"
+
+msgid "A database temporary table is corrupted - this is usually caused by a full or failing disk. Please contact your host. (MySQL error 1034)"
+msgstr "Sebuah tabel sementara basis data rusak - hal ini biasanya disebabkan oleh disk yang penuh atau bermasalah. Mohon hubungi host Anda. (MySQL error 1034)"
+
+msgid "Permalink cache appears empty after rebuild - suggestions may be degraded. Try rebuilding again or check available disk space."
+msgstr "Cache permalink tampak kosong setelah dibangun ulang - saran mungkin menjadi kurang akurat. Coba bangun ulang lagi atau periksa ruang disk yang tersedia."
+
+msgid "WordPress cron does not appear to be running. The earliest overdue cron event has been waiting at least %d hours, so cron-dependent plugin features (staged view-build, daily cleanup, log updates, digest emails) are not advancing. To resolve: if DISABLE_WP_CRON is set in wp-config.php either remove it, or configure a system cron job that requests wp-cron.php periodically. To force the redirect view to rebuild right now in your browser (workaround while cron is broken), open the 404 Solution Redirects page with ?abj404_force_view_rebuild=1 appended to the URL."
+msgstr "Cron WordPress tampaknya tidak berjalan. Peristiwa cron terlambat yang paling awal sudah menunggu setidaknya %d jam, sehingga fitur plugin yang bergantung pada cron (pembangunan tampilan bertahap, pembersihan harian, pembaruan log, email ringkasan) tidak berlanjut. Untuk mengatasinya: jika DISABLE_WP_CRON diatur di wp-config.php, hapus pengaturan tersebut, atau konfigurasikan tugas cron sistem yang meminta wp-cron.php secara berkala. Untuk memaksa tampilan pengalihan dibangun ulang sekarang juga di peramban Anda (solusi sementara saat cron rusak), buka halaman Redirects 404 Solution dengan menambahkan ?abj404_force_view_rebuild=1 pada URL."
+
+msgid "Scheduling the 404 Solution staged view-build cron event failed. The build will not advance in the background until this clears. This usually indicates the WordPress cron lock is held, the cron option is unwritable, or a custom cron implementation rejected the event. Check your hosting provider and any cron-replacement plugins. To force the redirect view to rebuild right now in your browser (workaround while cron scheduling is failing), open the 404 Solution Redirects page with ?abj404_force_view_rebuild=1 appended to the URL."
+msgstr "Penjadwalan peristiwa cron pembangunan tampilan bertahap 404 Solution gagal. Pembangunan tidak akan berlanjut di latar belakang sampai hal ini teratasi. Hal ini biasanya menandakan bahwa kunci cron WordPress sedang ditahan, opsi cron tidak dapat ditulis, atau implementasi cron khusus menolak peristiwa tersebut. Periksa penyedia hosting Anda dan plugin pengganti cron mana pun. Untuk memaksa tampilan pengalihan dibangun ulang sekarang juga di peramban Anda (solusi sementara saat penjadwalan cron gagal), buka halaman Redirects 404 Solution dengan menambahkan ?abj404_force_view_rebuild=1 pada URL."
+
+msgid "Your PHP memory_limit (%s) is below the recommended 128M; the redirect view rebuild may fail on large sites."
+msgstr "Nilai memory_limit PHP Anda (%s) berada di bawah rekomendasi 128M; pembangunan ulang tampilan pengalihan mungkin gagal pada situs yang besar."
+
+msgid "The 404 Solution view-build pipeline detected filesystem host constraints that may degrade the next rebuild: "
+msgstr "Alur pembangunan tampilan 404 Solution mendeteksi kendala host sistem berkas yang dapat menurunkan kualitas pembangunan ulang berikutnya: "
+
+msgid "The 404 Solution view-build pipeline detected MySQL session-variable settings that may degrade the next rebuild: "
+msgstr "Alur pembangunan tampilan 404 Solution mendeteksi pengaturan variabel sesi MySQL yang dapat menurunkan kualitas pembangunan ulang berikutnya: "
+
+msgid "Original error: %s"
+msgstr "Kesalahan asli: %s"
+
+msgid "The 404 Solution view-build pipeline halted at stage %d/11."
+msgstr "Alur pembangunan tampilan 404 Solution berhenti pada tahap %d/11."
+
+msgid "The 404 Solution view-build pipeline skipped optional stage %d/11."
+msgstr "Alur pembangunan tampilan 404 Solution melewati tahap opsional %d/11."
+
+msgid "Ask your host to grant the CREATE TEMPORARY TABLES privilege to your WordPress database user so the hits aggregate column can be populated."
+msgstr "Mintalah host Anda untuk memberikan hak akses CREATE TEMPORARY TABLES kepada pengguna basis data WordPress Anda agar kolom agregat hit dapat diisi."
+
+msgid "Ask your host to grant the ALTER privilege to your WordPress database user."
+msgstr "Mintalah host Anda untuk memberikan hak akses ALTER kepada pengguna basis data WordPress Anda."
+
+msgid "Ask your host to grant ALTER + DROP + CREATE on the database used by WordPress so the view-build swap can complete."
+msgstr "Mintalah host Anda untuk memberikan hak akses ALTER + DROP + CREATE pada basis data yang digunakan oleh WordPress agar pertukaran pembangunan tampilan dapat selesai."
+
+msgid "Ask your host to review your WordPress database user privileges."
+msgstr "Mintalah host Anda untuk meninjau hak akses pengguna basis data WordPress Anda."
+
+msgid "This database does not support session-scoped GET_LOCK named locks. The plugin is using a WordPress option-row fallback to coordinate the staged view-build. Common on PlanetScale, Vitess, and split-routing ProxySQL deployments."
+msgstr "Basis data ini tidak mendukung kunci bernama GET_LOCK yang tercakup dalam sesi (session-scoped). Plugin menggunakan baris opsi WordPress sebagai cadangan untuk mengoordinasikan pembangunan tampilan bertahap. Hal ini umum terjadi pada penerapan PlanetScale, Vitess, dan ProxySQL dengan perutean terpisah (split-routing)."
+
+# translation-verified: en-fallback awaiting native pass (t_260618_093531_671)
+#: includes/view/View_CapturedURLsTable.php:332
+msgid "Preparing the captured 404s table. The list is still loading and will appear in a moment."
+msgstr "Preparing the captured 404s table. The list is still loading and will appear in a moment."
+
+#: includes/admin/AdminTableColumnHeaders.php:178
+msgid "Sorting by this column is being prepared for your number of URLs (%d%% complete). The list shows newest first until it is ready."
+msgstr "Pengurutan berdasarkan kolom ini sedang disiapkan untuk jumlah URL Anda (%d%% selesai). Sementara itu, daftar menampilkan yang terbaru lebih dulu."
+
+#: includes/view/View_Shared.php:247
+msgid "Sorting by this column is unavailable on this site. The list shows newest first."
+msgstr "Pengurutan berdasarkan kolom ini tidak tersedia di situs ini. Daftar menampilkan yang terbaru lebih dulu."

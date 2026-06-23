@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
  * SECURITY CONTRACT: anonymous-by-design.
  *
  *   This endpoint is registered for BOTH `wp_ajax_*` and
- *   `wp_ajax_nopriv_*` actions (see `WordPress_Connector::registerAsyncSuggestionHooks`),
+ *   `wp_ajax_nopriv_*` actions (see `WordPressHookRegistrar::registerAsyncSuggestionHooks`),
  *   mirroring `Ajax_SuggestionCompute::computeSuggestions` (the producer
  *   side of the same contract). There is intentionally no
  *   `userIsPluginAdmin()` / `current_user_can()` check: the public 404
@@ -29,7 +29,7 @@ if (!defined('ABSPATH')) {
  *        the page emitting the polling JS also emits the nonce, so a
  *        scripted abuse attempt has to first fetch the 404 page.
  *     2. The shared per-actor (user-id or IP) rate limiter via
- *        `Ajax_Php::checkRateLimit('poll_suggestions', 120, 60)`.
+ *        `Ajax_Php::consumeRateLimit('poll_suggestions', 120, 60)`.
  *     3. The endpoint is strictly read-only and only emits status
  *        constants plus rendered suggestion HTML for the requested URL:
  *        the worst-case information leak is "which URLs on this site have
@@ -69,6 +69,10 @@ class ABJ_404_Solution_Ajax_SuggestionPolling {
      * @return void
      */
     public static function pollSuggestions(): void {
+        if (!ABJ_404_Solution_AjaxRequestContractValidator::requireValidCurrentRequest('ajax-suggestion-polling')) {
+            return;
+        }
+
         // Verify nonce for CSRF protection
         if (!check_ajax_referer('abj404_poll_suggestions', '_ajax_nonce', false)) {
             wp_send_json(array('status' => 'error', 'message' => 'Security check failed'), 403);
@@ -78,16 +82,15 @@ class ABJ_404_Solution_Ajax_SuggestionPolling {
         // Rate limit polling to avoid admin-ajax.php abuse on high-traffic 404 pages.
         // Uses the same transient-based limiter as other AJAX endpoints (user ID or IP).
         if (class_exists('ABJ_404_Solution_Ajax_Php') &&
-            ABJ_404_Solution_Ajax_Php::checkRateLimit('poll_suggestions', 120, 60)) {
+            ABJ_404_Solution_Ajax_Php::consumeRateLimit('poll_suggestions', 120, 60)) {
             wp_send_json(array('status' => 'error', 'message' => 'Rate limit exceeded. Please try again later.'), 429);
             return; // @phpstan-ignore deadCode.unreachable
         }
 
         // Sanitize input
-        $f = abj_service('functions');
         if (isset($_POST['url'])) {
             $rawUrl = function_exists('wp_unslash') ? wp_unslash($_POST['url']) : $_POST['url'];
-            $requestedURL = $f->normalizeUrlString($rawUrl);
+            $requestedURL = abj_service('sanitizer')->normalizeUrlString($rawUrl);
         } else {
             $requestedURL = '';
         }
@@ -98,7 +101,7 @@ class ABJ_404_Solution_Ajax_SuggestionPolling {
         }
 
         // Normalize URL using centralized function for consistency
-        $normalizedURL = $f->normalizeURLForCacheKey($requestedURL);
+        $normalizedURL = abj_service('url_encoder')->normalizeURLForCacheKey($requestedURL);
 
         $urlKey = md5($normalizedURL);
         $transientKey = 'abj404_suggest_' . $urlKey;
@@ -144,8 +147,15 @@ class ABJ_404_Solution_Ajax_SuggestionPolling {
         }
 
         if ($transient->isError()) {
-            // Computation crashed; return error immediately with generic message.
-            // Detailed error info is logged server-side, not exposed to frontend.
+            // Computation crashed. No underlying detail is available to surface
+            // here by design: this endpoint is hit by public 404-page visitors
+            // (not authenticated admins), and the producer's shutdown handler
+            // (Ajax_SuggestionCompute::handleComputationCrash) deliberately
+            // strips the PHP fatal-error message, file path, and line number
+            // from the transient payload to avoid leaking implementation details
+            // (paths, plugin internals) to the public web. The full crash detail
+            // is recorded server-side via the plugin logger; site admins should
+            // consult the plugin log for diagnosis.
             wp_send_json(array('status' => 'error', 'message' => 'Suggestion computation failed'), 500);
             return; // @phpstan-ignore deadCode.unreachable
         }

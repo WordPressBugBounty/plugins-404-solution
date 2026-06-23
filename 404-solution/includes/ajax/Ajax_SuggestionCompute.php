@@ -7,7 +7,7 @@ if (!defined('ABSPATH')) {
 
 /**
  * AJAX handler for background suggestion computation.
- * Called via non-blocking wp_remote_post from SpellChecker::triggerAsyncSuggestionComputation().
+ * Called via non-blocking wp_remote_post from SpellChecker::triggerAndCleanupOnFailure().
  * Runs in a separate PHP process to avoid blocking the user's redirect.
  */
 class ABJ_404_Solution_Ajax_SuggestionCompute {
@@ -57,13 +57,15 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
      * @return void
      */
     public static function computeSuggestions(): void {
-        // (1) Per-IP rate limit FIRST — cheapest possible rejection so an
+        ABJ_404_Solution_AjaxRequestContractValidator::enforceCurrentRequest('ajax-suggestion-compute');
+
+        // (1) Per-IP rate limit FIRST - cheapest possible rejection so an
         // attacker rotating fresh URLs (each producing a new token via a
         // real 404) cannot trigger unbounded expensive computations.
         // Single-flight protects same-token replay; this protects distinct-
         // token flooding from one source.
         if (class_exists('ABJ_404_Solution_Ajax_Php') &&
-                ABJ_404_Solution_Ajax_Php::checkRateLimit(
+                ABJ_404_Solution_Ajax_Php::consumeRateLimit(
                     'compute_suggestions',
                     self::COMPUTE_RATE_LIMIT_MAX_REQUESTS,
                     self::COMPUTE_RATE_LIMIT_WINDOW_SECONDS
@@ -76,23 +78,22 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
             wp_die('Missing required parameters');
         }
 
-        // URL normalization requires the Functions service.
-        $f = abj_service('functions');
+        // URL normalization requires the Sanitizer service.
         $rawUrl = function_exists('wp_unslash') ? wp_unslash($_POST['url']) : $_POST['url'];
-        $requestedURL = $f->normalizeUrlString($rawUrl);
+        $requestedURL = abj_service('sanitizer')->normalizeUrlString($rawUrl);
         if (empty($requestedURL)) {
             wp_die('Missing required parameters');
         }
 
         // (3) Token check via transient lookup.
         // Use the same normalizeURLForCacheKey() pipeline as the producer
-        // (SpellChecker::triggerAsyncSuggestionComputation) and the polling
+        // (SpellChecker::triggerAndCleanupOnFailure) and the polling
         // consumer (Ajax_SuggestionPolling::pollSuggestions). Without this,
-        // any URL that esc_url touches — spaces, unicode, double ampersands —
+        // any URL that esc_url touches - spaces, unicode, double ampersands -
         // hashes to a different transient key than the producer wrote, and
         // this worker reports "Unauthorized" while the polling client never
         // finds the result. Sibling shape of 73f21bce / 6e0908a8 / 83b9fb85.
-        $normalizedURL = $f->normalizeURLForCacheKey($requestedURL);
+        $normalizedURL = abj_service('url_encoder')->normalizeURLForCacheKey($requestedURL);
         $urlKey = md5($normalizedURL);
         $transientKey = 'abj404_suggest_' . $urlKey;
 
@@ -161,10 +162,10 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
         $logger->debugMessage("Ajax_SuggestionCompute: Starting computation for " . esc_html($requestedURL));
 
         // Extract URL slug for spell checking
-        $urlSlugOnly = $abj404logic->removeHomeDirectory($requestedURL);
+        $urlSlugOnly = $abj404logic->urlNormalization()->removeHomeDirectory($requestedURL);
 
         // Get options for suggestion settings
-        $options = $abj404logic->getOptions();
+        $options = abj_service('options_repository')->getOptions();
 
         // Gate 4 is the early return that fires when the N-gram prefilter
         // finds zero candidates at Dice >= 0.3. That is useful in the
@@ -261,17 +262,16 @@ class ABJ_404_Solution_Ajax_SuggestionCompute {
             $error['line']
         );
 
-        // Use plugin's logging if available, fallback to error_log
+        // Use plugin logging when available, then the centralized PHP-log fallback.
         if (class_exists('ABJ_404_Solution_Logging')) {
             try {
                 $logger = abj_service('logging');
                 $logger->errorMessage($logMessage);
             } catch (Exception $e) {
-                // Logging failed during shutdown - use error_log as fallback
-                @error_log("404 Solution: " . $logMessage);
+                abj404_logPhpFallback('fatal-handler-fallback', $logMessage);
             }
         } else {
-            @error_log("404 Solution: " . $logMessage);
+            abj404_logPhpFallback('fatal-handler-fallback', $logMessage);
         }
     }
 }

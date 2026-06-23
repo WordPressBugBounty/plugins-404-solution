@@ -5,8 +5,9 @@
  * rebuild completes):
  *
  *   - triggerInitialTableLoadIfNeeded: hydrates the placeholder rows on
- *     first paint via paginationLinksChange. Falls through to the staged
- *     view-build poller when the server reports `viewBuildPending`.
+ *     first paint via paginationLinksChange. The single-table denorm read
+ *     (denorm Step 3b) is always serveable, so the table renders
+ *     synchronously: there is no view-build / cache-warm fallthrough.
  *   - triggerBackgroundTableRefreshIfEnabled: detect-only refresh that
  *     never overwrites the visible table, only flips the "Refresh
  *     available" pill when content has changed.
@@ -17,15 +18,14 @@
  * Also exposes the shared refresh-status host lookup and the AJAX
  * failure-details formatter consumed by the pagination error handler.
  *
- * Globals defined: abj404FormatAjaxFailureDetails, refreshHealthBarIfNeeded,
- * getRefreshStatusHost, isDetectOnlyRefreshInFlight, setDetectOnlyRefreshInFlight,
- * triggerBackgroundTableRefreshIfEnabled, triggerInitialTableLoadIfNeeded.
+ * Globals defined: abj404FormatAjaxFailureDetails, abj404RenderAjaxErrorNotice,
+ * refreshHealthBarIfNeeded, getRefreshStatusHost, isDetectOnlyRefreshInFlight,
+ * setDetectOnlyRefreshInFlight, triggerBackgroundTableRefreshIfEnabled,
+ * triggerInitialTableLoadIfNeeded.
  *
  * Depends on view_updater.js (abj404UpdateAjaxDebugLog, getURLParameter,
- * paginationLinksChange, isElementFullyVisible), view_updater_table_warmup.js
- * (startViewBuildPollingThenRetry, startPlaceholderTableHydration),
- * view_updater_toast.js (showRefreshAvailablePill, showRefreshToastStart,
- * showRefreshToastComplete, hideRefreshToast), view_updater_stats.js
+ * paginationLinksChange, isElementFullyVisible),
+ * view_updater_refresh_pill.js (showRefreshAvailablePill), view_updater_stats.js
  * (markAutoRefreshCompleted, shouldRunAutoRefreshNow).
  */
 
@@ -58,6 +58,88 @@ function abj404FormatAjaxFailureDetails(meta) {
         lines.push('Last query (redacted): ' + meta.lastQueryRedacted);
     }
     return lines;
+}
+
+/**
+ * Render a non-blocking admin error notice that carries a SupportRequestButton
+ * mount point, so any user-facing AJAX failure on the redirects / captured-404s
+ * tabs offers a "Send debug log to developer" affordance instead of bare text.
+ *
+ * Single rendering contract for both the foreground pagination error path
+ * (view_updater_pagination.js) and the background-refresh warmup failure path
+ * (view_updater_table_warmup.js). Without this helper the two paths drifted:
+ * foreground produced a proper notice + button, background-refresh produced
+ * status-line text + a duplicate table-row message and no button, so users on
+ * the background-refresh path could not report the failure.
+ *
+ * options:
+ *   - noticeTitle (string, required): bold title at the top of the notice.
+ *   - $detailsEl (jQuery element, optional): a <pre> with the failure details
+ *     formatted by abj404FormatAjaxFailureDetails. Inserted below the title.
+ *   - triggeredFromSlug (string, optional): one of Ajax_SupportRequest's
+ *     ALLOWED_TRIGGER_SOURCES. Defaults to 'redirects_page'.
+ *   - contextSummary (string, optional): one-line summary shown inside the
+ *     send-debug-log modal. Defaults to the noticeTitle.
+ *
+ * Returns the appended notice element so callers can mutate it (e.g. the
+ * pagination path patches detail lines once the inflight-stage lookup
+ * completes).
+ */
+function abj404RenderAjaxErrorNotice(options) {
+    options = options || {};
+    var noticeTitle = options.noticeTitle || '';
+    var $detailsEl = options.$detailsEl || null;
+    var triggeredFromSlug = options.triggeredFromSlug || 'redirects_page';
+    var contextSummary = (typeof options.contextSummary === 'string' && options.contextSummary !== '')
+        ? options.contextSummary : noticeTitle;
+
+    var $notice = jQuery('<div class="notice notice-error abj404-ajax-error-notice is-dismissible"></div>');
+    var $titleEl = jQuery('<p></p>').text(noticeTitle + ' ');
+    var linkEl = document.createElement('a');
+    linkEl.className = 'abj404-support-request-link';
+    linkEl.setAttribute('href', '#abj404-support-request');
+    linkEl.setAttribute('data-triggered-from', triggeredFromSlug);
+    linkEl.setAttribute('data-context-summary', contextSummary);
+    linkEl.textContent = (window.ABJ404 && window.ABJ404.i18n && window.ABJ404.i18n.sendDebugLog) ? String(window.ABJ404.i18n.sendDebugLog) : 'Send debug log to developer';
+    $titleEl[0].appendChild(linkEl);
+    $notice.append($titleEl);
+    if ($detailsEl) {
+        // Wrap the diagnostic details in a collapsed <details> panel so the
+        // user-visible notice stays quiet. Internal-looking stage labels and
+        // query method names belong behind a deliberate click, not in the
+        // headline. The support-request payload still picks up the full
+        // context via data-context-summary above.
+        var $debugWrap = jQuery('<details class="abj404-ajax-error-debug"></details>');
+        var summaryLabel = (window.ABJ404 && window.ABJ404.i18n && window.ABJ404.i18n.errorDebugDetails)
+            ? String(window.ABJ404.i18n.errorDebugDetails) : 'Debug details';
+        var $summary = jQuery('<summary></summary>').text(summaryLabel);
+        $debugWrap.append($summary);
+        $debugWrap.append($detailsEl);
+        $notice.append($debugWrap);
+    }
+
+    // Replace any prior notice so repeated failures do not stack.
+    jQuery('.abj404-ajax-error-notice').remove();
+    // Suppress the server-rendered "Do you think 404 Solution deserves a
+    // 5-star review?" prompt (ReviewFeedback::echoDashboardNotification)
+    // whenever a user-facing AJAX error is shown. The server-side notice
+    // is rendered earlier in the request lifecycle and can't see errors
+    // that have not yet happened, so the coordination point has to be
+    // here. The class is shared across all three review-prompt templates
+    // (reviewQualificationQuestion / reviewLinkNotice / feedbackFormNotice).
+    jQuery('.abj404-review-notice').remove();
+    var $tableContainer = jQuery('.abj404-table-container').first();
+    if ($tableContainer.length > 0) {
+        $tableContainer.before($notice);
+    } else {
+        jQuery('.wrap').first().prepend($notice);
+    }
+
+    if (window.ABJ404 && window.ABJ404.SupportRequestButton &&
+        typeof window.ABJ404.SupportRequestButton.mountAll === 'function') {
+        window.ABJ404.SupportRequestButton.mountAll();
+    }
+    return $notice;
 }
 
 /**
@@ -96,6 +178,7 @@ function refreshHealthBarIfNeeded() {
     abj404UpdateAjaxDebugLog('Starting Health Bar AJAX: ' + action);
 
     var healthBarAjaxRunner = (typeof abj404AjaxWithNonceRetry === 'function')
+        // ajax-direct-approved: fallback when abj404AjaxWithNonceRetry helper not yet loaded in this bundle
         ? abj404AjaxWithNonceRetry : jQuery.ajax;
     healthBarAjaxRunner({
         url: url,
@@ -215,12 +298,12 @@ function triggerBackgroundTableRefreshIfEnabled() {
         return;
     }
 
-    // allow-em-dash: visible horizontal-ellipsis preserved verbatim from the original toast text
-    var startedText = $config.attr('data-pagination-refresh-started-text') || 'Refreshing data in background…';
-    showRefreshToastStart(startedText);
-    var refreshStartedAt = Date.now();
-
-    // Run a detect-only check in the background. Never overwrite the visible table automatically.
+    // Run a detect-only check in the background. It never overwrites the
+    // visible table and shows no progress/success chrome: the table already
+    // rendered live from the single denorm read, so a poll that finds nothing
+    // changed is a no-op the user should never see. The only surface is the
+    // "Refresh available" pill, and only when the data actually changed since
+    // this page loaded (e.g. new 404s arrived while the admin was reading).
     var runRefresh = function() {
         if (isDetectOnlyRefreshInFlight()) {
             return;
@@ -228,38 +311,23 @@ function triggerBackgroundTableRefreshIfEnabled() {
         paginationLinksChange(perpageElements[0], {
             backgroundRefresh: true,
             detectOnly: true,
-            showStageProgress: true,
-            stageProgressMessage: startedText,
             onComplete: function(meta) {
                 var $latestConfig = getRefreshStatusHost();
                 var hasUpdate = !!(meta && meta.hasUpdate);
-                var finishedText = $latestConfig.attr('data-pagination-refresh-finished-text') || 'Data refreshed';
-                var elapsed = Date.now() - refreshStartedAt;
-                var minimumVisibleMs = 850;
-                var showFinished = function() {
-                    if (hasUpdate) {
-                        var availableText = $latestConfig.attr('data-pagination-refresh-available-text') || 'Refresh available';
-                        showRefreshAvailablePill(availableText, 5000);
-                    }
-                    showRefreshToastComplete(finishedText);
-                    window.setTimeout(hideRefreshToast, 3500);
-                };
-                if (elapsed < minimumVisibleMs) {
-                    window.setTimeout(showFinished, minimumVisibleMs - elapsed);
-                } else {
-                    showFinished();
+                if (hasUpdate) {
+                    var availableText = $latestConfig.attr('data-pagination-refresh-available-text') || 'Refresh available';
+                    showRefreshAvailablePill(availableText, 5000);
                 }
                 if (window.abj404BackgroundRefreshState) {
-                    window.abj404BackgroundRefreshState.finishedAt = Date.now();
+                    window.abj404BackgroundRefreshState.finishedAt = Date.now(); // allow-direct-time: telemetry finishedAt timestamp; browser admin script, no client-side clock adapter exists in this plugin
                     window.abj404BackgroundRefreshState.hasUpdateAvailable = hasUpdate;
                 }
                 markAutoRefreshCompleted($latestConfig);
             },
             onError: function() {
-                hideRefreshToast();
                 if (window.abj404BackgroundRefreshState) {
                     window.abj404BackgroundRefreshState.lastError = 'background-refresh-failed';
-                    window.abj404BackgroundRefreshState.finishedAt = Date.now();
+                    window.abj404BackgroundRefreshState.finishedAt = Date.now(); // allow-direct-time: telemetry finishedAt timestamp; browser admin script, no client-side clock adapter exists in this plugin
                     window.abj404BackgroundRefreshState.hasUpdateAvailable = false;
                 }
             }
@@ -295,21 +363,10 @@ function triggerInitialTableLoadIfNeeded() {
         paginationLinksChange(perpageElements[0], {
             backgroundRefresh: false,
             detectOnly: false,
-            cacheMode: 'cache_or_pending',
-            onComplete: function(meta) {
-                if (meta && meta.viewBuildPending) {
-                    // Cold start: the staged view_done table is missing or
-                    // invalidated. Poll the bounded build-advance endpoint
-                    // (one resumable tick per call) and retry the fetch when
-                    // the build reports ready.  No HTTP 500 path can fire
-                    // here: the fetch endpoint never builds inline.
-                    startViewBuildPollingThenRetry(perpageElements[0], $config, attemptNumber);
-                    return;
-                }
-                if (meta && meta.cachePending) {
-                    startPlaceholderTableHydration(perpageElements[0]);
-                    return;
-                }
+            cacheMode: 'normal',
+            onComplete: function() {
+                // The single-table denorm read is always serveable, so a
+                // successful response always carries the rendered table.
                 $config.attr('data-pagination-initial-load', '0');
             },
             onError: function(errorMeta) {

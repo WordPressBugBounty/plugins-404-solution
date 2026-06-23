@@ -13,13 +13,12 @@ if (!defined('ABSPATH')) {
  * request per 5 minutes) to prevent a frustrated admin (or a malicious one)
  * from flooding the developer endpoint with click-spam.
  *
- * Wired in WordPress_Connector::registerAdminHooks() under the action name
+ * Wired in WordPressHookRegistrar::registerAdminHooks() under the action name
  * 'wp_ajax_abj404_support_request'. The matching client lives at
  * includes/ajax/SupportRequest.js. The UI buttons that call it are added in
  * follow-up tasks B (reusable button) and C (wire button into error sites).
  */
 class ABJ_404_Solution_Ajax_SupportRequest {
-    use ABJ_404_Solution_AjaxSecurityTrait;
 
     /** Per-site cooldown between support requests (seconds). */
     const COOLDOWN_SECONDS = 300;
@@ -50,6 +49,18 @@ class ABJ_404_Solution_Ajax_SupportRequest {
 
     /** @var self|null */
     private static $instance = null;
+    /**
+     * Test seam: install or clear the cached singleton instance without
+     * private-field reflection. Pass null to reset between tests; pass a
+     * configured instance (or double) to install it (M105 singleton-reset seam).
+     *
+     * @param self|null $instance
+     * @return void
+     */
+    public static function setInstance($instance) {
+        self::$instance = $instance;
+    }
+
 
     /** @return self */
     public static function getInstance(): self {
@@ -78,16 +89,20 @@ class ABJ_404_Solution_Ajax_SupportRequest {
      * @return void
      */
     public function handleRequest(): void {
+        if (!ABJ_404_Solution_AjaxRequestContractValidator::requireValidCurrentRequest('ajax-support-request')) {
+            return;
+        }
+
         // Nonce + manage_options gate. requireAdminWithNonce() reads from
         // POST first, then GET; the matching JS posts a 'nonce' field.
-        self::requireAdminWithNonce(self::NONCE_ACTION);
+        abj_service('ajax_security_gate')->requireAdminWithNonce(self::NONCE_ACTION);
 
         // Cooldown check (per site, cheap transient read). 'manage_options'
         // already gated above so the cooldown is purely about endpoint-spam
         // prevention, not abuse from random users.
         $cooldownStartedAt = get_transient(self::COOLDOWN_TRANSIENT);
         if (is_scalar($cooldownStartedAt) && (int)$cooldownStartedAt > 0) {
-            $remaining = self::COOLDOWN_SECONDS - (time() - (int)$cooldownStartedAt);
+            $remaining = self::COOLDOWN_SECONDS - (abj_clock()->now() - (int)$cooldownStartedAt);
             if ($remaining > 0) {
                 wp_send_json_error(array(
                     'message' => __('Please wait before sending another support request.', '404-solution'),
@@ -140,7 +155,8 @@ class ABJ_404_Solution_Ajax_SupportRequest {
         // Mark cooldown BEFORE dispatch so a slow / hung HTTP transport
         // can't be exploited to bypass the rate limit by a user mashing
         // the button while the request is in flight.
-        set_transient(self::COOLDOWN_TRANSIENT, time(), self::COOLDOWN_SECONDS);
+        // allow-cache-empty: timestamp marker starts a support-request cooldown; not a cached fetch result.
+        set_transient(self::COOLDOWN_TRANSIENT, abj_clock()->now(), self::COOLDOWN_SECONDS);
 
         $ok = ABJ_404_Solution_FeedbackTransport::sendNow($payload, 'support_request');
         $fallbackUsed = ABJ_404_Solution_FeedbackTransport::lastSendUsedFallback();
@@ -241,18 +257,21 @@ class ABJ_404_Solution_Ajax_SupportRequest {
      * @return string
      */
     private static function resolveDebugLogExcerpt(): string {
-        if (!function_exists('abj_service')) {
+        if (!function_exists('abj_service_optional')) {
             return '';
         }
-        try {
-            $logger = abj_service('logging');
-            if (is_object($logger) && method_exists($logger, 'getSanitizedLogExcerptForSupport')) {
+        $logger = abj_service_optional('logging');
+        if (is_object($logger) && method_exists($logger, 'getSanitizedLogExcerptForSupport')) {
+            try {
                 $excerpt = $logger->getSanitizedLogExcerptForSupport();
                 return is_string($excerpt) ? $excerpt : '';
+            } catch (\Throwable $e) {
+                ABJ_404_Solution_FeedbackTransportLog::log(
+                    'warn',
+                    'Support request debug-log excerpt unavailable: ' . $e->getMessage()
+                );
+                return '';
             }
-        // allow-silent-catch: log excerpt is best-effort context for the support request; a Logging service failure must not block the user-initiated send, and the failure is already surfaced via the plugin's own logging path
-        } catch (\Throwable $e) {
-            return '';
         }
         return '';
     }
@@ -273,7 +292,7 @@ class ABJ_404_Solution_Ajax_SupportRequest {
      * @return string
      */
     private static function generateReferenceId(): string {
-        $timestamp = gmdate('Y-m-d-H-i-s');
+        $timestamp = gmdate('Y-m-d-H-i-s', abj_clock()->now());
         try {
             $suffix = substr(bin2hex(random_bytes(4)), 0, 7);
             return $timestamp . '-' . $suffix;
