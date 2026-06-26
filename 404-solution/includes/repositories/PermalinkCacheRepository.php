@@ -14,31 +14,11 @@ class ABJ_404_Solution_PermalinkCacheRepository {
     /** @var ABJ_404_Solution_DatabaseCore */
     private $dbCore;
 
-    /** @var ABJ_404_Solution_Functions */
-    private $f;
-
-    /** @var mixed Options provider exposing getOptions(): array. */
-    private $optionsProvider;
-
     /**
      * @param ABJ_404_Solution_DatabaseCore $dbCore
-     * @param ABJ_404_Solution_Functions $functions
-     * @param mixed $optionsProvider Object exposing getOptions(): array.
      */
-    public function __construct(ABJ_404_Solution_DatabaseCore $dbCore, $functions, $optionsProvider) {
+    public function __construct(ABJ_404_Solution_DatabaseCore $dbCore) {
         $this->dbCore = $dbCore;
-        $this->f = $functions;
-        $this->optionsProvider = $optionsProvider;
-    }
-
-    /** @return array<string, mixed> */
-    private function getRuntimeOptions(): array {
-        $provider = $this->optionsProvider !== null ? $this->optionsProvider : abj_service('options_repository');
-        if (is_object($provider) && method_exists($provider, 'getOptions')) {
-            $options = $provider->getOptions();
-            return is_array($options) ? $options : array();
-        }
-        return array();
     }
 
     /** @return void */
@@ -63,6 +43,7 @@ class ABJ_404_Solution_PermalinkCacheRepository {
      */
     public function getPermalinkFromCache($id) {
         $id = absint($id);
+        // allow-unbounded-select: bounded keyset: WHERE id = <pk> / id IN (<caller ids>) single/few-row lookup
         $query = "select url from {wp_abj404_permalink_cache} where id = " . $id;
         $results = $this->dbCore->queryAndGetResults($query);
 
@@ -85,6 +66,7 @@ class ABJ_404_Solution_PermalinkCacheRepository {
         }
         $sanitized = array_map('absint', $ids);
         $placeholders = implode(',', $sanitized);
+        // allow-unbounded-select: bounded keyset: WHERE id = <pk> / id IN (<caller ids>) single/few-row lookup
         $query = "select id, url from {wp_abj404_permalink_cache} where id in (" . $placeholders . ")";
         $query = $this->dbCore->doTableNameReplacements($query);
         $results = $this->dbCore->queryAndGetResults($query);
@@ -97,6 +79,7 @@ class ABJ_404_Solution_PermalinkCacheRepository {
      */
     public function getPermalinkEtcFromCache($id) {
         $id = absint($id);
+        // allow-unbounded-select: bounded keyset: WHERE id = <pk> / id IN (<caller ids>) single/few-row lookup
         $query = "select id, url, meta, url_length, post_parent from {wp_abj404_permalink_cache} where id = " . $id;
         $results = $this->dbCore->queryAndGetResults($query);
 
@@ -110,24 +93,6 @@ class ABJ_404_Solution_PermalinkCacheRepository {
         }
 
         return $this->stringKeyedRow($rows[0]);
-    }
-
-    /** @return array<int, array<string, mixed>>|null */
-    public function getIDsNeededForPermalinkCache() {
-        $options = $this->getRuntimeOptions();
-        $recognizedPostTypes = $this->dbCore->tableNameResolver()->buildPostTypeSqlList($options);
-        if ($recognizedPostTypes === '') {
-            return null;
-        }
-
-        $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getIDsNeededForPermalinkCache.sql");
-        $query = $this->f->str_replace('{recognizedPostTypes}', $recognizedPostTypes, $query);
-
-        $results = $this->dbCore->queryAndGetResults($query);
-
-        /** @var array<int, array<string, mixed>>|null $rows */
-        $rows = $results['rows'];
-        return $rows;
     }
 
     /** @return array<string, mixed> */

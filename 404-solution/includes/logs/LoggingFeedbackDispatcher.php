@@ -48,11 +48,9 @@ class ABJ_404_Solution_LoggingFeedbackDispatcher {
             return false;
         }
 
-        $optionsRepo = abj_service('options_repository');
-        $options = $optionsRepo->getOptions(true);
         $dedupe = $this->getDedupeState();
         $sentinelFilePath = $this->logging->getDebugFilePathSentFile();
-        $sentLine = $dedupe->readSentLine($options, $sentinelFilePath);
+        $sentLine = $dedupe->readSentLine($sentinelFilePath);
         $this->logging->debugMessage("Dedupe pointer: sentLine=" . $sentLine);
 
         if ($dedupe->isAlreadySent($sentLine, $latestErrorLineFound, $debugFilePath)) {
@@ -66,7 +64,7 @@ class ABJ_404_Solution_LoggingFeedbackDispatcher {
             return false;
         }
 
-        if (!$dedupe->recordSent($options, $sentinelFilePath, $debugFilePath, $latestErrorLineFound)) {
+        if (!$dedupe->recordSent($sentinelFilePath, $debugFilePath, $latestErrorLineFound)) {
             $this->logging->errorMessage("There was an issue writing to the file " . $sentinelFilePath);
             return false;
         }
@@ -109,12 +107,29 @@ class ABJ_404_Solution_LoggingFeedbackDispatcher {
     }
 
     /**
+     * Drain any pending crash beacon and report it as a post-mortem `error`
+     * report. Runs in the same async maintenance context as the error-log and
+     * heartbeat dispatch (and under the same send_error_logs opt-in), so a fatal
+     * or OOM that could not phone home at the time gets reported on the next
+     * healthy maintenance run (after a plugin update, for an every-request OOM).
+     *
+     * Delegates to FeedbackTransport (the Core telemetry facade this dispatcher
+     * already routes error/heartbeat sends through) so the crash-beacon reporter
+     * lives beside the other transports in the Core layer.
+     *
+     * @return bool True if a crash beacon was reported.
+     */
+    public function drainCrashBeaconIfNecessary(): bool {
+        return ABJ_404_Solution_FeedbackTransport::drainCrashBeacon();
+    }
+
+    /**
      * @return ABJ_404_Solution_ErrorEmailDedupeState
      */
     private function getDedupeState(): ABJ_404_Solution_ErrorEmailDedupeState {
         if ($this->dedupeState === null) {
             $this->dedupeState = new ABJ_404_Solution_ErrorEmailDedupeState(
-                abj_service('options_repository'));
+                ABJ_404_Solution_LoggingStateStore::resolve());
         }
         return $this->dedupeState;
     }

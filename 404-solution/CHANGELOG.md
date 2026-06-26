@@ -1,5 +1,10 @@
 # Changelog #
 
+## Version 4.3.1 (June 26, 2026) ##
+* FIX: Fixed an out-of-memory error (thanks to johnegg and kalshyre for reporting this).
+* FIX: Fixed other things that looked like possible out-of-memory errors during maintenance.
+* Improvement: Made automatic error reporting more robust to cover OOM as best as possible as well as other failure types.
+
 ## Version 4.3.0 (June 12, 2026) ##
 
 **Bug Fixes**
