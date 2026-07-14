@@ -128,6 +128,126 @@ class ABJ_404_Solution_CronScheduler {
     }
 
     /**
+     * Ensures a recurring event exists with recurrence EXACTLY `daily`,
+     * migrating any pre-existing event scheduled at a different recurrence
+     * (e.g. a stale `weekly` event left over from before a hook was
+     * normalized onto a fixed cadence -- see EmailDigest::scheduleNextDigest()
+     * and WP.org support topic weekly-digest-3). Without this, a site
+     * upgrading from a build that scheduled `abj404_send_digest` at
+     * `weekly` recurrence would keep that stale recurrence forever:
+     * scheduleRecurringIfMissing()'s `!wp_next_scheduled` guard only checks
+     * whether ANY event exists for the hook, not whether it matches the
+     * intended cadence.
+     *
+     * Takes NO recurrence parameter by design: hardcoding the target here
+     * makes it structurally impossible for a future caller to reintroduce
+     * a variable-driven recurrence, which is the root shape of the
+     * original bug (a WP-Cron event's own recurrence tied to a
+     * user-configurable interval instead of a fixed, frequent trigger).
+     *
+     * @param array<int, mixed> $args
+     * @return bool
+     */
+    public function scheduleDailyMigratingStaleRecurrence(string $hook, int $delaySeconds = 0, array $args = array()): bool {
+        $current = $this->currentScheduledEvent($hook, $args);
+        if ($current === null) {
+            return $this->scheduleRecurringAt($hook, 'daily', $this->timestampAfter($delaySeconds), $args);
+        }
+        if ($current['recurrence'] === 'daily') {
+            return true;
+        }
+        if ($current['recurrence'] === null) {
+            $this->logWarning('Cannot migrate cron hook ' . $hook . ': existing recurrence is unavailable.');
+            return false;
+        }
+        if (!function_exists('wp_unschedule_event')) {
+            $this->logWarning('Cannot migrate cron hook ' . $hook . ': wp_unschedule_event unavailable.');
+            return false;
+        }
+
+        $replacementTimestamp = $this->timestampAfter($delaySeconds);
+        if (!function_exists('wp_get_scheduled_event')) {
+            // WordPress 5.0's unschedule primitive returns void on success.
+            // Put the replacement after the stale event so nextScheduled()
+            // can verify that the old event was actually removed.
+            $replacementTimestamp = max($replacementTimestamp, $current['timestamp'] + 1);
+        } elseif ($replacementTimestamp === $current['timestamp']) {
+            $replacementTimestamp++;
+        }
+
+        if (!$this->scheduleRecurringAt($hook, 'daily', $replacementTimestamp, $args)) {
+            return false;
+        }
+        if ($this->unscheduleExact($current['timestamp'], $hook, $args, $replacementTimestamp)) {
+            return true;
+        }
+
+        if (!$this->unscheduleExact($replacementTimestamp, $hook, $args, $current['timestamp'])) {
+            $this->logWarning('Failed to roll back replacement cron hook ' . $hook . ' after stale-event removal failed.');
+        }
+        return false;
+    }
+
+    /**
+     * @param array<int, mixed> $args
+     * @return array{timestamp: int, recurrence: string|null}|null
+     */
+    private function currentScheduledEvent(string $hook, array $args = array()): ?array {
+        if (function_exists('wp_get_scheduled_event')) {
+            $event = empty($args)
+                ? wp_get_scheduled_event($hook)
+                : wp_get_scheduled_event($hook, $this->listArgs($args));
+            if ($event === false) {
+                return null;
+            }
+            if (!is_object($event) || !isset($event->timestamp) || !is_numeric($event->timestamp)) {
+                return array('timestamp' => 0, 'recurrence' => null);
+            }
+            $recurrence = isset($event->schedule) && is_string($event->schedule) && $event->schedule !== ''
+                ? $event->schedule
+                : null;
+            return array('timestamp' => (int)$event->timestamp, 'recurrence' => $recurrence);
+        }
+
+        $timestamp = $this->nextScheduled($hook, $args);
+        if ($timestamp === false) {
+            return null;
+        }
+        if (!function_exists('wp_get_schedule')) {
+            return array('timestamp' => (int)$timestamp, 'recurrence' => null);
+        }
+        $schedule = empty($args) ? wp_get_schedule($hook) : wp_get_schedule($hook, $this->listArgs($args));
+        return array(
+            'timestamp' => (int)$timestamp,
+            'recurrence' => is_string($schedule) && $schedule !== '' ? $schedule : null,
+        );
+    }
+
+    /**
+     * Removes one identified occurrence without affecting sibling events.
+     *
+     * @param array<int, mixed> $args
+     */
+    private function unscheduleExact(int $timestamp, string $hook, array $args, int $expectedNextTimestamp): bool {
+        $result = empty($args)
+            ? wp_unschedule_event($timestamp, $hook, array(), true)
+            : wp_unschedule_event($timestamp, $hook, $this->listArgs($args), true);
+        if ($result === false || $this->isWpError($result)) {
+            $errorMessage = $this->wpErrorMessage($result);
+            $this->lastFailureDetail = $errorMessage !== '' ? $errorMessage : 'wp_unschedule_event returned false';
+            $this->logWarning('Failed to unschedule cron hook ' . $hook . ' at timestamp ' . $timestamp
+                . '. Detail: ' . $this->lastFailureDetail);
+            return false;
+        }
+        if ($result === null && $this->nextScheduled($hook, $args) !== $expectedNextTimestamp) {
+            $this->lastFailureDetail = 'event remained scheduled after wp_unschedule_event returned no status';
+            $this->logWarning('Failed to verify cron hook removal for ' . $hook . ' at timestamp ' . $timestamp . '.');
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * @return bool
      */
     public function scheduleDailyInWindowIfMissing(string $hook, int $startHour, int $endHour): bool {
@@ -144,15 +264,26 @@ class ABJ_404_Solution_CronScheduler {
             random_int(10, 59),
             random_int(10, 59)
         );
-        $timestamp = strtotime($timeForEvent);
-        if ($timestamp === false) {
-            $this->logScheduleFailure('recurring', $hook, 'daily', 0, array(), 'failed to calculate daily schedule timestamp');
+        // The requested [$startHour, $endHour] window is a WP-site-local
+        // off-peak window (e.g. "0-5am, when this site has the least
+        // traffic"). wp_schedule_event() below compares the resulting
+        // timestamp against WP-Cron's true-UTC clock, so the wall-clock
+        // hour must be anchored to the site's configured timezone
+        // (SiteTimezone) rather than PHP's implicit default timezone --
+        // otherwise the "local off-peak" window silently lands at the
+        // wrong local hour whenever the two timezones differ (e.g. a
+        // managed host running PHP in UTC for a site configured to
+        // America/Los_Angeles).
+        try {
+            $timestamp = (new DateTimeImmutable('today ' . $timeForEvent, ABJ_404_Solution_SiteTimezone::resolve()))->getTimestamp();
+        } catch (Exception $e) {
+            $this->logScheduleFailure('recurring', $hook, 'daily', 0, array(), 'failed to calculate daily schedule timestamp: ' . $e->getMessage());
             return false;
         }
         if ($this->nextScheduled($hook) !== false) {
             return true;
         }
-        return $this->scheduleRecurringAt($hook, 'daily', (int)$timestamp);
+        return $this->scheduleRecurringAt($hook, 'daily', $timestamp);
     }
 
     /**

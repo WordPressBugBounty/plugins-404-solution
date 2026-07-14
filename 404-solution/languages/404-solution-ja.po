@@ -534,6 +534,10 @@ msgstr "エラー：編集リクエストのIDが見つかりません。"
 msgid "Error: No ID(s) specified for bulk action. (%s)"
 msgstr "エラー：一括アクションのIDが指定されていません。（%s）"
 
+# translation-verified: en-fallback awaiting native pass
+msgid "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+msgstr "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+
 msgid "Error: No records were imported. SQL result: %s"
 msgstr "エラー：レコードがインポートされませんでした。SQL結果：%s"
 
@@ -654,8 +658,8 @@ msgstr "次のページへ"
 msgid "Go to previous page"
 msgstr "前のページへ"
 
-msgid "Help the developer by sending error logs"
-msgstr "エラーログを送信して開発者を支援"
+msgid "Help the developer with error logs and usage stats"
+msgstr "エラーログと使用状況統計で開発者を支援する"
 
 msgid "Here are some other great pages"
 msgstr "他の優良なページはこちら"
@@ -1648,8 +1652,8 @@ msgid "Error: Invalid language selected"
 msgstr "エラー：無効な言語が選択されました"
 
 #: includes/html/adminOptionsGeneral.html
-msgid "When the plugin detects an error, it transmits a copy of the debug log to the developer for diagnosis. Transmission may be by email or by HTTPS upload to a developer-operated server; the contents are the same. This is not required for the plugin to work, but it helps the developer fix bugs in future versions. The report includes: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when a support issue is opened). Reports are checked daily when maintenance runs."
-msgstr "プラグインがエラーを検出すると、診断のためにデバッグログのコピーを開発者に送信します。送信方法はメールまたは開発者が運営するサーバーへのHTTPSアップロードのいずれかで、内容は同じです。これはプラグインの動作に必須ではありませんが、開発者が将来のバージョンで不具合を修正するのに役立ちます。レポートには次のものが含まれます：デバッグログのすべての内容、管理者のメールアドレス、インストール済みのPHP拡張機能、有効なプラグイン、PHPのバージョン、WordPressのバージョン、MySQLのバージョン、公開されたページと投稿の総数など（サポート問い合わせを開く際に尋ねられるすべての情報）。レポートはメンテナンスの実行時に毎日確認されます。"
+msgid "Sends the developer your debug log when an error occurs, plus a status ping at most once a week (once the plugin's been active 5+ days) with your site's version, URL, and 404/redirect counts. Counts are aggregate only, never per-URL. Optional - helps fix bugs and prioritize development. Reports are reviewed daily."
+msgstr "エラー発生時にデバッグログを開発者へ送信し、プラグインが5日以上有効になった後は、週1回までステータス ping としてサイトのバージョン、URL、404件数、リダイレクト件数を送信します。件数は集計のみで、URLごとのデータは送信しません。任意です。バグ修正と開発優先度の判断に役立ちます。レポートは毎日確認されます。"
 
 #: includes/html/viewSuggestions.html
 msgid "Display the closest matching pages by using the shortcode [abj404_solution_page_suggestions]."
@@ -3956,6 +3960,11 @@ msgstr "%s redirect entries were moved to the trash."
 msgid "Error: Unable to update redirect data. Repository result: %s"
 msgstr "Error: Unable to update redirect data. Repository result: %s"
 
+# translation-verified: en-fallback awaiting native pass
+#: includes/
+msgid "Error: Unable to save redirect conditions. Repository result: %s"
+msgstr "Error: Unable to save redirect conditions. Repository result: %s"
+
 # translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Loading status..."
@@ -4094,3 +4103,87 @@ msgstr "この列での並べ替えを、あなたのURL数に合わせて準備
 #: includes/view/View_Shared.php:247
 msgid "Sorting by this column is unavailable on this site. The list shows newest first."
 msgstr "この列での並べ替えは、このサイトでは利用できません。リストは新しいものから順に表示します。"
+
+msgid "Sources (%d)"
+msgstr "ソース（%d）"
+
+msgid "Showing %1$d of %2$d sources."
+msgstr "%2$d件中%1$d件のソースを表示しています。"
+
+msgid "Linked from"
+msgstr "リンク元"
+
+msgid "old permalink structure"
+msgstr "古いパーマリンク構造"
+
+msgid "Could not prepare the preview (%s)."
+msgstr "プレビューを準備できませんでした（%s）。"
+
+msgid "Could not prepare the report (%s)."
+msgstr "レポートを準備できませんでした（%s）。"
+
+msgid "Unauthorized (401)"
+msgstr "認証されていません（401）"
+
+msgid "Rate limited (429). Try again later."
+msgstr "レート制限に達しました（429）。しばらくしてから再試行してください。"
+
+msgid "Timed out after %ds"
+msgstr "%ds後にタイムアウトしました"
+
+msgid "Network request failed (%s)"
+msgstr "ネットワークリクエストが失敗しました（%s）"
+
+msgid "Could not prepare the diagnostic data request."
+msgstr "診断データのリクエストを準備できませんでした。"
+
+msgid "The reports server returned an unexpected response."
+msgstr "レポートサーバーが予期しない応答を返しました。"
+
+msgid "Reports server error (%d)"
+msgstr "レポートサーバーエラー（%d）"
+
+msgid "Reports server returned HTTP %d"
+msgstr "レポートサーバーが HTTP %d を返しました"
+
+msgid "Your Diagnostic Data"
+msgstr "あなたの診断データ"
+
+msgid "enabled"
+msgstr "有効"
+
+msgid "disabled"
+msgstr "無効"
+
+msgid "Download my data"
+msgstr "自分のデータをダウンロード"
+
+msgid "Delete my data"
+msgstr "自分のデータを削除"
+
+msgid "Nothing currently stored."
+msgstr "現在保存されているものはありません。"
+
+msgid "Delete your diagnostic data?"
+msgstr "診断データを削除しますか？"
+
+msgid "This permanently deletes every diagnostic report this site has ever sent. This cannot be undone. Your redirects and settings are not affected -- only diagnostic/telemetry history is removed."
+msgstr "この操作は、このサイトがこれまでに送信したすべての診断レポートを完全に削除します。この操作は元に戻せません。リダイレクトと設定には影響しません。削除されるのは診断とテレメトリーの履歴のみです。"
+
+msgid "Yes, delete permanently"
+msgstr "はい、完全に削除します"
+
+msgid "Diagnostic identity is not registered yet."
+msgstr "診断用識別子はまだ登録されていません。"
+
+msgid "Confirm diagnostic data deletion before continuing."
+msgstr "続行する前に診断データの削除を確認してください。"
+
+msgid "Diagnostic reporting has never been enabled for this site, so there is nothing stored on the developer's server for you to download or delete."
+msgstr "このサイトでは診断レポートが一度も有効になっていないため、開発者のサーバーにはダウンロードまたは削除できるデータは何も保存されていません。"
+
+msgid "This site has diagnostic reporting %s. You can download everything stored on the developer's server for this site, or permanently delete it."
+msgstr "このサイトの診断レポートは%sです。このサイト用に開発者のサーバーに保存されているすべてのデータをダウンロードするか、完全に削除できます。"
+
+msgid "When checked, the text is treated as a regular expression. Note that including a bad regular expression or one that takes too long will break your website. So please use caution and test them elsewhere before trying them here. If you don't know what you're doing please don't use this option (as it's not necessary for the functioning of the plugin)."
+msgstr "チェックすると、テキストは正規表現として扱われます。不正な正規表現や処理に時間がかかりすぎる正規表現は、サイトが正常に動作しなくなる原因になることに注意してください。ここで試す前に、必ず別の場所で慎重にテストしてください。自分が何をしているのか分からない場合は、このオプションを使用しないでください（プラグインの動作に必須ではありません）。"

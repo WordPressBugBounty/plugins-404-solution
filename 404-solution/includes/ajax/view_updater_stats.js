@@ -19,7 +19,7 @@
  * triggerStatsBackgroundRefreshIfEnabled, setRefreshStatus, clearRefreshStatus,
  * getAutoRefreshCacheKey, shouldRunAutoRefreshNow, markAutoRefreshCompleted.
  *
- * Depends on view_updater.js (abj404UpdateAjaxDebugLog, getURLParameter) and
+ * Depends on view_updater.js (getURLParameter) and
  * view_updater_refresh_pill.js (showRefreshAvailablePill).
  */
 
@@ -55,7 +55,12 @@ function markStatsAutoRefreshCompleted($config) {
         var key = getStatsAutoRefreshCacheKey($config);
         localStorage.setItem(key, String(Date.now()));
     } catch (e) {
-        // allow-silent-catch: best-effort cooldown timestamp; storage failures must not block the page
+        // Best-effort cooldown timestamp; storage failures must not block
+        // the page. Log so a real bug here is diagnosable instead of
+        // invisible.
+        if (window.console && window.console.warn) {
+            window.console.warn('404 Solution: markStatsAutoRefreshCompleted failed to write localStorage', e);
+        }
     }
 }
 
@@ -96,8 +101,7 @@ function triggerStatsBackgroundRefreshIfEnabled() {
     var currentHash = $config.attr('data-stats-refresh-current-hash') || '';
 
     var runRefresh = function() {
-        var startMs = Date.now();
-        abj404UpdateAjaxDebugLog('Starting Stats AJAX: ' + action);
+        var startMs = Date.now(); // allow-direct-time: AJAX wall-clock duration baseline; browser admin script, no client-side clock adapter exists in this plugin
         var statsAjaxRunner = (typeof abj404AjaxWithNonceRetry === 'function')
             ? abj404AjaxWithNonceRetry : jQuery.ajax;
         statsAjaxRunner({
@@ -117,10 +121,6 @@ function triggerStatsBackgroundRefreshIfEnabled() {
                     payload = payload.data;
                 }
                 var hasUpdate = !!(payload && payload.hasUpdate);
-                abj404UpdateAjaxDebugLog('Stats AJAX Success: ' + action, {
-                    hasUpdate: hasUpdate,
-                    durationMs: Date.now() - startMs
-                });
                 if (hasUpdate) {
                     showRefreshAvailablePill(refreshAvailableText, 5000);
                 }
@@ -138,12 +138,6 @@ function triggerStatsBackgroundRefreshIfEnabled() {
                 markStatsAutoRefreshCompleted($config);
             },
             error: function(xhr, textStatus, errorThrown) {
-                abj404UpdateAjaxDebugLog('Stats AJAX Error: ' + action, {
-                    status: xhr ? xhr.status : '',
-                    textStatus: textStatus,
-                    errorThrown: errorThrown,
-                    durationMs: Date.now() - startMs
-                });
                 if (window.abj404StatsBackgroundRefreshState) {
                     var duration = Date.now() - startMs;
                     window.abj404StatsBackgroundRefreshState.finishedAt = Date.now();
@@ -176,9 +170,6 @@ function setRefreshStatus($config, message) {
     }
     if ($status.length > 0) {
         $status.text(message || '');
-        if (message) {
-            abj404UpdateAjaxDebugLog('Status: ' + message);
-        }
     }
 }
 
@@ -226,6 +217,11 @@ function markAutoRefreshCompleted($config) {
         var key = getAutoRefreshCacheKey($config);
         localStorage.setItem(key, String(Date.now()));
     } catch (e) {
-        // allow-silent-catch: best-effort cooldown timestamp; storage failures must not block the page
+        // Best-effort cooldown timestamp; storage failures must not block
+        // the page. Log so a real bug here is diagnosable instead of
+        // invisible.
+        if (window.console && window.console.warn) {
+            window.console.warn('404 Solution: markAutoRefreshCompleted failed to write localStorage', e);
+        }
     }
 }

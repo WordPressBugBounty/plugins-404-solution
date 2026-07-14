@@ -536,6 +536,10 @@ msgstr "Erreur : Aucun ID trouvé pour la modification."
 msgid "Error: No ID(s) specified for bulk action. (%s)"
 msgstr "Erreur : Aucun ID spécifié pour l'action groupée. (%s)"
 
+# translation-verified: en-fallback awaiting native pass
+msgid "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+msgstr "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+
 msgid "Error: No records were imported. SQL result: %s"
 msgstr "Erreur : Aucun enregistrement importé. Résultat SQL : %s"
 
@@ -656,8 +660,8 @@ msgstr "Aller à la page suivante"
 msgid "Go to previous page"
 msgstr "Aller à la page précédente"
 
-msgid "Help the developer by sending error logs"
-msgstr "Aider le développeur en envoyant les journaux d'erreurs"
+msgid "Help the developer with error logs and usage stats"
+msgstr "Aider le développeur avec les journaux d'erreurs et les statistiques d'utilisation"
 
 msgid "Here are some other great pages"
 msgstr "Voici d'autres pages intéressantes"
@@ -1658,8 +1662,8 @@ msgid "Error: Invalid language selected"
 msgstr "Erreur : Langue invalide sélectionnée"
 
 #: includes/html/adminOptionsGeneral.html
-msgid "When the plugin detects an error, it transmits a copy of the debug log to the developer for diagnosis. Transmission may be by email or by HTTPS upload to a developer-operated server; the contents are the same. This is not required for the plugin to work, but it helps the developer fix bugs in future versions. The report includes: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when a support issue is opened). Reports are checked daily when maintenance runs."
-msgstr "Lorsque l'extension détecte une erreur, elle transmet une copie du journal de débogage au développeur pour diagnostic. La transmission peut se faire par e-mail ou par téléversement HTTPS vers un serveur exploité par le développeur ; le contenu est identique. Cela n'est pas nécessaire au fonctionnement de l'extension, mais cela aide le développeur à corriger les bogues dans les futures versions. Le rapport inclut : tout le contenu du journal de débogage, l'adresse e-mail de l'administrateur, les extensions PHP installées, les extensions actives, la version PHP, la version WordPress, la version MySQL, le total des pages et articles publiés, etc. (tout ce qui est demandé à l'ouverture d'une demande d'assistance). Les rapports sont vérifiés quotidiennement lors de l'exécution de la maintenance."
+msgid "Sends the developer your debug log when an error occurs, plus a status ping at most once a week (once the plugin's been active 5+ days) with your site's version, URL, and 404/redirect counts. Counts are aggregate only, never per-URL. Optional - helps fix bugs and prioritize development. Reports are reviewed daily."
+msgstr "Envoie au développeur votre journal de débogage lorsqu'une erreur se produit, ainsi qu'un ping d'état au maximum une fois par semaine, une fois l'extension active depuis plus de 5 jours, avec la version, l'URL et les compteurs 404/redirections de votre site. Les compteurs sont uniquement agrégés, jamais par URL. Facultatif, aide à corriger les bogues et à prioriser le développement. Les rapports sont examinés chaque jour."
 
 #: includes/html/viewSuggestions.html
 msgid "Display the closest matching pages by using the shortcode [abj404_solution_page_suggestions]."
@@ -3938,6 +3942,11 @@ msgstr "%s redirect entries were moved to the trash."
 msgid "Error: Unable to update redirect data. Repository result: %s"
 msgstr "Error: Unable to update redirect data. Repository result: %s"
 
+# translation-verified: en-fallback awaiting native pass
+#: includes/
+msgid "Error: Unable to save redirect conditions. Repository result: %s"
+msgstr "Error: Unable to save redirect conditions. Repository result: %s"
+
 # translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Loading status..."
@@ -4076,3 +4085,87 @@ msgstr "Le tri par cette colonne est en cours de préparation pour votre nombre 
 #: includes/view/View_Shared.php:247
 msgid "Sorting by this column is unavailable on this site. The list shows newest first."
 msgstr "Le tri par cette colonne n'est pas disponible sur ce site. La liste affiche les plus récentes en premier."
+
+msgid "Sources (%d)"
+msgstr "Sources disponibles (%d)"
+
+msgid "Showing %1$d of %2$d sources."
+msgstr "Affichage de %1$d sur %2$d sources."
+
+msgid "Linked from"
+msgstr "Lié depuis"
+
+msgid "old permalink structure"
+msgstr "ancienne structure de permaliens"
+
+msgid "Could not prepare the preview (%s)."
+msgstr "Impossible de préparer l'aperçu (%s)."
+
+msgid "Could not prepare the report (%s)."
+msgstr "Impossible de préparer le rapport (%s)."
+
+msgid "Unauthorized (401)"
+msgstr "Non autorisé (401)"
+
+msgid "Rate limited (429). Try again later."
+msgstr "Limite de requêtes atteinte (429). Réessayez plus tard."
+
+msgid "Timed out after %ds"
+msgstr "Délai dépassé après %ds"
+
+msgid "Network request failed (%s)"
+msgstr "Échec de la requête réseau (%s)"
+
+msgid "Could not prepare the diagnostic data request."
+msgstr "Impossible de préparer la requête de données de diagnostic."
+
+msgid "The reports server returned an unexpected response."
+msgstr "Le serveur de rapports a renvoyé une réponse inattendue."
+
+msgid "Reports server error (%d)"
+msgstr "Erreur du serveur de rapports (%d)"
+
+msgid "Reports server returned HTTP %d"
+msgstr "Le serveur de rapports a renvoyé HTTP %d"
+
+msgid "Your Diagnostic Data"
+msgstr "Vos données de diagnostic"
+
+msgid "enabled"
+msgstr "activé"
+
+msgid "disabled"
+msgstr "désactivé"
+
+msgid "Download my data"
+msgstr "Télécharger mes données"
+
+msgid "Delete my data"
+msgstr "Supprimer mes données"
+
+msgid "Nothing currently stored."
+msgstr "Rien n'est actuellement stocké."
+
+msgid "Delete your diagnostic data?"
+msgstr "Supprimer vos données de diagnostic ?"
+
+msgid "This permanently deletes every diagnostic report this site has ever sent. This cannot be undone. Your redirects and settings are not affected -- only diagnostic/telemetry history is removed."
+msgstr "Cette action supprime définitivement chaque rapport de diagnostic jamais envoyé par ce site. Cette action est irréversible. Vos redirections et vos paramètres ne sont pas affectés : seul l'historique des données de diagnostic et de télémétrie est supprimé."
+
+msgid "Yes, delete permanently"
+msgstr "Oui, supprimer définitivement"
+
+msgid "Diagnostic identity is not registered yet."
+msgstr "L'identité de diagnostic n'est pas encore enregistrée."
+
+msgid "Confirm diagnostic data deletion before continuing."
+msgstr "Confirmez la suppression des données de diagnostic avant de continuer."
+
+msgid "Diagnostic reporting has never been enabled for this site, so there is nothing stored on the developer's server for you to download or delete."
+msgstr "La collecte de rapports de diagnostic n'a jamais été activée pour ce site, il n'y a donc rien de stocké sur le serveur du développeur à télécharger ou à supprimer."
+
+msgid "This site has diagnostic reporting %s. You can download everything stored on the developer's server for this site, or permanently delete it."
+msgstr "Ce site a la collecte de rapports de diagnostic %s. Vous pouvez télécharger tout ce qui est stocké sur le serveur du développeur pour ce site, ou le supprimer définitivement."
+
+msgid "When checked, the text is treated as a regular expression. Note that including a bad regular expression or one that takes too long will break your website. So please use caution and test them elsewhere before trying them here. If you don't know what you're doing please don't use this option (as it's not necessary for the functioning of the plugin)."
+msgstr "Lorsque coché, le texte est traité comme une expression régulière. Notez qu'une expression régulière incorrecte ou trop lente ENDOMMAGERA votre site web. Veuillez donc faire preuve de prudence et les tester ailleurs avant de les essayer ici. Si vous ne savez pas ce que vous faites, veuillez ne pas utiliser cette option (elle n'est pas nécessaire au fonctionnement du plugin)."

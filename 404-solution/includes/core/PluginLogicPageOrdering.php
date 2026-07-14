@@ -115,7 +115,7 @@ class ABJ_404_Solution_PluginLogicPageOrdering {
                         continue;
                     }
                     $parentPageSlug = $postParent->post_name;
-                    $parentPage = $this->contentRepo->getPublishedPagesAndPostsIDs($parentPageSlug);
+                    $parentPage = $this->contentRepo->getPublishedPagesAndPostsIDs(array('slug' => $parentPageSlug));
                     if (count($parentPage) != 0) {
                         $pages[] = $parentPage[0];
                     }
@@ -334,6 +334,10 @@ class ABJ_404_Solution_PluginLogicPageOrdering {
         $frequency = isset($options['admin_notification_frequency']) && is_string($options['admin_notification_frequency'])
             ? $options['admin_notification_frequency']
             : 'instant';
+
+        if ($frequency === 'never') {
+            return 'Email notifications disabled: frequency is never.';
+        }
 
         if ($frequency !== 'instant') {
             $emailDigest = new ABJ_404_Solution_EmailDigest(

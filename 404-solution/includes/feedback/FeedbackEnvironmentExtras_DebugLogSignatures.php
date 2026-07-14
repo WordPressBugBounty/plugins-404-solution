@@ -11,7 +11,7 @@ if (!defined('ABSPATH')) {
  * Two responsibilities both anchored to the debug log:
  *   1. probeRecentErrorSignatures(): tail-read the plugin debug log
  *      (capped at 256 KB), parse lines matching the canonical
- *      "YYYY-MM-DD HH:MM:SS (LEVEL): ..." shape that Logging.php emits,
+ *      "YYYY-MM-DD HH:MM:SS [TZ] (LEVEL): ..." shape that Logging.php emits,
  *      keep only [ERROR]/[WARN] entries within the last 7 days, group
  *      by coarse signature, return the top 5 by count.
  *   2. normalizeErrorSignature(): the PII-stripping transform that
@@ -36,7 +36,7 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_DebugLogSignatures {
      * different and would never reach the email-on-first-error path.
      *
      * Bounded cost: reads the tail 256 KB of the debug file, parses
-     * lines matching the canonical "YYYY-MM-DD HH:MM:SS (LEVEL): ..."
+     * lines matching the canonical "YYYY-MM-DD HH:MM:SS [TZ] (LEVEL): ..."
      * shape, keeps only [ERROR]/[WARN] entries within the last 7 days,
      * groups by a coarse signature (first 200 chars after the level),
      * keeps the top 5 by count. Returns an empty array on any read
@@ -92,12 +92,35 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_DebugLogSignatures {
         }
         foreach ($lines as $line) {
             if (!is_string($line) || $line === '') { continue; }
-            // Match "YYYY-MM-DD HH:MM:SS (LEVEL): tail..." per Logging.php format.
-            if (!preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \((ERROR|WARN)\):\s*(.*)$/', $line, $m)) {
+            // Match "YYYY-MM-DD HH:MM:SS [TZ] (LEVEL): tail..." per
+            // LogTimestampFormatter's actual 'Y-m-d H:i:s T' output (the
+            // trailing timezone abbreviation/offset is optional in the
+            // pattern so older or hand-edited log lines without one still
+            // match).
+            if (!preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:\s+\S+)?\s+\((ERROR|WARN)\):\s*(.*)$/', $line, $m)) {
                 continue;
             }
-            $ts = strtotime($m[1]);
-            if ($ts === false || $ts < $cutoff) { continue; }
+            // The captured datetime is in the WP site's configured timezone
+            // (LogTimestampFormatter's contract), not PHP's default timezone,
+            // so it must be interpreted the same way here before comparing
+            // against the true-UTC $cutoff -- otherwise a non-UTC site's
+            // recent errors are silently miscounted as too old (or too new).
+            try {
+                $ts = (new DateTimeImmutable($m[1], ABJ_404_Solution_SiteTimezone::resolve()))->getTimestamp();
+            } catch (Exception $e) {
+                // The regex above validates digit *shape* (\d{4}-\d{2}-\d{2}
+                // \d{2}:\d{2}:\d{2}) but not calendar validity, so a
+                // corrupted or hand-edited log line (e.g. month 13) can still
+                // reach here. Rare, but a run of these would indicate log
+                // corruption or a LogTimestampFormatter regression, so make
+                // it visible in diagnostics instead of dropping it with zero
+                // trace. Delegated to a helper (rather than inlined here) to
+                // keep this already-complex parsing loop's branch count from
+                // growing further.
+                $this->logUnparseableTimestamp($log, $m[1], $e);
+                continue;
+            }
+            if ($ts < $cutoff) { continue; }
             $level = $m[2];
             $msg = trim($m[3]);
             if ($msg === '') { continue; }
@@ -123,12 +146,44 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_DebugLogSignatures {
     }
 
     /**
+     * Report a log line whose timestamp matched the digit-shape regex but
+     * failed to parse as a real calendar date/time (e.g. month 13). Debug
+     * mode gated (via Logging::debugMessage()'s own contract) since this can
+     * run once per matched line in the tail and a corrupted log could
+     * otherwise flood the debug log on every probe call.
+     *
+     * @param object $log Already validated as an object with getDebugFilePath()
+     *                     by the caller; debugMessage() itself is checked here
+     *                     since not every logger double implements it.
+     * @param string $rawTimestamp The unparseable captured group, for context.
+     * @param \Exception $e
+     * @return void
+     */
+    private function logUnparseableTimestamp($log, string $rawTimestamp, \Exception $e): void {
+        if (method_exists($log, 'debugMessage')) {
+            $log->debugMessage('FeedbackEnvironmentExtras_DebugLogSignatures: unparseable log timestamp "' .
+                $rawTimestamp . '": ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Coarse-grain an error message so different incident timestamps,
      * memory addresses, file paths, and line numbers fold into the same
      * signature. Used by probeRecentErrorSignatures to group recurring
      * errors. Exposed (public) so the unit test
      * tests/F6UrlFragmentLeakIntoErrorSignatureTest can pin the
      * PII-stripping behavior directly.
+     *
+     * Mirrors ABJ_404_Solution_CrashBeacon::lightRedact() (the cheap
+     * capture-time version run inside the fatal handler) and is also run
+     * again on an already-lightRedact'd message at report time
+     * (CrashBeaconReporter::buildSignature()), so the digit fold here must
+     * use the same "bytes" exemption or the capture-time fix has no effect
+     * on the final reported text. See lightRedact()'s docblock: a byte
+     * count is never PII and is the memory_limit/allocation-size
+     * diagnostic the crash-beacon feature exists to report. It is also
+     * stable per site (memory_limit does not change between requests), so
+     * exempting it does not hurt the grouping this function exists for.
      *
      * @param string $msg
      * @return string
@@ -139,7 +194,7 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_DebugLogSignatures {
         $s = preg_replace('#/[A-Za-z0-9_\-\./]+/([A-Za-z0-9_\-]+\.php)#', '$1', $s) ?? $s;
         // Collapse memory addresses, hex, and digit sequences.
         $s = preg_replace('/\b0x[0-9a-fA-F]+\b/', '0xN', $s) ?? $s;
-        $s = preg_replace('/\b\d{4,}\b/', 'N', $s) ?? $s;
+        $s = preg_replace('/\b\d{4,}\b(?!\s*bytes\b)/i', 'N', $s) ?? $s;
         // Collapse runs of whitespace.
         $s = preg_replace('/\s+/', ' ', $s) ?? $s;
         return trim($s);

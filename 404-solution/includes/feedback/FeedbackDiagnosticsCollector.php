@@ -30,6 +30,7 @@ class ABJ_404_Solution_FeedbackDiagnosticsCollector {
         $payload['redirects_automatic_count'] = $this->pluckInt($redirectCounts, 'auto');
         $payload['redirects_regex_count']     = $this->pluckInt($redirectCounts, 'regex');
         $payload['redirects_trashed_count']   = $this->pluckInt($redirectCounts, 'trash');
+        $payload['redirect_hit_count_histogram'] = $this->redirectHitCountHistogram();
 
         $capturedCounts = $this->tryArray(function () { return $this->capturedCountsRaw(); });
         $payload['captured_404s_active_total']  = $this->pluckInt($capturedCounts, 'all');
@@ -192,6 +193,47 @@ class ABJ_404_Solution_FeedbackDiagnosticsCollector {
         return $out;
     }
 
+    /**
+     * @return array<string, int>|null
+     */
+    private function redirectHitCountHistogram(): ?array {
+        $histogram = $this->tryArray(function () { return $this->redirectHitCountHistogramRaw(); });
+        if (empty($histogram)) {
+            return null;
+        }
+        $buckets = array(
+            'zero_hits' => 0,
+            'one_to_ten_hits' => 0,
+            'eleven_to_hundred_hits' => 0,
+            'over_hundred_hits' => 0,
+        );
+        foreach ($buckets as $key => $_default) {
+            $buckets[$key] = $this->pluckInt($histogram, $key) ?? 0;
+        }
+        return $buckets;
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function redirectHitCountHistogramRaw(): array {
+        $viewReadService = $this->viewReadService();
+        if ($viewReadService === null || !method_exists($viewReadService, 'getRedirectHitCountHistogram')) {
+            throw new \RuntimeException('ViewReadService::getRedirectHitCountHistogram unavailable');
+        }
+        $raw = $viewReadService->getRedirectHitCountHistogram();
+        if (!is_array($raw)) {
+            throw new \RuntimeException('getRedirectHitCountHistogram returned non-array');
+        }
+        $out = array();
+        foreach ($raw as $k => $v) {
+            if (is_string($k) && is_scalar($v)) {
+                $out[$k] = (int)$v;
+            }
+        }
+        return $out;
+    }
+
     private function logEntriesCount(): int {
         $viewReadService = $this->viewReadService();
         if ($viewReadService === null || !method_exists($viewReadService, 'getLogsCount')) {
@@ -261,7 +303,13 @@ class ABJ_404_Solution_FeedbackDiagnosticsCollector {
      * @return array{debug_log?: string}
      */
     private function debugLogPayload(string $type): array {
-        if ($type !== 'error' && $type !== 'heartbeat') {
+        // Only 'error' reports need the raw log tail for reproduction context.
+        // A heartbeat has no error to diagnose; recent_error_signatures
+        // (environment_extras) already surfaces any ERROR/WARN lines from the
+        // same window in normalized form, so shipping up to 262144 raw bytes
+        // on every weekly heartbeat is PII/bandwidth over-collection with no
+        // offsetting diagnostic value.
+        if ($type !== 'error') {
             return array();
         }
         return array('debug_log' => $this->tryString(function () { return $this->debugLogTail(); }));

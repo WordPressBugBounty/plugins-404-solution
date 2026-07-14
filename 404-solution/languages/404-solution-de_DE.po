@@ -533,6 +533,10 @@ msgstr "Fehler: Keine ID(s) für Bearbeitungsanforderung gefunden."
 msgid "Error: No ID(s) specified for bulk action. (%s)"
 msgstr "Fehler: Keine ID(s) für Massenaktion angegeben. (%s)"
 
+# translation-verified: en-fallback awaiting native pass
+msgid "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+msgstr "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+
 msgid "Error: No records were imported. SQL result: %s"
 msgstr "Fehler: Keine Datensätze wurden importiert. SQL-Ergebnis: %s"
 
@@ -653,8 +657,8 @@ msgstr "Zur nächsten Seite"
 msgid "Go to previous page"
 msgstr "Zur vorherigen Seite"
 
-msgid "Help the developer by sending error logs"
-msgstr "Fehlerprotokolle automatisch an Entwickler senden"
+msgid "Help the developer with error logs and usage stats"
+msgstr "Dem Entwickler mit Fehlerprotokollen und Nutzungsstatistiken helfen"
 
 msgid "Here are some other great pages"
 msgstr "Hier sind weitere interessante Seiten"
@@ -1642,8 +1646,8 @@ msgid "Error: Invalid language selected"
 msgstr "Fehler: Ungültige Sprache ausgewählt"
 
 #: includes/html/adminOptionsGeneral.html
-msgid "When the plugin detects an error, it transmits a copy of the debug log to the developer for diagnosis. Transmission may be by email or by HTTPS upload to a developer-operated server; the contents are the same. This is not required for the plugin to work, but it helps the developer fix bugs in future versions. The report includes: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when a support issue is opened). Reports are checked daily when maintenance runs."
-msgstr "Wenn das Plugin einen Fehler erkennt, übermittelt es eine Kopie des Debug-Protokolls zur Diagnose an den Entwickler. Die Übermittlung kann per E-Mail oder per HTTPS-Upload an einen vom Entwickler betriebenen Server erfolgen; die Inhalte sind identisch. Dies ist nicht erforderlich, damit das Plugin funktioniert, aber es hilft dem Entwickler, Fehler in zukünftigen Versionen zu beheben. Der Bericht enthält: alles im Debug-Protokoll, die Administrator-E-Mail-Adresse, installierte PHP-Erweiterungen, aktive Plugins, PHP-Version, WordPress-Version, MySQL-Version, insgesamt veröffentlichte Seiten und Beiträge usw. (alles, was beim Öffnen eines Support-Tickets gefragt wird). Berichte werden täglich bei der Wartung überprüft."
+msgid "Sends the developer your debug log when an error occurs, plus a status ping at most once a week (once the plugin's been active 5+ days) with your site's version, URL, and 404/redirect counts. Counts are aggregate only, never per-URL. Optional - helps fix bugs and prioritize development. Reports are reviewed daily."
+msgstr "Sendet dem Entwickler Ihr Debug-Protokoll, wenn ein Fehler auftritt, sowie höchstens einmal pro Woche einen Status-Ping, sobald das Plugin mehr als 5 Tage aktiv ist, mit Version, URL und 404-/Weiterleitungszahlen Ihrer Website. Die Zahlen sind nur aggregiert, niemals pro URL. Optional, hilft, Fehler zu beheben und die Entwicklung zu priorisieren. Berichte werden täglich geprüft."
 
 #: includes/html/viewSuggestions.html
 msgid "Display the closest matching pages by using the shortcode [abj404_solution_page_suggestions]."
@@ -3942,6 +3946,11 @@ msgstr "%s redirect entries were moved to the trash."
 msgid "Error: Unable to update redirect data. Repository result: %s"
 msgstr "Error: Unable to update redirect data. Repository result: %s"
 
+# translation-verified: en-fallback awaiting native pass
+#: includes/
+msgid "Error: Unable to save redirect conditions. Repository result: %s"
+msgstr "Error: Unable to save redirect conditions. Repository result: %s"
+
 # translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Loading status..."
@@ -4080,3 +4089,87 @@ msgstr "Die Sortierung nach dieser Spalte wird fur Ihre Anzahl an URLs vorbereit
 #: includes/view/View_Shared.php:247
 msgid "Sorting by this column is unavailable on this site. The list shows newest first."
 msgstr "Die Sortierung nach dieser Spalte ist auf dieser Website nicht verfugbar. Die Liste zeigt die neuesten Eintrage zuerst."
+
+msgid "Sources (%d)"
+msgstr "Quellen (%d)"
+
+msgid "Showing %1$d of %2$d sources."
+msgstr "%1$d von %2$d Quellen werden angezeigt."
+
+msgid "Linked from"
+msgstr "Verlinkt von"
+
+msgid "old permalink structure"
+msgstr "alte Permalink-Struktur"
+
+msgid "Could not prepare the preview (%s)."
+msgstr "Die Vorschau konnte nicht vorbereitet werden (%s)."
+
+msgid "Could not prepare the report (%s)."
+msgstr "Der Bericht konnte nicht vorbereitet werden (%s)."
+
+msgid "Unauthorized (401)"
+msgstr "Nicht autorisiert (401)"
+
+msgid "Rate limited (429). Try again later."
+msgstr "Rate-Limit erreicht (429). Bitte versuchen Sie es später erneut."
+
+msgid "Timed out after %ds"
+msgstr "Zeitüberschreitung nach %ds"
+
+msgid "Network request failed (%s)"
+msgstr "Netzwerkanfrage fehlgeschlagen (%s)"
+
+msgid "Could not prepare the diagnostic data request."
+msgstr "Die Anfrage für Diagnosedaten konnte nicht vorbereitet werden."
+
+msgid "The reports server returned an unexpected response."
+msgstr "Der Berichtsserver hat eine unerwartete Antwort zurückgegeben."
+
+msgid "Reports server error (%d)"
+msgstr "Fehler des Berichtsservers (%d)"
+
+msgid "Reports server returned HTTP %d"
+msgstr "Der Berichtsserver hat HTTP %d zurückgegeben"
+
+msgid "Your Diagnostic Data"
+msgstr "Ihre Diagnosedaten"
+
+msgid "enabled"
+msgstr "aktiviert"
+
+msgid "disabled"
+msgstr "deaktiviert"
+
+msgid "Download my data"
+msgstr "Meine Daten herunterladen"
+
+msgid "Delete my data"
+msgstr "Meine Daten löschen"
+
+msgid "Nothing currently stored."
+msgstr "Derzeit nichts gespeichert."
+
+msgid "Delete your diagnostic data?"
+msgstr "Ihre Diagnosedaten löschen?"
+
+msgid "This permanently deletes every diagnostic report this site has ever sent. This cannot be undone. Your redirects and settings are not affected -- only diagnostic/telemetry history is removed."
+msgstr "Dies löscht dauerhaft jeden Diagnosebericht, den diese Website jemals gesendet hat. Dies kann nicht rückgängig gemacht werden. Ihre Weiterleitungen und Einstellungen sind davon nicht betroffen: Es wird nur der Diagnose- und Telemetrieverlauf entfernt."
+
+msgid "Yes, delete permanently"
+msgstr "Ja, dauerhaft löschen"
+
+msgid "Diagnostic identity is not registered yet."
+msgstr "Die Diagnoseidentität ist noch nicht registriert."
+
+msgid "Confirm diagnostic data deletion before continuing."
+msgstr "Bestätigen Sie die Löschung der Diagnosedaten, bevor Sie fortfahren."
+
+msgid "Diagnostic reporting has never been enabled for this site, so there is nothing stored on the developer's server for you to download or delete."
+msgstr "Die Diagnoseberichterstattung wurde für diese Website nie aktiviert, daher ist auf dem Server des Entwicklers nichts gespeichert, das Sie herunterladen oder löschen könnten."
+
+msgid "This site has diagnostic reporting %s. You can download everything stored on the developer's server for this site, or permanently delete it."
+msgstr "Diese Website hat die Diagnoseberichterstattung %s. Sie können alles, was auf dem Server des Entwicklers für diese Website gespeichert ist, herunterladen oder dauerhaft löschen."
+
+msgid "When checked, the text is treated as a regular expression. Note that including a bad regular expression or one that takes too long will break your website. So please use caution and test them elsewhere before trying them here. If you don't know what you're doing please don't use this option (as it's not necessary for the functioning of the plugin)."
+msgstr "Wenn aktiviert, wird der Text als regulärer Ausdruck behandelt. Beachten Sie, dass ein fehlerhafter oder zu langsamer regulärer Ausdruck Ihre Website unbrauchbar machen wird. Seien Sie daher vorsichtig und testen Sie ihn zuerst woanders, bevor Sie ihn hier ausprobieren. Wenn Sie nicht wissen, was Sie tun, verwenden Sie diese Option bitte nicht (sie ist für die Funktion des Plugins nicht erforderlich)."

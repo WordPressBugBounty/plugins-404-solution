@@ -93,10 +93,16 @@ class ABJ_404_Solution_AdminAssetEnqueuer {
             }
 
             if ($isStatsPage) {
+                // Chart.js is bundled with the plugin (includes/js/lib/) and enqueued
+                // as a hard dependency of both chart scripts. It used to be fetched from a
+                // third-party CDN at runtime, which is a WordPress.org guideline violation
+                // and a supply-chain risk in the authenticated admin context.
+                ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-chartjs',
+                    ABJ404_URL . 'includes/js/lib/chart.umd.min.js', array());
                 ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-stats-confidence-chart',
-                    ABJ404_URL . 'includes/js/statsConfidenceChart.js', array());
+                    ABJ404_URL . 'includes/js/statsConfidenceChart.js', array('abj404-chartjs'));
                 ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-stats-trends',
-                    ABJ404_URL . 'includes/js/statsTrends.js', array());
+                    ABJ404_URL . 'includes/js/statsTrends.js', array('abj404-chartjs'));
             }
 
             if ($isToolsPage) {
@@ -121,6 +127,8 @@ class ABJ_404_Solution_AdminAssetEnqueuer {
                     array('jquery'));
                 ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-restore-defaults', $includesUrl . 'ajax/RestoreDefaults.js',
                     array('jquery'));
+                ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-diagnostic-data-card',
+                    $includesUrl . 'js/diagnosticDataCard.js', array('jquery', 'abj404-admin-ajax'));
                 ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-behavior-tiles', ABJ404_URL . 'includes/js/behaviorTiles.js',
                     array());
                 ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-settings-deferred', ABJ404_URL . 'includes/js/settingsDeferred.js',

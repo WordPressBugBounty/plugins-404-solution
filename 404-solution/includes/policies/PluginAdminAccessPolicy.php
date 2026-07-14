@@ -338,23 +338,84 @@ class ABJ_404_Solution_PluginAdminAccessPolicy {
             return $allcaps;
         }
 
-        $policy = abj_service('admin_access_policy');
-        if (!is_object($policy) || !method_exists($policy, 'isPluginAdmin')) {
-            return $allcaps;
-        }
+        try {
+            $policy = abj_service('admin_access_policy');
+            if (!is_object($policy) || !method_exists($policy, 'isPluginAdmin')) {
+                return $allcaps;
+            }
 
-        if (!$policy->isPluginAdmin()) {
-            return $allcaps;
-        }
+            if (!$policy->isPluginAdmin()) {
+                return $allcaps;
+            }
 
-        $userRequest = ABJ_404_Solution_UserRequest::getInstance();
-        $queryParts = $userRequest !== null ? $userRequest->getQueryString() : null;
-        $isViewing404AdminPage = is_string($queryParts) && strpos($queryParts, ABJ404_PP) !== false;
-
-        if ($isViewing404AdminPage) {
-            $allcaps['manage_options'] = true;
+            if (self::isRequestForPluginAdminPage()) {
+                $allcaps['manage_options'] = true;
+            }
+        } catch (\Throwable $e) {
+            // user_has_cap fires on every current_user_can() check across
+            // all of wp-admin, often many times per page load. A transient
+            // failure resolving this plugin's services must not fatal the
+            // whole admin page for an unrelated capability check; returning
+            // $allcaps unchanged is also the safe failure mode for an
+            // authorization filter (it withholds the extra grant rather
+            // than risking one).
+            if (function_exists('abj404_logRuntimeWarning')) {
+                abj404_logRuntimeWarning('wpUserHasCapFilter failed', $e);
+            }
         }
 
         return $allcaps;
+    }
+
+    /**
+     * Whether the current request is actually loading THIS plugin's own admin
+     * screen. Scopes the manage_options grant above as narrowly as the
+     * user_has_cap filter allows.
+     *
+     * Binds the two signals WordPress itself uses to route an admin page:
+     *   - the `page` query var must EXACTLY equal the plugin page slug
+     *     (ABJ404_PP), not merely contain it as a substring, AND
+     *   - the current admin file ($pagenow) must be the parent the plugin
+     *     registers its menu under: 'admin.php' for the top-level menu
+     *     (menuLocation=settingsLevel) or 'options-general.php' for the
+     *     Settings submenu (see WordPress_Connector::addMainSettingsPageLink).
+     *
+     * Without both, a delegated plugin admin (a user listed in
+     * plugin_admin_users who lacks manage_options) could decorate any wp-admin
+     * URL with the plugin slug and pick up manage_options request-wide:
+     * e.g. users.php?s=abj404_solution (slug as a substring) or
+     * options.php?page=abj404_solution (right slug, wrong admin file).
+     *
+     * @return bool
+     */
+    private static function isRequestForPluginAdminPage(): bool {
+        if (self::currentAdminPageQueryVar() !== ABJ404_PP) {
+            return false;
+        }
+
+        $pagenow = isset($GLOBALS['pagenow']) && is_string($GLOBALS['pagenow'])
+            ? $GLOBALS['pagenow'] : '';
+
+        return $pagenow === 'admin.php' || $pagenow === 'options-general.php';
+    }
+
+    /**
+     * Resolve the `page` admin query var from the sanitized UserRequest query
+     * string (the same source the filter has always trusted), or null when it
+     * is absent or cannot be determined.
+     *
+     * @return string|null
+     */
+    private static function currentAdminPageQueryVar(): ?string {
+        $userRequest = ABJ_404_Solution_UserRequest::getInstance();
+        $queryParts = $userRequest !== null ? $userRequest->getQueryString() : null;
+        if (!is_string($queryParts) || $queryParts === '') {
+            return null;
+        }
+
+        $parsed = array();
+        parse_str($queryParts, $parsed);
+
+        return isset($parsed['page']) && is_string($parsed['page']) ? $parsed['page'] : null;
     }
 }

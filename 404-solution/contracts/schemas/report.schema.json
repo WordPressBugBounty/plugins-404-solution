@@ -59,6 +59,17 @@
     "redirects_regex_count": { "type": ["integer", "null"], "minimum": 0 },
     "redirects_trashed_count": { "type": ["integer", "null"], "minimum": 0 },
 
+    "redirect_hit_count_histogram": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "zero_hits": { "type": "integer", "minimum": 0 },
+        "one_to_ten_hits": { "type": "integer", "minimum": 0 },
+        "eleven_to_hundred_hits": { "type": "integer", "minimum": 0 },
+        "over_hundred_hits": { "type": "integer", "minimum": 0 }
+      }
+    },
+
     "captured_404s_active_total": { "type": ["integer", "null"], "minimum": 0 },
     "captured_404s_new_count": { "type": ["integer", "null"], "minimum": 0 },
     "captured_404s_ignored_count": { "type": ["integer", "null"], "minimum": 0 },
@@ -69,6 +80,23 @@
     "log_table_size_bytes": { "type": ["integer", "null"], "minimum": 0 },
     "error_count_in_log": { "type": ["integer", "null"], "minimum": 0 },
     "debug_file_size_bytes": { "type": ["integer", "null"], "minimum": 0 },
+
+    "environment_extras": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "properties": {
+        "hosting_class": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "host": { "type": "string" },
+            "server_class": { "type": "string" },
+            "panel": { "type": "string" },
+            "matched_marker": { "type": "string" }
+          }
+        }
+      }
+    },
 
     "debug_log": { "type": "string", "maxLength": 262144 },
 

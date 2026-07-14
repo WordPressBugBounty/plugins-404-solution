@@ -899,6 +899,11 @@ msgstr ""
 msgid "Error: No ID(s) specified for bulk action. (%s)"
 msgstr ""
 
+#: includes/admin/actions/BulkActionHandler.php:73
+#, php-format
+msgid "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+msgstr ""
+
 #: includes/PluginLogicTrait_AdminActions.php:195
 msgid "Error: Bad trash operation specified."
 msgstr ""
@@ -1976,8 +1981,8 @@ msgstr ""
 msgid "(Explain)"
 msgstr ""
 
-#: includes/ViewTrait_Redirects.php:140
-#: includes/ViewTrait_RedirectsTable.php:625
+#: includes/admin/RedirectAddModalPresenter.php:49
+#: includes/view/RedirectEditFormPresenter.php:146
 msgid "When checked, the text is treated as a regular expression. Note that including a bad regular expression or one that takes too long will break your website. So please use caution and test them elsewhere before trying them here. If you don't know what you're doing please don't use this option (as it's not necessary for the functioning of the plugin)."
 msgstr ""
 
@@ -3465,4 +3470,93 @@ msgstr ""
 
 #: includes/view/View_CapturedURLsTable.php:332
 msgid "Preparing the captured 404s table. The list is still loading and will appear in a moment."
+msgstr ""
+
+#: includes/html/adminOptionsGeneral.html
+msgid "Help the developer with error logs and usage stats"
+msgstr ""
+
+#: includes/html/adminOptionsGeneral.html
+msgid "Sends the developer your debug log when an error occurs, plus a status ping at most once a week (once the plugin's been active 5+ days) with your site's version, URL, and 404/redirect counts. Counts are aggregate only, never per-URL. Optional - helps fix bugs and prioritize development. Reports are reviewed daily."
+msgstr ""
+
+msgid "Sources (%d)"
+msgstr ""
+
+msgid "Showing %1$d of %2$d sources."
+msgstr ""
+
+msgid "Linked from"
+msgstr ""
+
+msgid "old permalink structure"
+msgstr ""
+
+msgid "Could not prepare the preview (%s)."
+msgstr ""
+
+msgid "Could not prepare the report (%s)."
+msgstr ""
+
+msgid "Unauthorized (401)"
+msgstr ""
+
+msgid "Rate limited (429). Try again later."
+msgstr ""
+
+msgid "Timed out after %ds"
+msgstr ""
+
+msgid "Network request failed (%s)"
+msgstr ""
+
+msgid "Could not prepare the diagnostic data request."
+msgstr ""
+
+msgid "The reports server returned an unexpected response."
+msgstr ""
+
+msgid "Reports server error (%d)"
+msgstr ""
+
+msgid "Reports server returned HTTP %d"
+msgstr ""
+
+msgid "Your Diagnostic Data"
+msgstr ""
+
+msgid "enabled"
+msgstr ""
+
+msgid "disabled"
+msgstr ""
+
+msgid "Download my data"
+msgstr ""
+
+msgid "Delete my data"
+msgstr ""
+
+msgid "Nothing currently stored."
+msgstr ""
+
+msgid "Delete your diagnostic data?"
+msgstr ""
+
+msgid "This permanently deletes every diagnostic report this site has ever sent. This cannot be undone. Your redirects and settings are not affected -- only diagnostic/telemetry history is removed."
+msgstr ""
+
+msgid "Yes, delete permanently"
+msgstr ""
+
+msgid "Diagnostic identity is not registered yet."
+msgstr ""
+
+msgid "Confirm diagnostic data deletion before continuing."
+msgstr ""
+
+msgid "Diagnostic reporting has never been enabled for this site, so there is nothing stored on the developer's server for you to download or delete."
+msgstr ""
+
+msgid "This site has diagnostic reporting %s. You can download everything stored on the developer's server for this site, or permanently delete it."
 msgstr ""

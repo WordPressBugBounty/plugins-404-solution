@@ -28,6 +28,19 @@ class ABJ_404_Solution_EditRedirectHandler {
     /** @var ABJ_404_Solution_RedirectFormResolver */
     private $resolver;
 
+    /**
+     * Cardinality cap on the conditions[] POST payload. Every accepted
+     * condition becomes its own INSERT statement inside
+     * RedirectConditionsRepository::saveRedirectConditions()'s replacement
+     * transaction, so this bounds the SQL workload (and in-memory statement
+     * array) a single edit request can generate. The admin UI's "+ Add
+     * Condition" button has no client-side cap, but a redirect with dozens
+     * of conditions is already an edge case -- 50 is comfortably above any
+     * realistic legitimate use while still rejecting a forged or accidental
+     * oversized request (e.g. 50,000 conditions).
+     */
+    const MAX_REDIRECT_CONDITIONS = 50;
+
     public function __construct(
         ABJ_404_Solution_PluginLogicAdminActions $parent,
         ABJ_404_Solution_RedirectFormResolver $resolver
@@ -167,10 +180,8 @@ class ABJ_404_Solution_EditRedirectHandler {
 
         $startDateRaw = isset($_POST['redirect_start_date']) && is_string($_POST['redirect_start_date']) ? trim($_POST['redirect_start_date']) : '';
         $endDateRaw = isset($_POST['redirect_end_date']) && is_string($_POST['redirect_end_date']) ? trim($_POST['redirect_end_date']) : '';
-        $startTs = ($startDateRaw !== '') ? strtotime($startDateRaw . ' 00:00:00') : null;
-        $endTs = ($endDateRaw !== '') ? strtotime($endDateRaw . ' 23:59:59') : null;
-        if ($startTs === false) { $startTs = null; }
-        if ($endTs === false) { $endTs = null; }
+        $startTs = ABJ_404_Solution_RedirectScheduleTimezone::toEpoch($startDateRaw, '00:00:00');
+        $endTs = ABJ_404_Solution_RedirectScheduleTimezone::toEpoch($endDateRaw, '23:59:59');
 
         return array(
             'tdTypeRaw' => $tdTypeRaw,
@@ -220,7 +231,10 @@ class ABJ_404_Solution_EditRedirectHandler {
         }
 
         if ($id > 0) {
-            $redirectsRepo->saveRedirectConditions($id, $this->sanitizeRedirectConditions());
+            $conditionsError = $redirectsRepo->saveRedirectConditions($id, $this->sanitizeRedirectConditions());
+            if ($conditionsError !== '') {
+                return $this->formatSaveConditionsError($conditionsError) . "<BR/>";
+            }
         }
         return '';
     }
@@ -261,6 +275,17 @@ class ABJ_404_Solution_EditRedirectHandler {
         return sprintf(
             __('Error: Unable to update redirect data. Repository result: %s', '404-solution'),
             esc_html($errorCode)
+        );
+    }
+
+    /**
+     * @param string $errorMessage Underlying DB/transaction error text (per
+     *     the Error visibility philosophy, surfaced rather than genericized).
+     */
+    private function formatSaveConditionsError(string $errorMessage): string {
+        return sprintf(
+            __('Error: Unable to save redirect conditions. Repository result: %s', '404-solution'),
+            esc_html($errorMessage)
         );
     }
 
@@ -327,6 +352,13 @@ class ABJ_404_Solution_EditRedirectHandler {
     private function sanitizeRedirectConditions(): array {
         $rawConditions = (isset($_POST['conditions']) && is_array($_POST['conditions']))
             ? $_POST['conditions'] : [];
+        // Enforce the domain maximum before sanitizing/inserting: mirrors the
+        // loop's existing "skip silently, never fail the whole request" shape
+        // (see the condition-type/operator handling below) rather than
+        // rejecting the entire edit over an oversized payload.
+        if (count($rawConditions) > self::MAX_REDIRECT_CONDITIONS) {
+            $rawConditions = array_slice($rawConditions, 0, self::MAX_REDIRECT_CONDITIONS);
+        }
         $sanitizedConditions = [];
         $allowedConditionTypes = [
             'login_status', 'user_role', 'referrer',

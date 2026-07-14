@@ -533,6 +533,10 @@ msgstr "Fout: Geen ID('s) gevonden voor bewerkingsverzoek."
 msgid "Error: No ID(s) specified for bulk action. (%s)"
 msgstr "Fout: Geen ID('s) opgegeven voor bulkactie. (%s)"
 
+# translation-verified: en-fallback awaiting native pass
+msgid "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+msgstr "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+
 msgid "Error: No records were imported. SQL result: %s"
 msgstr "Fout: Geen records geïmporteerd. SQL-resultaat: %s"
 
@@ -653,8 +657,8 @@ msgstr "Ga naar volgende pagina"
 msgid "Go to previous page"
 msgstr "Ga naar vorige pagina"
 
-msgid "Help the developer by sending error logs"
-msgstr "Help de ontwikkelaar door foutlogs te verzenden"
+msgid "Help the developer with error logs and usage stats"
+msgstr "Help de ontwikkelaar met foutlogs en gebruiksstatistieken"
 
 msgid "Here are some other great pages"
 msgstr "Hier zijn enkele andere geweldige pagina's"
@@ -1642,8 +1646,8 @@ msgid "Error: Invalid language selected"
 msgstr "Fout: Ongeldige taal geselecteerd"
 
 #: includes/html/adminOptionsGeneral.html
-msgid "When the plugin detects an error, it transmits a copy of the debug log to the developer for diagnosis. Transmission may be by email or by HTTPS upload to a developer-operated server; the contents are the same. This is not required for the plugin to work, but it helps the developer fix bugs in future versions. The report includes: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when a support issue is opened). Reports are checked daily when maintenance runs."
-msgstr "Wanneer de plugin een fout detecteert, verzendt deze een kopie van het foutopsporingslogboek naar de ontwikkelaar voor diagnose. Verzending kan plaatsvinden per e-mail of via HTTPS-upload naar een door de ontwikkelaar beheerde server; de inhoud is hetzelfde. Dit is niet vereist voor de werking van de plugin, maar het helpt de ontwikkelaar om fouten in toekomstige versies te verhelpen. Het rapport bevat: alles in het foutopsporingslogboek, het e-mailadres van de beheerder, geïnstalleerde PHP-extensies, actieve plugins, PHP-versie, WordPress-versie, MySQL-versie, totaal aantal gepubliceerde pagina's en berichten, enzovoort (alles wat wordt gevraagd bij het openen van een ondersteuningsverzoek). Rapporten worden dagelijks gecontroleerd wanneer onderhoud wordt uitgevoerd."
+msgid "Sends the developer your debug log when an error occurs, plus a status ping at most once a week (once the plugin's been active 5+ days) with your site's version, URL, and 404/redirect counts. Counts are aggregate only, never per-URL. Optional - helps fix bugs and prioritize development. Reports are reviewed daily."
+msgstr "Stuurt je debuglog naar de ontwikkelaar wanneer er een fout optreedt, plus maximaal één keer per week een statusping zodra de plugin meer dan 5 dagen actief is, met de versie, URL en 404-/redirectaantallen van je site. Aantallen zijn alleen geaggregeerd, nooit per URL. Optioneel, helpt bugs op te lossen en ontwikkeling te prioriteren. Rapporten worden dagelijks bekeken."
 
 #: includes/html/viewSuggestions.html
 msgid "Display the closest matching pages by using the shortcode [abj404_solution_page_suggestions]."
@@ -3944,6 +3948,11 @@ msgstr "%s redirect entries were moved to the trash."
 msgid "Error: Unable to update redirect data. Repository result: %s"
 msgstr "Error: Unable to update redirect data. Repository result: %s"
 
+# translation-verified: en-fallback awaiting native pass
+#: includes/
+msgid "Error: Unable to save redirect conditions. Repository result: %s"
+msgstr "Error: Unable to save redirect conditions. Repository result: %s"
+
 # translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Loading status..."
@@ -4082,3 +4091,87 @@ msgstr "Sorteren op deze kolom wordt voorbereid voor jouw aantal URL's (%d%% vol
 #: includes/view/View_Shared.php:247
 msgid "Sorting by this column is unavailable on this site. The list shows newest first."
 msgstr "Sorteren op deze kolom is niet beschikbaar op deze site. De lijst toont de nieuwste eerst."
+
+msgid "Sources (%d)"
+msgstr "Bronnen (%d)"
+
+msgid "Showing %1$d of %2$d sources."
+msgstr "%1$d van %2$d bronnen worden getoond."
+
+msgid "Linked from"
+msgstr "Gelinkt vanaf"
+
+msgid "old permalink structure"
+msgstr "oude permalinkstructuur"
+
+msgid "Could not prepare the preview (%s)."
+msgstr "Kon de preview niet voorbereiden (%s)."
+
+msgid "Could not prepare the report (%s)."
+msgstr "Kon het rapport niet voorbereiden (%s)."
+
+msgid "Unauthorized (401)"
+msgstr "Niet geautoriseerd (401)"
+
+msgid "Rate limited (429). Try again later."
+msgstr "Snelheidslimiet bereikt (429). Probeer het later opnieuw."
+
+msgid "Timed out after %ds"
+msgstr "Time-out na %ds"
+
+msgid "Network request failed (%s)"
+msgstr "Netwerkverzoek mislukt (%s)"
+
+msgid "Could not prepare the diagnostic data request."
+msgstr "Kon het verzoek om diagnostische gegevens niet voorbereiden."
+
+msgid "The reports server returned an unexpected response."
+msgstr "De rapportenserver gaf een onverwacht antwoord terug."
+
+msgid "Reports server error (%d)"
+msgstr "Fout van de rapportenserver (%d)"
+
+msgid "Reports server returned HTTP %d"
+msgstr "De rapportenserver gaf HTTP %d terug"
+
+msgid "Your Diagnostic Data"
+msgstr "Uw diagnostische gegevens"
+
+msgid "enabled"
+msgstr "ingeschakeld"
+
+msgid "disabled"
+msgstr "uitgeschakeld"
+
+msgid "Download my data"
+msgstr "Mijn gegevens downloaden"
+
+msgid "Delete my data"
+msgstr "Mijn gegevens verwijderen"
+
+msgid "Nothing currently stored."
+msgstr "Momenteel niets opgeslagen."
+
+msgid "Delete your diagnostic data?"
+msgstr "Uw diagnostische gegevens verwijderen?"
+
+msgid "This permanently deletes every diagnostic report this site has ever sent. This cannot be undone. Your redirects and settings are not affected -- only diagnostic/telemetry history is removed."
+msgstr "Dit verwijdert permanent elk diagnostisch rapport dat deze site ooit heeft verzonden. Dit kan niet ongedaan worden gemaakt. Uw omleidingen en instellingen worden niet beïnvloed: alleen de diagnostische en telemetriegeschiedenis wordt verwijderd."
+
+msgid "Yes, delete permanently"
+msgstr "Ja, definitief verwijderen"
+
+msgid "Diagnostic identity is not registered yet."
+msgstr "Diagnostische identiteit is nog niet geregistreerd."
+
+msgid "Confirm diagnostic data deletion before continuing."
+msgstr "Bevestig het verwijderen van diagnostische gegevens voordat u doorgaat."
+
+msgid "Diagnostic reporting has never been enabled for this site, so there is nothing stored on the developer's server for you to download or delete."
+msgstr "Diagnostische rapportage is nooit ingeschakeld voor deze site, dus er is niets opgeslagen op de server van de ontwikkelaar om te downloaden of te verwijderen."
+
+msgid "This site has diagnostic reporting %s. You can download everything stored on the developer's server for this site, or permanently delete it."
+msgstr "Deze site heeft diagnostische rapportage %s. U kunt alles downloaden dat is opgeslagen op de server van de ontwikkelaar voor deze site, of het permanent verwijderen."
+
+msgid "When checked, the text is treated as a regular expression. Note that including a bad regular expression or one that takes too long will break your website. So please use caution and test them elsewhere before trying them here. If you don't know what you're doing please don't use this option (as it's not necessary for the functioning of the plugin)."
+msgstr "Wanneer aangevinkt, wordt de tekst behandeld als een reguliere expressie. Let op: een foutieve of te trage reguliere expressie zal uw website breken. Wees daarom voorzichtig en test ze eerst elders voordat u ze hier probeert. Als u niet weet wat u doet, gebruik deze optie dan niet (deze is niet nodig voor het functioneren van de plugin)."

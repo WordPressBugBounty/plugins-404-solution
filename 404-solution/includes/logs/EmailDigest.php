@@ -255,13 +255,22 @@ class ABJ_404_Solution_EmailDigest {
      */
     public function sendDigest(): string {
         $options = $this->getOptions();
+        $frequency = $this->readFrequencyOption($options);
 
-        $frequency = isset($options['admin_notification_frequency']) && is_string($options['admin_notification_frequency'])
-            ? $options['admin_notification_frequency']
-            : 'instant';
+        if ($frequency === 'instant' || $frequency === 'never') {
+            return 'Digest skipped: frequency is ' . $frequency . '.';
+        }
 
-        if ($frequency === 'instant') {
-            return 'Digest skipped: frequency is instant.';
+        // Centralized cadence gate: sendDigest() is reachable from more than
+        // one trigger (the dedicated abj404_send_digest WP-Cron event, and
+        // the plugin's daily maintenance cron via
+        // emailCaptured404Notification()). Without this check here, ANY
+        // trigger firing more often than the configured frequency (e.g. the
+        // daily maintenance cron running while frequency=weekly) sends a
+        // digest every time it runs, regardless of what the admin selected.
+        $cooldownSkip = $this->cooldownSkipMessage($frequency, $options);
+        if ($cooldownSkip !== '') {
+            return $cooldownSkip;
         }
 
         $to = isset($options['admin_notification_email']) && is_string($options['admin_notification_email'])
@@ -320,11 +329,45 @@ class ABJ_404_Solution_EmailDigest {
         );
 
         $this->logger->debugMessage('Sending 404 digest email to: ' . $to);
-        wp_mail($to, $subject, $body, $headers);
+        $sent = wp_mail($to, $subject, $body, $headers);
+
+        if (!$sent) {
+            // Do not stamp admin_notification_last_sent on a failed send:
+            // that would suppress the cooldown gate's retry for up to a
+            // week even though nothing actually went out. A hosting-level
+            // mail failure is a warning (the plugin can still function),
+            // not an error -- the next daily-maintenance-cron trigger
+            // retries naturally since last_sent is unchanged.
+            $this->logger->warn('404 digest email failed to send to: ' . $to . ' (wp_mail() reported failure).');
+            return 'Digest email failed to send to: ' . $to;
+        }
+
         $this->logger->debugMessage('404 digest email sent.');
 
+        // Write through the options repository (into the bundled
+        // abj404_settings option), NOT a bare update_option() call: this
+        // must land in the SAME storage location cooldownSkipMessage()
+        // reads via getOptions(), or the cooldown gate silently never
+        // engages (the storage-mismatch half of WP.org support topic
+        // weekly-digest-3 -- see EmailDigestCadenceRealStorageRoundTripTest).
+        $lastSent = abj_clock()->now();
+        abj_service('options_repository')->setRawSettingValue('admin_notification_last_sent', $lastSent);
+
+        // Compatibility-window dual-write: 4.3.1 (already shipped to
+        // production) persisted this same value as a STANDALONE WP option
+        // via a bare update_option('admin_notification_last_sent', ...)
+        // call. External integrations (other plugins, monitoring scripts,
+        // site-owner custom code) may read that released contract via
+        // get_option('admin_notification_last_sent'). The options_repository
+        // write above does not touch that standalone option -- it lands
+        // inside abj404_settings instead -- so without this second write,
+        // any such external reader would silently stop receiving updates
+        // after upgrading to 4.3.2+ (design-audit category 110 Contract
+        // Compatibility finding). Keep both writes: the repository write is
+        // load-bearing for this class's own cooldown gate, and this one
+        // preserves the public contract for everyone else.
         if (function_exists('update_option')) {
-            update_option('admin_notification_last_sent', abj_clock()->now());
+            update_option('admin_notification_last_sent', $lastSent);
         }
 
         return 'Digest email sent to: ' . $to;
@@ -334,24 +377,82 @@ class ABJ_404_Solution_EmailDigest {
      * Schedule the next digest send based on the frequency option.
      * Reschedules or clears WP-Cron as needed.
      *
+     * The dedicated `abj404_send_digest` WP-Cron event always runs at a
+     * fixed `daily` recurrence, regardless of the configured
+     * admin_notification_frequency (daily/weekly). WP-Cron only fires
+     * opportunistically on page loads with no guaranteed exact timing, so
+     * tying this event's OWN recurrence to the desired send interval means
+     * a single missed `weekly`-recurrence firing silently doubles the wait
+     * to two weeks. cooldownSkipMessage() (called from sendDigest(), the
+     * actual send boundary) is the single source of truth for cadence,
+     * keyed off `admin_notification_last_sent`. A daily trigger just needs
+     * to check in often enough that a missed firing costs at most a day,
+     * never a week -- the same pattern LoggingFeedbackDispatcher uses for
+     * its weekly heartbeat (frequent trigger, elapsed-time gate).
+     *
+     * @param string|null $frequencyOverride When provided, used instead of
+     *     re-reading the option. Callers that just validated and are about
+     *     to persist a new frequency value (e.g. SettingsNotificationPolicy)
+     *     must pass it explicitly: the options repository write happens
+     *     later in the same request, so a re-fetch here would read the
+     *     stale pre-save value and could incorrectly clear/schedule against
+     *     the wrong instant-vs-not state.
      * @return void
      */
-    public function scheduleNextDigest(): void {
-        $options = $this->getOptions();
-        $frequency = isset($options['admin_notification_frequency']) && is_string($options['admin_notification_frequency'])
-            ? $options['admin_notification_frequency']
-            : 'instant';
+    public function scheduleNextDigest(?string $frequencyOverride = null): void {
+        $frequency = $frequencyOverride !== null ? $frequencyOverride : $this->readFrequencyOption($this->getOptions());
 
         $scheduler = abj_cron_scheduler();
         $hook = ABJ_404_Solution_CronScheduler::HOOK_SEND_DIGEST;
 
-        if ($frequency === 'instant') {
+        if ($frequency === 'instant' || $frequency === 'never') {
             $scheduler->clearHook($hook);
             return;
         }
 
-        $recurrence = ($frequency === 'weekly') ? 'weekly' : 'daily';
-        $scheduler->scheduleRecurringIfMissing($hook, $recurrence);
+        $scheduler->scheduleDailyMigratingStaleRecurrence($hook);
+    }
+
+    /** @param array<string, mixed> $options */
+    private function readFrequencyOption(array $options): string {
+        return isset($options['admin_notification_frequency']) && is_string($options['admin_notification_frequency'])
+            ? $options['admin_notification_frequency']
+            : 'instant';
+    }
+
+    /**
+     * Returns a non-empty skip message when the configured cadence has not
+     * yet elapsed since the last successful send, or '' when sending is
+     * allowed. `admin_notification_last_sent` (written at the bottom of
+     * sendDigest()) is the single source of truth for cadence enforcement,
+     * independent of which caller/cron triggered this method.
+     *
+     * @param array<string, mixed> $options
+     */
+    private function cooldownSkipMessage(string $frequency, array $options): string {
+        $intervalSeconds = $frequency === 'weekly'
+            ? (defined('WEEK_IN_SECONDS') ? WEEK_IN_SECONDS : 604800)
+            : (defined('DAY_IN_SECONDS') ? DAY_IN_SECONDS : 86400);
+
+        $lastSentRaw = isset($options['admin_notification_last_sent']) && is_scalar($options['admin_notification_last_sent'])
+            ? $options['admin_notification_last_sent']
+            : 0;
+        $lastSent = intval($lastSentRaw);
+        if ($lastSent <= 0) {
+            return '';
+        }
+
+        $elapsed = abj_clock()->now() - $lastSent;
+        if ($elapsed < $intervalSeconds) {
+            return sprintf(
+                'Digest skipped: last sent %d seconds ago; next %s digest eligible in %d seconds.',
+                $elapsed,
+                $frequency,
+                $intervalSeconds - $elapsed
+            );
+        }
+
+        return '';
     }
 
     /** @return array<string, mixed> */

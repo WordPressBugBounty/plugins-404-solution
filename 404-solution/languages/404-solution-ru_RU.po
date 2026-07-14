@@ -534,6 +534,10 @@ msgstr "Ошибка: Не найдены ID для запроса редакт�
 msgid "Error: No ID(s) specified for bulk action. (%s)"
 msgstr "Ошибка: Не указаны ID для массового действия. (%s)"
 
+# translation-verified: en-fallback awaiting native pass
+msgid "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+msgstr "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+
 msgid "Error: No records were imported. SQL result: %s"
 msgstr "Ошибка: Записи не были импортированы. Результат SQL: %s"
 
@@ -654,8 +658,8 @@ msgstr "Перейти на следующую страницу"
 msgid "Go to previous page"
 msgstr "Перейти на предыдущую страницу"
 
-msgid "Help the developer by sending error logs"
-msgstr "Помочь разработчику, отправляя журналы ошибок"
+msgid "Help the developer with error logs and usage stats"
+msgstr "Помочь разработчику журналами ошибок и статистикой использования"
 
 msgid "Here are some other great pages"
 msgstr "Вот несколько других отличных страниц"
@@ -1645,8 +1649,8 @@ msgid "Error: Invalid language selected"
 msgstr "Ошибка: Выбран недопустимый язык"
 
 #: includes/html/adminOptionsGeneral.html
-msgid "When the plugin detects an error, it transmits a copy of the debug log to the developer for diagnosis. Transmission may be by email or by HTTPS upload to a developer-operated server; the contents are the same. This is not required for the plugin to work, but it helps the developer fix bugs in future versions. The report includes: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when a support issue is opened). Reports are checked daily when maintenance runs."
-msgstr "Когда плагин обнаруживает ошибку, он передаёт копию журнала отладки разработчику для диагностики. Передача может осуществляться по электронной почте или путём загрузки по протоколу HTTPS на сервер, управляемый разработчиком; содержимое одинаковое. Это не требуется для работы плагина, но помогает разработчику исправлять ошибки в будущих версиях. Отчёт включает: всё содержимое журнала отладки, адрес электронной почты администратора, установленные расширения PHP, активные плагины, версию PHP, версию WordPress, версию MySQL, общее количество опубликованных страниц и записей и так далее (всё, что запрашивается при открытии заявки в службу поддержки). Отчёты проверяются ежедневно при выполнении обслуживания."
+msgid "Sends the developer your debug log when an error occurs, plus a status ping at most once a week (once the plugin's been active 5+ days) with your site's version, URL, and 404/redirect counts. Counts are aggregate only, never per-URL. Optional - helps fix bugs and prioritize development. Reports are reviewed daily."
+msgstr "Отправляет разработчику ваш журнал отладки при возникновении ошибки, а также статусный пинг не чаще одного раза в неделю после того, как плагин активен более 5 дней, с версией сайта, URL и счетчиками 404/перенаправлений. Счетчики передаются только в агрегированном виде, никогда по отдельным URL. Необязательно, помогает исправлять ошибки и расставлять приоритеты разработки. Отчеты просматриваются ежедневно."
 
 #: includes/html/viewSuggestions.html
 msgid "Display the closest matching pages by using the shortcode [abj404_solution_page_suggestions]."
@@ -3952,6 +3956,11 @@ msgstr "%s redirect entries were moved to the trash."
 msgid "Error: Unable to update redirect data. Repository result: %s"
 msgstr "Error: Unable to update redirect data. Repository result: %s"
 
+# translation-verified: en-fallback awaiting native pass
+#: includes/
+msgid "Error: Unable to save redirect conditions. Repository result: %s"
+msgstr "Error: Unable to save redirect conditions. Repository result: %s"
+
 # translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Loading status..."
@@ -4090,3 +4099,87 @@ msgstr "Сортировка по этому столбцу подготавли
 #: includes/view/View_Shared.php:247
 msgid "Sorting by this column is unavailable on this site. The list shows newest first."
 msgstr "Сортировка по этому столбцу недоступна на этом сайте. Список показывает сначала самые новые."
+
+msgid "Sources (%d)"
+msgstr "Источники (%d)"
+
+msgid "Showing %1$d of %2$d sources."
+msgstr "Показано %1$d из %2$d источников."
+
+msgid "Linked from"
+msgstr "Ссылка с"
+
+msgid "old permalink structure"
+msgstr "старая структура постоянных ссылок"
+
+msgid "Could not prepare the preview (%s)."
+msgstr "Не удалось подготовить предварительный просмотр (%s)."
+
+msgid "Could not prepare the report (%s)."
+msgstr "Не удалось подготовить отчет (%s)."
+
+msgid "Unauthorized (401)"
+msgstr "Не авторизовано (401)"
+
+msgid "Rate limited (429). Try again later."
+msgstr "Превышен лимит запросов (429). Повторите попытку позже."
+
+msgid "Timed out after %ds"
+msgstr "Истекло время ожидания после %ds"
+
+msgid "Network request failed (%s)"
+msgstr "Сбой сетевого запроса (%s)"
+
+msgid "Could not prepare the diagnostic data request."
+msgstr "Не удалось подготовить запрос диагностических данных."
+
+msgid "The reports server returned an unexpected response."
+msgstr "Сервер отчётов вернул неожиданный ответ."
+
+msgid "Reports server error (%d)"
+msgstr "Ошибка сервера отчётов (%d)"
+
+msgid "Reports server returned HTTP %d"
+msgstr "Сервер отчётов вернул HTTP %d"
+
+msgid "Your Diagnostic Data"
+msgstr "Ваши диагностические данные"
+
+msgid "enabled"
+msgstr "включено"
+
+msgid "disabled"
+msgstr "отключено"
+
+msgid "Download my data"
+msgstr "Скачать мои данные"
+
+msgid "Delete my data"
+msgstr "Удалить мои данные"
+
+msgid "Nothing currently stored."
+msgstr "В настоящее время ничего не сохранено."
+
+msgid "Delete your diagnostic data?"
+msgstr "Удалить ваши диагностические данные?"
+
+msgid "This permanently deletes every diagnostic report this site has ever sent. This cannot be undone. Your redirects and settings are not affected -- only diagnostic/telemetry history is removed."
+msgstr "Это навсегда удалит каждый диагностический отчёт, когда-либо отправленный этим сайтом. Это действие нельзя отменить. Ваши редиректы и настройки не затрагиваются: удаляется только история диагностики и телеметрии."
+
+msgid "Yes, delete permanently"
+msgstr "Да, удалить навсегда"
+
+msgid "Diagnostic identity is not registered yet."
+msgstr "Диагностическая идентичность ещё не зарегистрирована."
+
+msgid "Confirm diagnostic data deletion before continuing."
+msgstr "Подтвердите удаление диагностических данных перед продолжением."
+
+msgid "Diagnostic reporting has never been enabled for this site, so there is nothing stored on the developer's server for you to download or delete."
+msgstr "Диагностическая отчетность никогда не была включена для этого сайта, поэтому на сервере разработчика нет ничего сохраненного для скачивания или удаления."
+
+msgid "This site has diagnostic reporting %s. You can download everything stored on the developer's server for this site, or permanently delete it."
+msgstr "Для этого сайта диагностическая отчетность %s. Вы можете скачать все, что хранится на сервере разработчика для этого сайта, или удалить это навсегда."
+
+msgid "When checked, the text is treated as a regular expression. Note that including a bad regular expression or one that takes too long will break your website. So please use caution and test them elsewhere before trying them here. If you don't know what you're doing please don't use this option (as it's not necessary for the functioning of the plugin)."
+msgstr "Если отмечено, текст обрабатывается как регулярное выражение. Обратите внимание, что неправильное или слишком медленное регулярное выражение нарушит работу вашего сайта. Поэтому, пожалуйста, соблюдайте осторожность и протестируйте их в другом месте, прежде чем пробовать здесь. Если вы не знаете, что делаете, пожалуйста, не используйте эту опцию (она не требуется для работы плагина)."

@@ -10,9 +10,14 @@ if (!defined('ABSPATH')) {
  * This is the data-access half of the cross-plugin import feature: it detects
  * which source plugins are installed (by probing for their tables or custom
  * post type) and reads each source's rows into one common normalized shape
- * (`['source_url' => string, 'dest_url' => string, 'code' => int, 'is_regex' => bool]`).
- * It makes no decision about how those rows become 404 Solution redirects; that
- * business logic lives in {@see ABJ_404_Solution_CrossPluginImporter}.
+ * (`['source_url' => string, 'dest_url' => string, 'code' => int, 'is_regex' => bool]`),
+ * or counts them without materializing rows. It makes no decision about how
+ * those rows become 404 Solution redirects; that business logic lives in
+ * {@see ABJ_404_Solution_CrossPluginImporter}. Actual query execution and
+ * driver-error interpretation is delegated to
+ * {@see ABJ_404_Solution_ForeignSourceQueryGateway}; this class owns only
+ * the per-source schema knowledge (table/CPT names, column names, WHERE
+ * filters) for each of the five supported sources.
  *
  * Supported sources:
  *   - Rank Math (rank_math_redirections)
@@ -23,11 +28,20 @@ if (!defined('ABSPATH')) {
  */
 class ABJ_404_Solution_ForeignRedirectSourceReader {
 
+    /**
+     * Row/post count per page for every paginated foreign-source read (M502,
+     * 2026-07-14): `LIMIT`/`OFFSET` for table-backed readers, `posts_per_page`
+     * for the CPT-backed Safe Redirect Manager reader. 500 keeps a page's PHP
+     * array well within shared-hosting memory limits even at VARCHAR(2048)
+     * source/dest width, while still finishing typical sites in 1-2 pages.
+     */
+    public const IMPORT_PAGE_SIZE = 500;
+
     /** @var ABJ_404_Solution_Logging */
     private $logger;
 
-    /** @var ABJ_404_Solution_DatabaseQueryInterface|null */
-    private $dbQuery;
+    /** @var ABJ_404_Solution_ForeignSourceQueryGateway */
+    private $queryGateway;
 
     /**
      * @param mixed $redirectsRepository Used only to resolve a database query
@@ -37,7 +51,7 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
      */
     public function __construct($redirectsRepository, $logger, $dbQuery = null) {
         $this->logger = $logger;
-        $this->dbQuery = $this->resolveDatabaseQuery($redirectsRepository, $dbQuery);
+        $this->queryGateway = new ABJ_404_Solution_ForeignSourceQueryGateway($redirectsRepository, $logger, $dbQuery);
     }
 
     /**
@@ -63,7 +77,7 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
 
         $detected = array();
         foreach ($tableMap as $slug => $tableName) {
-            $detected[$slug] = $this->tableExists($tableName);
+            $detected[$slug] = $this->queryGateway->tableExists($tableName);
         }
 
         // Safe Redirect Manager uses a custom post type, not a dedicated table.
@@ -74,53 +88,148 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
     }
 
     /**
-     * Read and normalize all redirect rows from the given source plugin.
+     * Read and normalize redirect rows from the given source plugin as a
+     * generator that yields one normalized row at a time.
+     *
+     * Each per-source reader pages in IMPORT_PAGE_SIZE-row chunks (table-
+     * backed: `LIMIT`/`OFFSET`; CPT-backed Safe Redirect Manager: paged
+     * get_posts()) rather than one unbounded read (M502, 2026-07-14: a
+     * source table with tens of thousands of rows previously materialized
+     * the entire result set in PHP memory before a row was written). The
+     * caller ({@see ABJ_404_Solution_CrossPluginImporter::importFrom()})
+     * consumes this row-by-row, so at most one page is ever held in memory.
      *
      * @param string $source One of 'rankmath', 'yoast', 'aioseo',
      *                       'safe-redirect-manager', 'redirection'
-     * @return array<int, array<string, mixed>>
+     * @return \Generator<int, array<string, mixed>>
      */
-    public function readSource(string $source): array {
+    public function readSource(string $source): \Generator {
         switch ($source) {
             case 'rankmath':
-                return $this->readRankMath();
+                yield from $this->readRankMath();
+                return;
             case 'yoast':
-                return $this->readYoast();
+                yield from $this->readYoast();
+                return;
             case 'aioseo':
-                return $this->readAIOSEO();
+                yield from $this->readAIOSEO();
+                return;
             case 'safe-redirect-manager':
-                return $this->readSafeRedirectManager();
+                yield from $this->readSafeRedirectManager();
+                return;
             case 'redirection':
-                return $this->readRedirection();
+                yield from $this->readRedirection();
+                return;
             default:
                 $this->logger->debugMessage(
                     'CrossPluginImporter: unknown source "' . $source . '". Returning empty.'
                 );
-                return array();
+                return;
+        }
+    }
+
+    /**
+     * Count redirect rows available from the given source plugin without
+     * materializing the full row set (M502, 2026-07-14: the AJAX preview
+     * handler previously called readSource() -- which fully reads every row
+     * from the source plugin's storage -- solely to count(), risking memory
+     * or time exhaustion on a large source history).
+     *
+     * The four sources backed by a dedicated DB table get a real
+     * `SELECT COUNT(*)` mirroring the WHERE clause of the matching
+     * read*() method above. Safe Redirect Manager is a custom post type,
+     * not a table, so it is counted with wp_count_posts() -- a single
+     * grouped-by-status COUNT query WordPress core already provides,
+     * not a per-row get_posts() fetch. All five sources therefore get a
+     * genuine count-only path; none require unserializing a full options
+     * blob (this plugin's cross-plugin sources are table/CPT-backed only).
+     *
+     * @param string $source One of 'rankmath', 'yoast', 'aioseo',
+     *                       'safe-redirect-manager', 'redirection'
+     * @return int
+     */
+    public function countSource(string $source): int {
+        global $wpdb;
+
+        switch ($source) {
+            case 'rankmath':
+                return $this->countTableRows($wpdb->prefix . 'rank_math_redirections', "status = 'active'");
+            case 'yoast':
+                return $this->countTableRows($wpdb->prefix . 'yoast_seo_redirects', '');
+            case 'aioseo':
+                return $this->countTableRows($wpdb->prefix . 'aioseo_redirects', "status = 'active'");
+            case 'redirection':
+                return $this->countTableRows($wpdb->prefix . 'redirection_items', "status = 'enabled'");
+            case 'safe-redirect-manager':
+                return $this->countSafeRedirectManager();
+            default:
+                $this->logger->debugMessage(
+                    'CrossPluginImporter: unknown source "' . $source . '" for count. Returning 0.'
+                );
+                return 0;
+        }
+    }
+
+    /**
+     * Page through a table-backed SELECT in IMPORT_PAGE_SIZE-row chunks,
+     * appending `ORDER BY \`id\` ASC LIMIT <n> OFFSET <n>` to $baseSql and
+     * re-issuing the query until a page returns fewer than IMPORT_PAGE_SIZE
+     * rows. Centralizes the pagination loop so every table-backed reader
+     * below shares one implementation (M502: previously each reader issued
+     * its own single unbounded SELECT with no LIMIT).
+     *
+     * Every source table this class reads from (rank_math_redirections,
+     * yoast_seo_redirects, aioseo_redirects, redirection_items) has an
+     * auto-increment `id` primary key, so ORDER BY id ASC gives stable,
+     * gap-free paging.
+     *
+     * IMPORT_PAGE_SIZE and $offset are internally-generated integers (never
+     * derived from request input), so inlining them into the SQL string is
+     * safe; {@see ABJ_404_Solution_ForeignSourceQueryGateway::queryRows()}
+     * takes a plain SQL string with no placeholder/param support.
+     *
+     * @param string $baseSql SELECT ... FROM ... [WHERE ...], without ORDER BY/LIMIT/OFFSET
+     * @return \Generator<int, array<string, mixed>> Raw (un-normalized) rows
+     */
+    private function pageTableQuery(string $baseSql): \Generator {
+        $offset = 0;
+        while (true) {
+            $sql = $baseSql . ' ORDER BY `id` ASC LIMIT ' . (int)self::IMPORT_PAGE_SIZE . ' OFFSET ' . (int)$offset;
+            $rows = $this->queryGateway->queryRows($sql);
+
+            if (empty($rows)) {
+                return;
+            }
+
+            foreach ($rows as $row) {
+                yield $row;
+            }
+
+            if (count($rows) < self::IMPORT_PAGE_SIZE) {
+                return;
+            }
+            $offset += self::IMPORT_PAGE_SIZE;
         }
     }
 
     /**
      * Read Rank Math redirections from rank_math_redirections table.
      *
-     * @return array<int, array<string, mixed>>
+     * @return \Generator<int, array<string, mixed>>
      */
-    private function readRankMath(): array {
+    private function readRankMath(): \Generator {
         global $wpdb;
 
         $tableName = $wpdb->prefix . 'rank_math_redirections';
-        if (!$this->tableExists($tableName)) {
-            return array();
+        if (!$this->queryGateway->tableExists($tableName)) {
+            return;
         }
 
-        $rows = $this->querySourceRows(
+        foreach ($this->pageTableQuery(
             "SELECT source_url, dest_url, redirect_type, regex_flag
              FROM `{$tableName}`
              WHERE status = 'active'"
-        );
-
-        $result = array();
-        foreach ($rows as $row) {
+        ) as $row) {
             if (!is_array($row)) {
                 continue;
             }
@@ -134,37 +243,32 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
             if ($sourceUrl === '' || $destUrl === '') {
                 continue;
             }
-            $result[] = array(
+            yield array(
                 'source_url' => $sourceUrl,
                 'dest_url'   => $destUrl,
                 'code'       => $code,
                 'is_regex'   => $isRegex,
             );
         }
-
-        return $result;
     }
 
     /**
      * Read Yoast SEO Premium redirects from yoast_seo_redirects table.
      *
-     * @return array<int, array<string, mixed>>
+     * @return \Generator<int, array<string, mixed>>
      */
-    private function readYoast(): array {
+    private function readYoast(): \Generator {
         global $wpdb;
 
         $tableName = $wpdb->prefix . 'yoast_seo_redirects';
-        if (!$this->tableExists($tableName)) {
-            return array();
+        if (!$this->queryGateway->tableExists($tableName)) {
+            return;
         }
 
-        $rows = $this->querySourceRows(
+        foreach ($this->pageTableQuery(
             "SELECT origin, target, redirect_type
              FROM `{$tableName}`"
-        );
-
-        $result = array();
-        foreach ($rows as $row) {
+        ) as $row) {
             if (!is_array($row)) {
                 continue;
             }
@@ -177,38 +281,33 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
             if ($sourceUrl === '' || $destUrl === '') {
                 continue;
             }
-            $result[] = array(
+            yield array(
                 'source_url' => $sourceUrl,
                 'dest_url'   => $destUrl,
                 'code'       => $code,
                 'is_regex'   => false,
             );
         }
-
-        return $result;
     }
 
     /**
      * Read AIOSEO redirects from aioseo_redirects table.
      *
-     * @return array<int, array<string, mixed>>
+     * @return \Generator<int, array<string, mixed>>
      */
-    private function readAIOSEO(): array {
+    private function readAIOSEO(): \Generator {
         global $wpdb;
 
         $tableName = $wpdb->prefix . 'aioseo_redirects';
-        if (!$this->tableExists($tableName)) {
-            return array();
+        if (!$this->queryGateway->tableExists($tableName)) {
+            return;
         }
 
-        $rows = $this->querySourceRows(
+        foreach ($this->pageTableQuery(
             "SELECT source, target, type
              FROM `{$tableName}`
              WHERE status = 'active'"
-        );
-
-        $result = array();
-        foreach ($rows as $row) {
+        ) as $row) {
             if (!is_array($row)) {
                 continue;
             }
@@ -219,90 +318,98 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
             if ($sourceUrl === '' || $destUrl === '') {
                 continue;
             }
-            $result[] = array(
+            yield array(
                 'source_url' => $sourceUrl,
                 'dest_url'   => $destUrl,
                 'code'       => $code,
                 'is_regex'   => false,
             );
         }
-
-        return $result;
     }
 
     /**
-     * Read Safe Redirect Manager redirects via the redirect_rule custom post type.
+     * Read Safe Redirect Manager redirects via the redirect_rule custom post
+     * type, one IMPORT_PAGE_SIZE page of posts at a time (M502: previously
+     * `posts_per_page => -1` loaded every published redirect_rule post --
+     * plus a get_post_meta() lookup per post -- into memory in one call).
+     * Pages via WP_Query's standard `paged` parameter until a page returns
+     * fewer posts than the page size.
      *
-     * @return array<int, array<string, mixed>>
+     * @return \Generator<int, array<string, mixed>>
      */
-    private function readSafeRedirectManager(): array {
+    private function readSafeRedirectManager(): \Generator {
         if (!function_exists('get_posts')) {
-            return array();
+            return;
         }
 
-        $posts = get_posts(array(
-            'post_type'      => 'redirect_rule',
-            'posts_per_page' => -1,
-            'post_status'    => 'publish',
-        ));
+        $paged = 1;
+        while (true) {
+            $posts = get_posts(array(
+                'post_type'      => 'redirect_rule',
+                'posts_per_page' => self::IMPORT_PAGE_SIZE,
+                'paged'          => $paged,
+                'post_status'    => 'publish',
+                'orderby'        => 'ID',
+                'order'          => 'ASC',
+            ));
 
-        if (!is_array($posts)) {
-            return array();
+            if (!is_array($posts) || empty($posts)) {
+                return;
+            }
+
+            foreach ($posts as $post) {
+                if (!is_object($post)) {
+                    continue;
+                }
+                $postId = (int)$post->ID;
+                if ($postId === 0) {
+                    continue;
+                }
+
+                $from = get_post_meta($postId, '_redirect_rule_from', true);
+                $to   = get_post_meta($postId, '_redirect_rule_to', true);
+                $code = get_post_meta($postId, '_redirect_rule_status_code', true);
+
+                $from = is_string($from) ? trim($from) : '';
+                $to   = is_string($to)   ? trim($to)   : '';
+                $code = is_numeric($code) ? (int)$code : 301;
+
+                if ($from === '' || $to === '') {
+                    continue;
+                }
+                yield array(
+                    'source_url' => $from,
+                    'dest_url'   => $to,
+                    'code'       => $code,
+                    'is_regex'   => false,
+                );
+            }
+
+            if (count($posts) < self::IMPORT_PAGE_SIZE) {
+                return;
+            }
+            $paged++;
         }
-
-        $result = array();
-        foreach ($posts as $post) {
-            if (!is_object($post)) {
-                continue;
-            }
-            $postId = (int)$post->ID;
-            if ($postId === 0) {
-                continue;
-            }
-
-            $from = get_post_meta($postId, '_redirect_rule_from', true);
-            $to   = get_post_meta($postId, '_redirect_rule_to', true);
-            $code = get_post_meta($postId, '_redirect_rule_status_code', true);
-
-            $from = is_string($from) ? trim($from) : '';
-            $to   = is_string($to)   ? trim($to)   : '';
-            $code = is_numeric($code) ? (int)$code : 301;
-
-            if ($from === '' || $to === '') {
-                continue;
-            }
-            $result[] = array(
-                'source_url' => $from,
-                'dest_url'   => $to,
-                'code'       => $code,
-                'is_regex'   => false,
-            );
-        }
-
-        return $result;
     }
 
     /**
      * Read Redirection plugin redirects from redirection_items table.
      *
-     * @return array<int, array<string, mixed>>
+     * @return \Generator<int, array<string, mixed>>
      */
-    private function readRedirection(): array {
+    private function readRedirection(): \Generator {
         global $wpdb;
 
         $tableName = $wpdb->prefix . 'redirection_items';
-        if (!$this->tableExists($tableName)) {
-            return array();
+        if (!$this->queryGateway->tableExists($tableName)) {
+            return;
         }
 
-        $rows = $this->querySourceRows(
+        foreach ($this->pageTableQuery(
             "SELECT url, action_data, action_code, regex
              FROM `{$tableName}`
              WHERE status = 'enabled'"
-        );
-
-        $result = array();
-        foreach ($rows as $row) {
+        ) as $row) {
             if (!is_array($row)) {
                 continue;
             }
@@ -316,143 +423,75 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
             if ($sourceUrl === '' || $destUrl === '') {
                 continue;
             }
-            $result[] = array(
+            yield array(
                 'source_url' => $sourceUrl,
                 'dest_url'   => $destUrl,
                 'code'       => $code,
                 'is_regex'   => $isRegex,
             );
         }
-
-        return $result;
     }
 
     /**
-     * Check whether a table exists using SHOW TABLES LIKE.
+     * Issue a COUNT(*) against a source-plugin table, through the same
+     * gateway queryRows() uses for full reads, mirroring the WHERE clause
+     * the row-reading method for that source applies. Returns 0 (rather
+     * than throwing) when the table is absent or the query fails -- the
+     * caller treats "nothing importable" and "can't tell" the same way the
+     * existing preview path already does.
      *
-     * @param string $tableName Fully-prefixed table name
-     * @return bool
+     * @param string $tableName   Fully-prefixed table name
+     * @param string $whereClause SQL WHERE condition without the "WHERE " keyword, or '' for none
+     * @return int
      */
-    private function tableExists(string $tableName): bool {
-        if (!$this->dbQuery instanceof ABJ_404_Solution_DatabaseQueryInterface) {
-            $this->logger->warn(
-                'CrossPluginImporter: cannot check source table "' . $tableName . '" because no database query service is available.'
-            );
-            return false;
+    private function countTableRows(string $tableName, string $whereClause): int {
+        if (!$this->queryGateway->tableExists($tableName)) {
+            return 0;
         }
 
-        $result = $this->dbQuery->queryAndGetResults(
-            'SHOW TABLES LIKE %s',
-            array(
-                'query_params' => array($tableName),
-                'result_type' => defined('ARRAY_A') ? ARRAY_A : 'ARRAY_A',
-                'log_errors' => false,
-                'skip_repair' => true,
-            )
-        );
-
-        if ($this->queryFailed($result)) {
-            $this->logger->warn(
-                'CrossPluginImporter: source table probe failed for "' . $tableName . '". Error: ' .
-                $this->queryErrorMessage($result)
-            );
-            return false;
+        $sql = "SELECT COUNT(*) AS cnt FROM `{$tableName}`";
+        if ($whereClause !== '') {
+            $sql .= " WHERE {$whereClause}";
         }
 
-        return !empty($result['rows']) && is_array($result['rows']);
-    }
-
-    /**
-     * Read external source-plugin rows through the centralized query pipeline.
-     *
-     * @param string $sql
-     * @return array<int, array<string, mixed>>
-     */
-    private function querySourceRows(string $sql): array {
-        if (!$this->dbQuery instanceof ABJ_404_Solution_DatabaseQueryInterface) {
-            $this->logger->warn('CrossPluginImporter: cannot read source rows because no database query service is available.');
-            return array();
+        $rows = $this->queryGateway->queryRows($sql);
+        if (empty($rows) || !is_array($rows[0])) {
+            return 0;
         }
 
-        $result = $this->dbQuery->queryAndGetResults(
-            $sql,
-            array('result_type' => defined('ARRAY_A') ? ARRAY_A : 'ARRAY_A')
-        );
-
-        if ($this->queryFailed($result)) {
-            $this->logger->warn(
-                'CrossPluginImporter: source row query failed. Error: ' . $this->queryErrorMessage($result)
-            );
-            return array();
-        }
-
-        $rows = $result['rows'] ?? array();
-        if (!is_array($rows)) {
-            return array();
-        }
-
-        $normalizedRows = array();
-        foreach ($rows as $row) {
-            if (is_array($row)) {
-                $normalizedRows[] = $row;
+        // Case-insensitive key lookup: information_schema-style result keys
+        // vary in case across MySQL/MariaDB drivers/versions (defensive
+        // coding rule: case-insensitive metadata access).
+        foreach ($rows[0] as $key => $value) {
+            if (strcasecmp((string)$key, 'cnt') === 0) {
+                return is_numeric($value) ? (int)$value : 0;
             }
         }
-        return $normalizedRows;
+        return 0;
     }
 
     /**
-     * @param array<string, mixed> $result
-     * @return bool
-     */
-    private function queryFailed(array $result): bool {
-        if (($result['timed_out'] ?? false) === true) {
-            return true;
-        }
-        return $this->queryErrorMessage($result) !== '';
-    }
-
-    /**
-     * @param array<string, mixed> $result
-     * @return string
-     */
-    private function queryErrorMessage(array $result): string {
-        if (($result['timed_out'] ?? false) === true) {
-            return 'query timed out';
-        }
-
-        $error = $result['last_error'] ?? '';
-        if ($error === '') {
-            return '';
-        }
-        if (is_scalar($error)) {
-            return (string)$error;
-        }
-        if (is_object($error) && method_exists($error, '__toString')) {
-            return (string)$error;
-        }
-        return 'non-scalar database error of type ' . gettype($error);
-    }
-
-    /**
-     * Resolve the database query service without requiring existing callers
-     * to pass the optional constructor argument.
+     * Count Safe Redirect Manager rows via wp_count_posts(), matching the
+     * post_status filter readSafeRedirectManager() applies ('publish').
+     * wp_count_posts() runs a single grouped COUNT query against wp_posts;
+     * unlike get_posts(), it never loads full post objects or postmeta, so
+     * it is the count-only counterpart for a CPT-backed source exactly as
+     * SELECT COUNT(*) is for a DB-table-backed source.
      *
-     * @param mixed $redirectsRepository
-     * @param mixed $dbQuery
-     * @return ABJ_404_Solution_DatabaseQueryInterface|null
+     * @return int
      */
-    private function resolveDatabaseQuery($redirectsRepository, $dbQuery) {
-        if ($dbQuery instanceof ABJ_404_Solution_DatabaseQueryInterface) {
-            return $dbQuery;
+    private function countSafeRedirectManager(): int {
+        if (!function_exists('post_type_exists') || !post_type_exists('redirect_rule')) {
+            return 0;
+        }
+        if (!function_exists('wp_count_posts')) {
+            return 0;
         }
 
-        if (is_object($redirectsRepository) && method_exists($redirectsRepository, 'getDbCore')) {
-            $candidate = $redirectsRepository->getDbCore();
-            if ($candidate instanceof ABJ_404_Solution_DatabaseQueryInterface) {
-                return $candidate;
-            }
+        $counts = wp_count_posts('redirect_rule');
+        if (!is_object($counts) || !isset($counts->publish)) {
+            return 0;
         }
-
-        return null;
+        return is_numeric($counts->publish) ? (int)$counts->publish : 0;
     }
 }

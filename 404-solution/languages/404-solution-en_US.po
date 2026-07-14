@@ -557,6 +557,9 @@ msgstr "Error: No ID(s) found for edit request."
 msgid "Error: No ID(s) specified for bulk action. (%s)"
 msgstr "Error: No ID(s) specified for bulk action. (%s)"
 
+msgid "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+msgstr "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+
 msgid "Error: No records were imported. SQL result: %s"
 msgstr "Error: No records were imported. SQL result: %s"
 
@@ -677,8 +680,8 @@ msgstr "Go to next page"
 msgid "Go to previous page"
 msgstr "Go to previous page"
 
-msgid "Help the developer by sending error logs"
-msgstr "Help the developer by sending error logs"
+msgid "Help the developer with error logs and usage stats"
+msgstr "Help the developer with error logs and usage stats"
 
 msgid "Here are some other great pages"
 msgstr "Here are some other great pages"
@@ -1684,8 +1687,8 @@ msgid "Error: Invalid language selected"
 msgstr "Error: Invalid language selected"
 
 #: includes/html/adminOptionsGeneral.html
-msgid "When the plugin detects an error, it transmits a copy of the debug log to the developer for diagnosis. Transmission may be by email or by HTTPS upload to a developer-operated server; the contents are the same. This is not required for the plugin to work, but it helps the developer fix bugs in future versions. The report includes: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when a support issue is opened). Reports are checked daily when maintenance runs."
-msgstr "When the plugin detects an error, it transmits a copy of the debug log to the developer for diagnosis. Transmission may be by email or by HTTPS upload to a developer-operated server; the contents are the same. This is not required for the plugin to work, but it helps the developer fix bugs in future versions. The report includes: everything in the debug log, the admin email address, installed PHP extensions, active plugins, PHP version, WordPress version, MySQL version, total published pages and posts, etc. (everything asked for when a support issue is opened). Reports are checked daily when maintenance runs."
+msgid "Sends the developer your debug log when an error occurs, plus a status ping at most once a week (once the plugin's been active 5+ days) with your site's version, URL, and 404/redirect counts. Counts are aggregate only, never per-URL. Optional - helps fix bugs and prioritize development. Reports are reviewed daily."
+msgstr "Sends the developer your debug log when an error occurs, plus a status ping at most once a week (once the plugin's been active 5+ days) with your site's version, URL, and 404/redirect counts. Counts are aggregate only, never per-URL. Optional - helps fix bugs and prioritize development. Reports are reviewed daily."
 
 #: includes/html/viewSuggestions.html
 msgid "Display the closest matching pages by using the shortcode [abj404_solution_page_suggestions]."
@@ -3982,6 +3985,10 @@ msgid "Error: Unable to update redirect data. Repository result: %s"
 msgstr "Error: Unable to update redirect data. Repository result: %s"
 
 #: includes/
+msgid "Error: Unable to save redirect conditions. Repository result: %s"
+msgstr "Error: Unable to save redirect conditions. Repository result: %s"
+
+#: includes/
 msgid "Loading status..."
 msgstr "Loading status..."
 
@@ -4105,3 +4112,87 @@ msgstr "Sorting by this column is being prepared for your number of URLs (%d%% c
 #: includes/view/View_Shared.php:247
 msgid "Sorting by this column is unavailable on this site. The list shows newest first."
 msgstr "Sorting by this column is unavailable on this site. The list shows newest first."
+
+msgid "Sources (%d)"
+msgstr "Sources (%d)"
+
+msgid "Showing %1$d of %2$d sources."
+msgstr "Showing %1$d of %2$d sources."
+
+msgid "Linked from"
+msgstr "Linked from"
+
+msgid "old permalink structure"
+msgstr "old permalink structure"
+
+msgid "Could not prepare the preview (%s)."
+msgstr "Could not prepare the preview (%s)."
+
+msgid "Could not prepare the report (%s)."
+msgstr "Could not prepare the report (%s)."
+
+msgid "Unauthorized (401)"
+msgstr "Unauthorized (401)"
+
+msgid "Rate limited (429). Try again later."
+msgstr "Rate limited (429). Try again later."
+
+msgid "Timed out after %ds"
+msgstr "Timed out after %ds"
+
+msgid "Network request failed (%s)"
+msgstr "Network request failed (%s)"
+
+msgid "Could not prepare the diagnostic data request."
+msgstr "Could not prepare the diagnostic data request."
+
+msgid "The reports server returned an unexpected response."
+msgstr "The reports server returned an unexpected response."
+
+msgid "Reports server error (%d)"
+msgstr "Reports server error (%d)"
+
+msgid "Reports server returned HTTP %d"
+msgstr "Reports server returned HTTP %d"
+
+msgid "Your Diagnostic Data"
+msgstr "Your Diagnostic Data"
+
+msgid "enabled"
+msgstr "enabled"
+
+msgid "disabled"
+msgstr "disabled"
+
+msgid "Download my data"
+msgstr "Download my data"
+
+msgid "Delete my data"
+msgstr "Delete my data"
+
+msgid "Nothing currently stored."
+msgstr "Nothing currently stored."
+
+msgid "Delete your diagnostic data?"
+msgstr "Delete your diagnostic data?"
+
+msgid "This permanently deletes every diagnostic report this site has ever sent. This cannot be undone. Your redirects and settings are not affected -- only diagnostic/telemetry history is removed."
+msgstr "This permanently deletes every diagnostic report this site has ever sent. This cannot be undone. Your redirects and settings are not affected -- only diagnostic/telemetry history is removed."
+
+msgid "Yes, delete permanently"
+msgstr "Yes, delete permanently"
+
+msgid "Diagnostic identity is not registered yet."
+msgstr "Diagnostic identity is not registered yet."
+
+msgid "Confirm diagnostic data deletion before continuing."
+msgstr "Confirm diagnostic data deletion before continuing."
+
+msgid "Diagnostic reporting has never been enabled for this site, so there is nothing stored on the developer's server for you to download or delete."
+msgstr "Diagnostic reporting has never been enabled for this site, so there is nothing stored on the developer's server for you to download or delete."
+
+msgid "This site has diagnostic reporting %s. You can download everything stored on the developer's server for this site, or permanently delete it."
+msgstr "This site has diagnostic reporting %s. You can download everything stored on the developer's server for this site, or permanently delete it."
+
+msgid "When checked, the text is treated as a regular expression. Note that including a bad regular expression or one that takes too long will break your website. So please use caution and test them elsewhere before trying them here. If you don't know what you're doing please don't use this option (as it's not necessary for the functioning of the plugin)."
+msgstr "When checked, the text is treated as a regular expression. Note that including a bad regular expression or one that takes too long will break your website. So please use caution and test them elsewhere before trying them here. If you don't know what you're doing please don't use this option (as it's not necessary for the functioning of the plugin)."

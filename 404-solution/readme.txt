@@ -5,7 +5,7 @@ Tags: 404, redirect, 404 redirect, broken links, spell check
 Requires at least: 5.0
 Requires PHP: 7.4
 Tested up to: 7.0
-Stable tag: 4.3.1
+Stable tag: 4.3.2
 License: GPL-3.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -200,6 +200,18 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 6. **Email Digest** — Weekly HTML email summarizing captured 404s, resolution rate, and a ranked table of top 404 URLs with color-coded hit badges.
 
 == Changelog ==
+
+= Version 4.3.2 (July 11, 2026) =
+* FIX: Fixed the email digest sending every day even when the notification frequency was set to Weekly (thanks to gardendarts for reporting this). The weekly/daily cadence is now enforced against the time the last digest was actually sent, and changing the frequency in Settings now takes effect on the very next save instead of the next unrelated one.
+* FIX: Fixed automatic error and heartbeat reports silently failing to send on some sites when an internal reporting component was unavailable.
+* FIX: Fixed debug logs and automatic reports sometimes over-redacting the plugin's own file names, option names, and URLs, including incorrectly truncating URLs that contained a query string.
+* FIX: Fixed a rare issue where saving, publishing, or deleting content, or changing a category, during a plugin update could interrupt a scheduled background maintenance task.
+* Improvement: Hardened several internal WordPress integration points (404 handling, REST API setup, log maintenance, and permission checks) so an unexpected internal error in one can no longer interrupt that request or affect other plugins.
+* Improvement: Out-of-memory diagnostic reports now preserve the exact memory sizes involved, making them easier to diagnose.
+* Improvement: Removed an internal AJAX diagnostics footer that no longer reflected real admin activity.
+* Improvement: If you've opted in to "Help the developer with error logs and usage stats," the optional weekly status ping now sends on a predictable weekly cadence (once the plugin's been active 5+ days) instead of a rare random daily chance that averaged about once every 6 months. Same opt-in checkbox and same aggregate-only data (site version, URL, 404/redirect counts); just a steadier heartbeat.
+* New: Added a "Never" option to the Email notification frequency dropdown, so you can fully turn off 404 email notifications without switching to Instant mode and separately zeroing the threshold.
+* New: Added a "Your Diagnostic Data" card to the Options tab so you can download or delete the diagnostic data this plugin has reported for your site, in line with GDPR data access and erasure rights.
 
 = Version 4.3.1 (June 26, 2026) =
 * FIX: Fixed an out-of-memory error (thanks to johnegg and kalshyre for reporting this).
@@ -472,24 +484,4 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 
 * Added Simple mode Phase 3 strings to all 17 locale PO files.
 * Added missing admin error message translations across all locale PO files.
-
-= Version 4.1.4 (Apr 20, 2026) =
-
-**Bug Fixes**
-
-* Fixed "Illegal mix of collations" errors on spell-checker and permalink-cache queries when plugin tables and WordPress core tables use different collations (e.g. `utf8mb4_unicode_520_ci` vs `utf8mb4_unicode_ci`). Extended the `COLLATE` protection pattern to `updatePermalinkCache.sql`, `getPublishedPagesAndPostsIDs.sql`, and `getIDsNeededForPermalinkCache.sql`.
-* Fixed redirect edit form rejecting type=0 (Default 404 Page) with "Data not formatted properly" error. The validation was unable to distinguish "no type provided" from "type is 0" after int-casting.
-* Fixed plugin tables not being detected after a hosting migration or `$table_prefix` change in `wp-config.php`. The daily maintenance cron now triggers prefix adoption so orphaned tables are auto-recovered without requiring a manual deactivate/reactivate cycle.
-* Fixed transient PHP fatal errors during plugin upgrades on hosts with aggressive opcache settings (WP Engine, Flywheel, etc.) caused by stale bytecode from the previous version. Critical class files are now invalidated via `opcache_invalidate()` at the start of the upgrade.
-
-**Improvements**
-
-* The daily maintenance cron now checks and converts table engines back to InnoDB, fixing persistent MyISAM reversions caused by hosting environments that reset the storage engine between plugin upgrades.
-
-= Version 4.1.3 (Apr 17, 2026) =
-
-**Bug Fixes**
-
-* Fixed spell checker throwing `get_object_vars()` TypeError on PHP 8+ when `get_term()` returns a non-object value (e.g. from a corrupted object cache). The tag and category matching branches now use `is_object()` guards before accessing term properties.
-* Fixed Google Search Console integration returning HTTP 400 errors — the API does not support `groupType: 'or'` in dimension filter groups. Each URL is now queried individually.
 

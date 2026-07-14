@@ -68,7 +68,7 @@ class ABJ_404_Solution_SettingsNotificationPolicy {
             return "";
         }
 
-        $allowedFrequencies = array('instant', 'daily', 'weekly');
+        $allowedFrequencies = array('instant', 'daily', 'weekly', 'never');
         $freq = sanitize_text_field(
             is_string($postData['admin_notification_frequency']) ? $postData['admin_notification_frequency'] : ''
         );
@@ -82,7 +82,11 @@ class ABJ_404_Solution_SettingsNotificationPolicy {
             ABJ_404_Solution_StatsRepositoryResolver::resolve(__CLASS__),
             $this->logger
         );
-        $emailDigest->scheduleNextDigest();
+        // Pass $freq directly rather than letting scheduleNextDigest() re-read
+        // the options repository: the caller (PluginLogicSettingsUpdate)
+        // persists $options AFTER apply() returns, so a re-fetch here would
+        // still see the pre-save frequency.
+        $emailDigest->scheduleNextDigest($freq);
         return "";
     }
 
