@@ -30,10 +30,23 @@ interface ABJ_404_Solution_ViewReadServiceInterface {
     /* ---- status counts + invalidation hooks ---- */
 
     /**
-     * @param bool $bypassCache
+     * @param bool $bypassCache Retained for compatibility; foreground reads are always cache-only.
+     * @param array<string, mixed> $tableOptions Retained for compatibility; never enables a foreground query.
      * @return array<string, int>
      */
-    public function getRedirectStatusCounts($bypassCache = false): array;
+    public function getRedirectStatusCounts($bypassCache = false, array $tableOptions = array()): array;
+
+    /**
+     * Same counts as getRedirectStatusCounts(), plus the freshness state that
+     * produced them, so a caller can tell "never computed on this site" apart
+     * from "computed and genuinely zero". The flat accessor above collapses
+     * both onto an absent key / a zero.
+     *
+     * State is one of ABJ_404_Solution_StatusCountsRefreshCoordinator::STATE_*.
+     *
+     * @return array{counts: array<string, int>, state: string}
+     */
+    public function getRedirectStatusCountsResult(): array;
 
     /**
      * @return array<string, int>
@@ -41,13 +54,22 @@ interface ABJ_404_Solution_ViewReadServiceInterface {
     public function getRedirectHitCountHistogram(): array;
 
     /**
-     * @param bool $bypassCache
+     * @param bool $bypassCache Retained for compatibility; foreground reads are always cache-only.
+     * @param array<string, mixed> $tableOptions Retained for compatibility; never enables a foreground query.
      * @return array<string, int>
      */
-    public function getCapturedStatusCounts($bypassCache = false): array;
+    public function getCapturedStatusCounts($bypassCache = false, array $tableOptions = array()): array;
 
-    /** @return int */
-    public function getHighImpactCapturedCount(): int;
+    /**
+     * Captured-404 counts plus their freshness state. See
+     * getRedirectStatusCountsResult().
+     *
+     * @return array{counts: array<string, int>, state: string}
+     */
+    public function getCapturedStatusCountsResult(): array;
+
+    /** @return int|null Null until the background count has been computed. */
+    public function getHighImpactCapturedCount(): ?int;
 
     /** @return string */
     public function buildHighImpactCapturedCountQuery(): string;
@@ -104,7 +126,7 @@ interface ABJ_404_Solution_ViewReadServiceInterface {
     /**
      * @param string $sub
      * @param array<string, mixed> $tableOptions
-     * @return int
+     * @return int Negative when the count query was incomplete or unavailable.
      */
     public function getRedirectsForViewCount(string $sub, array $tableOptions): int;
 

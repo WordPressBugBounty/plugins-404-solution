@@ -6,11 +6,12 @@
  * user-triggered element into a single request descriptor consumed by
  * view_updater_pagination.js. Pure read; no DOM mutation and no AJAX.
  *
- * The descriptor returned contains both the raw AJAX payload sent to
- * ajaxUpdatePaginationLinks and the cross-cutting fields the
+ * The descriptor returned contains the base AJAX payload sent to each
+ * ajaxUpdatePaginationLinks part and the cross-cutting fields the
  * orchestrator needs for telemetry and the detect-only baseline
  * comparison (baseUrl, action, subpage, nonces, requestId,
- * requestStartedAt, baselineComparison, ajaxTimeoutMs, mode flags).
+ * requestStartedAt, baselineComparison, part plan, timeout, retry schedule,
+ * and mode flags).
  *
  * Returns null when no AJAX URL can be located on the page; the caller
  * treats that as an abort and emits the same console warning the legacy
@@ -111,14 +112,13 @@ function abj404BuildPaginationRequest(triggerItem, options) {
         };
     }
 
-    // Background detect-only refreshes use a tight 15s budget so a stalled
-    // silent poll never lingers in the background. Explicit user actions use
-    // 45s so a cold-cache table query (large redirects/logs tables) has time
-    // to complete before the placeholder turns into an error notice. The
-    // foreground overlay is pointer-transparent and always removed on AJAX
-    // complete, so a longer budget can no longer block clicks regardless of
-    // how long the request runs.
-    var ajaxTimeoutMs = isDetectOnlyBackground ? 15000 : 45000;
+    // Each foreground part has a 25s transport budget above its server-side
+    // 20s SQL budget. Detect-only polls keep their existing tighter 15s client
+    // budget and use a 10s SQL budget server-side.
+    var ajaxTimeoutMs = isDetectOnlyBackground ? 15000 : 25000;
+    var parts = detectOnly
+        ? ['table']
+        : (subpage === 'abj404_logs' ? ['table', 'pagination'] : ['table', 'counts', 'pagination']);
 
     var payload = {
         action: action,
@@ -150,6 +150,8 @@ function abj404BuildPaginationRequest(triggerItem, options) {
         requestId: requestId,
         baselineComparison: baselineComparison,
         ajaxTimeoutMs: ajaxTimeoutMs,
+        parts: parts,
+        retryDelaysMs: isBackgroundRefresh ? [] : [3000, 8000],
         rowsPerPage: rowsPerPage,
         filterText: filterText,
         tableSelector: tableSelector,
@@ -164,4 +166,14 @@ function abj404BuildPaginationRequest(triggerItem, options) {
         paged: paged,
         filter: trashFilter
     };
+}
+
+// Build identity (Bruno timeout cause matrix, gap GF): this module is flat
+// top-level declarations rather than an IIFE, so it hands the registry its
+// functions in file order and the server extracts the same ones by name out
+// of this file. See view_updater_client_build_registry.js.
+if (typeof window !== 'undefined' && window.abj404ClientBuildRegistry) {
+    window.abj404ClientBuildRegistry.registerFunctions('pagination_request', [
+        abj404BuildPaginationRequest
+    ]);
 }

@@ -40,7 +40,9 @@ function abj404FormatAjaxFailureDetails(meta) {
         'textStatus: ' + (meta.textStatus || ''),
         'errorThrown: ' + (meta.errorThrown || ''),
         'action: ' + (meta.action || ''),
-        'subpage: ' + (meta.subpage || '')
+        'subpage: ' + (meta.subpage || ''),
+        'Request ID: ' + (meta.requestId || ''),
+        'Retry count: ' + (parseInt(meta.retryCount, 10) || 0)
     ];
     if (!isNaN(elapsed)) {
         lines.push('Elapsed: ' + elapsed + 'ms');
@@ -56,6 +58,15 @@ function abj404FormatAjaxFailureDetails(meta) {
     }
     if (meta.lastQueryRedacted) {
         lines.push('Last query (redacted): ' + meta.lastQueryRedacted);
+    }
+    // Browser-side transport timeline, one line per attempt. It joins the
+    // existing diagnostic block rather than adding a new notice surface, and
+    // it is what separates "never left the browser" from "headers arrived and
+    // the body stalled" when the server side reports nothing at all.
+    if (Array.isArray(meta.attemptTimeline)) {
+        for (var i = 0; i < meta.attemptTimeline.length; i++) {
+            lines.push('Transport: ' + meta.attemptTimeline[i]);
+        }
     }
     return lines;
 }
@@ -201,6 +212,7 @@ function refreshHealthBarIfNeeded() {
     }
 
     $bar.attr('data-health-bar-loading', '1');
+    var requestId = abj404GenerateRequestId();
 
     var healthBarAjaxRunner = (typeof abj404AjaxWithNonceRetry === 'function')
         // ajax-direct-approved: fallback when abj404AjaxWithNonceRetry helper not yet loaded in this bundle
@@ -213,7 +225,8 @@ function refreshHealthBarIfNeeded() {
             action: action,
             nonce: nonce,
             page: getURLParameter('page') || '',
-            subpage: getURLParameter('subpage') || ''
+            subpage: getURLParameter('subpage') || '',
+            requestId: requestId
         },
         success: function(result) {
             $bar.removeAttr('data-health-bar-loading');
@@ -380,46 +393,28 @@ function triggerInitialTableLoadIfNeeded() {
         return;
     }
 
-    var maxInitialLoadAttempts = 3;
-    var triggerInitialLoadAttempt = function(attemptNumber) {
-        paginationLinksChange(perpageElements[0], {
-            backgroundRefresh: false,
-            detectOnly: false,
-            cacheMode: 'normal',
-            onComplete: function() {
-                // The single-table denorm read is always serveable, so a
-                // successful response always carries the rendered table.
-                $config.attr('data-pagination-initial-load', '0');
-            },
-            onError: function(errorMeta) {
-                var status = errorMeta && errorMeta.status ? parseInt(errorMeta.status, 10) : 0;
-                if (attemptNumber < maxInitialLoadAttempts) {
-                    // Retry transient failures (including rate-limit responses) before
-                    // giving up and leaving placeholders in place.
-                    var delayMs = (status === 429) ? 1200 * attemptNumber : 700 * attemptNumber;
-                    window.setTimeout(function() {
-                        triggerInitialLoadAttempt(attemptNumber + 1);
-                    }, delayMs);
-                    return;
-                }
-                $config.attr('data-pagination-initial-load', '0');
-                // Last-resort fallback: unblock page placeholders so the UI is usable.
-                // Replace the "Loading..." cell text with a concrete error state so
-                // the page no longer appears stuck. Stripping the attribute alone
-                // leaves the original placeholder rows visible to the user.
-                var fallbackDetails = abj404FormatAjaxFailureDetails(errorMeta || {});
-                var errorMessage = 'Could not load table data. ' + fallbackDetails.join('\n');
-                jQuery('.abj404-table[data-table-awaiting-load] tbody').html(
-                    '<tr><td class="abj404-empty-message abj404-error">' +
-                    jQuery('<div/>').text(errorMessage).html() +
-                    '</td></tr>'
-                );
-                jQuery('[data-table-awaiting-load]').removeAttr('data-table-awaiting-load');
-                jQuery('[data-tab-counts-placeholder]').removeAttr('data-tab-counts-placeholder');
-                jQuery('[data-health-bar-placeholder]').removeAttr('data-health-bar-placeholder');
-            }
-        });
-    };
-
-    triggerInitialLoadAttempt(1);
+    paginationLinksChange(perpageElements[0], {
+        backgroundRefresh: false,
+        detectOnly: false,
+        cacheMode: 'normal',
+        onComplete: function() {
+            $config.attr('data-pagination-initial-load', '0');
+        },
+        onError: function(errorMeta) {
+            // paginationLinksChange already exhausted its finite transient-only
+            // retry schedule. Do not wrap it in another whole-workflow retry,
+            // which would multiply the bounded three attempts into nine.
+            $config.attr('data-pagination-initial-load', '0');
+            var fallbackDetails = abj404FormatAjaxFailureDetails(errorMeta || {});
+            var errorMessage = 'Could not load table data. ' + fallbackDetails.join('\n');
+            jQuery('.abj404-table[data-table-awaiting-load] tbody').html(
+                '<tr><td class="abj404-empty-message abj404-error">' +
+                jQuery('<div/>').text(errorMessage).html() +
+                '</td></tr>'
+            );
+            jQuery('[data-table-awaiting-load]').removeAttr('data-table-awaiting-load');
+            jQuery('[data-tab-counts-placeholder]').removeAttr('data-tab-counts-placeholder');
+            jQuery('[data-health-bar-placeholder]').removeAttr('data-health-bar-placeholder');
+        }
+    });
 }

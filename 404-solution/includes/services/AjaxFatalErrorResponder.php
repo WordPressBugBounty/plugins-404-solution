@@ -81,9 +81,11 @@ class ABJ_404_Solution_AjaxFatalErrorResponder {
             if (PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg') {
                 $minLevel = max($minLevel, ob_get_level());
             }
-            while (ob_get_level() > $minLevel) {
+            // Bounded: a close that does not lower the level would otherwise
+            // spin forever inside the handler for a fatal already in progress.
+            ABJ_404_Solution_OutputBufferDrain::drainTo($minLevel, static function () {
                 @ob_end_clean();
-            }
+            });
         }
         return $bufferedOutput;
     }
@@ -167,7 +169,12 @@ class ABJ_404_Solution_AjaxFatalErrorResponder {
             }
             header('Content-type: application/json; charset=UTF-8');
             if (function_exists('status_header')) {
-                status_header($httpStatus);
+                ABJ_404_Solution_ResponseControlFilterTracer::traceDispatch(
+                    'status_header',
+                    static function () use ($httpStatus) {
+                        status_header($httpStatus);
+                    }
+                );
             } elseif (function_exists('http_response_code')) {
                 http_response_code($httpStatus);
             }

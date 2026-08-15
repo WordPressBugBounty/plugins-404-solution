@@ -70,9 +70,21 @@ class ABJ_404_Solution_ViewCacheInvalidator {
         if (ABJ_404_Solution_ViewReadRuntimeState::$bulkMutationInProgress) {
             return;
         }
-        delete_transient(ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_REDIRECT_STATUS);
-        delete_transient(ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_CAPTURED_STATUS);
-        delete_transient(ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_HIGH_IMPACT_CAPTURED);
+        self::markTransientStale(array(
+            'current' => ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_REDIRECT_STATUS,
+            'last_known' => ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_REDIRECT_STATUS_LAST_KNOWN,
+            'kind' => 'array',
+        ));
+        self::markTransientStale(array(
+            'current' => ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_CAPTURED_STATUS,
+            'last_known' => ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_CAPTURED_STATUS_LAST_KNOWN,
+            'kind' => 'array',
+        ));
+        self::markTransientStale(array(
+            'current' => ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_HIGH_IMPACT_CAPTURED,
+            'last_known' => ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_HIGH_IMPACT_CAPTURED_LAST_KNOWN,
+            'kind' => 'count',
+        ));
         $this->invalidateViewSnapshotCache();
     }
 
@@ -101,39 +113,119 @@ class ABJ_404_Solution_ViewCacheInvalidator {
         if (ABJ_404_Solution_ViewReadRuntimeState::$bulkMutationInProgress) {
             return;
         }
-        $cooldownKey = ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_CAPTURED_COUNT_INVALIDATE_COOLDOWN;
-        if (get_transient($cooldownKey)) {
+        if (!self::claimCapturedCountInvalidateCooldown()) {
             return;
         }
-        set_transient($cooldownKey, 1,
-            ABJ_404_Solution_ViewReadRuntimeState::CAPTURED_COUNT_INVALIDATE_COOLDOWN_SECONDS);
-        delete_transient(ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_CAPTURED_STATUS);
-        delete_transient(ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_HIGH_IMPACT_CAPTURED);
+        self::invalidateCapturedStatusCountsCache();
     }
 
     /**
-     * Clear the view snapshot cache.
+     * Single-flight claim on the captured-count invalidation cooldown.
+     * Returns true only for the caller that wins the race.
+     *
+     * A plain get_transient()/set_transient() pair is check-then-act: under
+     * a burst of near-simultaneous captured-URL inserts (bot-scanner flood
+     * traffic across parallel PHP-FPM workers -- the exact profile this
+     * debounce exists for), multiple requests can each read an empty
+     * cooldown before any of them writes it, so the "collapse a burst to
+     * one invalidation" guarantee silently fails under real concurrency.
+     * Same TOCTOU shape as Ajax_Php::consumeRateLimit(), fixed the same way:
+     * wp_cache_add() only succeeds in creating the key if it doesn't already
+     * exist, so concurrent callers on a persistent object cache serialize on
+     * that add. Sites without a persistent object cache keep the narrower
+     * pre-existing transient race rather than gain a DB dependency in this
+     * intentionally zero-dependency method (called from the frontend
+     * capture hot path without a wired invalidator instance).
+     */
+    private static function claimCapturedCountInvalidateCooldown(): bool {
+        $key = ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_CAPTURED_COUNT_INVALIDATE_COOLDOWN;
+        $ttl = ABJ_404_Solution_ViewReadRuntimeState::CAPTURED_COUNT_INVALIDATE_COOLDOWN_SECONDS;
+        if (function_exists('wp_using_ext_object_cache') && wp_using_ext_object_cache()
+            && function_exists('wp_cache_add')) {
+            return (bool)wp_cache_add($key, 1, 'abj404_view_cache_invalidate', $ttl);
+        }
+        if (get_transient($key)) {
+            return false;
+        }
+        set_transient($key, 1, $ttl);
+        return true;
+    }
+
+    /**
+     * Mark captured-scoped count caches stale without applying a debounce.
+     */
+    public static function invalidateCapturedStatusCountsCache(): void {
+        if (ABJ_404_Solution_ViewReadRuntimeState::$bulkMutationInProgress) {
+            return;
+        }
+        self::markTransientStale(array(
+            'current' => ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_CAPTURED_STATUS,
+            'last_known' => ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_CAPTURED_STATUS_LAST_KNOWN,
+            'kind' => 'array',
+        ));
+        self::markTransientStale(array(
+            'current' => ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_HIGH_IMPACT_CAPTURED,
+            'last_known' => ABJ_404_Solution_ViewReadRuntimeState::CACHE_KEY_HIGH_IMPACT_CAPTURED_LAST_KNOWN,
+            'kind' => 'count',
+        ));
+    }
+
+    /**
+     * Preserve a trustworthy current value before expiring its fresh cache key.
+     *
+     * @param array{current:string,last_known:string,kind:'array'|'count'} $cache
+     */
+    private static function markTransientStale(array $cache): void {
+        $current = get_transient($cache['current']);
+        $isTrustworthy = ($cache['kind'] === 'array' && is_array($current))
+            || ($cache['kind'] === 'count' && is_numeric($current));
+        if ($isTrustworthy) {
+            // allow-cache-empty: numeric zero is a trustworthy computed count and shaped all-zero status arrays still contain their named keys.
+            set_transient(
+                $cache['last_known'],
+                $cache['kind'] === 'count' ? intval($current) : $current,
+                ABJ_404_Solution_ViewReadRuntimeState::STATUS_LAST_KNOWN_CACHE_TTL
+            );
+        }
+        delete_transient($cache['current']);
+    }
+
+    /**
+     * Expire the view snapshot: mark the built-at freshness marker stale so the
+     * next admin read treats the derived view as out of date.
+     *
+     * Deliberately one delete_option() and nothing else. Through 4.2.x this
+     * also cleared a snapshot RESULT cache -- rows in {prefix}abj404_view_cache
+     * and per-key transients named abj404_view_* -- but denorm Step 3e-B
+     * (5f4fcfb4, shipped in 4.3.1) removed that subsystem: the admin table read
+     * is now live off the abj404_redirects denorm columns, and no code path has
+     * written either store since. The two DELETEs outlived their writers and
+     * ran on every redirect create, update and delete to remove rows nothing
+     * can create, so they were removed rather than bounded:
+     *
+     *   - `DELETE FROM {wp_abj404_view_cache} WHERE 1=1` -- a table-wide
+     *     destructive statement whose result set is permanently empty.
+     *   - `option_name LIKE '_transient_abj404_view_%'` against wp_options --
+     *     worse, because the pattern begins with `_`, LIKE's single-character
+     *     wildcard, leaving the range optimizer no literal prefix to seek on.
+     *     Every row of the site's largest, hottest shared table was read, on
+     *     the redirect-mutation path, to delete none of them. (The plugin's
+     *     other wp_options sweeps -- Uninstaller, PluginLogicLifecycle,
+     *     DatabaseUpgradeDailyMaintenance -- all go through prepare() with
+     *     esc_like(); this one never did.)
+     *
+     * Residue on sites that upgraded from a snapshot-cache version is inert:
+     * the view_cache rows are read by nothing and the table is dropped at
+     * uninstall, and the orphaned transients carry their `_transient_timeout_`
+     * companions, so WordPress's own expired-transient collection reaps them.
+     * Physically dropping the vestigial table is the separately-tracked
+     * one-way-door step (i463-C/D), alongside DropStagedViewTables.
      *
      * @return void
      */
     public function invalidateViewSnapshotCache(): void {
         if (function_exists('delete_option')) {
             delete_option($this->viewDoneFreshnessOptionName);
-        }
-
-        $query = "DELETE FROM {wp_abj404_view_cache} WHERE 1=1";
-        $this->dbCore->queryAndGetResults($query, array('log_errors' => false, 'skip_repair' => true));
-
-        global $wpdb;
-        if (isset($wpdb->options) && method_exists($wpdb, 'query')) {
-            /** @var string $optionsTable */
-            // @utf8-audit: opt-out — wpdb->options is a WordPress-controlled table identifier.
-            $optionsTable = esc_sql($wpdb->options);
-            // DAO-bypass-approved: View-cache clear targets wp_options -- outside the plugin's owned tables; runs during cache invalidation hot path; failure is best-effort
-            $wpdb->query(
-                "DELETE FROM `{$optionsTable}` WHERE option_name LIKE '_transient_abj404_view_%'"
-                . " OR option_name LIKE '_transient_timeout_abj404_view_%'"
-            );
         }
     }
 

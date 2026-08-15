@@ -4,6 +4,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once dirname(__DIR__) . '/diagnostics/QueryBudgetInstrumentation.php';
+
 /**
  * Query diagnostics for safe source labels, latency simulation, and logging.
  *
@@ -36,6 +38,91 @@ class ABJ_404_Solution_DatabaseQueryDiagnostics {
             && class_exists('ABJ_404_Solution_QueryBudgetInstrumentation', false)
             && ABJ_404_Solution_QueryBudgetInstrumentation::isEnabled()) {
             abj404_query_budget_record($this->extractSqlFilename($query), $elapsedMs, $timeoutSeconds);
+        }
+    }
+
+    /**
+     * Open the ledger-scoped boundary covering all work before query_probe.
+     *
+     * @param mixed $wpdb
+     */
+    public function beginQueryPreflight(
+        string $query,
+        $wpdb
+    ): ABJ_404_Solution_DatabaseQueryPreflightTracer {
+        return ABJ_404_Solution_DatabaseQueryPreflightTracer::begin(
+            $this->extractSqlFilename($query),
+            $wpdb
+        );
+    }
+
+    /**
+     * Announce a query to the per-request attribution timeline BEFORE it runs
+     * (Bruno timeout cause matrix, cause class F).
+     *
+     * Emitted ahead of execution on purpose: a query that blocks and never
+     * returns cannot be described by a record written on completion, and
+     * naming the SQL shape that was in flight is what separates "the stage
+     * hung in the database" from "the stage hung in PHP after the database
+     * came back". See ABJ_404_Solution_AjaxQueryTimeline.
+     *
+     * The call-site label is resolved only when the timeline is armed, since
+     * extractSqlFilename() falls back to a debug_backtrace() walk.
+     *
+     * @param string $query The final SQL the server will receive.
+     * @param int $timeoutSeconds
+     * @return array{q:int,sql_id:string}|null
+     */
+    public function recordQueryTimelineStart(
+        string $query,
+        int $timeoutSeconds,
+        string $preflightId = ''
+    ): ?array {
+        if (!class_exists('ABJ_404_Solution_AjaxQueryTimeline')
+                || !ABJ_404_Solution_AjaxQueryTimeline::isArmed()) {
+            return null;
+        }
+        return ABJ_404_Solution_AjaxQueryTimeline::beginQuery(
+            $query,
+            $this->extractSqlFilename($query),
+            $timeoutSeconds,
+            $preflightId
+        );
+    }
+
+    /**
+     * Close the in-flight timeline entry with the duration the executor
+     * measured. In-memory only; the value is carried out by the next probe and
+     * by the request's closing summary.
+     *
+     * Deliberately called from BOTH the normal and the throwing path of
+     * queryAndGetResults: a query that raised is still a query that ended, and
+     * an unclosed entry would make every duration after it unreadable.
+     *
+     * @param float $elapsedMs
+     * @return void
+     */
+    public function recordQueryTimelineEnd(float $elapsedMs): void {
+        if (class_exists('ABJ_404_Solution_AjaxQueryTimeline', false)) {
+            ABJ_404_Solution_AjaxQueryTimeline::endQuery($elapsedMs);
+        }
+    }
+
+    /**
+     * Attach the strongest DB-level timeout mode observed during the active
+     * AJAX stage. MariaDB's persisted wrapper-rejection state is explicitly
+     * recorded as unwrapped because its MAX_EXECUTION_TIME comment is ignored.
+     */
+    public function recordAjaxTimeoutMode(string $query): void {
+        $mode = 'none';
+        if (class_exists('ABJ_404_Solution_DatabaseRuntimeState')
+                && ABJ_404_Solution_DatabaseRuntimeState::isSetStatementWrapperUnsupported()) {
+            $mode = 'unwrapped';
+        } else if (preg_match('/MAX_EXECUTION_TIME|max_statement_time/i', $query) === 1) {
+            $mode = 'wrapped';
+        }
+        if (class_exists('ABJ_404_Solution_AjaxStageDiagnostics')) {
+            ABJ_404_Solution_AjaxStageDiagnostics::addStageMetadata(array('db_timeout_mode' => $mode));
         }
     }
 
@@ -78,11 +165,12 @@ class ABJ_404_Solution_DatabaseQueryDiagnostics {
         static $internalMethods = array(
             'extractSqlFilename' => true,
             'resolveCallerFromBacktrace' => true,
+            'beginQueryPreflight' => true,
             'queryAndGetResults' => true,
             'attemptInvalidDataRetry' => true,
             'attemptMissingTableRepairAndRetry' => true,
             'repairCorruptedTableAndRetry' => true,
-            'recoverFromCollationMismatchAndRetry' => true,
+            'scheduleCollationRecovery' => true,
             'call_user_func_array' => true,
             'call_user_func' => true,
             '__call' => true,

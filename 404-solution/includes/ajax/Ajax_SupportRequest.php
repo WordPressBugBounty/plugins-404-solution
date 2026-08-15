@@ -13,6 +13,13 @@ if (!defined('ABSPATH')) {
  * request per 5 minutes) to prevent a frustrated admin (or a malicious one)
  * from flooding the developer endpoint with click-spam.
  *
+ * This class owns the endpoint: authentication, the cooldown, input
+ * validation, dispatch, and the answer the browser gets. WHAT the report
+ * carries as evidence, and the byte contract that evidence lives under, is
+ * ABJ_404_Solution_SupportEvidenceExcerpt's -- a separate job with entirely
+ * different failure modes, and the one the beta.1 evidence losses all
+ * happened in.
+ *
  * Wired in WordPressHookRegistrar::registerAdminHooks() under the action name
  * 'wp_ajax_abj404_support_request'. The matching client lives at
  * includes/ajax/SupportRequest.js. The UI buttons that call it are added in
@@ -138,10 +145,13 @@ class ABJ_404_Solution_Ajax_SupportRequest {
             $userMessage = substr($userMessage, 0, self::MAX_USER_MESSAGE_LENGTH);
         }
 
-        // Pull a sanitized log excerpt via the existing helper. Best-effort:
-        // a missing log file or unavailable Logging service must not block
-        // sending the support request.
-        $debugLogExcerpt = self::resolveDebugLogExcerpt();
+        // The evidence the report carries. Best-effort by construction:
+        // unavailable diagnostics are reported inside the excerpt, never by
+        // blocking the support request the admin is waiting on.
+        $debugLogExcerpt = ABJ_404_Solution_SupportEvidenceExcerpt::assemble(array(
+            'telemetry' => self::readClientTelemetry(),
+            'session_id' => self::readClientSessionId(),
+        ));
 
         $extras = array(
             'user_message' => $userMessage,
@@ -264,29 +274,43 @@ class ABJ_404_Solution_Ajax_SupportRequest {
     }
 
     /**
-     * Best-effort lookup of a sanitized log excerpt. Returns empty string
-     * if the Logging service or its helper isn't reachable in this context.
+     * The browser's drained transport-attempt buffer as it was actually sent.
      *
-     * @return string
+     * Read through RequestInputNormalizer for the same reason
+     * RequestInputNormalizer::getPostOrGetSanitize() always is: WordPress escapes every superglobal
+     * at boot, so a JSON buffer taken straight out of $_POST can never parse
+     * and every real support request would report its own telemetry as
+     * unparseable.
+     *
+     * The request boundary stays here rather than inside
+     * ABJ_404_Solution_SupportEvidenceExcerpt: reading it once and passing it
+     * in is what lets the same assembly run from a context that has no $_POST
+     * at all, and it guarantees the attempt ids the manifest reconciles are the
+     * ids in the buffer the payload actually carries.
      */
-    private static function resolveDebugLogExcerpt(): string {
-        if (!function_exists('abj_service_optional')) {
-            return '';
-        }
-        $logger = abj_service_optional('logging');
-        if (is_object($logger) && method_exists($logger, 'getSanitizedLogExcerptForSupport')) {
-            try {
-                $excerpt = $logger->getSanitizedLogExcerptForSupport();
-                return is_string($excerpt) ? $excerpt : '';
-            } catch (\Throwable $e) {
-                ABJ_404_Solution_FeedbackTransportLog::log(
-                    'warn',
-                    'Support request debug-log excerpt unavailable: ' . $e->getMessage()
-                );
-                return '';
-            }
-        }
-        return '';
+    private static function readClientTelemetry(): string {
+        return isset($_POST['client_telemetry'])
+            ? ABJ_404_Solution_RequestInputNormalizer::normalizeScalar($_POST['client_telemetry']) : '';
+    }
+
+    /**
+     * The browser session this report is being sent from.
+     *
+     * It is what scopes the detach A/B verdict: the checkpoint journal is
+     * site-wide while the experiment's attempt counters are per session and
+     * workload scope, so two admin tabs write independent A/B sequences into
+     * one file and only the clicking tab's own matched pairs are evidence.
+     *
+     * Bounded to the same 64 characters ABJ_404_Solution_AjaxRequestLedger's
+     * own readFields() gives the field on every other request, so a session id
+     * joins across channels rather than matching itself only here. The value is
+     * never echoed, never queried with, and only ever hashed into a session
+     * key, so bounding it is the whole of the sanitization it needs.
+     */
+    private static function readClientSessionId(): string {
+        return isset($_POST['sessionId'])
+            ? substr(ABJ_404_Solution_RequestInputNormalizer::normalizeScalar($_POST['sessionId']), 0, 64)
+            : '';
     }
 
     /**

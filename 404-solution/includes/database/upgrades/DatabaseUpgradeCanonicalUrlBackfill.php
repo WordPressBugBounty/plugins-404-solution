@@ -62,7 +62,7 @@ class ABJ_404_Solution_DatabaseUpgradeCanonicalUrlBackfill extends ABJ_404_Solut
         if ($found !== $redirectsTable) {
             return 0;
         }
-        if (!$this->columnExists($redirectsTable, 'canonical_url')) {
+        if ($this->columnExists($redirectsTable, 'canonical_url') !== true) {
             return 0;
         }
 
@@ -181,7 +181,7 @@ class ABJ_404_Solution_DatabaseUpgradeCanonicalUrlBackfill extends ABJ_404_Solut
         if ($found !== $logsTable) {
             return 0;
         }
-        if (!$this->columnExists($logsTable, 'canonical_url')) {
+        if ($this->columnExists($logsTable, 'canonical_url') !== true) {
             return 0;
         }
 
@@ -250,14 +250,30 @@ class ABJ_404_Solution_DatabaseUpgradeCanonicalUrlBackfill extends ABJ_404_Solut
      * Case-insensitive on the column name to match MySQL/MariaDB driver
      * variations in returned column-name casing.
      *
+     * Three answers, not two: true, false, and null for "the server did not
+     * tell me". Collapsing the third into false said "the column is absent"
+     * whenever the read was refused, and the ensure*Column() helpers act on
+     * absence by issuing ALTER TABLE ... ADD COLUMN -- so a denied read, a
+     * connection lost mid-upgrade or a table caught mid-rename produced a blind
+     * schema change against a table nothing had managed to introspect. Callers
+     * therefore test against true or false explicitly; null means "leave it
+     * alone and look again next tick".
+     *
      * @param string $tableName  Fully-qualified table name.
      * @param string $columnName Column to look for.
-     * @return bool
+     * @return bool|null
      */
-    public function columnExists(string $tableName, string $columnName): bool {
+    public function columnExists(string $tableName, string $columnName): ?bool {
         $result = $this->dbCore->queryAndGetResults("SHOW COLUMNS FROM " . $tableName,
             array('log_errors' => false));
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+        $lastError = isset($result['last_error']) && is_scalar($result['last_error'])
+            ? (string)$result['last_error'] : '';
+        if ($lastError !== '' || !is_array($result['rows'] ?? null) || empty($result['rows'])) {
+            // Unreadable, or a live table reporting no columns at all, which is
+            // not a state a real table can be in and so is not an answer either.
+            return null;
+        }
+        $rows = $result['rows'];
         $needle = strtolower($columnName);
         foreach ($rows as $row) {
             if (!is_array($row)) { continue; }
@@ -269,5 +285,93 @@ class ABJ_404_Solution_DatabaseUpgradeCanonicalUrlBackfill extends ABJ_404_Solut
             }
         }
         return false;
+    }
+
+    /**
+     * Add the canonical_url column to logsv2 with online DDL when supported.
+     *
+     * A small idempotent helper that runs ahead of the generic
+     * verifyColumns() flow so the column add can use
+     * ALGORITHM=INPLACE, LOCK=NONE on InnoDB 5.6 or newer (no table lock during the
+     * rewrite). On engines that don't support online DDL for ADD COLUMN the
+     * explicit clause causes the statement to fail with
+     * ER_ALTER_OPERATION_NOT_SUPPORTED, so we fall back to a bare ALTER, which
+     * is what verifyColumns() also runs as the safety net.
+     *
+     * The matching idx_canonical_url is added by the standard
+     * ABJ_404_Solution_DatabaseUpgradeIndexes::verifyIndexes() flow. Index adds
+     * use online DDL by default on InnoDB 5.6 or newer, so a separate ensure
+     * helper isn't required for the index.
+     *
+     * @param string $logsTable
+     * @return void
+     */
+    public function ensureLogsv2CanonicalUrlColumn(string $logsTable): void {
+        if ($this->columnExists($logsTable, 'canonical_url') !== false) {
+            // Present, or unknown. Only a definite absence justifies an ALTER.
+            return;
+        }
+        $inplaceQuery = "ALTER TABLE " . $logsTable .
+            " ADD COLUMN `canonical_url` VARCHAR(2048) DEFAULT NULL," .
+            " ALGORITHM=INPLACE, LOCK=NONE";
+        $result = $this->dbCore->queryAndGetResults($inplaceQuery,
+            array('log_too_slow' => false, 'log_errors' => false));
+        if (empty($result['last_error'])) {
+            $this->logger->infoMessage("Added canonical_url to {$logsTable} (ALGORITHM=INPLACE, LOCK=NONE).");
+            return;
+        }
+        // Engine didn't support online DDL for ADD COLUMN, so the bare ALTER
+        // falls back to whatever algorithm the engine picks (COPY on MyISAM / very
+        // old InnoDB). On modern InnoDB the bare ALTER is itself implicitly
+        // INPLACE for ADD COLUMN ... DEFAULT NULL, so this branch only runs
+        // on legacy engines where some lock is unavoidable.
+        $bareQuery = "ALTER TABLE " . $logsTable .
+            " ADD COLUMN `canonical_url` VARCHAR(2048) DEFAULT NULL";
+        $bare = $this->dbCore->queryAndGetResults($bareQuery,
+            array('log_too_slow' => false));
+        if (empty($bare['last_error'])) {
+            $this->logger->infoMessage("Added canonical_url to {$logsTable} (bare ALTER fallback).");
+        }
+    }
+
+    /**
+     * Add the canonical_url column to the redirects table with online DDL
+     * when supported.
+     *
+     * Sibling of {@see ensureLogsv2CanonicalUrlColumn()} applied to the
+     * redirects side. The column shipped in 4.1.11 and is normally added by dbDelta
+     * on plugin update. On hosts where dbDelta silently fails to ALTER ADD
+     * it, every captured-404 INSERT errors out with "Unknown column
+     * 'canonical_url' in 'field list'" until verifyColumns eventually
+     * retries the column add. One site in the May 10 debug zip emitted
+     * 1671 such errors over 10 days on 4.1.12. Calling this helper eagerly
+     * from runInitialCreateTables() shortens that window: every cron tick
+     * that runs the bootstrap loop retries the ALTER on its own,
+     * independent of the verifyColumns DDL diff path.
+     *
+     * @param string $redirectsTable
+     * @return void
+     */
+    public function ensureRedirectsCanonicalUrlColumn(string $redirectsTable): void {
+        if ($this->columnExists($redirectsTable, 'canonical_url') !== false) {
+            // Present, or unknown. Only a definite absence justifies an ALTER.
+            return;
+        }
+        $inplaceQuery = "ALTER TABLE " . $redirectsTable .
+            " ADD COLUMN `canonical_url` VARCHAR(2048) DEFAULT NULL," .
+            " ALGORITHM=INPLACE, LOCK=NONE";
+        $result = $this->dbCore->queryAndGetResults($inplaceQuery,
+            array('log_too_slow' => false, 'log_errors' => false));
+        if (empty($result['last_error'])) {
+            $this->logger->infoMessage("Added canonical_url to {$redirectsTable} (ALGORITHM=INPLACE, LOCK=NONE).");
+            return;
+        }
+        $bareQuery = "ALTER TABLE " . $redirectsTable .
+            " ADD COLUMN `canonical_url` VARCHAR(2048) DEFAULT NULL";
+        $bare = $this->dbCore->queryAndGetResults($bareQuery,
+            array('log_too_slow' => false));
+        if (empty($bare['last_error'])) {
+            $this->logger->infoMessage("Added canonical_url to {$redirectsTable} (bare ALTER fallback).");
+        }
     }
 }

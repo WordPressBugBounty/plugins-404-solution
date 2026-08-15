@@ -39,21 +39,66 @@ class ABJ_404_Solution_DatabaseTableNameResolver {
         $this->queryRunner = $queryRunner;
     }
 
+    /** The engine answered, and the table is there. */
+    const TABLE_PRESENT = 'present';
+
+    /** The engine answered, and the table is not there. */
+    const TABLE_ABSENT = 'absent';
+
+    /** The engine did not answer, so presence is not known either way. */
+    const TABLE_UNKNOWN = 'unknown';
+
     /**
      * Check if a database table exists.
+     *
+     * Answers the question callers who are about to CREATE or upgrade a table
+     * ask -- "can I count on it being there?" -- so an unanswerable probe reads
+     * as false, the same as absence. Callers deciding whether to SUPPRESS a read
+     * must use {@see tableExistenceStatus()} instead, because for them the two
+     * are not the same answer at all.
      *
      * @param string $tableName Full table name to check (including prefix)
      * @return bool
      */
     public function tableExists($tableName): bool {
+        return $this->tableExistenceStatus((string)$tableName) === self::TABLE_PRESENT;
+    }
+
+    /**
+     * Whether a table is there, is not there, or could not be asked about.
+     *
+     * SHOW TABLES LIKE answers with a name or with nothing, and wpdb renders
+     * "nothing" as NULL -- the same NULL it returns when the query never ran at
+     * all. A lost connection, a revoked SHOW grant and a driver that does not
+     * speak the statement are therefore indistinguishable from a genuinely
+     * missing table unless last_error is read alongside the value, which is the
+     * pair getTableColumnNames() below already reads for the same reason.
+     *
+     * The distinction is the whole point of this method: a caller that
+     * suppresses a query on "absent" turns a transient database fault into a
+     * confident, query-free zero on screen if it also suppresses on "could not
+     * ask" -- silent by construction, because no query means nothing for the
+     * centralized error handler to log. Unknown belongs to the caller to decide,
+     * and the safe decision is to attempt the read and let that handler speak.
+     *
+     * @param string $tableName Full table name to check (including prefix)
+     * @return string One of TABLE_PRESENT, TABLE_ABSENT, TABLE_UNKNOWN.
+     */
+    public function tableExistenceStatus(string $tableName): string {
         global $wpdb;
         if (!isset($wpdb) || !is_object($wpdb) || !is_callable(array($wpdb, 'get_var'))) {
-            return false;
+            return self::TABLE_UNKNOWN;
         }
-        // @utf8-audit: opt-out - tableExists receives system-generated plugin table names from DAO/core callers.
+        // @utf8-audit: opt-out - tableExistenceStatus receives system-generated plugin table names from DAO/core callers.
         // DAO-bypass-approved: metadata table existence probe for system-generated plugin table names.
         $table = $wpdb->get_var("SHOW TABLES LIKE '" . esc_sql($tableName) . "'");
-        return ($table == $tableName);
+        if ($table == $tableName) {
+            return self::TABLE_PRESENT;
+        }
+        // Read after the probe, never before: wpdb clears last_error at the
+        // start of every query, so what is there now belongs to this one.
+        $lastError = isset($wpdb->last_error) && is_string($wpdb->last_error) ? trim($wpdb->last_error) : '';
+        return $lastError === '' ? self::TABLE_ABSENT : self::TABLE_UNKNOWN;
     }
 
     /**
@@ -154,30 +199,86 @@ class ABJ_404_Solution_DatabaseTableNameResolver {
 
     /**
      * @param array<string, mixed> $options
-     * @return string
+     * @return string A comma-separated list of quoted SQL literals, or '' when
+     *   the setting is empty. Callers splice it into IN (...).
      */
     public function buildPostTypeSqlList(array $options): string {
-        $rptVal = $options['recognized_post_types'] ?? '';
-        $postTypes = $this->f->explodeNewlineOrComma(is_string($rptVal) ? $rptVal : '');
-        $recognizedPostTypes = '';
-        foreach ($postTypes as $postType) {
-            $recognizedPostTypes .= "'" . trim($this->f->strtolower($postType)) . "', ";
-        }
-        return rtrim($recognizedPostTypes, ", ");
+        return $this->buildQuotedSqlList($options, 'recognized_post_types');
     }
 
     /**
      * @param array<string, mixed> $options
-     * @return string
+     * @return string A comma-separated list of quoted SQL literals, or '' when
+     *   the setting is empty. Callers splice it into IN (...).
      */
     public function buildCategorySqlList(array $options): string {
-        $rcVal = $options['recognized_categories'] ?? '';
-        $categories = $this->f->explodeNewlineOrComma(is_string($rcVal) ? $rcVal : '');
-        $recognizedCategories = '';
-        foreach ($categories as $category) {
-            $recognizedCategories .= "'" . trim($this->f->strtolower($category)) . "', ";
+        return $this->buildQuotedSqlList($options, 'recognized_categories');
+    }
+
+    /**
+     * Turn one free-text setting into a list of quoted SQL literals safe to
+     * splice into an IN (...) clause.
+     *
+     * The escaping lives here, at the only point that writes the quotes, and
+     * not at the settings screen or the four call sites. Both of those were
+     * tried by omission and failed: SettingsWordPressPolicy stores these values
+     * through wp_kses_post(), an HTML sanitizer that does nothing whatever to a
+     * single quote, and the call sites hand the fragment straight to
+     * str_replace() against a .sql template. A value carrying a quote therefore
+     * closed its own literal and ran as syntax inside three live queries
+     * against wp_posts and wp_term_taxonomy -- a stored injection whose trigger
+     * is separated from the write by however long it takes someone to ask for
+     * published content.
+     *
+     * Escaped rather than allowlisted on purpose. recognized_post_types would
+     * be safe under a strict [a-z0-9_-] identifier rule, but
+     * recognized_categories is matched against lower(wp_terms.name) as well as
+     * the taxonomy key (getPublishedCategories.sql), and a term name is display
+     * text: "women's shoes" is a legitimate setting. One rule for both builders
+     * is also what keeps them from drifting apart again, which is how one of
+     * them ended up unescaped while three sibling list builders elsewhere in
+     * the plugin were not.
+     *
+     * esc_sql() is the right primitive and not merely the conventional one: it
+     * reaches mysqli_real_escape_string(), which honours the server's SQL mode
+     * and switches to doubled quotes under NO_BACKSLASH_ESCAPES, where a
+     * hand-rolled addslashes() would silently stop escaping. It is also a no-op
+     * for values with nothing to escape, so ordinary post-type keys still
+     * compare byte-identically.
+     *
+     * @param array<string, mixed> $options
+     * @param string $optionName
+     * @return string
+     */
+    private function buildQuotedSqlList(array $options, string $optionName): string {
+        $rawValue = $options[$optionName] ?? '';
+        // explodeNewlineOrComma() already lowercases, trims and drops empties.
+        $values = $this->f->explodeNewlineOrComma(is_string($rawValue) ? $rawValue : '');
+
+        $quoted = array();
+        foreach ($values as $value) {
+            // Sanitize BEFORE escaping, and do it here rather than trusting a
+            // caller. esc_sql() reaches mysqli_real_escape_string(), which
+            // escapes quotes and passes malformed byte sequences through
+            // untouched; on a connection whose charset disagrees with those
+            // bytes a truncated lead byte can absorb the escaping backslash and
+            // hand the next quote to the parser as syntax. Pattern 10
+            // ("invalid UTF-8 reaches SQL") is this project's own recurring
+            // class, and these two settings are free-text textareas, so their
+            // bytes are entirely attacker-chosen.
+            //
+            // It looked safe without this: explodeNewlineOrComma() lowercases,
+            // and with mbstring loaded mb_strtolower() substitutes malformed
+            // bytes as a side effect. MbStringAdapterPreg::strtolower() is
+            // plain strtolower() and does not, so every host without the
+            // mbstring extension -- a configuration this plugin supports on
+            // purpose -- had no sanitization at all here. A security property
+            // resting on an incidental side effect of a lowercasing call is not
+            // a security property.
+            $quoted[] = "'" . esc_sql($this->f->sanitizeInvalidUTF8($value)) . "'";
         }
-        return rtrim($recognizedCategories, ", ");
+
+        return implode(', ', $quoted);
     }
 
     /** @return void */

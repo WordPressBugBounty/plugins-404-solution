@@ -44,6 +44,9 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
     /** @var ABJ_404_Solution_Logging */
     private $logger;
 
+    /** @var ABJ_404_Solution_TableReadinessGate */
+    private $readiness;
+
     /** @var array<string,bool>|null Memoized lowercased column-name set of the
      *  redirects table (one SHOW COLUMNS per instance), the source for both the
      *  dest_for_view presence check and the narrow sort-key presence gates. */
@@ -65,6 +68,10 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
     public function __construct(ABJ_404_Solution_DatabaseCore $dbCore, $logging = null) {
         $this->dbCore = $dbCore;
         $this->logger = $logging !== null ? $logging : abj_service('logging');
+        $this->readiness = new ABJ_404_Solution_TableReadinessGate(
+            $dbCore,
+            $dbCore->tableNameResolver()
+        );
     }
 
     /**
@@ -188,7 +195,7 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
      */
     private function reverseLookupRedirectIds(array $types, int $finalDestId): array {
         $typeList = implode(',', array_map('intval', $types));
-        if ($typeList === '') {
+        if ($typeList === '' || $this->readiness->isKnownAbsent('{wp_abj404_redirects}')) {
             return array();
         }
         $result = $this->dbCore->queryAndGetResults(
@@ -234,6 +241,11 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
 
         $redirectsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
         $logsHitsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_logs_hits}');
+        $canonicalRedirectUrl = "COALESCE(r.canonical_url, CONCAT('/', TRIM(BOTH '/' FROM r.url)))";
+        $comparableRedirectUrl = $this->dbCore->collationHelper()->coerceExpressionToColumnCollation(
+            $canonicalRedirectUrl,
+            array('table' => $logsHitsTable, 'column' => 'requested_url')
+        );
 
         // Chunk by redirect id (report.md Finding 5): a single full-table UPDATE
         // JOIN over every redirect row can lock / heavily load the redirects table
@@ -253,9 +265,12 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
             $cursor = (int)max($ids);
             $idClause = ' AND r.id IN (' . implode(',', $ids) . ')';
             $query = ABJ_404_Solution_RedirectsDenormColumnSql::buildHitsRollupFromRollupTableStatement(
-                $redirectsTable,
-                $logsHitsTable,
-                $idClause
+                array(
+                    'redirects_table' => $redirectsTable,
+                    'logs_hits_table' => $logsHitsTable,
+                    'id_clause' => $idClause,
+                    'comparable_redirect_url' => $comparableRedirectUrl,
+                )
             );
             $result = $this->dbCore->queryAndGetResults($query);
             $lastError = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
@@ -309,7 +324,9 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
 
     /**
      * Lowercased column-name set of wp_abj404_redirects via one SHOW COLUMNS,
-     * memoized per instance. A failed/empty probe yields an empty set, so every
+     * memoized per instance after a successful non-empty probe. A failed/empty
+     * probe yields an uncached empty set, so an in-request schema repair can be
+     * observed by the next call. Every
      * presence check (dest_for_view, dest_sort_key, url_sort_key) degrades to
      * false -- the safe schema-drift fallback (skip the write / omit the UPDATE).
      *
@@ -318,6 +335,9 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
     private function redirectsColumnSet(): array {
         if ($this->redirectsColumnSetCache !== null) {
             return $this->redirectsColumnSetCache;
+        }
+        if ($this->readiness->isKnownAbsent('{wp_abj404_redirects}')) {
+            return array();
         }
         $table = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
         $result = $this->dbCore->queryAndGetResults(
@@ -337,7 +357,9 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
                 }
             }
         }
-        $this->redirectsColumnSetCache = $set;
+        if (!empty($set)) {
+            $this->redirectsColumnSetCache = $set;
+        }
         return $set;
     }
 

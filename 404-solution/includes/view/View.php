@@ -76,26 +76,26 @@ require_once __DIR__ . '/View_Logs.php';
  * @method mixed echoToastNotification()
  * @method mixed echoTrendsSection()
  * @method mixed fillRedirectRowTemplate(array<mixed> $replacements)
- * @method mixed getAdminLogsPageTable($sub)
+ * @method string getAdminLogsPageTable($sub, array<string, mixed> $tableOptionOverrides = array())
  * @method mixed getAdminOptionsPageAdvancedContent($options)
  * @method mixed getAdminOptionsPageAdvancedLogging($options)
  * @method mixed getAdminOptionsPageAdvancedSystem($options)
  * @method mixed getAdminOptionsPageAutoRedirects($options)
  * @method mixed getAdminOptionsPageGeneralSettings($options)
- * @method mixed getAdminRedirectsPageTable($sub)
+ * @method string getAdminRedirectsPageTable($sub, array<string, mixed> $tableOptionOverrides = array())
  * @method mixed getBehaviorTilesHTML($options)
  * @method mixed getBulkOperationsFormURL($sub, $tableOptions)
- * @method mixed getCapturedURLSPageTable($sub)
+ * @method string getCapturedURLSPageTable($sub, array<string, mixed> $tableOptionOverrides = array())
  * @method string getCardIcon(string $iconName)
  * @method mixed getCheckedAttr($options, $key)
- * @method string computeTableDataSignature($sub)
+ * @method string computeTableDataSignature($sub, array<string, mixed> $tableOptionOverrides = array())
  * @method string getCurrentTableDataSignature($sub)
  * @method mixed getDashboardNotificationCaptured($captured)
  * @method mixed getFallbackOptionDefaults()
  * @method mixed getHeaderSortState($tableOptions, $orderby, $preferDescOnFirstClick = false)
  * @method mixed getMigrateFromPluginMarkup()
  * @method mixed getOptionsWithDefaults()
- * @method mixed getPaginationLinks($sub, $showSearchFilter = true)
+ * @method string getPaginationLinks($sub, array<string, mixed> $tableOptionOverrides = array())
  * @method mixed getSignatureFieldsForSubpage($sub, $row)
  * @method mixed getSubSubSub($sub)
  * @method mixed getSuggestedDestination(string $url, array<mixed> $options)
@@ -355,19 +355,18 @@ class ABJ_404_Solution_View {
 	}
 
 	/**
-	 * Record the logs_hits rollup staleness diagnostic on plugin admin page
-	 * renders. This deliberately does not schedule a rollup rebuild; rebuild
-	 * arming has other callers, while the diagnostic needs a page-load seam now
-	 * that the old Hits/Last Used tooltip path no longer exists.
+	 * Maintain the logs_hits rollup when a plugin admin page renders. The policy
+	 * records staleness and schedules a rebuild only when the rollup is missing
+	 * or behind the source log table.
 	 *
 	 * @return void
 	 */
-	private function recordLogsHitsRollupStalenessDiagnosticOnAdminPageLoad(): void {
+	private function maintainLogsHitsRollupOnAdminPageLoad(): void {
 		try {
-			$this->logsRepository->recordLogsHitsRollupStalenessSignal();
+			$this->viewReadService->maybeUpdateRedirectsForViewHitsTable();
 		} catch (\Throwable $e) {
 			$this->logger->warn(
-				'logs_hits rollup staleness diagnostic failed during admin page render: '
+				'logs_hits rollup maintenance failed during admin page render: '
 				. get_class($e) . ' code=' . (string)$e->getCode() . ' message=' . $e->getMessage()
 			);
 		}
@@ -424,7 +423,15 @@ class ABJ_404_Solution_View {
 				return;
 			}
 
-			$instance->recordLogsHitsRollupStalenessDiagnosticOnAdminPageLoad();
+			// Close any missing plugin table before drawing anything. The bounded
+			// counterpart to the boot prologue, and it contains its own failures;
+			// see DatabaseUpgradeSelfHeal::repairMissingTablesForRequest() for why
+			// a render has to ask for this rather than cause it by accident.
+			// After the authorization gate on purpose: an unauthorized visitor
+			// must not be able to make the site issue DDL.
+			abj_service('database_upgrades')->repairMissingTablesForRequest();
+
+			$instance->maintainLogsHitsRollupOnAdminPageLoad();
 
 			$sub = "";
 

@@ -79,34 +79,103 @@ class ABJ_404_Solution_TableViewOptionsResolver {
      * @return array<string, mixed>
      */
     function resolve(string $pageBeingViewed): array {
-        $tableOptions = array();
-        $options = abj_service('options_repository')->getOptions(true);
+        $preludeTracer = ABJ_404_Solution_TableRendererPreludeTracer::begin();
+        try {
+            if ($preludeTracer !== null) {
+                $preludeTracer->prepareTranslationDomain();
+            }
+            $tableOptions = array();
+            $tableOptions['translations'] = $this->tracePrelude(
+                $preludeTracer, 'translation_tokens', fn() => $this->translationTokens());
+            $tableOptions['filter'] = $this->tracePrelude(
+                $preludeTracer, 'filter_resolution', fn() => $this->resolveFilter());
+            $tableOptions['filterText'] = $this->tracePrelude(
+                $preludeTracer, 'filter_text_resolution', fn() => $this->resolveFilterText());
 
-        $tableOptions['translations'] = $this->translationTokens();
+            $orderbyInput = ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('orderby', '');
+            $orderInput = strtoupper(ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('order', ''));
+            $sortPreferenceRequested = in_array($pageBeingViewed, array('abj404_redirects', 'abj404_captured'), true)
+                && (
+                    ($orderbyInput !== '' && in_array($orderbyInput, self::$allowedOrderbyColumns, true))
+                    || ($orderInput !== '' && in_array($orderInput, self::$allowedOrderValues, true))
+                );
+            $optionTracer = $sortPreferenceRequested
+                ? ABJ_404_Solution_OptionPersistenceTracer::begin()
+                : null;
+            try {
+                $optionsRead = static function (): array {
+                    return abj_service('options_repository')->getOptions(true);
+                };
+                $options = $this->tracePrelude(
+                    $preludeTracer,
+                    'options_read',
+                    static fn() => $optionTracer === null
+                        ? $optionsRead()
+                        : $optionTracer->traceOperation('sort_preference_options_read', $optionsRead)
+                );
 
-        $tableOptions['filter'] = $this->resolveFilter();
-        $tableOptions['filterText'] = $this->resolveFilterText();
+                $tableOptions['orderby'] = $this->tracePrelude(
+                    $preludeTracer,
+                    'orderby_resolution',
+                    fn() => $this->resolveOrderby($orderbyInput, $pageBeingViewed, $options)
+                );
+                $tableOptions['order'] = $this->tracePrelude(
+                    $preludeTracer,
+                    'order_resolution',
+                    fn() => $this->resolveOrder(
+                        $orderInput, $tableOptions['orderby'], $pageBeingViewed, $options)
+                );
+                $sortPreferenceWrite = function () use (
+                    $orderbyInput, $orderInput, $pageBeingViewed, $options
+                ): void {
+                    $this->rememberSortPreference($orderbyInput, $orderInput, $pageBeingViewed, $options);
+                };
+                $this->tracePrelude(
+                    $preludeTracer,
+                    'sort_preference_write',
+                    static fn() => $optionTracer === null
+                        ? $sortPreferenceWrite()
+                        : $optionTracer->traceOperation('sort_preference_write', $sortPreferenceWrite)
+                );
+            } finally {
+                if ($optionTracer !== null) {
+                    $optionTracer->finish();
+                }
+            }
 
-        $orderbyInput = $this->f->getPostOrGetSanitize('orderby', '');
-        $tableOptions['orderby'] = $this->resolveOrderby($orderbyInput, $pageBeingViewed, $options);
+            $tableOptions['paged'] = $this->tracePrelude(
+                $preludeTracer, 'paged_resolution', fn() => $this->resolvePaged());
+            $tableOptions['perpage'] = $this->tracePrelude(
+                $preludeTracer, 'perpage_resolution', fn() => $this->resolvePerPage($options));
+            $tableOptions['logsid'] = $this->tracePrelude(
+                $preludeTracer, 'logsid_resolution', fn() => $this->resolveLogsId());
+            $tableOptions['score_range'] = $this->tracePrelude(
+                $preludeTracer, 'score_range_resolution', fn() => $this->resolveScoreRange());
 
-        $orderInput = strtoupper($this->f->getPostOrGetSanitize('order', ''));
-        $tableOptions['order'] = $this->resolveOrder($orderInput, $tableOptions['orderby'], $pageBeingViewed, $options);
-
-        $this->rememberSortPreference($orderbyInput, $orderInput, $pageBeingViewed, $options);
-
-        $tableOptions['paged'] = $this->resolvePaged();
-        $tableOptions['perpage'] = $this->resolvePerPage($options);
-
-        $tableOptions['logsid'] = $this->resolveLogsId();
-        $tableOptions['score_range'] = $this->resolveScoreRange();
-
-        $forceRebuild = $this->resolveForceViewRebuild();
-        if ($forceRebuild !== null) {
-            $tableOptions['_abj404_force_view_rebuild'] = $forceRebuild;
+            $forceRebuild = $this->tracePrelude(
+                $preludeTracer, 'force_view_rebuild_resolution', fn() => $this->resolveForceViewRebuild());
+            if ($forceRebuild !== null) {
+                $tableOptions['_abj404_force_view_rebuild'] = $forceRebuild;
+            }
+            $sanitized = $this->tracePrelude(
+                $preludeTracer, 'sanitize', fn() => $this->sanitize($tableOptions));
+            return $this->tracePrelude(
+                $preludeTracer, 'normalize_types', fn() => $this->normalizeResolvedTypes($sanitized));
+        } finally {
+            if ($preludeTracer !== null) {
+                $preludeTracer->finish();
+            }
         }
+    }
 
-        return $this->normalizeResolvedTypes($this->sanitize($tableOptions));
+    /**
+     * @template T
+     * @param ABJ_404_Solution_TableRendererPreludeTracer|null $tracer
+     * @param callable():T $work
+     * @return T
+     */
+    private function tracePrelude($tracer, string $operation, callable $work) {
+        return $tracer === null ? $work() : $tracer->traceOperation($operation, $work);
     }
 
     /**
@@ -171,9 +240,9 @@ class ABJ_404_Solution_TableViewOptionsResolver {
 
     /** @return int */
     private function resolveFilter(): int {
-        $rawFilter = $this->f->getPostOrGetSanitize('filter', '');
+        $rawFilter = ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('filter', '');
         if ($rawFilter === '') {
-            if ($this->f->getPostOrGetSanitize('subpage') == 'abj404_captured') {
+            if (ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('subpage') == 'abj404_captured') {
                 return ABJ404_STATUS_CAPTURED;
             }
             return 0;
@@ -183,7 +252,7 @@ class ABJ_404_Solution_TableViewOptionsResolver {
 
     /** @return string */
     private function resolveFilterText(): string {
-        $filterText = trim($this->f->getPostOrGetSanitize('filterText', ''));
+        $filterText = trim(ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('filterText', ''));
         return $this->f->str_replace(array('*', '/', '$'), '', $filterText);
     }
 
@@ -242,7 +311,7 @@ class ABJ_404_Solution_TableViewOptionsResolver {
 
     /** @return int */
     private function resolvePaged(): int {
-        $paged = $this->f->getPostOrGetSanitize('paged', '');
+        $paged = ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('paged', '');
         if ($paged === '') {
             $paged = $this->readScalarFromRequestUriQuery('paged');
         }
@@ -258,7 +327,7 @@ class ABJ_404_Solution_TableViewOptionsResolver {
         if (isset($options['perpage'])) {
             $perPageOption = max(absint(is_scalar($options['perpage']) ? $options['perpage'] : 0), ABJ404_OPTION_MIN_PERPAGE);
         }
-        $rawPerPage = $this->f->getPostOrGetSanitize('perpage', '');
+        $rawPerPage = ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('perpage', '');
         if ($rawPerPage === '') {
             return $perPageOption;
         }
@@ -267,14 +336,14 @@ class ABJ_404_Solution_TableViewOptionsResolver {
 
     /** @return int */
     private function resolveLogsId(): int {
-        if ($this->f->getPostOrGetSanitize('subpage') != 'abj404_logs') {
+        if (ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('subpage') != 'abj404_logs') {
             return 0;
         }
-        $logId = (string)$this->f->getPostOrGetSanitize('id', '');
+        $logId = (string)ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('id', '');
         if (preg_match('/^\d+$/', $logId) === 1) {
             return absint($logId);
         }
-        $redirectToDataFieldId = (string)$this->f->getPostOrGetSanitize('redirect_to_data_field_id', '');
+        $redirectToDataFieldId = (string)ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('redirect_to_data_field_id', '');
         if (preg_match('/^\d+$/', $redirectToDataFieldId) === 1) {
             return absint($redirectToDataFieldId);
         }
@@ -283,16 +352,16 @@ class ABJ_404_Solution_TableViewOptionsResolver {
 
     /** @return string */
     private function resolveScoreRange(): string {
-        $raw = (string)$this->f->getPostOrGetSanitize('score_range', 'all');
+        $raw = (string)ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('score_range', 'all');
         $allowed = array('all', 'high', 'medium', 'low', 'manual');
         return in_array($raw, $allowed, true) ? $raw : 'all';
     }
 
     /** @return string|null */
     private function resolveForceViewRebuild() {
-        $val = (string)$this->f->getPostOrGetSanitize('forceViewRebuild', '');
+        $val = (string)ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('forceViewRebuild', '');
         if ($val === '') {
-            $val = (string)$this->f->getPostOrGetSanitize('abj404_force_view_rebuild', '');
+            $val = (string)ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('abj404_force_view_rebuild', '');
         }
         return $val === '1' ? '1' : null;
     }

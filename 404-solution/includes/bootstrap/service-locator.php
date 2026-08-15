@@ -5,6 +5,7 @@ if (!defined('ABSPATH')) {
 }
 
 require_once __DIR__ . '/../core/PhpErrorLogFallback.php';
+require_once __DIR__ . '/../core/ServiceContainer.php';
 
 /**
  * Global service-locator helper functions.
@@ -33,6 +34,7 @@ require_once __DIR__ . '/../core/PhpErrorLogFallback.php';
  *
  * @phpstan-return (
  *     $name is 'functions' ? ABJ_404_Solution_Functions : (
+ *     $name is 'request_input_normalizer' ? ABJ_404_Solution_RequestInputNormalizer : (
  *     $name is 'mb_string_adapter' ? ABJ_404_Solution_MbStringAdapter : (
  *     $name is 'regex_helper' ? ABJ_404_Solution_RegexHelper : (
  *     $name is 'url_encoder' ? ABJ_404_Solution_UrlEncoder : (
@@ -89,7 +91,7 @@ require_once __DIR__ . '/../core/PhpErrorLogFallback.php';
  *     $name is 'settings_mode_preference' ? ABJ_404_Solution_SettingsModePreference : (
  *     $name is 'not_found_response' ? ABJ_404_Solution_NotFoundResponseService :
  *     mixed
- * ))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+ * )))))))))))))))))))))))))))))))))))))))))))))))))))))))))
  */
 function abj_service($name) {
     if ($name === 'logging' && class_exists('ABJ_404_Solution_Logging', false)) {

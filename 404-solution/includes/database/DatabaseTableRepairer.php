@@ -34,6 +34,8 @@ if (!defined('ABSPATH')) {
  *     (signature: function(): string);
  *   - a notice setter bound over DatabaseNoticeStateHolder::setPluginDbNotice
  *     (signature: function(string, string, string, string): void);
+ *   - a connection-reset callable bound over
+ *     DatabaseConnectionManager::resetForRetry (signature: function(string): bool);
  *   - ABJ_404_Solution_Functions for regex/string helpers and the plugin logger.
  *
  * The recursion guards are static properties on this class (they must survive
@@ -61,6 +63,9 @@ class ABJ_404_Solution_DatabaseTableRepairer {
     /** @var callable(string, string, string, string): void */
     private $noticeSetter;
 
+    /** @var callable(string): bool */
+    private $connectionResetter;
+
     /** @var ABJ_404_Solution_Functions */
     private $f;
 
@@ -78,6 +83,8 @@ class ABJ_404_Solution_DatabaseTableRepairer {
      *   Returns the current wpdb result type (ARRAY_A or OBJECT) for retries.
      * @param callable(string, string, string, string): void $noticeSetter
      *   Persists a plugin-db admin notice (type, message, guidance, errorString).
+     * @param callable(string): bool $connectionResetter
+     *   Resets the active wpdb connection before a recovery retry.
      * @param ABJ_404_Solution_Functions $functions
      * @param ABJ_404_Solution_Logging $logger
      */
@@ -86,6 +93,7 @@ class ABJ_404_Solution_DatabaseTableRepairer {
         callable $resultHarvester,
         callable $resultTypeGetter,
         callable $noticeSetter,
+        callable $connectionResetter,
         $functions,
         $logger
     ) {
@@ -93,6 +101,7 @@ class ABJ_404_Solution_DatabaseTableRepairer {
         $this->resultHarvester = $resultHarvester;
         $this->resultTypeGetter = $resultTypeGetter;
         $this->noticeSetter = $noticeSetter;
+        $this->connectionResetter = $connectionResetter;
         $this->f = $functions;
         $this->logger = $logger;
     }
@@ -252,23 +261,52 @@ class ABJ_404_Solution_DatabaseTableRepairer {
      *
      * @param string $query
      * @param array<string, mixed> $result Passed by reference.
+     * @param ABJ_404_Solution_DatabaseQueryRecoveryTracer|null $tracer
      * @return void
      */
-    public function repairCorruptedTableAndRetry(string $query, array &$result): void {
+    public function repairCorruptedTableAndRetry(
+        string $query,
+        array &$result,
+        ?ABJ_404_Solution_DatabaseQueryRecoveryTracer $tracer = null
+    ): void {
         $errorMessage = is_string($result['last_error']) ? $result['last_error'] : '';
         $this->repairTable($errorMessage);
         if (stripos($errorMessage, 'abj404') !== false) {
             global $wpdb;
-            $wpdb->flush();
+            if ($tracer === null) {
+                if (!(($this->connectionResetter)($errorMessage))) {
+                    return;
+                }
+            } else {
+                $reset = $tracer->traceOperation(
+                    'corrupted_table',
+                    'connection_retry_reset',
+                    fn(): bool => ($this->connectionResetter)($errorMessage)
+                );
+                if (!$reset) {
+                    return;
+                }
+            }
             $resultType = ($this->resultTypeGetter)();
             // DAO-bypass-approved: retry-after-repair is part of the DAO's
             // self-healing pipeline; calling queryAndGetResults() here would
             // re-enter the error-handler that just invoked us.
-            $result['rows'] = $wpdb->get_results($query, $resultType);
-            $result['last_error'] = (string)($wpdb->last_error ?? '');
-            $result['last_result'] = $wpdb->last_result ?? array();
-            $result['rows_affected'] = $wpdb->rows_affected ?? 0;
-            $result['insert_id'] = $wpdb->insert_id ?? 0;
+            $retry = function () use ($wpdb, $query, $resultType): array {
+                $retried = array('rows' => $wpdb->get_results($query, $resultType));
+                $retried['last_error'] = (string)($wpdb->last_error ?? '');
+                $retried['last_result'] = $wpdb->last_result ?? array();
+                $retried['rows_affected'] = $wpdb->rows_affected ?? 0;
+                $retried['insert_id'] = $wpdb->insert_id ?? 0;
+                return $retried;
+            };
+            $retried = $tracer === null
+                ? $retry()
+                : $tracer->traceAttempt(
+                    'corrupted_table',
+                    'corrupted_table',
+                    $retry
+                );
+            $result = array_merge($result, $retried);
             if ($result['last_error'] === '') {
                 $this->logger->infoMessage("Retry after 'Incorrect key file' repair succeeded for plugin table.");
             }
@@ -286,29 +324,66 @@ class ABJ_404_Solution_DatabaseTableRepairer {
      *
      * @param string $query
      * @param array<string, mixed> $result Passed by reference.
+     * @param ABJ_404_Solution_DatabaseQueryRecoveryTracer|null $tracer
      * @return void
      */
-    public function attemptInvalidDataRetry($query, &$result) {
+    public function attemptInvalidDataRetry(
+        $query,
+        &$result,
+        ?ABJ_404_Solution_DatabaseQueryRecoveryTracer $tracer = null
+    ) {
         if (self::$invalidDataRetryInProgress) {
             return;
         }
         self::$invalidDataRetryInProgress = true;
         try {
-            $retryQuery = $this->get_stripped_query_result($query);
-            $retryQuery = function_exists('apply_filters')
-                ? apply_filters('abj404_invalid_data_retry_query', $retryQuery, $query)
-                : $retryQuery;
+            $prepareRetry = function () use ($query) {
+                $retryQuery = $this->get_stripped_query_result($query);
+                return function_exists('apply_filters')
+                    ? apply_filters('abj404_invalid_data_retry_query', $retryQuery, $query)
+                    : $retryQuery;
+            };
+            $retryQuery = $tracer === null
+                ? $prepareRetry()
+                : $tracer->traceOperation(
+                    'invalid_data',
+                    'retry_prepare',
+                    $prepareRetry
+                );
             if (!is_string($retryQuery) || trim($retryQuery) === '' || $retryQuery === $query) {
                 return;
             }
             global $wpdb;
-            $wpdb->flush();
+            $retryError = isset($result['last_error']) && is_scalar($result['last_error'])
+                ? (string)$result['last_error']
+                : '';
+            if ($tracer === null) {
+                if (!(($this->connectionResetter)($retryError))) {
+                    return;
+                }
+            } else {
+                $reset = $tracer->traceOperation(
+                    'invalid_data',
+                    'connection_retry_reset',
+                    fn(): bool => ($this->connectionResetter)($retryError)
+                );
+                if (!$reset) {
+                    return;
+                }
+            }
             $resultType = ($this->resultTypeGetter)();
             // DAO-bypass-approved: retry-after-strip is part of the DAO's
             // self-healing pipeline; calling queryAndGetResults() here would
             // re-enter the error-handler that just invoked us.
-            $result['rows'] = $wpdb->get_results($retryQuery, $resultType);
-            ($this->resultHarvester)($result);
+            $retry = function () use ($wpdb, $retryQuery, $resultType): array {
+                $retried = array('rows' => $wpdb->get_results($retryQuery, $resultType));
+                ($this->resultHarvester)($retried);
+                return $retried;
+            };
+            $retried = $tracer === null
+                ? $retry()
+                : $tracer->traceAttempt('invalid_data', 'invalid_data', $retry);
+            $result = array_merge($result, $retried);
         } catch (Throwable $e) {
             $this->logger->warn("Invalid-data retry failed: " . $e->getMessage());
         } finally {

@@ -1,5 +1,44 @@
 # Changelog #
 
+## Version 4.3.3 (August 12, 2026) ##
+
+**New Features**
+
+* Regex redirect destinations can now be site-relative paths such as `/archive/$1`, not only full http(s):// URLs.
+
+**Bug Fixes**
+
+* Fixed the Page Redirects and Captured 404s tabs being able to hang after their data was already built. When something else on the site holds an output buffer open that cannot be closed, whether that is PHP output compression or another plugin, the response could keep trying to flush buffers until the host's execution limit killed the request. Flushing is now bounded, so the table finishes rendering instead of spinning.
+* Fixed a fatal error that could happen while updating from 4.2.x, when the server's PHP bytecode cache was still handing out the previous version's files as the new ones loaded. This guard protects future updates; it cannot protect the update that installs it.
+* Fixed a crashed or killed request being able to leave an internal lock behind, which left redirect lookups on a slower fallback path until the lock expired (more than 24 hours was observed on one site). Locks are now released even when the request dies, and an abandoned lock is reclaimed after at most 5 minutes instead of after the server's maximum execution time.
+* Fixed "Illegal mix of collations" database errors on sites whose plugin tables do not all share the same collation. This affected 404 log cleanup, the admin list counts, the email digest, and the dead-destination check.
+* Fixed the plugin running a schema-wide collation repair in the middle of an admin page load, which could make that page slow or time out. The repair now happens outside the page request.
+* Fixed slow sorting on the Captured 404s tab. The timestamp sort had no supporting database index, so a large site re-sorted the whole table on every page load.
+* Fixed the plugin trusting one of its own sort indexes by name alone. A database server silently narrows an index when a column it referenced is dropped, and an index narrowed that way was treated as correct forever, so the sorts it was built for scanned the entire table instead of reading a single page of rows. Indexes are now compared against the definition the plugin ships and rebuilt when they differ.
+* Fixed the plugin rebuilding a database index on the strength of index information it could not read. When a database server left out or garbled the field that says whether an index is unique, the plugin decided the index differed from the one it ships and repaired it, which on the page-suggestion cache meant emptying that table and rewriting the index. Index information that cannot be read is now treated as unknown, and an index the plugin cannot describe is left alone.
+* Fixed the Page Redirects and Captured 404s tabs waiting on their own row counts on large sites. Pagination and the per-status counts now load in separate stages, and a count that is still being computed is shown as incomplete instead of holding up the table.
+* Fixed a regex redirect whose source pattern starts with an anchor (for example `^/products/(.*)`) being rewritten on save into a pattern that could never match.
+* Fixed the Add Redirect dialog rejecting valid regex destinations, and checking them against a stale copy of the validation rules after an update.
+* Fixed the "Hits" counts on the admin tabs falling behind. The roll-up that keeps them current was no longer running from a page view, and the counts could also sit empty on sites whose WordPress cron is backed up. Both paths are restored.
+* Fixed 404 URLs containing `@` (retina images such as `logo@2x.png`) and PHP static-call frames in stack traces being mangled by the redaction that runs before a debug log or automatic report is written.
+* Fixed page suggestions staying poor for months after an interrupted rebuild. A partially built suggestion cache recovered at about 50 entries a day rather than rebuilding; it is now completed at full rebuild speed.
+* Fixed a multisite network where deleting a site part way through the page-suggestion rebuild could leave a later site with an empty suggestion cache that was marked fully built and never rebuilt. The rebuild now tracks the last site it finished instead of counting positions in a list that shifts whenever a site is removed.
+* Fixed transient database failover and connection-state errors, including Galera nodes that are temporarily unavailable and "Commands out of sync," being treated as permanent failures. Affected queries now recover and retry through the shared database path.
+* Fixed an admin table database failure being mistaken for a successful empty result, which could make the table appear empty instead of showing the real error.
+* Fixed the 404 and redirect trend charts reading all zeros on sites whose database server is not set to UTC, which is common on shared hosting. Each database row was matched to a calendar day by comparing two dates produced in different time zones, so on those sites no row ever matched a day and the chart drew a flat line with no error shown. The Search Console date range was built the same way and is fixed too.
+* Fixed the "Post types" and "Categories" settings fields being able to alter the database queries built from them. Values from those two fields were placed into queries without being escaped, so a value containing a quote could change what the query did. Both fields are now escaped, and text carrying invalid characters is repaired before it reaches the database.
+* Fixed automatic redirects being able to save a destination that cannot be reached. The destination was checked as a positive number but stored exactly as entered, so a value such as `-3` was checked against page 3 and then stored as `-3`. Automatic redirects are created with nobody watching, so nothing later would have questioned it.
+* Fixed 404 URLs losing their hit counts and their "View Logs" row action when their log rows had no canonical URL recorded. Those rows were dropped from the hit-count roll-up entirely, with nothing to say so.
+* Fixed the "Hits" columns going stale, or being rebuilt on every check along with a repeating admin notice, on sites whose database server is not set to UTC. The age of the hit-count roll-up was measured by comparing a time the database rendered in its own time zone against a time measured in UTC, so it was wrong by that server's offset, in one direction or the other depending on which side of UTC the server sits.
+
+**Improvements**
+
+* The hit-count roll-up no longer runs at the very end of an admin request, where it added as much as 21 seconds to the page on a 900,000-row test site.
+* On LiteSpeed servers the admin table response is handed back as soon as it is ready, instead of waiting for the rest of the request to finish.
+* Creating, editing or deleting a redirect no longer scans the whole WordPress options table. The plugin was still clearing a results cache it stopped using in 4.3.1, and the pattern it searched for could not use an index, so on a site with a large options table every redirect change read the entire table to delete nothing.
+* When an admin action fails because the server or its gateway rejected the request, the message now names the underlying failure (for example "502 Bad Gateway") instead of a generic "An error occurred", and the full detail is written to the browser console. Saving settings, restoring defaults, switching settings mode and trashing a redirect each had their own copy of this handling, and two of them discarded the failure entirely.
+* Automatic error reports and support previews now include log evidence for the error they describe, even when the error falls outside the most recent log tail. Admin table retries also preserve a diagnostic trail under the plugin's shipped default settings.
+
 ## Version 4.3.2 (July 11, 2026) ##
 * FIX: Fixed the email digest sending every day even when the notification frequency was set to Weekly (thanks to gardendarts for reporting this). The weekly/daily cadence is now enforced against the time the last digest was actually sent, and changing the frequency in Settings now takes effect on the very next save instead of the next unrelated one.
 * FIX: Fixed automatic error and heartbeat reports silently failing to send on some sites when an internal reporting component was unavailable.

@@ -27,10 +27,6 @@ class ABJ_404_Solution_LogsWriteRecoveryPolicy {
         $this->noticeState = $noticeState;
     }
 
-    public function isCommandsOutOfSyncError(string $error): bool {
-        return stripos($error, 'commands out of sync') !== false;
-    }
-
     public function isTableFullError(string $error): bool {
         $lower = strtolower($error);
         return stripos($lower, 'is full') !== false || stripos($lower, 'table full') !== false;
@@ -74,32 +70,6 @@ class ABJ_404_Solution_LogsWriteRecoveryPolicy {
             function_exists('__') ? __('The 404 Solution log table is full. The plugin automatically trimmed the oldest 1,000 log entries to free space, but logging may still be limited. Please contact your hosting provider about disk space.', '404-solution') : 'The 404 Solution log table is full. The plugin automatically trimmed the oldest 1,000 log entries to free space, but logging may still be limited. Please contact your hosting provider about disk space.',
             $errorMessage
         );
-    }
-
-    /**
-     * @return wpdb|null
-     */
-    public function getIsolatedWpdb(): ?wpdb {
-        static $isolated = null;
-        if ($isolated !== null) {
-            return $isolated;
-        }
-        if (!class_exists('wpdb')) {
-            return null;
-        }
-        if (!defined('DB_USER') || !defined('DB_PASSWORD') || !defined('DB_NAME') || !defined('DB_HOST')) {
-            static $warnedNoDbConsts = false;
-            if (!$warnedNoDbConsts) {
-                $warnedNoDbConsts = true;
-                $this->logger->warn(__METHOD__ . ': DB_USER/DB_PASSWORD/DB_NAME/DB_HOST undefined; isolated wpdb unavailable');
-            }
-            return null;
-        }
-        // phpcs:ignore WordPress.DB.RestrictedClasses.mysql__wpdb
-        $isolated = new wpdb(DB_USER, DB_PASSWORD, DB_NAME, DB_HOST);
-        $isolated->show_errors(false);
-        $isolated->suppress_errors(true);
-        return $isolated;
     }
 
     public function getWpdbRecentQueryContextForLogs(): string {

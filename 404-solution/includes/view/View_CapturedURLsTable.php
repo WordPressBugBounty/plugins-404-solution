@@ -46,18 +46,28 @@ class ABJ_404_Solution_View_CapturedURLsTable extends ABJ_404_Solution_ViewCompo
         return $this->pageChromeRenderer;
     }
 
-    public function getCapturedURLSPageTable(string $sub): string {
+    /** @param array<string, mixed> $tableOptionOverrides Internal per-request read options. */
+    public function getCapturedURLSPageTable(string $sub, array $tableOptionOverrides = array()): string {
         $tableOptions = $this->logic->settingsUpdate()->getTableOptions($sub);
+        $tableOptions = array_replace($tableOptions, $tableOptionOverrides);
         $rows = $this->viewReadService->getRedirectsForView($sub, $tableOptions);
         /** @var array<int, array<string, mixed>> $typedRows */
         $typedRows = array_values(array_filter($rows, 'is_array'));
         $this->shared->rememberTableDataSignature($sub, $typedRows);
+        $header = ABJ_404_Solution_TableRenderTranslationTracer::traceScope(
+            'captured_header',
+            'Select all|URL|Status|Hits|Created|Last Used',
+            fn(): array => array(
+                'select_all' => esc_attr__('Select all', '404-solution'),
+                'cells' => $this->buildCapturedHeaderCells($tableOptions),
+            )
+        );
 
         return $this->f->str_replace(
             array('{select_all_label}', '{header_cells}', '{body_rows}'),
             array(
-                esc_attr__('Select all', '404-solution'),
-                $this->buildCapturedHeaderCells($tableOptions),
+                $header['select_all'],
+                $header['cells'],
                 $this->buildCapturedBodyRows($sub, $tableOptions, $typedRows),
             ),
             $this->tpl('viewRedirectsTableCapturedTableShell.html')
@@ -89,21 +99,30 @@ class ABJ_404_Solution_View_CapturedURLsTable extends ABJ_404_Solution_ViewCompo
             // Same i455 bug class as the redirects table: a pending/errored/
             // stale-empty staged read must not be shown as "No records" while
             // the live source count says captured rows exist.
-            $emptyMessage = $this->viewReadService->lastRedirectsViewReadWasIncomplete()
-                ? __('Preparing the captured 404s table. The list is still loading and will appear in a moment.', '404-solution')
-                : __('No Captured 404 Records To Display', '404-solution');
-            return $this->f->str_replace(
-                '{message}',
-                $emptyMessage,
-                $this->tpl('viewRedirectsTableCapturedEmptyRow.html')
-            ) . "\n";
+            return ABJ_404_Solution_TableRenderTranslationTracer::traceScope(
+                'captured_empty_state',
+                'Preparing captured table|No Captured 404 Records To Display',
+                function (): string {
+                    $emptyMessage = $this->viewReadService->lastRedirectsViewReadWasIncomplete()
+                        ? __('Preparing the captured 404s table. The list is still loading and will appear in a moment.', '404-solution')
+                        : __('No Captured 404 Records To Display', '404-solution');
+                    return $this->f->str_replace(
+                        '{message}',
+                        $emptyMessage,
+                        $this->tpl('viewRedirectsTableCapturedEmptyRow.html')
+                    ) . "\n";
+                }
+            );
         }
 
         $sourceEvidenceByUrl = $this->sourceEvidenceByVisibleUrl($rows);
         $bodyRows = '';
+        $progress = ABJ_404_Solution_AjaxRowLoopProgress::begin('captured_rows', count($rows));
         foreach ($rows as $row) {
+            $progress->tick($row);
             $bodyRows .= $this->capturedBodyRow($sub, $tableOptions, $row, $sourceEvidenceByUrl);
         }
+        $progress->finish();
         return $bodyRows;
     }
 

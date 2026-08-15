@@ -26,6 +26,9 @@ if (!defined('ABSPATH')) {
  */
 class ABJ_404_Solution_RedirectsDenormSchemaReadiness {
 
+    /** @var callable(string,array<string,mixed>,callable):mixed|null */
+    private static $operationTracer = null;
+
     /** @var ABJ_404_Solution_DatabaseCore */
     private $dbCore;
 
@@ -34,10 +37,11 @@ class ABJ_404_Solution_RedirectsDenormSchemaReadiness {
      *  derivedColumnsPresent() and destSortKeyColumnPresent(). */
     private $redirectsColumnSetCache = null;
 
-    /** @var array<string,bool>|null Memoized lowercased index-name (Key_name) set
-     *  of the redirects table (one SHOW INDEX per request), consulted by
+    /** @var array<string, array{name: string, columns: array<int, array{column: string, prefix: int|null}>, unique: bool}>|null
+     *  Memoized live index DEFINITIONS of the redirects table, keyed by
+     *  lowercased index name (one SHOW INDEX per request), consulted by
      *  sortKeyReadyForColumn() to confirm the composite indexes backing a narrow
-     *  sort key were actually created before the read orders by it. */
+     *  sort key can actually serve the sort before the read orders by it. */
     private $redirectsIndexSetCache = null;
 
     /**
@@ -48,6 +52,11 @@ class ABJ_404_Solution_RedirectsDenormSchemaReadiness {
      */
     public function __construct(ABJ_404_Solution_DatabaseCore $dbCore) {
         $this->dbCore = $dbCore;
+    }
+
+    /** @param callable(string,array<string,mixed>,callable):mixed|null $tracer */
+    public static function setOperationTracer($tracer): void {
+        self::$operationTracer = $tracer;
     }
 
     /**
@@ -115,11 +124,17 @@ class ABJ_404_Solution_RedirectsDenormSchemaReadiness {
      * @return bool
      */
     public function sortKeyReadyForColumn(string $column): bool {
-        if (!$this->sortKeySchemaAvailableForColumn($column)) {
-            return false;
-        }
-        $latch = ABJ_404_Solution_RedirectsDenormColumnSql::sortKeyBackfillLatchOption($column);
-        return $latch !== '' && function_exists('get_option') && get_option($latch) === '1';
+        return self::trace('readiness_evaluation', array('column' => $column), function () use ($column): bool {
+            if (!$this->sortKeySchemaAvailableForColumn($column)) {
+                return false;
+            }
+            $latch = ABJ_404_Solution_RedirectsDenormColumnSql::sortKeyBackfillLatchOption($column);
+            return $latch !== '' && function_exists('get_option') && self::trace(
+                'latch_option_read',
+                array('column' => $column, 'option' => $latch),
+                static fn(): bool => get_option($latch) === '1'
+            );
+        });
     }
 
     /**
@@ -132,16 +147,27 @@ class ABJ_404_Solution_RedirectsDenormSchemaReadiness {
      * @return bool
      */
     public function sortKeySchemaAvailableForColumn(string $column): bool {
-        if (!isset($this->redirectsColumnSet()[$column])) {
-            return false;
-        }
-        return $this->sortKeyCompositeIndexesPresent($column);
+        return self::trace('schema_readiness', array('column' => $column), function () use ($column): bool {
+            if (!isset($this->redirectsColumnSet()[$column])) {
+                return false;
+            }
+            return $this->sortKeyCompositeIndexesPresent($column);
+        });
     }
 
     /**
-     * Whether every composite index registered for a narrow sort-key column
-     * exists on the redirects table. A column with no registered composites is
-     * treated as never index-ready (the safe default).
+     * Whether every composite index registered for a narrow sort-key column can
+     * actually serve an ORDER BY on that column. A column with no registered
+     * composites is treated as never index-ready (the safe default).
+     *
+     * Each index must exist AND contain the sort column. The name alone is not
+     * evidence: MySQL and MariaDB silently strip a dropped column out of every
+     * index that named it and keep the rest under the same name, so a table
+     * that once ran a build predating url_sort_key carries
+     * idx_status_disabled_url_sort_id defined as (status, disabled, id). Taking
+     * the name as proof told the read path a sort was index-ordered while it
+     * filesorted the whole captured partition -- the exact failure this gate
+     * exists to prevent.
      *
      * @param string $column url_sort_key | dest_sort_key.
      * @return bool
@@ -153,7 +179,9 @@ class ABJ_404_Solution_RedirectsDenormSchemaReadiness {
         }
         $present = $this->redirectsIndexSet();
         foreach ($required as $indexName) {
-            if (!isset($present[strtolower($indexName)])) {
+            $definition = $present[strtolower($indexName)] ?? null;
+            if (!is_array($definition)
+                    || !ABJ_404_Solution_TableIndexDefinitions::containsColumn($definition, $column)) {
                 return false;
             }
         }
@@ -161,37 +189,25 @@ class ABJ_404_Solution_RedirectsDenormSchemaReadiness {
     }
 
     /**
-     * The lowercased index-name (Key_name) set of wp_abj404_redirects, fetched
-     * once per request via a single SHOW INDEX. Same per-request memoization and
-     * schema-drift tolerance as redirectsColumnSet(): an empty/failed probe yields
-     * an empty set, so every index-presence check degrades to false (the safe
-     * fallback). Runs only when the admin redirects view is rendered -- not on the
-     * frontend 404 hot path.
+     * The live index definitions of wp_abj404_redirects, keyed by lowercased
+     * index name, fetched once per request via a single SHOW INDEX. Same
+     * per-request memoization and schema-drift tolerance as redirectsColumnSet():
+     * an unreadable probe yields an empty set, so every index check degrades to
+     * false (the safe fallback). Runs only when the admin redirects view is
+     * rendered -- not on the frontend 404 hot path.
      *
-     * @return array<string,bool>
+     * @return array<string, array{name: string, columns: array<int, array{column: string, prefix: int|null}>, unique: bool}>
      */
     private function redirectsIndexSet(): array {
         if ($this->redirectsIndexSetCache !== null) {
             return $this->redirectsIndexSetCache;
         }
-        $table = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
-        $result = $this->dbCore->queryAndGetResults("SHOW INDEX FROM " . $table,
-            array('log_errors' => false));
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
-        $set = array();
-        foreach ($rows as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-            foreach ($row as $key => $value) {
-                if (strtolower((string)$key) === 'key_name' && is_scalar($value)) {
-                    $set[strtolower((string)$value)] = true;
-                    break;
-                }
-            }
-        }
-        $this->redirectsIndexSetCache = $set;
-        return $set;
+        $definitions = self::trace('index_schema_probe', array(), function () {
+            $table = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
+            return (new ABJ_404_Solution_TableIndexDefinitions($this->dbCore))->readLive($table);
+        });
+        $this->redirectsIndexSetCache = is_array($definitions) ? $definitions : array();
+        return $this->redirectsIndexSetCache;
     }
 
     /**
@@ -207,9 +223,11 @@ class ABJ_404_Solution_RedirectsDenormSchemaReadiness {
         if ($this->redirectsColumnSetCache !== null) {
             return $this->redirectsColumnSetCache;
         }
-        $table = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
-        $result = $this->dbCore->queryAndGetResults("SHOW COLUMNS FROM " . $table,
-            array('log_errors' => false));
+        $result = self::trace('column_schema_probe', array(), function (): array {
+            $table = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
+            return $this->dbCore->queryAndGetResults("SHOW COLUMNS FROM " . $table,
+                array('log_errors' => false));
+        });
         $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
         $set = array();
         foreach ($rows as $row) {
@@ -225,5 +243,18 @@ class ABJ_404_Solution_RedirectsDenormSchemaReadiness {
         }
         $this->redirectsColumnSetCache = $set;
         return $set;
+    }
+
+    /**
+     * @template T
+     * @param array<string,mixed> $fields
+     * @param callable():T $work
+     * @return T
+     */
+    private static function trace(string $operation, array $fields, callable $work) {
+        if (self::$operationTracer === null) {
+            return $work();
+        }
+        return (self::$operationTracer)($operation, $fields, $work);
     }
 }

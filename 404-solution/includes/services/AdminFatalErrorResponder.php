@@ -16,6 +16,13 @@ class ABJ_404_Solution_AdminFatalErrorResponder {
      */
     private static $adminFatalPageRendered = false;
 
+    /** @var int Output-buffer level inherited when this responder took control. */
+    private $entryOutputBufferLevel;
+
+    public function __construct() {
+        $this->entryOutputBufferLevel = ABJ_404_Solution_OutputBufferDrain::currentLevel();
+    }
+
     /**
      * Detect whether the current request is the plugin admin page.
      *
@@ -125,9 +132,12 @@ class ABJ_404_Solution_AdminFatalErrorResponder {
             return;
         }
 
-        while (ob_get_level() > 0) {
+        // Bounded and ownership-scoped: discard only output created after this
+        // responder took control. WordPress, PHP, and other-plugin buffers
+        // below the captured entry level are inherited and must survive.
+        ABJ_404_Solution_OutputBufferDrain::drainTo($this->entryOutputBufferLevel, static function () {
             @ob_end_clean();
-        }
+        });
     }
 
     /** @return void */

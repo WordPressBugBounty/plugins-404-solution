@@ -66,8 +66,8 @@ class ABJ_404_Solution_EditRedirectHandler {
         }
 
         $f = $this->parent->getFunctions();
-        $id = $f->getPostOrGetSanitize('id');
-        $ids = $f->getPostOrGetSanitize('ids_multiple');
+        $id = ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('id');
+        $ids = ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('ids_multiple');
         if ($id === '' && $ids === '') {
             return $message;
         }
@@ -107,14 +107,40 @@ class ABJ_404_Solution_EditRedirectHandler {
         $target = $this->resolveUpdateTarget();
         $message = $target['message'];
         $logger = $this->parent->getLogger();
+        if ($message !== '') {
+            return $message;
+        }
 
-        $typeAndDest = $this->resolver->getRedirectTypeAndDest();
+        $statusTypeForValidation = ABJ404_STATUS_MANUAL;
+        if (isset($_POST['is_regex_url']) && $_POST['is_regex_url'] != '0') {
+            $statusTypeForValidation = ABJ404_STATUS_REGEX;
+        }
+        $sourceResolution = array(
+            'statusType' => $statusTypeForValidation,
+            'url' => $target['fromURL'],
+            'autoPromoted' => false,
+            'urlRewritten' => false,
+        );
+        $originalFromURL = $target['fromURL'];
+        if ($target['fromURL'] !== '') {
+            $sourceResolution = $this->resolver->resolveSource(
+                $statusTypeForValidation,
+                $target['fromURL']
+            );
+            $statusTypeForValidation = $sourceResolution['statusType'];
+            $target['fromURL'] = $sourceResolution['url'];
+        }
+
+        $typeAndDest = $this->resolver->getRedirectTypeAndDest(array(
+            'isRegex' => $statusTypeForValidation === ABJ404_STATUS_REGEX,
+            'sourcePattern' => $target['fromURL'],
+        ));
         $typeAndDestMessage = is_string($typeAndDest['message']) ? $typeAndDest['message'] : '';
         if ($typeAndDestMessage != "") {
             return $typeAndDestMessage;
         }
 
-        $context = $this->buildUpdateContext($typeAndDest);
+        $context = $this->buildUpdateContext($typeAndDest, $statusTypeForValidation);
         if (!$this->contextHasDestination($context)) {
             $message .= __('Error: Data not formatted properly.', '404-solution') . "<BR/>";
             $logger->errorMessage("Update redirect data issue. Type: " . esc_html((string)$context['tdType']) .
@@ -123,7 +149,12 @@ class ABJ_404_Solution_EditRedirectHandler {
         }
 
         if ($target['fromURL'] != "") {
-            return $message . $this->updateSingleRedirect($target['fromURL'], $context);
+            return $message . $this->updateSingleRedirect(
+                $target['fromURL'],
+                $context,
+                $sourceResolution,
+                $originalFromURL
+            );
         }
 
         if (!empty($target['ids_multiple'])) {
@@ -142,7 +173,6 @@ class ABJ_404_Solution_EditRedirectHandler {
         $message = "";
         $fromURL = "";
         $idsMultiple = array();
-        $f = $this->parent->getFunctions();
 
         if (
             (!array_key_exists('url', $_POST) || $_POST['url'] == "") &&
@@ -157,10 +187,6 @@ class ABJ_404_Solution_EditRedirectHandler {
             $message .= __('Error: URL is a required field.', '404-solution') . "<BR/>";
         }
 
-        if ($fromURL != "" && $f->substr(isset($_POST['url']) && is_string($_POST['url']) ? $_POST['url'] : '', 0, 1) != "/") {
-            $message .= __('Error: URL must start with /', '404-solution') . "<BR/>";
-        }
-
         return array('fromURL' => $fromURL, 'ids_multiple' => $idsMultiple, 'message' => $message);
     }
 
@@ -168,15 +194,11 @@ class ABJ_404_Solution_EditRedirectHandler {
      * @param array<string, mixed> $typeAndDest
      * @return array{tdTypeRaw: string, tdType: int, tdDest: string, code: string, statusType: int, startTs: int|null, endTs: int|null}
      */
-    private function buildUpdateContext(array $typeAndDest): array {
+    private function buildUpdateContext(array $typeAndDest, int $statusType): array {
         $tdTypeRaw = is_scalar($typeAndDest['type']) ? (string)$typeAndDest['type'] : '';
         $tdType = ($tdTypeRaw !== '') ? (int)$tdTypeRaw : -1;
         $tdDest = is_scalar($typeAndDest['dest']) ? (string)$typeAndDest['dest'] : '';
         $code = isset($_POST['code']) && is_string($_POST['code']) ? $_POST['code'] : '';
-        $statusType = ABJ404_STATUS_MANUAL;
-        if (isset($_POST['is_regex_url']) && $_POST['is_regex_url'] != '0') {
-            $statusType = ABJ404_STATUS_REGEX;
-        }
 
         $startDateRaw = isset($_POST['redirect_start_date']) && is_string($_POST['redirect_start_date']) ? trim($_POST['redirect_start_date']) : '';
         $endDateRaw = isset($_POST['redirect_end_date']) && is_string($_POST['redirect_end_date']) ? trim($_POST['redirect_end_date']) : '';
@@ -204,21 +226,23 @@ class ABJ_404_Solution_EditRedirectHandler {
 
     /**
      * @param array{tdTypeRaw: string, tdType: int, tdDest: string, code: string, statusType: int, startTs: int|null, endTs: int|null} $context
+     * @param array{statusType: int, url: string, autoPromoted: bool, urlRewritten: bool} $sourceResolution
      */
-    private function updateSingleRedirect(string $fromURL, array $context): string {
+    private function updateSingleRedirect(
+        string $fromURL,
+        array $context,
+        array $sourceResolution,
+        string $originalFromURL
+    ): string {
         $redirectsRepo = $this->parent->getRedirectsRepo();
         $id = isset($_POST['id']) && is_scalar($_POST['id']) ? (int)$_POST['id'] : 0;
-        $originalFromURL = $fromURL;
-        $autoPromote = $this->resolver->maybeAutoPromoteRegex($context['statusType'], $fromURL);
-        $statusType = $autoPromote['statusType'];
-        $fromURL = $autoPromote['url'];
         $updateError = $redirectsRepo->updateRedirect(ABJ_404_Solution_RedirectUpdate::fromArray(array(
             'id' => $id,
             'type' => $context['tdType'],
             'fromUrl' => (string)$fromURL,
             'destination' => $context['tdDest'],
             'code' => $context['code'],
-            'statusType' => (string)$statusType,
+            'statusType' => (string)$context['statusType'],
             'startTs' => $context['startTs'],
             'endTs' => $context['endTs'],
         )));
@@ -226,8 +250,13 @@ class ABJ_404_Solution_EditRedirectHandler {
         if ($errorCode !== '') {
             return $this->formatUpdateRedirectError($errorCode) . "<BR/>";
         }
-        if ($autoPromote['autoPromoted']) {
-            $this->resolver->saveRegexAutoPromoteNotice($id, $originalFromURL, $fromURL, $autoPromote['urlRewritten']);
+        if ($sourceResolution['autoPromoted']) {
+            $this->resolver->saveRegexAutoPromoteNotice(
+                $id,
+                $originalFromURL,
+                $fromURL,
+                $sourceResolution['urlRewritten']
+            );
         }
 
         if ($id > 0) {
@@ -296,30 +325,29 @@ class ABJ_404_Solution_EditRedirectHandler {
      * @return array{source_page: string, redirect_url: string}
      */
     private function buildPostEditRedirect(): array {
-        $f = $this->parent->getFunctions();
         $valid_tabs = array('abj404_redirects', 'abj404_captured', 'abj404_logs',
                           'abj404_stats', 'abj404_tools', 'abj404_options');
-        $source_page = $f->getPostOrGetSanitize('source_page');
+        $source_page = ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('source_page');
         if ($source_page === '' || !in_array($source_page, $valid_tabs)) {
             $source_page = 'abj404_redirects';
         }
 
         $redirect_url = "?page=" . ABJ404_PP . "&subpage=" . $source_page . "&updated=1";
 
-        $source_filter = $f->getPostOrGetSanitize('source_filter', '');
+        $source_filter = ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('source_filter', '');
         if ($source_filter !== '' && $source_filter !== '0') {
             $redirect_url .= "&filter=" . urlencode($source_filter);
         }
 
-        $source_orderby = $f->getPostOrGetSanitize('source_orderby', '');
-        $source_order = $f->getPostOrGetSanitize('source_order', '');
+        $source_orderby = ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('source_orderby', '');
+        $source_order = ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('source_order', '');
         if ($source_orderby !== '' && $source_order !== ''
                 && !($source_orderby === "url" && $source_order === "ASC")) {
             $redirect_url .= "&orderby=" . urlencode($source_orderby);
             $redirect_url .= "&order=" . urlencode($source_order);
         }
 
-        $source_paged = $f->getPostOrGetSanitize('source_paged', '');
+        $source_paged = ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('source_paged', '');
         if ($source_paged !== '' && (int)$source_paged > 1) {
             $redirect_url .= "&paged=" . urlencode($source_paged);
         }

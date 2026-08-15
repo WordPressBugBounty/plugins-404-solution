@@ -3,6 +3,10 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/DatabaseInfrastructureErrorTaxonomy.php';
+require_once __DIR__ . '/DatabaseErrorTableInspector.php';
+require_once __DIR__ . '/DatabasePrefixDiagnostics.php';
+
 /**
  * Coordinates database error response: applies notice and runtime-flag side
  * effects on top of focused error-classification collaborators.
@@ -155,7 +159,7 @@ class ABJ_404_Solution_DatabaseErrorClassifier {
             return;
         }
         if ($this->taxonomy->schema()->isCollationError($errorText)) {
-            $this->logger->debugMessage("Collation mismatch detected (auto-recovery will run): " . $errorText);
+            $this->logger->debugMessage("Collation mismatch detected (background repair will be scheduled): " . $errorText);
         }
     }
 

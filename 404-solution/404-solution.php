@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 	Author:      Aaron J
 	Author URI:  https://www.ajexperience.com/404-solution/
 
-	Version: 4.3.2
+	Version: 4.3.3
 	Requires at least: 5.0
 	Requires PHP: 7.4
 
@@ -46,6 +46,48 @@ if (!defined('ABJ404_FILE')) {
 if (!defined('ABJ404_PATH')) {
 	define('ABJ404_PATH', plugin_dir_path(ABJ404_FILE));
 }
+// Content-addressed release marker compiled into the earliest boot file.
+// DiagnosticModuleManifestTest recomputes it from every covered PHP module.
+if (!defined('ABJ404_DIAGNOSTIC_BUILD_ID')) {
+define('ABJ404_DIAGNOSTIC_BUILD_ID', '55bf53685624aeb5204c697bdf2994dcd83e65e1');
+}
+
+// The plugin version is read from this file's own header (single source of
+// truth) and is defined HERE rather than in Loader.php because the
+// post-upgrade opcache guard below needs it before any other plugin file
+// loads. Loader.php keeps its own guarded define for loaders that reach it
+// without going through this entry point; it becomes a no-op in normal boots.
+// get_file_data() reads from disk, so the version is correct even when this
+// entry point is itself being served from stale bytecode.
+if (!defined('ABJ404_VERSION') && function_exists('get_file_data')) {
+	$__abj404_header = get_file_data(ABJ404_FILE, array('Version' => 'Version'));
+	define('ABJ404_VERSION', isset($__abj404_header['Version']) ? $__abj404_header['Version'] : '');
+	unset($__abj404_header);
+}
+
+// POST-UPGRADE OPCACHE GUARD -- must stay the FIRST plugin file required, ahead
+// of every other require and ahead of spl_autoload_register() below.
+//
+// PHP revalidates cached bytecode per file on its own schedule, so for a few
+// seconds after an update the class graph can be MIXED: a file at a path that
+// is new in this release compiles fresh from disk while a file whose path did
+// not change is still the previous release's bytecode. When a parent and its
+// subclass land on opposite sides of that split and a signature changed, PHP
+// raises an uncatchable E_ERROR while LINKING them -- which is exactly what
+// killed requests on a real 4.2.0 -> 4.3.1 upgrade (see the file header of
+// includes/root-boot/OpcacheUpgradeGuard.php for the incident detail).
+//
+// Because the fatal happens at class-linking time, the flush is only useful if
+// it runs before the autoloader can link anything. Anything later (the old
+// PluginLogicVersionUpgrader::invalidateOpcacheForCriticalFiles(), which ran
+// inside the booted plugin) is structurally incapable of saving the request
+// that dies. The call is gated on a persisted version stamp -- the
+// `abj404_opcache_version` option, which doubles as the support-visible record
+// of when this last ran -- so the work happens once per upgrade, not once per
+// request. There is no logger this early in the boot, by construction.
+require_once __DIR__ . '/includes/root-boot/OpcacheUpgradeGuard.php';
+abj404_opcache_refresh_after_upgrade();
+
 require_once __DIR__ . '/includes/core/PhpErrorLogFallback.php';
 	if (!defined('ABJ404_SHORTCODE_NAME')) {
 		define('ABJ404_SHORTCODE_NAME', 'abj404_solution_page_suggestions');
@@ -84,6 +126,68 @@ if (has_filter('abj404_debug_whitelist')) {
 // includes/data/autoloader-trait-dependencies.php.
 require_once __DIR__ . '/includes/root-boot/Autoloader.php';
 spl_autoload_register('abj404_autoloader');
+
+// Boot lifecycle waypoint checkpoints (Bruno timeout cause matrix, gap G3):
+// boot_delta_ms used to be the ONLY boot measurement, and it was written at
+// trace construction -- AFTER auth and the rate limiter -- so a slow boot and
+// a slow auth/DB path were indistinguishable. These checkpoints localize a
+// slow boot to a phase instead of a total. Gated to our own table-AJAX and
+// canary-ladder requests only (see
+// ABJ_404_Solution_AjaxRequestLedger::bootWaypointRequestId()); the frontend
+// 404 path is hot and must never pay this write cost.
+//
+// 'muplugins_loaded' is not separately hooked here: WordPress fires that
+// action (wp-settings.php, do_action('muplugins_loaded')) BEFORE a regular
+// (non-mu) plugin's file is even require()'d, so a normal plugin can never
+// observe it firing -- registering a callback for it here would silently
+// never run. This waypoint, the earliest point our own code can reach the
+// checkpoint logger, is therefore the honest measurement of that entire
+// pre-active-plugin window: mu-plugins, every listener on muplugins_loaded,
+// and any plugin that loads ahead of us in the active-plugins list.
+ABJ_404_Solution_BootWaypointRecorder::record('boot_plugin_entry', array(
+	'module' => '404-solution',
+	'path' => __FILE__,
+	'build_id' => ABJ404_DIAGNOSTIC_BUILD_ID,
+));
+add_action('plugins_loaded', static function () {
+	ABJ_404_Solution_BootWaypointRecorder::record('plugins_loaded', array(
+		'module' => '404-solution',
+		'path' => __FILE__,
+		'build_id' => ABJ404_DIAGNOSTIC_BUILD_ID,
+	));
+	// Same-site concurrency census (Bruno timeout cause matrix, gap GC).
+	// Registered here rather than at the plugin file's first line because it
+	// needs the service container, which Loader.php builds further down this
+	// file; 'plugins_loaded' is the earliest hook that is guaranteed to run
+	// after that for EVERY request, including the wp-cron loopbacks and the
+	// other plugins' admin-ajax polls whose contention is the thing being
+	// counted. The census itself decides which requests are in scope (see
+	// ABJ_404_Solution_SameSiteRequestCensus::channelForThisRequest); the hot
+	// front-end 404 path is not one of them.
+	//
+	// class_exists() first (Defensive Coding #1): the safe autoloader returns
+	// SILENTLY for a missing class file, so an install with a corrupt or
+	// partially-updated plugin directory would turn this diagnostic into a
+	// fatal on every admin request. A missing diagnostic is the correct
+	// degradation; a broken admin screen is not.
+	if (class_exists('ABJ_404_Solution_SameSiteRequestCensus')) {
+		ABJ_404_Solution_SameSiteRequestCensus::join();
+	}
+}, PHP_INT_MIN);
+add_action('init', static function () {
+	ABJ_404_Solution_BootWaypointRecorder::record('init', array(
+		'module' => '404-solution',
+		'path' => __FILE__,
+		'build_id' => ABJ404_DIAGNOSTIC_BUILD_ID,
+	));
+}, PHP_INT_MIN);
+add_action('admin_init', static function () {
+	ABJ_404_Solution_BootWaypointRecorder::record('admin_init', array(
+		'module' => '404-solution',
+		'path' => __FILE__,
+		'build_id' => ABJ404_DIAGNOSTIC_BUILD_ID,
+	));
+}, PHP_INT_MIN);
 
 // Root-boot procedural functions. Each file only DEFINES functions (the
 // add_action/add_filter/add_shortcode registrations stay below in this file).
@@ -290,6 +394,8 @@ abj404_benchmark_mark_bootstrap_done();
 // the deactivate round-trip tests can discover the hook names in one place.
 add_action('abj404_cleanupCronAction', 'abj404_dailyMaintenanceCronJobListener');
 add_action('abj404_updateLogsHitsTableAction', 'abj404_updateLogsHitsTableListener');
+add_action('abj404_refresh_status_counts', 'abj404_refreshStatusCountsListener', 10, 1);
+add_action('abj404_repair_collations', 'abj404_repairCollationsListener');
 add_action('abj404_logsv2_canonical_backfill', 'abj404_logsv2CanonicalUrlBackfillListener');
 add_action('abj404_redirects_denorm_backfill', 'abj404_redirectsDenormBackfillListener');
 add_action('abj404_redirects_sort_key_backfill', 'abj404_redirectsSortKeyBackfillListener');

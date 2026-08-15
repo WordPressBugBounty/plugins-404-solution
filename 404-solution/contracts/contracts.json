@@ -9,7 +9,7 @@
       "producer": {
         "file": "includes/FeedbackTransport.php",
         "test": [
-          "tests/FeedbackTransportPayloadTest.php",
+          "tests/FeedbackTransportSupportPayloadTest.php",
           "tests/FeedbackPayloadSchemaContractTest.php"
         ]
       },
@@ -498,11 +498,11 @@
     },
     {
       "id": "ajax-admin-endpoint-support-helper",
-      "description": "Shared admin AJAX response envelope emitted by Ajax_AdminEndpointSupport for every admin endpoint",
+      "description": "Shared admin AJAX response envelope emitted by AjaxAdminEndpointSupport for every admin endpoint",
       "schema": "schemas/ajax-admin-endpoint-support-helper.schema.json",
       "direction": "server-to-client",
       "consumer": {
-        "file": "includes/ajax/Ajax_AdminEndpointSupport.php",
+        "file": "includes/ajax/AjaxAdminEndpointSupport.php",
         "test": "tests/ViewQueryFailureDiagnosticsTest.php"
       },
       "parityTest": "tests/AjaxRuntimeContractValidationTest.php",
@@ -535,6 +535,29 @@
         ],
         "invalid": [
           "fixtures/ajax-update-pagination.invalid-missing-subpage.json"
+        ]
+      }
+    },
+    {
+      "id": "ajax-client-report-beacon",
+      "description": "Report-only telemetry beacon branch of ajaxUpdatePaginationLinks: same action, same nonce and same request schema as the table request, but the server journals the client's report and answers immediately instead of doing table work.",
+      "schema": "schemas/ajax-update-pagination.schema.json",
+      "direction": "client-to-server",
+      "producer": {
+        "file": "includes/ajax/view_updater_transport_telemetry_delivery.js",
+        "test": "tests-js/transport-telemetry-attempt-record.test.js"
+      },
+      "consumer": {
+        "file": "includes/ajax/AjaxClientReportBeaconResponder.php",
+        "test": "tests/ClientTransportBeaconTest.php"
+      },
+      "parityTest": "tests/ClientTransportBeaconTest.php",
+      "fixtures": {
+        "valid": [
+          "fixtures/ajax-client-report-beacon.valid.json"
+        ],
+        "invalid": [
+          "fixtures/ajax-client-report-beacon.invalid-bad-reported-attempt-id.json"
         ]
       }
     },
@@ -715,6 +738,30 @@
         ],
         "invalid": [
           "fixtures/ajax-view-logs.invalid-missing-nonce.json"
+        ]
+      }
+    },
+    {
+      "id": "ajax-run-canary-step-handler",
+      "description": "Adaptive canary ladder AJAX step (Bruno timeout cause matrix, coverage req. 7): isolates browser/network, boot/auth, the rate limiter, query cost, response size, compression, and output buffering as candidate causes for a failed admin table request.",
+      "schema": "schemas/ajax-run-canary-step.schema.json",
+      "direction": "client-to-server",
+      "producer": {
+        "file": "includes/ajax/view_updater_canary_ladder.js",
+        "test": "tests-js/canary-ladder-runner.test.js"
+      },
+      "consumer": {
+        "file": "includes/ajax/Ajax_CanaryLadder.php",
+        "test": "tests/AjaxCanaryPayloadAndReceiptTest.php"
+      },
+      "parityTest": "tests/AjaxCanaryPayloadAndReceiptTest.php",
+      "fixtures": {
+        "valid": [
+          "fixtures/ajax-run-canary-step.valid.json",
+          "fixtures/ajax-run-canary-step.valid-with-step-receipts.json"
+        ],
+        "invalid": [
+          "fixtures/ajax-run-canary-step.invalid-missing-nonce.json"
         ]
       }
     }

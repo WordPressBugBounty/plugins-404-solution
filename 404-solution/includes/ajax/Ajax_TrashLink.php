@@ -17,8 +17,10 @@ class ABJ_404_Solution_Ajax_TrashLink {
         }
 
         $container = ABJ_404_Solution_ServiceContainer::getInstance();
-        /** @var ABJ_404_Solution_Functions $functions */
-        $functions = $container->has('functions') ? $container->get('functions') : abj_service('functions');
+        /** @var ABJ_404_Solution_RequestInputNormalizer $requestReader */
+        $requestReader = $container->has('request_input_normalizer')
+            ? $container->get('request_input_normalizer')
+            : abj_service('request_input_normalizer');
         /** @var ABJ_404_Solution_RedirectsRepositoryInterface $redirectsRepository */
         $redirectsRepository = abj_service('redirects_repository');
         /** @var ABJ_404_Solution_ViewReadServiceInterface $viewReadService */
@@ -33,21 +35,25 @@ class ABJ_404_Solution_Ajax_TrashLink {
 
         abj_service('ajax_security_gate')->requireAdminWithNonce('abj404_ajaxTrash', '_wpnonce');
         
-        $idToTrash = $functions->getPostOrGetSanitize('id');
-        $trashAction = $functions->getPostOrGetSanitize('trash');
-        $subpage = $functions->getPostOrGetSanitize('subpage');
+        $idToTrash = $requestReader->getPostOrGetSanitize('id');
+        $trashAction = $requestReader->getPostOrGetSanitize('trash');
+        $subpage = $requestReader->getPostOrGetSanitize('subpage');
         
         $data = array();
         $data['resultset'] = $redirectsRepository->moveRedirectsToTrash((int)$idToTrash, (int)$trashAction);
 
-        // Return fresh tab counts so the JS can update the tab badges.
-        // Bypass cache since the trash action just changed the counts.
+        // Return cached tab counts when available. A cache miss schedules the
+        // aggregate refresh out of band; it must never block this mutation.
         if ($subpage === 'abj404_captured') {
-            $counts = $viewReadService->getCapturedStatusCounts(true);
+            $counts = $viewReadService->getCapturedStatusCounts(false);
         } else {
-            $counts = $viewReadService->getRedirectStatusCounts(true);
+            $counts = $viewReadService->getRedirectStatusCounts(false);
         }
-        $data['tabCounts'] = array_values($counts);
+        if (!empty($counts['_incomplete'])) {
+            $data['countsIncomplete'] = true;
+        } else {
+            $data['tabCounts'] = array_values($counts);
+        }
 
         if (empty($data['resultset'])) {
             $data['result'] = "success";

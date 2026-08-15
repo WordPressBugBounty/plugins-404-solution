@@ -54,6 +54,11 @@ return (function (): array {
     // unioned in below.
     $base = [
         // Plugin and request metadata
+        'payload_schema_version' => [
+            'type' => 'int',
+            'enum' => [2],
+            'description' => 'Additive feedback wire-contract version. Version 2 adds the optional plugin_settings diagnostic snapshot.',
+        ],
         'plugin_version'  => ['type' => 'string', 'description' => 'ABJ404_VERSION at send time. Empty string is allowed only in early-boot test contexts.'],
         'report_type'     => ['type' => 'string', 'enum' => ['error', 'heartbeat', 'uninstall', 'support_request']],
         'is_uninstall'    => ['type' => 'bool', 'description' => 'Back-compat alias for report_type=uninstall. True iff report_type=uninstall.'],
@@ -121,6 +126,11 @@ return (function (): array {
         'redirects_automatic_count' => ['type' => 'int|null'],
         'redirects_regex_count'     => ['type' => 'int|null'],
         'redirects_trashed_count'   => ['type' => 'int|null'],
+        'redirects_status_counts_state' => [
+            'type' => 'string',
+            'enum' => ['fresh', 'stale', 'uncomputed', 'unavailable', 'redacted'],
+            'description' => 'Why the five redirects_* tallies above hold what they hold. The tallies are served from a cache that a background job fills, so NULL/0 alone cannot distinguish "this site has no redirects" from "no count has ever been computed here" (uncomputed) or "the read service could not be reached" (unavailable). `stale` means the counts came from the last-known cache while a refresh is pending.',
+        ],
         'redirect_hit_count_histogram' => [
             'type' => 'object|null',
             'key_type' => 'string',
@@ -134,6 +144,11 @@ return (function (): array {
         'captured_404s_ignored_count' => ['type' => 'int|null'],
         'captured_404s_later_count'   => ['type' => 'int|null'],
         'captured_404s_trashed_count' => ['type' => 'int|null'],
+        'captured_404s_status_counts_state' => [
+            'type' => 'string',
+            'enum' => ['fresh', 'stale', 'uncomputed', 'unavailable', 'redacted'],
+            'description' => 'Same discriminator as redirects_status_counts_state, for the five captured_404s_* tallies above.',
+        ],
 
         // Log + debug file health.
         'log_entries_count'     => ['type' => 'int|null'],
@@ -167,6 +182,13 @@ return (function (): array {
             // passthrough, mixed scalar/object/array values allowed.
             'description' => 'Best-effort site diagnostics: MySQL globals + status counters + session probe, disk free/total, PHP SAPI / opcache (on/off + detail settings), plugin table sizes (with data_free fragmentation), view-build freshness state, active connection count, per-index cardinality, hosting + panel class, object-cache backend, DB charset/collate + per-column collation, WP+PHP timezone, plugin install/upgrade lifecycle, top recurring error signatures, opcache revalidate/validate/cli detail, open_basedir restriction, multisite role + network-activation, .htaccess writability, /tmp filesystem free bytes. Anything new diagnosed for a recurring-user failure goes here first, then optionally graduates to a typed column.',
         ],
+
+        'plugin_settings' => [
+            'type' => 'object',
+            'key_type' => 'string',
+            'required' => false,
+            'description' => 'Deny-by-default snapshot of allowlisted behavioral settings. Credentials, emails, free text, and paths are never included.',
+        ],
     ];
 
     $errorExtras = [
@@ -174,7 +196,13 @@ return (function (): array {
         'previously_sent_line' => ['type' => 'int'],
         'debug_log'            => [
             'type' => 'string',
-            'description' => 'Sanitized plugin debug-log tail emitted by FeedbackTransport::debugLogPayload() for opted-in error diagnostics. Server contract accepts this field as debug_log. Not sent for heartbeat: a heartbeat has no error to diagnose, and recent_error_signatures already covers the no-error case in normalized, aggregate form.',
+            'description' => 'Sanitized recent debug-log tail for opted-in error diagnostics. It remains a tail under evidence schema v1; when the named error is older, debug_log_evidence carries a separate non-overlapping anchor and both fields share 262144 bytes.',
+        ],
+        'debug_log_evidence'   => [
+            'type' => 'object',
+            'key_type' => 'string',
+            'required' => false,
+            'description' => 'Additive versioned metadata and anchored excerpt for the error named by this report. schema_version=1 preserves debug_log as a tail and allocates one shared 262144-byte budget across the tail and non-overlapping error_excerpt.',
         ],
     ];
 
@@ -219,7 +247,7 @@ return (function (): array {
             ],
             'description' => 'Which admin surface launched the request. Pinned enum; mirror of Ajax_SupportRequest::ALLOWED_TRIGGER_SOURCES.',
         ],
-        'debug_log_excerpt' => ['type' => 'string', 'description' => 'Best-effort log tail via Ajax_SupportRequest::resolveDebugLogExcerpt(). Empty string when the log file is missing or the Logging service is unavailable.'],
+        'debug_log_excerpt' => ['type' => 'string', 'description' => 'Best-effort sanitized debug-log tail, plus bounded PII-safe AJAX stage-trace JSONL AND AJAX request-checkpoint JSONL AND the detach A/B verdict AND receipt-reconstructed canary interpretation for the sending session, all assembled by SupportEvidenceExcerpt::assemble(), plus the browser transport-attempt buffer drained by SupportRequest.js (timings, byte counts, readyState, protocol; no URL, user text, or identifiers). Empty string when no source is available.'],
     ];
 
     return [

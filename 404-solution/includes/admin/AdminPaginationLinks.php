@@ -28,18 +28,27 @@ class ABJ_404_Solution_AdminPaginationLinks {
         $this->viewReadService = $viewReadService;
     }
 
-    public function render(string $sub): string {
-        $state = $this->paginationState($sub);
-        return $this->renderTemplate($sub, $state);
+    /** @param array<string, mixed> $tableOptionOverrides Internal per-request read options. */
+    public function render(string $sub, array $tableOptionOverrides = array()): string {
+        return ABJ_404_Solution_TableRenderTranslationTracer::traceScope(
+            'pagination',
+            'state|sanitize|Loading|item(s)|page count|navigation|URL|nonce|refresh available',
+            function () use ($sub, $tableOptionOverrides): string {
+                $state = $this->paginationState($sub, $tableOptionOverrides);
+                return $this->renderTemplate($sub, $state);
+            }
+        );
     }
 
     /**
+     * @param array<string, mixed> $tableOptionOverrides Internal per-request read options.
      * @return array{tableOptions: array<string, mixed>, logsid: string, orderby: string, order: string,
      *     filter: string, paged: int, perpage: int, totalPages: int, numRecords: int, filterText: string,
      *     urls: array{first: string, previous: string, next: string, last: string}}
      */
-    private function paginationState(string $sub): array {
+    private function paginationState(string $sub, array $tableOptionOverrides = array()): array {
         $tableOptions = $this->logic->settingsUpdate()->getTableOptions($sub);
+        $tableOptions = array_replace($tableOptions, $tableOptionOverrides);
         $logsid = array_key_exists('logsid', $tableOptions) && is_scalar($tableOptions['logsid']) ? $tableOptions['logsid'] : 0;
         $orderby = array_key_exists('orderby', $tableOptions) && is_string($tableOptions['orderby']) ? $tableOptions['orderby'] : 'url';
         $order = array_key_exists('order', $tableOptions) && is_string($tableOptions['order']) ? $tableOptions['order'] : 'ASC';
@@ -61,10 +70,7 @@ class ABJ_404_Solution_AdminPaginationLinks {
             $paged = 1;
         }
 
-        $totalPages = (int)ceil($numRecords / $perpage);
-        if ($totalPages == 0) {
-            $totalPages = 1;
-        }
+        $totalPages = max(1, (int)ceil(max(0, $numRecords) / $perpage));
 
         $urls = $this->navigationUrls($url, $paged, $totalPages);
         $filterText = array_key_exists('filterText', $tableOptions) && is_string($tableOptions['filterText']) ? $tableOptions['filterText'] : '';
@@ -158,17 +164,23 @@ class ABJ_404_Solution_AdminPaginationLinks {
         // "{N} items" outer count and "{X} of {Y}" inline indicator. The
         // earlier "1 - 25 of 487 redirects" / "Page 25 of 487" wording made
         // the strip too wide to fit on the same tablenav row as bulk actions.
-        $currentlyShowingText = sprintf(
-            /* translators: %s is the total record count, already number-formatted for the current locale */
-            _n('%s item', '%s items', $numRecords, '404-solution'),
-            number_format_i18n($numRecords)
-        );
-        $currentPageText = sprintf(
-            /* translators: %1$d is current page number, %2$d is total page count */
-            esc_html__('%1$d of %2$d', '404-solution'),
-            $paged,
-            $totalPages
-        );
+        $currentlyShowingText = $numRecords < 0
+            ? '<span aria-hidden="true">-</span><span class="screen-reader-text">'
+                . esc_html__('Loading...', '404-solution') . '</span>'
+            : sprintf(
+                /* translators: %s is the total record count, already number-formatted for the current locale */
+                _n('%s item', '%s items', $numRecords, '404-solution'),
+                number_format_i18n($numRecords)
+            );
+        $currentPageText = $numRecords < 0
+            ? '<span aria-hidden="true">-</span><span class="screen-reader-text">'
+                . esc_html__('Loading...', '404-solution') . '</span>'
+            : sprintf(
+                /* translators: %1$d is current page number, %2$d is total page count */
+                esc_html__('%1$d of %2$d', '404-solution'),
+                $paged,
+                $totalPages
+            );
 
         $html = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . '/../html/paginationLinks.html');
         $html = $this->f->str_replace('{TEXT_BEFORE_LINKS}', $currentlyShowingText, $html);

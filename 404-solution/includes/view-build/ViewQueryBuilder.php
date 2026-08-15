@@ -34,12 +34,17 @@ class ABJ_404_Solution_ViewQueryBuilder {
     public function buildHighImpactCapturedCountQuery(): string {
         // Plain equality gives the optimizer an indexable requested_url probe;
         // the BINARY predicate keeps exact-match URL semantics.
+        $logsHitsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_logs_hits}');
+        $canonicalRedirectUrl = "COALESCE(r.canonical_url, CONCAT('/', TRIM(BOTH '/' FROM r.url)))";
+        $comparableRedirectUrl = $this->dbCore->collationHelper()->coerceExpressionToColumnCollation(
+            $canonicalRedirectUrl,
+            array('table' => $logsHitsTable, 'column' => 'requested_url')
+        );
         // allow-unbounded-select: COUNT(*) aggregate; returns a single row
         $query = "SELECT COUNT(*) AS cnt
             FROM {wp_abj404_redirects} r
             INNER JOIN {wp_abj404_logs_hits} h
-                ON h.requested_url =
-                   COALESCE(r.canonical_url, CONCAT('/', TRIM(BOTH '/' FROM r.url)))
+                ON h.requested_url = " . $comparableRedirectUrl . "
                AND BINARY h.requested_url = BINARY
                    COALESCE(r.canonical_url, CONCAT('/', TRIM(BOTH '/' FROM r.url)))
             WHERE r.status = " . ABJ404_STATUS_CAPTURED . " AND r.disabled = 0
@@ -105,10 +110,19 @@ class ABJ_404_Solution_ViewQueryBuilder {
      *   redirects table (schema-drift tolerance: false selects base columns only
      *   and the live resolver fills the derived values).
      * @return array<int, array<string, mixed>>
+     * @throws ABJ_404_Solution_ViewQueryFailureException When the database adapter reports a failed read.
      */
     public function readRedirectsSingleTable(string $sub, array $tableOptions, bool $derivedPresent = true): array {
         $query = $this->buildRedirectsSingleTableReadQuery($sub, $tableOptions, $derivedPresent);
         $result = $this->dbCore->queryAndGetResults($query, $this->resolveReadTimeoutOptions($tableOptions));
+        $lastErrorRaw = $result['last_error'] ?? '';
+        $lastError = is_scalar($lastErrorRaw) ? trim((string)$lastErrorRaw) : '';
+        if (!empty($result['timed_out']) || $lastError !== '') {
+            $message = !empty($result['timed_out'])
+                ? 'Redirect row query timed out.'
+                : 'Redirect row query failed: ' . $lastError;
+            throw new ABJ_404_Solution_ViewQueryFailureException($message);
+        }
         $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
         /** @var array<int, array<string, mixed>> $rows */
         return $rows;
@@ -137,16 +151,32 @@ class ABJ_404_Solution_ViewQueryBuilder {
      * @param array<string, mixed> $tableOptions
      * @param bool $derivedPresent
      * @return int
+     * @throws ABJ_404_Solution_ViewQueryFailureException When the aggregate is unavailable or malformed.
      */
     public function countRedirectsSingleTable(string $sub, array $tableOptions, bool $derivedPresent = true): int {
         $query = $this->buildRedirectsSingleTableCountQuery($sub, $tableOptions, $derivedPresent);
         $result = $this->dbCore->queryAndGetResults($query, $this->resolveReadTimeoutOptions($tableOptions));
+        $lastErrorRaw = $result['last_error'] ?? '';
+        $lastError = is_scalar($lastErrorRaw) ? trim((string)$lastErrorRaw) : '';
+        if (!empty($result['timed_out']) || $lastError !== '') {
+            $message = !empty($result['timed_out'])
+                ? 'Filtered redirect count query timed out.'
+                : 'Filtered redirect count query failed: ' . $lastError;
+            throw new ABJ_404_Solution_ViewQueryFailureException($message);
+        }
         $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
         if (empty($rows) || !is_array($rows[0])) {
-            return 0;
+            throw new ABJ_404_Solution_ViewQueryFailureException(
+                'Filtered redirect count query returned no aggregate row.'
+            );
         }
         $raw = $rows[0]['cnt'] ?? reset($rows[0]);
-        return is_scalar($raw) ? intval($raw) : 0;
+        if (!is_numeric($raw)) {
+            throw new ABJ_404_Solution_ViewQueryFailureException(
+                'Filtered redirect count query returned a nonnumeric aggregate.'
+            );
+        }
+        return intval($raw);
     }
 
     /**

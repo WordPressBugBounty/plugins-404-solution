@@ -105,43 +105,83 @@ class ABJ_404_Solution_DatabaseQueryTimeoutManager {
      * @param int $timeoutSeconds Maximum execution time in seconds
      * @return string The query with timeout applied (or unchanged if no mechanism)
      */
-    public function applyQueryTimeout(string $query, int $timeoutSeconds): string {
+    public function applyQueryTimeout(
+        string $query,
+        int $timeoutSeconds,
+        ?ABJ_404_Solution_DatabaseQueryPreflightTracer $preflight = null
+    ): string {
         // Skip if a timeout hint is already present (prevents double-wrapping).
         if (preg_match('/MAX_EXECUTION_TIME|max_statement_time/i', $query)) {
             return $query;
         }
 
         if ($this->queryStartsWithSelect($query)) {
-            return $this->applySelectTimeout($query, $timeoutSeconds);
+            return $this->applySelectTimeout($query, $timeoutSeconds, $preflight);
         }
         if (preg_match('/SELECT\s/i', $query)) {
             // INSERT...SELECT, CREATE TABLE...SELECT, etc.
-            return $this->applyNonLeadingSelectTimeout($query, $timeoutSeconds);
+            return $this->applyNonLeadingSelectTimeout($query, $timeoutSeconds, $preflight);
         }
         // Plain INSERT, UPDATE, DELETE, DDL: only MariaDB has a timeout mechanism.
-        return $this->applyStatementTimeout($query, $timeoutSeconds);
+        return $this->applyStatementTimeout($query, $timeoutSeconds, $preflight);
     }
 
     /**
      * Detect the DB engine. Returns true for MariaDB, false for MySQL/unknown.
      * @return bool
      */
-    public function isMariaDB(): bool {
+    public function isMariaDB(
+        ?ABJ_404_Solution_DatabaseQueryPreflightTracer $preflight = null
+    ): bool {
         global $wpdb;
         if (!isset($wpdb) || !is_object($wpdb)) {
             return false;
         }
-        try {
-            if (isset($wpdb->dbh) && function_exists('mysqli_get_server_info') && $wpdb->dbh instanceof \mysqli) {
+        $source = isset($wpdb->dbh)
+            && function_exists('mysqli_get_server_info')
+            && $wpdb->dbh instanceof \mysqli
+                ? 'mysqli_server_info'
+                : 'wpdb_db_version';
+        $detect = static function () use ($wpdb): bool {
+            if (isset($wpdb->dbh) && function_exists('mysqli_get_server_info')
+                    && $wpdb->dbh instanceof \mysqli) {
                 $dbVersion = mysqli_get_server_info($wpdb->dbh);
             } else {
                 /** @var wpdb $wpdb */
                 $dbVersion = $wpdb->db_version() ?? '';
             }
-        } catch (\Throwable $e) { // allow-silent-catch: test doubles / early-boot wpdb may lack db_version(); defaulting to MySQL (no MariaDB timeout syntax) is safe
-            $dbVersion = '';
+            return stripos((string)$dbVersion, 'mariadb') !== false;
+        };
+        try {
+            if ($preflight === null) {
+                return $detect();
+            }
+            return $preflight->trace(
+                ABJ_404_Solution_DatabaseQueryPreflightTracer::ENGINE_DETECTION,
+                $detect,
+                array(
+                    'fields' => array('engine_source' => $source),
+                    'result_fields' => static fn(bool $isMariaDb): array => array(
+                        'engine' => $isMariaDb ? 'mariadb' : 'mysql_or_unknown',
+                    ),
+                )
+            );
+        } catch (\Throwable $e) {
+            // Falling back to "not MariaDB" is safe (it only forgoes MariaDB's
+            // timeout syntax), and on a test double or an early-boot wpdb
+            // without db_version() it is also expected. But safe is not the
+            // same as uninteresting: if this starts throwing at runtime, the
+            // statement-timeout path quietly turns itself off on every query
+            // for the rest of the request, and a silent catch here is the
+            // reason nobody would ever find out. Record it and degrade.
+            $this->logger->debugMessage(
+                'DB engine detection failed; assuming not-MariaDB and skipping the MariaDB '
+                . 'statement-timeout syntax. Source: ' . $source . '. '
+                . get_class($e) . ' (code ' . (string)$e->getCode() . '): ' . $e->getMessage(),
+                $e
+            );
+            return false;
         }
-        return stripos($dbVersion, 'mariadb') !== false;
     }
 
     /**
@@ -154,8 +194,13 @@ class ABJ_404_Solution_DatabaseQueryTimeoutManager {
      * @param int $timeoutSeconds Maximum execution time in seconds
      * @return string The query with timeout hint applied
      */
-    public function applySelectTimeout(string $query, int $timeoutSeconds): string {
-        if ($this->isMariaDB() && !ABJ_404_Solution_DatabaseRuntimeState::isSetStatementWrapperUnsupported()) {
+    public function applySelectTimeout(
+        string $query,
+        int $timeoutSeconds,
+        ?ABJ_404_Solution_DatabaseQueryPreflightTracer $preflight = null
+    ): string {
+        if ($this->isMariaDB($preflight)
+                && !$this->isSetStatementWrapperUnsupported($preflight)) {
             return "SET STATEMENT max_statement_time=" . $timeoutSeconds . " FOR " . $query;
         }
         // MySQL hint also works for the MariaDB-with-disabled-wrapper case:
@@ -180,8 +225,13 @@ class ABJ_404_Solution_DatabaseQueryTimeoutManager {
      * @param int $timeoutSeconds Maximum execution time in seconds
      * @return string The query with timeout applied
      */
-    public function applyNonLeadingSelectTimeout(string $query, int $timeoutSeconds): string {
-        if ($this->isMariaDB() && !ABJ_404_Solution_DatabaseRuntimeState::isSetStatementWrapperUnsupported()) {
+    public function applyNonLeadingSelectTimeout(
+        string $query,
+        int $timeoutSeconds,
+        ?ABJ_404_Solution_DatabaseQueryPreflightTracer $preflight = null
+    ): string {
+        if ($this->isMariaDB($preflight)
+                && !$this->isSetStatementWrapperUnsupported($preflight)) {
             return "SET STATEMENT max_statement_time=" . $timeoutSeconds . " FOR " . $query;
         }
         $timeoutMs = $timeoutSeconds * 1000;
@@ -204,8 +254,13 @@ class ABJ_404_Solution_DatabaseQueryTimeoutManager {
      * @param int $timeoutSeconds Maximum execution time in seconds
      * @return string The query with timeout applied (unchanged on MySQL)
      */
-    public function applyStatementTimeout(string $query, int $timeoutSeconds): string {
-        if ($this->isMariaDB() && !ABJ_404_Solution_DatabaseRuntimeState::isSetStatementWrapperUnsupported()) {
+    public function applyStatementTimeout(
+        string $query,
+        int $timeoutSeconds,
+        ?ABJ_404_Solution_DatabaseQueryPreflightTracer $preflight = null
+    ): string {
+        if ($this->isMariaDB($preflight)
+                && !$this->isSetStatementWrapperUnsupported($preflight)) {
             return "SET STATEMENT max_statement_time=" . $timeoutSeconds . " FOR " . $query;
         }
         // MySQL has no timeout mechanism for non-SELECT queries. MariaDB hosts
@@ -214,6 +269,41 @@ class ABJ_404_Solution_DatabaseQueryTimeoutManager {
         // staged build's per-tick budget enforcement degrades to the cron
         // tick's own wall-clock deadline rather than per-statement.
         return $query;
+    }
+
+    /**
+     * Read the request-local/persisted wrapper capability under its own
+     * preflight boundary. The result descriptor exposes only hit/miss state.
+     */
+    private function isSetStatementWrapperUnsupported(
+        ?ABJ_404_Solution_DatabaseQueryPreflightTracer $preflight
+    ): bool {
+        if ($preflight === null) {
+            return ABJ_404_Solution_DatabaseRuntimeState::isSetStatementWrapperUnsupported();
+        }
+        $source = ABJ_404_Solution_DatabaseRuntimeState::setStatementWrapperCapabilitySource();
+        return $preflight->trace(
+            ABJ_404_Solution_DatabaseQueryPreflightTracer::TIMEOUT_CAPABILITY_CACHE,
+            static fn(): bool =>
+                ABJ_404_Solution_DatabaseRuntimeState::isSetStatementWrapperUnsupported(),
+            array(
+                'fields' => array('cache_source' => $source),
+                'result_fields' => static function (bool $unsupported) use ($source): array {
+                    if ($source === 'transient') {
+                        return array(
+                            'cache_outcome' => $unsupported
+                                ? 'hit_unsupported'
+                                : 'miss_supported',
+                        );
+                    }
+                    return array(
+                        'cache_outcome' => $unsupported
+                            ? 'request_local_unsupported'
+                            : 'request_local_supported',
+                    );
+                },
+            )
+        );
     }
 
     /**
@@ -252,12 +342,13 @@ class ABJ_404_Solution_DatabaseQueryTimeoutManager {
     /**
      * Re-execute a query without the `SET STATEMENT max_statement_time=N FOR `
      * wrapper after the server rejected the wrapper itself (privilege denied
-     * or syntax not understood). Caches the result in
-     * ABJ_404_Solution_DatabaseCore::$setStatementWrapperUnsupported so every
-     * subsequent timeout-wrapped query in this request skips the wrapper too.
+     * or syntax not understood). Caches the result in request-local state and
+     * a short-lived WordPress transient so subsequent queries and fresh PHP
+     * requests skip the known-unsupported wrapper until the capability is
+     * probed again.
      *
-     * Result harvest mirrors the other recovery paths
-     * (recoverFromCollationMismatchAndRetry, attemptMissingTableRepairAndRetry):
+     * Result harvest mirrors retrying recovery paths such as
+     * attemptMissingTableRepairAndRetry():
      * write into $result by reference so the caller's downstream branches see
      * the retry's outcome instead of the original error.
      *
@@ -269,49 +360,83 @@ class ABJ_404_Solution_DatabaseQueryTimeoutManager {
      * @param string $query        Passed by reference. Mutated to the unwrapped form.
      * @param array<string, mixed> $result Passed by reference; updated with retry rows / error.
      * @param 'OBJECT'|'OBJECT_K'|'ARRAY_A'|'ARRAY_N' $resultType wpdb output type for get_results().
+     * @param ABJ_404_Solution_DatabaseQueryRecoveryTracer|null $tracer
      * @return void
      */
     public function retryWithoutSetStatementWrapper(
         string &$query,
         array &$result,
-        string $resultType
+        string $resultType,
+        ?ABJ_404_Solution_DatabaseQueryRecoveryTracer $tracer = null
     ): void {
         if (!$this->queryHasSetStatementWrapper($query)) {
             // Defensive: nothing to strip. Caller misclassified the error.
             return;
         }
         $unwrapped = $this->stripSetStatementWrapper($query);
-        // Cache the negative result for the rest of the request so we don't
-        // wrap-then-fail on every subsequent query. Reset between requests.
+        // Cache the negative result locally and across requests so the host
+        // does not repeatedly pay for the same known-failing capability probe.
         ABJ_404_Solution_DatabaseRuntimeState::setSetStatementWrapperUnsupported(true);
-        $this->logger->infoMessage(
+        if (class_exists('ABJ_404_Solution_AjaxStageDiagnostics')) {
+            ABJ_404_Solution_AjaxStageDiagnostics::addStageMetadata(array(
+                'db_timeout_mode' => 'unwrapped',
+            ));
+        }
+        $this->logger->warn(
             'SET STATEMENT timeout wrapper rejected by server; '
-            . 'retrying query without wrapper and caching unsupported flag '
-            . 'for the rest of this request.'
+            . 'retrying query without a DB-level timeout and caching the '
+            . 'unsupported capability for one hour.'
         );
 
         global $wpdb;
         /** @var wpdb $wpdb */
-        $wpdb->flush();
+        $retryError = isset($result['last_error']) && is_scalar($result['last_error'])
+            ? (string)$result['last_error']
+            : '';
+        if ($tracer === null) {
+            if (!$this->core->connectionManager()->resetForRetry($retryError)) {
+                return;
+            }
+        } else {
+            $reset = $tracer->traceOperation(
+                'timeout_wrapper',
+                'connection_retry_reset',
+                fn(): bool => $this->core->connectionManager()->resetForRetry($retryError)
+            );
+            if (!$reset) {
+                return;
+            }
+        }
         // Mutate $query so downstream retry paths execute the unwrapped form.
         $query = $unwrapped;
         // Re-route classification past any leading comments and the (now-absent)
         // wrapper. Using queryProducesResultRows on the unwrapped query keeps
         // the routing correct for INSERT/UPDATE/DELETE/DDL.
         // SET STATEMENT wrapper-rejection recovery is a DAO-internal primitive
-        // (parallel to recoverFromCollationMismatchAndRetry). It must call
+        // (parallel to attemptMissingTableRepairAndRetry). It must call
         // $wpdb directly: re-routing through queryAndGetResults() would
         // re-enter the same SET STATEMENT detection path, deepening the call
         // stack on every retry. Per-bypass approval markers are inline below.
         $unwrappedProducesRows = $this->queryProducesResultRows($unwrapped);
-        if ($unwrappedProducesRows) {
-            // DAO-bypass-approved: SET STATEMENT wrapper-rejection retry primitive.
-            $result['rows'] = $wpdb->get_results($unwrapped, $resultType);
-        } else {
-            // DAO-bypass-approved: SET STATEMENT wrapper-rejection retry primitive.
-            $wpdb->query($unwrapped);
-            $result['rows'] = array();
-        }
-        $this->core->resultHarvester()->harvestWpdbResult($result);
+        $retry = function () use ($wpdb, $unwrapped, $resultType, $unwrappedProducesRows): array {
+            if ($unwrappedProducesRows) {
+                // DAO-bypass-approved: SET STATEMENT wrapper-rejection retry primitive.
+                $retried = array('rows' => $wpdb->get_results($unwrapped, $resultType));
+            } else {
+                // DAO-bypass-approved: SET STATEMENT wrapper-rejection retry primitive.
+                $wpdb->query($unwrapped);
+                $retried = array('rows' => array());
+            }
+            $this->core->resultHarvester()->harvestWpdbResult($retried);
+            return $retried;
+        };
+        $retried = $tracer === null
+            ? $retry()
+            : $tracer->traceAttempt(
+                'timeout_wrapper',
+                'timeout_wrapper_rejected',
+                $retry
+            );
+        $result = array_merge($result, $retried);
     }
 }

@@ -5,8 +5,10 @@ if (!defined('ABSPATH')) {
 }
 
 require_once __DIR__ . '/FeedbackDatabaseIdentity.php';
+require_once __DIR__ . '/DebugLogEvidenceBudget.php';
 require_once __DIR__ . '/FeedbackDiagnosticsCollector.php';
 require_once __DIR__ . '/FeedbackEnvironmentExtras.php';
+require_once __DIR__ . '/FeedbackPluginSettingsSnapshot.php';
 require_once __DIR__ . '/FeedbackPayloadSchemaGuard.php';
 require_once __DIR__ . '/FeedbackReportUuid.php';
 require_once __DIR__ . '/FeedbackRuntimeEnvironment.php';
@@ -21,6 +23,9 @@ require_once __DIR__ . '/FeedbackWordPressInventory.php';
  * schema validation.
  */
 class ABJ_404_Solution_FeedbackPayloadBuilder {
+
+    /** Current additive feedback payload contract version. */
+    public const PAYLOAD_SCHEMA_VERSION = 2;
 
     /**
      * Build a payload from current site state. $extra carries type-specific
@@ -38,6 +43,7 @@ class ABJ_404_Solution_FeedbackPayloadBuilder {
         $inventory = new ABJ_404_Solution_FeedbackWordPressInventory();
 
         $payload = array(
+            'payload_schema_version' => self::PAYLOAD_SCHEMA_VERSION,
             'plugin_version' => defined('ABJ404_VERSION') ? ABJ404_VERSION : '',
             'db_type' => $databaseIdentity['type'],
             'db_version' => $databaseIdentity['version'],
@@ -63,6 +69,10 @@ class ABJ_404_Solution_FeedbackPayloadBuilder {
 
         $payload += (new ABJ_404_Solution_FeedbackDiagnosticsCollector())->collect($type);
         $payload['environment_extras'] = (new ABJ_404_Solution_FeedbackEnvironmentExtras())->collect();
+        $settingsSnapshot = (new ABJ_404_Solution_FeedbackPluginSettingsSnapshot())->collect();
+        if ($settingsSnapshot !== array()) {
+            $payload['plugin_settings'] = $settingsSnapshot;
+        }
 
         if ($environment->isDevelopmentEnvironment()) {
             $payload['environment_type'] = 'development';
@@ -70,6 +80,10 @@ class ABJ_404_Solution_FeedbackPayloadBuilder {
 
         foreach ($extra as $k => $v) {
             $payload[(string)$k] = $v;
+        }
+
+        if ($type === 'error') {
+            $payload = ABJ_404_Solution_DebugLogEvidenceBudget::normalizePayload($payload);
         }
 
         $payload = ABJ_404_Solution_FeedbackPayloadSchemaGuard::normalize($payload);
@@ -89,6 +103,7 @@ class ABJ_404_Solution_FeedbackPayloadBuilder {
      */
     public static function buildMinimal(string $type, array $extra = array()): array {
         $payload = array(
+            'payload_schema_version' => self::PAYLOAD_SCHEMA_VERSION,
             'plugin_version' => defined('ABJ404_VERSION') ? ABJ404_VERSION : '',
             'report_type'    => $type,
             'is_uninstall'   => ($type === 'uninstall'),
@@ -121,6 +136,7 @@ class ABJ_404_Solution_FeedbackPayloadBuilder {
             'redirects_automatic_count'    => null,
             'redirects_regex_count'        => null,
             'redirects_trashed_count'      => null,
+            'redirects_status_counts_state' => ABJ_404_Solution_FeedbackDiagnosticsCollector::STATUS_COUNTS_STATE_REDACTED,
             'redirect_hit_count_histogram' => null,
 
             'captured_404s_active_total'  => null,
@@ -128,6 +144,7 @@ class ABJ_404_Solution_FeedbackPayloadBuilder {
             'captured_404s_ignored_count' => null,
             'captured_404s_later_count'   => null,
             'captured_404s_trashed_count' => null,
+            'captured_404s_status_counts_state' => ABJ_404_Solution_FeedbackDiagnosticsCollector::STATUS_COUNTS_STATE_REDACTED,
 
             'log_entries_count'     => null,
             'log_table_size_bytes'  => null,

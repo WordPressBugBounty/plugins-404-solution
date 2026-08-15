@@ -190,11 +190,10 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 
 	/**
 	 * @param bool $updatingToNewVersion
-	 * @param bool $force
 	 * @return void
 	 */
-	public function createDatabaseTables($updatingToNewVersion = false, bool $force = false) {
-		$this->components()->bootstrapUpgrade()->createDatabaseTables($updatingToNewVersion, $force);
+	public function createDatabaseTables($updatingToNewVersion = false) {
+		$this->components()->bootstrapUpgrade()->createDatabaseTables($updatingToNewVersion);
 	}
 
 	/** @return void */
@@ -205,6 +204,15 @@ class ABJ_404_Solution_DatabaseUpgradesEtc {
 	/** @return void */
 	public function runSelfHealPrologue() {
 		$this->components()->selfHealUpgrade()->runSelfHealPrologue();
+	}
+
+	/**
+	 * Bounded, never-throwing missing-table repair for a user-facing request.
+	 *
+	 * @return void
+	 */
+	public function repairMissingTablesForRequest() {
+		$this->components()->selfHealUpgrade()->repairMissingTablesForRequest();
 	}
 
 	/** @return void */

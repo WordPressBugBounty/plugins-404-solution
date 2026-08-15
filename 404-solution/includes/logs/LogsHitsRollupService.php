@@ -182,26 +182,88 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
         $rawRefreshedFlag = $this->noticeState->getRuntimeFlag(self::HITS_TABLE_LAST_REFRESHED_FLAG);
         $runtimeRefreshedAt = is_scalar($rawRefreshedFlag) ? (int)$rawRefreshedFlag : 0;
         $runtimeRefreshedAt = $runtimeRefreshedAt > 0 ? $runtimeRefreshedAt : null;
-        $query = "SELECT create_time FROM information_schema.tables WHERE table_name = '{wp_abj404_logs_hits}' AND table_schema = DATABASE()";
+        $schemaTimestamp = $this->readSchemaFreshnessEpoch();
+        if ($schemaTimestamp === null) { return $runtimeRefreshedAt; }
+        if ($runtimeRefreshedAt !== null && $runtimeRefreshedAt > $schemaTimestamp) { return $runtimeRefreshedAt; }
+        return $schemaTimestamp;
+    }
+
+    /**
+     * The rollup table's own creation instant, as a true UTC epoch, read from
+     * information_schema.
+     *
+     * The server is asked for UNIX_TIMESTAMP(create_time) rather than
+     * create_time itself, because create_time is DISPLAYED in the MySQL session
+     * timezone: one instant reads as "2026-08-13 21:52:51" at +00:00 and
+     * "2026-08-14 06:52:51" at +09:00. Only the epoch form is timezone-invariant,
+     * and it is the form the caller needs, since it compares this against
+     * abj_clock()->now(), a true UTC epoch.
+     *
+     * @return int|null Epoch seconds, or null when the server has no usable
+     *                  answer (no such table, or the read was refused and the
+     *                  fallback could not date it either).
+     */
+    private function readSchemaFreshnessEpoch(): ?int {
+        $query = "SELECT UNIX_TIMESTAMP(create_time) AS create_time_epoch FROM information_schema.tables WHERE table_name = '{wp_abj404_logs_hits}' AND table_schema = DATABASE()";
         $query = $this->dbCore->doTableNameReplacements($query);
         $results = $this->dbCore->queryAndGetResults($query);
         if ($results['rows'] == null || empty($results['rows'])) {
-            if (!empty($results['last_error'])) {
-                $statusRow = $this->getLogsHitsTableStatusRow();
-                $dateValue = is_array($statusRow) ? ($statusRow['update_time'] ?? ($statusRow['create_time'] ?? '')) : '';
-                if ($dateValue !== '') { $fallbackTimestamp = strtotime(is_string($dateValue) ? $dateValue : ''); if ($fallbackTimestamp !== false) { if ($runtimeRefreshedAt !== null && $runtimeRefreshedAt > $fallbackTimestamp) { return $runtimeRefreshedAt; } return $fallbackTimestamp; } }
-            }
-            return $runtimeRefreshedAt;
+            // Rows AND an error means the read was refused (restricted grants
+            // on managed hosts), which is the only case worth a second attempt.
+            return empty($results['last_error']) ? null : $this->readStatusFallbackFreshnessEpoch();
         }
         $hitsRows = is_array($results['rows']) ? $results['rows'] : array();
-        $row = is_array($hitsRows[0] ?? null) ? $hitsRows[0] : array();
-        $row = array_change_key_case($row);
-        $createTime = $row['create_time'] ?? null;
-        if ($createTime === null) { return $runtimeRefreshedAt; }
-        $schemaTimestamp = strtotime(is_string($createTime) ? $createTime : '');
-        if ($schemaTimestamp === false) { return $runtimeRefreshedAt; }
-        if ($runtimeRefreshedAt !== null && $runtimeRefreshedAt > $schemaTimestamp) { return $runtimeRefreshedAt; }
-        return $schemaTimestamp;
+        $row = is_array($hitsRows[0] ?? null) ? array_change_key_case($hitsRows[0]) : array();
+        $createTimeEpoch = $row['create_time_epoch'] ?? null;
+        if (!is_numeric($createTimeEpoch)) { return null; }
+        $schemaTimestamp = (int)$createTimeEpoch;
+        return $schemaTimestamp > 0 ? $schemaTimestamp : null;
+    }
+
+    /**
+     * The same instant read through SHOW TABLE STATUS, for hosts that refuse
+     * information_schema. Prefers Update_time, which InnoDB leaves NULL until
+     * the table is written, and falls back to Create_time.
+     *
+     * @return int|null Epoch seconds, or null when the row carries no usable date.
+     */
+    private function readStatusFallbackFreshnessEpoch(): ?int {
+        $statusRow = $this->getLogsHitsTableStatusRow();
+        $dateValue = is_array($statusRow) ? ($statusRow['update_time'] ?? ($statusRow['create_time'] ?? '')) : '';
+        if (!is_string($dateValue) || $dateValue === '') { return null; }
+        return $this->mysqlDatetimeToEpoch($dateValue);
+    }
+
+    /**
+     * Convert a datetime string the database server just rendered back into a
+     * true UTC epoch, using that same server's session timezone.
+     *
+     * SHOW TABLE STATUS cannot be wrapped in an expression the way
+     * information_schema's create_time can, so its Create_time / Update_time
+     * arrive here as a string already rendered in the MySQL session timezone
+     * (normally SYSTEM, i.e. the DB host's OS timezone). Handing that string to
+     * PHP's strtotime() would re-read it in PHP's default timezone, which
+     * WordPress pins to UTC -- two systems rendering and parsing the same
+     * instant under different implicit timezones, which puts the rollup age out
+     * by the server's whole UTC offset. Asking the server to convert its own
+     * rendering keeps interpretation on the side that produced it, so the two
+     * cannot disagree.
+     *
+     * @param string $mysqlDatetime A datetime as rendered by the server.
+     * @return int|null Epoch seconds, or null when the server cannot convert it
+     *                  (unparseable, zero date, or a failed conversion query).
+     */
+    private function mysqlDatetimeToEpoch(string $mysqlDatetime): ?int {
+        $results = $this->dbCore->queryAndGetResults(
+            "SELECT UNIX_TIMESTAMP(%s) AS `epoch`",
+            array('query_params' => array($mysqlDatetime), 'log_errors' => false)
+        );
+        $rows = isset($results['rows']) && is_array($results['rows']) ? $results['rows'] : array();
+        $row = is_array($rows[0] ?? null) ? array_change_key_case($rows[0]) : array();
+        $epoch = $row['epoch'] ?? null;
+        if (!is_numeric($epoch)) { return null; }
+        $epoch = (int)$epoch;
+        return $epoch > 0 ? $epoch : null;
     }
 
     /** @return array<string, mixed> */
@@ -213,7 +275,17 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
         if ($query === null) { return array(); }
         $results = $this->dbCore->queryAndGetResults($query, array('log_errors' => false));
         if (!is_array($results['rows']) || empty($results['rows']) || !is_array($results['rows'][0])) { return array(); }
-        return array_change_key_case($results['rows'][0], CASE_LOWER);
+        // Lower-cased explicitly rather than through array_change_key_case(),
+        // which is typed as preserving the input's (here unknown) key type and
+        // so cannot satisfy this method's declared string-keyed contract.
+        // MySQL and MariaDB disagree on the case of SHOW TABLE STATUS column
+        // names, which is the whole reason the keys are normalized at all
+        // (defensive philosophy #5, case-insensitive metadata access).
+        $row = array();
+        foreach ($results['rows'][0] as $column => $value) {
+            $row[strtolower((string)$column)] = $value;
+        }
+        return $row;
     }
 
     // =========================================================================
@@ -321,19 +393,18 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
             if ($lastScheduled > 0 && (abj_clock()->now() - $lastScheduled) < self::HITS_TABLE_SCHEDULE_COOLDOWN_SECONDS) { $this->logger->debugMessage(__FUNCTION__ . " skipping scheduling due to cooldown."); return; }
             self::$hitsTableRebuildScheduled = true;
             $this->noticeState->setRuntimeFlag(self::HITS_TABLE_LAST_SCHEDULED_FLAG, abj_clock()->now(), 86400);
-            if ($this->shouldScheduleHitsTableRebuildViaCron()) { $this->logger->debugMessage(__FUNCTION__ . " scheduling hits table rebuild via WP-Cron."); abj_cron_scheduler()->scheduleSingle(ABJ_404_Solution_CronScheduler::HOOK_UPDATE_LOGS_HITS_TABLE, 5); return; }
-            $this->logger->debugMessage(__FUNCTION__ . " scheduling hits table rebuild for shutdown hook.");
-            add_action('shutdown', function(): void { $this->createRedirectsForViewHitsTable(); });
+            // A full rollup rebuild is background work in every request
+            // context. PHP/LSAPI servers may send response headers early but
+            // buffer the body until WordPress shutdown callbacks finish, so a
+            // shutdown rebuild can keep the admin page blank for the entire
+            // database operation. The cron listener is the single execution
+            // boundary for this expensive pipeline.
+            $this->logger->debugMessage(__FUNCTION__ . " scheduling hits table rebuild via WP-Cron.");
+            abj_cron_scheduler()->scheduleSingle(
+                ABJ_404_Solution_CronScheduler::HOOK_UPDATE_LOGS_HITS_TABLE,
+                5
+            );
         }
-    }
-
-    /** @return bool */
-    private function shouldScheduleHitsTableRebuildViaCron(): bool {
-        if (function_exists('wp_doing_ajax') && wp_doing_ajax()) { return true; }
-        $scriptName = isset($_SERVER['SCRIPT_NAME']) && is_string($_SERVER['SCRIPT_NAME']) ? $_SERVER['SCRIPT_NAME'] : '';
-        if ($scriptName !== '' && basename($scriptName) === 'admin-ajax.php') { return true; }
-        $pagenow = isset($GLOBALS['pagenow']) && is_string($GLOBALS['pagenow']) ? $GLOBALS['pagenow'] : '';
-        return $pagenow === 'admin-ajax.php';
     }
 
     private function getHitsTableRebuildLockOptionName(): string { return $this->dbCore->tableNameResolver()->getLowercasePrefix() . 'abj404_logs_hits_rebuild_lock'; }

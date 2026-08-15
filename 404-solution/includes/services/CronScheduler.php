@@ -24,6 +24,8 @@ class ABJ_404_Solution_CronScheduler {
     const HOOK_REDIRECTS_DENORM_BACKFILL = 'abj404_redirects_denorm_backfill';
     const HOOK_REDIRECTS_SORT_KEY_BACKFILL = 'abj404_redirects_sort_key_backfill';
     const HOOK_SEND_QUEUED_REPORT = 'abj404_send_queued_report';
+    const HOOK_REFRESH_STATUS_COUNTS = 'abj404_refresh_status_counts';
+    const HOOK_REPAIR_COLLATIONS = 'abj404_repair_collations';
     const HOOK_NETWORK_ACTIVATION = 'abj404_network_activation_hook';
     const HOOK_NETWORK_ACTIVATION_BACKGROUND = 'abj404_network_activation_background';
     const HOOK_NETWORK_UPGRADE_BACKGROUND = 'abj404_network_upgrade_background';
@@ -34,6 +36,9 @@ class ABJ_404_Solution_CronScheduler {
     // sites upgrading from a build that scheduled it may still carry the event;
     // deactivation must defensively clear it (matches deleteBlogData + Uninstaller).
     const HOOK_REBUILD_VIEW_DONE_LEGACY = 'abj404_rebuildViewDone';
+
+    /** @var callable(string,array<string,mixed>,callable):mixed|null */
+    private static $statusCountOperationTracer = null;
 
     /** @var ABJ_404_Solution_Clock */
     private $clock;
@@ -53,6 +58,11 @@ class ABJ_404_Solution_CronScheduler {
         $this->logger = $logger;
     }
 
+    /** @param callable(string,array<string,mixed>,callable):mixed|null $tracer */
+    public static function setStatusCountOperationTracer($tracer): void {
+        self::$statusCountOperationTracer = $tracer;
+    }
+
     /** @return int */
     public function now(): int {
         return $this->clock->now();
@@ -69,10 +79,18 @@ class ABJ_404_Solution_CronScheduler {
      * @return int|false
      */
     public function nextScheduled(string $hook, array $args = array()) {
-        if (!function_exists('wp_next_scheduled')) {
-            return false;
-        }
-        return empty($args) ? wp_next_scheduled($hook) : wp_next_scheduled($hook, $this->listArgs($args));
+        return self::traceStatusCountOperation(
+            $hook,
+            'next_scheduled_check',
+            function () use ($hook, $args) {
+                if (!function_exists('wp_next_scheduled')) {
+                    return false;
+                }
+                return empty($args)
+                    ? wp_next_scheduled($hook)
+                    : wp_next_scheduled($hook, $this->listArgs($args));
+            }
+        );
     }
 
     /**
@@ -106,12 +124,42 @@ class ABJ_404_Solution_CronScheduler {
             $this->logScheduleFailure('single', $hook, null, $timestamp, $args, 'wp_schedule_single_event unavailable');
             return false;
         }
-        $scheduled = wp_schedule_single_event($timestamp, $hook, $this->listArgs($args), true);
+        $scheduled = self::traceStatusCountOperation(
+            $hook,
+            'scheduling_write',
+            fn() => wp_schedule_single_event(
+                $timestamp,
+                $hook,
+                $this->listArgs($args),
+                true
+            )
+        );
         if ($scheduled === false || $this->isWpError($scheduled)) {
             $this->logScheduleFailure('single', $hook, null, $timestamp, $args, $this->wpErrorMessage($scheduled));
             return false;
         }
         return true;
+    }
+
+    /**
+     * @template T
+     * @param callable():T $work
+     * @return T
+     */
+    private static function traceStatusCountOperation(
+        string $hook,
+        string $operation,
+        callable $work
+    ) {
+        if ($hook !== self::HOOK_REFRESH_STATUS_COUNTS
+                || self::$statusCountOperationTracer === null) {
+            return $work();
+        }
+        return (self::$statusCountOperationTracer)(
+            $operation,
+            array('family' => 'status_refresh_cron'),
+            $work
+        );
     }
 
     /**
@@ -342,6 +390,8 @@ class ABJ_404_Solution_CronScheduler {
             self::HOOK_REDIRECTS_DENORM_BACKFILL,
             self::HOOK_REDIRECTS_SORT_KEY_BACKFILL,
             self::HOOK_SEND_QUEUED_REPORT,
+            self::HOOK_REFRESH_STATUS_COUNTS,
+            self::HOOK_REPAIR_COLLATIONS,
             self::HOOK_NETWORK_ACTIVATION,
             self::HOOK_NETWORK_ACTIVATION_BACKGROUND,
             self::HOOK_NETWORK_UPGRADE_BACKGROUND,
