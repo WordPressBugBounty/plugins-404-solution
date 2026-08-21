@@ -111,7 +111,35 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
             return;
         }
 
+        // The statement asked for a schema change that was already made. That
+        // is the state the caller wanted, so the plugin can still do its job --
+        // the project's own test for warning versus error -- and the developer
+        // has nothing to act on. Recorded, not reported. August 2026: report
+        // 270 was two concurrent upgrade requests racing to add the same index,
+        // and this line is where four of its five ERROR entries came from.
+        if ($this->isRedundantSchemaChangeError($lastError)) {
+            $this->logger->warn($message);
+            return;
+        }
+
         $this->logger->errorMessage($message);
+    }
+
+    /**
+     * Pure classifier: true if the SQL error string says the schema already
+     * reflects the change the statement asked for. Mirrors
+     * {@see isInfrastructureSqlError()} in shape so the observed-error layer
+     * and the final-error layer classify from one definition rather than two
+     * copies of a string list.
+     *
+     * @param string $errorText
+     * @return bool
+     */
+    public function isRedundantSchemaChangeError(string $errorText): bool {
+        if ($errorText === '') {
+            return false;
+        }
+        return $this->core->errorClassifier()->isRedundantSchemaChangeError($errorText);
     }
 
     /**
@@ -128,7 +156,7 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
         if ($errorText === '') {
             return false;
         }
-        return $this->core->errorClassifier()->taxonomy()->isInfrastructureSqlError($errorText);
+        return $this->core->errorClassifier()->isInfrastructureSqlError($errorText);
     }
 
     /**
@@ -195,6 +223,15 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
                 return;
             }
 
+            // Same reasoning as the observed-error layer above: a schema change
+            // that was already applied reached its goal, so it is recorded
+            // rather than reported. Both layers fire on one failed statement,
+            // so demoting only one of them would still email the developer.
+            if ($this->isRedundantSchemaChangeError($lastError)) {
+                $this->logger->warn("Schema change was already applied (handled): " . $lastError);
+                return;
+            }
+
             $this->logDetailedFinalSqlError($query, $lastError, $timer);
             return;
         }
@@ -244,7 +281,7 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
                 $tracer->traceBranch('duplicate_id', $repair);
             }
         }
-        if ($this->core->errorClassifier()->taxonomy()->schema()->isIncorrectKeyFileError($lastError)) {
+        if ($this->core->errorClassifier()->isIncorrectKeyFileError($lastError)) {
             $repair = function () use ($query, &$result, $tracer): void {
                 $this->core->tableRepairer()->repairCorruptedTableAndRetry(
                     $query,
@@ -284,7 +321,7 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
         global $wpdb;
 
         $strippedQuery = 'n/a';
-        if ($this->core->errorClassifier()->taxonomy()->schema()->isInvalidDataError($lastError)) {
+        if ($this->core->errorClassifier()->isInvalidDataError($lastError)) {
             $strippedResult = $this->core->tableRepairer()->get_stripped_query_result($query);
             $strippedQuery = is_string($strippedResult) ? $strippedResult : 'n/a';
         }

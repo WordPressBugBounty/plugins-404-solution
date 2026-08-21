@@ -137,6 +137,13 @@ class ABJ_404_Solution_TitleMatchingEngine implements ABJ_404_Solution_MatchingE
         if ($bestScore < $minScore) {
             $this->logger->debugMessage("Title engine: best score " . $bestScore .
                 " below threshold " . $minScore);
+            // Sibling of the spelling near miss (SpellChecker::getPermalinkUsingSpelling):
+            // the best candidate lost only on the threshold, and that score is
+            // what tells the admin why the URL was captured instead of
+            // redirected. Record it before the reject branch discards it.
+            abj_service('near_miss_recorder')->record(array(
+                'requestedURL' => $request->getRequestedURL(), 'score' => (float)$bestScore,
+                'engineName' => $this->getName()));
             return null;
         }
 

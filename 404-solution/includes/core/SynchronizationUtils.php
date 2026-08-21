@@ -137,27 +137,23 @@ class ABJ_404_Solution_SynchronizationUtils {
         // don't let anyone hold the lock for too long.
         $this->fixAnUnforeseenIssue($synchronizedKeyFromUser);
 
-        // acquire the lock.
-       	$currentOwner = $this->ownerStore->readOwner($internalSynchronizedKey);
-        // only write the value if it's empty.
-        if (empty($currentOwner)) {
-        	$this->ownerStore->writeOwner($internalSynchronizedKey, $uniqueID);
-        	// Arm the crash-safe release BEFORE the settle sleep below: a fatal
-        	// during that window would otherwise leak an owner record we wrote.
-        	$this->rememberHeldLock($internalSynchronizedKey, $uniqueID);
-        }
-        // give a different thread that ran at the same time a chance to overwrite our value.
-        time_nanosleep(0, 10000000 * 30); // 10000000 is 1/100 of a second.
-        // check and see if we're the owner yet.
-        $currentOwner = $this->ownerStore->readOwner($internalSynchronizedKey);
-
-        if ($currentOwner == $uniqueID) {
-        	return $uniqueID;
+        if (!$this->ownerStore->claimOwner(array(
+            'key' => $internalSynchronizedKey,
+            'owner' => $uniqueID,
+        ))) {
+        	// Somebody else owns it. This request wrote nothing, so it has
+        	// nothing to clean up.
+        	return '';
         }
 
-        // Someone else won the race, so this request holds nothing to clean up.
-        $this->forgetHeldLock($internalSynchronizedKey, $uniqueID);
-        return '';
+        // Arm the crash-safe release as the very next thing after the record
+        // exists. The two cannot be made one operation in PHP, so a fatal in
+        // between still leaks the record -- but that gap is now a single
+        // statement rather than the 300ms settle sleep the old read-write-
+        // sleep-read protocol had to hold it open for.
+        $this->rememberHeldLock($internalSynchronizedKey, $uniqueID);
+
+        return $uniqueID;
     }
 
     /** Remove the lock if it's been in place for too long.
@@ -183,11 +179,21 @@ class ABJ_404_Solution_SynchronizationUtils {
 
         // it should have been released by now.
         if ($timePassed > $maxExecutionTime) {
-        	$this->ownerStore->deleteOwner($uniqueID, $internalSynchronizedKey);
+			$this->ownerStore->deleteOwner(array(
+				'key' => $internalSynchronizedKey,
+				'owner' => $uniqueID,
+			));
             $valueAfterDelete = $this->ownerStore->readOwner($internalSynchronizedKey);
 
-            // if options mode failed for some reason then switch to file sync mode.
-            if ($valueAfterDelete != null && $valueAfterDelete != '' &&
+            // Options storage is only proven broken when the record that is
+            // still sitting there is the SAME one we just deleted. A different
+            // value means another request legitimately claimed the key in the
+            // meantime, which is the protocol working rather than the storage
+            // failing, and latching the whole site onto file-based records over
+            // it would be a false alarm. (deleteOwner() only removes a record
+            // whose value the caller named, so losing that race leaves the new
+            // owner's record untouched, which is exactly what should happen.)
+            if ($valueAfterDelete === $uniqueID &&
             		!$this->ownerStore->isFileMode()) {
             	$this->ownerStore->switchToFileSyncMode();
             	return;
@@ -203,40 +209,23 @@ class ABJ_404_Solution_SynchronizationUtils {
         }
     }
 
-    /** Waits until the lock can be acquired and then returns the unique ID.
-     * @param string $synchronizedKeyFromUser
-     * @return string the unique ID that was used. This is needed to release the lock.
-     */
-    function synchronizerAcquireLockWithWait($synchronizedKeyFromUser) {
-        $uniqueID = $this->createUniqueID($synchronizedKeyFromUser);
-        $internalSynchronizedKey = $this->createInternalKey($synchronizedKeyFromUser);
-
-        $this->fixAnUnforeseenIssue($synchronizedKeyFromUser);
-        $iterations = 0;
-
-        // acquire the lock.
-        $currentOwner = $this->ownerStore->readOwner($internalSynchronizedKey);
-        while ($currentOwner != $uniqueID) {
-            // only write the value if it's empty.
-            if (empty($currentOwner)) {
-            	$this->ownerStore->writeOwner($internalSynchronizedKey, $uniqueID);
-            	// Same reasoning as synchronizerAcquireLockTry(): arm the
-            	// crash-safe release the moment an owner record exists.
-            	$this->rememberHeldLock($internalSynchronizedKey, $uniqueID);
-            }
-            // give a different thread that ran at the same time a chance to overwrite our value.
-            time_nanosleep(0, 500000000); // 10000000 is 1/100 of a second. 500000000 is 1/2 of a second.
-            // check and see if we're the owner yet.
-            $currentOwner = $this->ownerStore->readOwner($internalSynchronizedKey);
-
-            $iterations++;
-            if ($iterations % 500 == 0) {
-                $this->fixAnUnforeseenIssue($synchronizedKeyFromUser);
-            }
-        }
-
-        return $uniqueID;
-    }
+    // There is deliberately no blocking acquire here. synchronizerAcquireLockWithWait()
+    // used to sit at this spot: a `while (!claimOwner(...))` that slept half a second
+    // between attempts, with no ceiling, no deadline and no give-up. Whether it ever
+    // returned was entirely the storage layer's decision, and every reason a claim can
+    // fail permanently -- a read-only replica refusing the write, a full disk, an
+    // unwritable uploads directory, a leaked owner record younger than the stale-lock
+    // threshold -- turned it into a request that ran until max_execution_time killed it.
+    // It had no callers in the plugin's whole recorded history.
+    //
+    // Waiting is therefore the CALLER's decision, not this class's: take the lock with
+    // synchronizerAcquireLockTry(), and on '' either skip the work (what every caller
+    // here does, because a concurrent request is already doing it) or retry under a
+    // deadline the caller owns and can report on. A bounded waiter may be added back if
+    // something genuinely needs one, but it has to carry a wall-clock deadline read from
+    // abj_clock() -- time_nanosleep() is not a clock under load -- and a return contract
+    // that can express "the deadline passed" with the reason the claims were failing.
+    // LockAcquireApiSurfaceTest holds that line for every acquire method on this class.
 
     /** Release the lock for a synchronized block. Should be done in a finally block.
      * @param string $uniqueID
@@ -254,7 +243,10 @@ class ABJ_404_Solution_SynchronizationUtils {
         $this->forgetHeldLock($internalSynchronizedKey, $uniqueID);
 
 		if ($uniqueID == $currentLockHolder) {
-			$this->ownerStore->deleteOwner($uniqueID, $internalSynchronizedKey);
+			$this->ownerStore->deleteOwner(array(
+				'key' => $internalSynchronizedKey,
+				'owner' => $uniqueID,
+			));
 
 		} else {
 			// Fail silently instead of throwing fatal exception.
@@ -394,7 +386,10 @@ class ABJ_404_Solution_SynchronizationUtils {
                     continue;
                 }
 
-                $this->ownerStore->deleteOwner($uniqueID, $internalSynchronizedKey);
+                $this->ownerStore->deleteOwner(array(
+                    'key' => $internalSynchronizedKey,
+                    'owner' => $uniqueID,
+                ));
 
                 // The record is gone, so this key's work is durably done. Drop
                 // it before anything else can throw: a key still in the map is

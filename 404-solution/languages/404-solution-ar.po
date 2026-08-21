@@ -537,9 +537,8 @@ msgstr "خطأ: لم يتم العثور على معرف(ات) لطلب التع
 msgid "Error: No ID(s) specified for bulk action. (%s)"
 msgstr "خطأ: لم يتم تحديد معرف(ات) للإجراء الجماعي. (%s)"
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
-msgstr "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+msgstr "خطأ: تم تحديد عدد كبير جدًا من المعرّفات للإجراء الجماعي (الحد الأقصى %d). (%s)"
 
 msgid "Error: No records were imported. SQL result: %s"
 msgstr "خطأ: لم يتم استيراد أي سجلات. نتيجة SQL: %s"
@@ -981,7 +980,7 @@ msgid "Referrer"
 msgstr "المُحيل"
 
 msgid "RegEx"
-msgstr "RegEx"
+msgstr "تعبير نمطي"
 
 msgid "Regular Expression (Manually Created)"
 msgstr "تعبير نمطي (تم إنشاؤه يدوياً)"
@@ -1904,8 +1903,8 @@ msgstr "وجهة 404 الافتراضية"
 msgid "Where to send visitors when a 404 error occurs"
 msgstr "أين ترسل الزوار عند حدوث خطأ 404"
 
-msgid "Automatically redirect 404s to similar pages when a good match is found"
-msgstr "إعادة توجيه أخطاء 404 تلقائياً إلى صفحات مشابهة عند العثور على تطابق جيد"
+msgid "Automatically redirect 404s to similar pages that score at least %1$s out of 100. To change that number, switch to Advanced Mode and look for %2$s in the System section."
+msgstr "إعادة توجيه أخطاء 404 تلقائياً إلى صفحات مشابهة تحصل على %1$s على الأقل من 100. لتغيير هذا الرقم، انتقل إلى الوضع المتقدم وابحث عن %2$s في قسم النظام."
 
 msgid "Redirect type"
 msgstr "نوع إعادة التوجيه"
@@ -2098,14 +2097,6 @@ msgstr "زيارة الرابط"
 
 msgid "This page doesn't exist or is not published so the redirect won't work."
 msgstr "هذه الصفحة غير موجودة أو غير منشورة لذا لن تعمل إعادة التوجيه."
-
-#: includes/DataAccess.php
-msgid "Just now"
-msgstr "الآن"
-
-#: includes/View.php
-msgid "Data may not be immediately updated. Refresh to see latest changes."
-msgstr "قد لا يتم تحديث البيانات فوراً. قم بالتحديث لرؤية أحدث التغييرات."
 
 #: includes/View.php
 msgid "Refresh scheduled"
@@ -3237,7 +3228,7 @@ msgid "URL Pattern"
 msgstr "نمط URL"
 
 msgid "Regex"
-msgstr "Regex"
+msgstr "تعبير نمطي"
 
 msgid "Engines"
 msgstr "المحركات"
@@ -3612,103 +3603,103 @@ msgid "No access token received from authorization."
 msgstr "لم يتم استلام رمز الوصول من عملية التفويض."
 
 msgid "Automatically trash bot and spam URLs"
-msgstr "Automatically trash bot and spam URLs"
+msgstr "نقل روابط الروبوتات والرسائل غير المرغوب فيها إلى سلة المهملات تلقائيًا"
 
 msgid "Auto-trash captured URLs from bots and security scanners during daily maintenance"
-msgstr "Auto-trash captured URLs from bots and security scanners during daily maintenance"
+msgstr "نقل الروابط الملتقطة من الروبوتات وماسحات الأمان إلى سلة المهملات تلقائيًا أثناء الصيانة اليومية"
 
 msgid "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected. We will email you if something needs attention."
-msgstr "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected. We will email you if something needs attention."
+msgstr "يراقب 404 Solution موقعك الآن. عندما يصل الزوار إلى روابط معطلة، تتم إعادة توجيههم تلقائيًا. سنرسل إليك رسالة بريد إلكتروني إذا كان هناك ما يحتاج إلى انتباهك."
 
 msgid "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected."
-msgstr "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected."
+msgstr "يراقب 404 Solution موقعك الآن. عندما يصل الزوار إلى روابط معطلة، تتم إعادة توجيههم تلقائيًا."
 
 msgid "404 Solution is now monitoring your site. We will email you if captured 404 URLs need attention."
-msgstr "404 Solution is now monitoring your site. We will email you if captured 404 URLs need attention."
+msgstr "يراقب 404 Solution موقعك الآن. سنرسل إليك رسالة بريد إلكتروني إذا كانت روابط 404 الملتقطة تحتاج إلى انتباهك."
 
 msgid "404 Solution is now monitoring your site. You can create manual redirects anytime from the Page Redirects tab."
-msgstr "404 Solution is now monitoring your site. You can create manual redirects anytime from the Page Redirects tab."
+msgstr "يراقب 404 Solution موقعك الآن. يمكنك إنشاء عمليات إعادة توجيه يدوية في أي وقت من تبويب إعادة توجيه الصفحات."
 
 msgid "You're all set!"
-msgstr "You're all set!"
+msgstr "كل شيء جاهز!"
 
 msgid "Get email alerts about 404 problems?"
-msgstr "Get email alerts about 404 problems?"
+msgstr "هل تريد تلقي تنبيهات بالبريد الإلكتروني عن مشكلات 404؟"
 
 msgid "Yes, email me a weekly summary (recommended)"
-msgstr "Yes, email me a weekly summary (recommended)"
+msgstr "نعم، أرسل إليّ ملخصًا أسبوعيًا بالبريد الإلكتروني (موصى به)"
 
 msgid "Get notified when captured 404 URLs exceed 50"
-msgstr "Get notified when captured 404 URLs exceed 50"
+msgstr "تلقّي إشعار عندما يتجاوز عدد روابط 404 الملتقطة 50"
 
 msgid "You can always enable email alerts later in Options"
-msgstr "You can always enable email alerts later in Options"
+msgstr "يمكنك دائمًا تفعيل تنبيهات البريد الإلكتروني لاحقًا من الخيارات"
 
 msgid "No, I'll check manually"
-msgstr "No, I'll check manually"
+msgstr "لا، سأتحقق يدويًا"
 
 msgid "Automatic Permanent Redirects"
-msgstr "Automatic Permanent Redirects"
+msgstr "إعادة التوجيه الدائمة التلقائية"
 
 msgid "Automatic Temporary Redirects"
-msgstr "Automatic Temporary Redirects"
+msgstr "إعادة التوجيه المؤقتة التلقائية"
 
 msgid "Manual Permanent Redirects"
-msgstr "Manual Permanent Redirects"
+msgstr "إعادة التوجيه الدائمة اليدوية"
 
 msgid "Manual Temporary Redirects"
-msgstr "Manual Temporary Redirects"
+msgstr "إعادة التوجيه المؤقتة اليدوية"
 
 msgid "Broken links visitors tried to reach. Create Redirect for important ones, Dismiss the rest."
-msgstr "Broken links visitors tried to reach. Create Redirect for important ones, Dismiss the rest."
+msgstr "روابط معطلة حاول الزوار الوصول إليها. استخدم إنشاء إعادة توجيه للمهم منها وتجاهل الباقي."
 
 msgid "Needs Review"
-msgstr "Needs Review"
+msgstr "يحتاج إلى مراجعة"
 
 msgid "Handled"
-msgstr "Handled"
+msgstr "تمت المعالجة"
 
 msgid "Dismiss"
-msgstr "Dismiss"
+msgstr "تجاهل"
 
 msgid "All good — %d redirects active, no URLs need attention"
-msgstr "All good — %d redirects active, no URLs need attention"
+msgstr "كل شيء على ما يرام: %d عملية إعادة توجيه نشطة، ولا توجد روابط تحتاج إلى انتباه"
 
 msgid "%1$d redirects active — %2$d captured URLs have repeat visitors"
-msgstr "%1$d redirects active — %2$d captured URLs have repeat visitors"
+msgstr "%1$d عملية إعادة توجيه نشطة: %2$d رابطًا ملتقطًا لديها زوار متكررون"
 
 msgid "View"
 msgstr "View"
 
 msgid "The plugin creates these automatically. You only need to act when the status bar above says so."
-msgstr "The plugin creates these automatically. You only need to act when the status bar above says so."
+msgstr "تنشئ الإضافة هذه تلقائيًا. لا تحتاج إلى التدخل إلا عندما يشير شريط الحالة أعلاه إلى ذلك."
 
 msgid "Blocked"
-msgstr "Blocked"
+msgstr "محظور"
 
 msgid "Best for moved pages"
-msgstr "Best for moved pages"
+msgstr "الأفضل للصفحات التي تم نقلها"
 
 msgid "Best for seasonal or test pages"
-msgstr "Best for seasonal or test pages"
+msgstr "الأفضل للصفحات الموسمية أو صفحات الاختبار"
 
 msgid "Permanent is best for most redirects. Use Temporary if the page may come back."
-msgstr "Permanent is best for most redirects. Use Temporary if the page may come back."
+msgstr "الدائم هو الأفضل لمعظم عمليات إعادة التوجيه. استخدم المؤقت إذا كان من الممكن أن تعود الصفحة."
 
 msgid "Back to Captured 404s"
-msgstr "Back to Captured 404s"
+msgstr "العودة إلى أخطاء 404 الملتقطة"
 
 msgid "Suggested destination"
-msgstr "Suggested destination"
+msgstr "الوجهة المقترحة"
 
 msgid "match"
-msgstr "match"
+msgstr "تطابق"
 
 msgid "Accept Suggestion"
-msgstr "Accept Suggestion"
+msgstr "قبول الاقتراح"
 
 msgid "Pick a Different Page"
-msgstr "Pick a Different Page"
+msgstr "اختيار صفحة أخرى"
 
 msgid "Post"
 msgstr "Post"
@@ -3940,22 +3931,14 @@ msgstr "تم إيقاف إعادة بناء المشاهدات/الزيارات 
 msgid "Retry Now"
 msgstr "أعد المحاولة الآن"
 
-# translation-verified: en-fallback awaiting native pass (i310)
-#: includes/
-msgid "literal text"
-msgstr "literal text"
-
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "literal"
-msgstr "literal"
+msgstr "حرفي"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%1$d of %2$d"
-msgstr "%1$d of %2$d"
+msgstr "%1$d من %2$d"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%s item"
 msgid_plural "%s items"
@@ -3966,94 +3949,77 @@ msgstr[3] "%s عناصر"
 msgstr[4] "%s عنصرًا"
 msgstr[5] "%s عنصر"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Unknown purge result: %s"
-msgstr "Error: Unknown purge result: %s"
+msgstr "خطأ: نتيجة تنظيف غير معروفة: %s"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%s redirect entries were moved to the trash."
-msgstr "%s redirect entries were moved to the trash."
+msgstr "تم نقل %s من مدخلات إعادة التوجيه إلى سلة المهملات."
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Unable to update redirect data. Repository result: %s"
-msgstr "Error: Unable to update redirect data. Repository result: %s"
+msgstr "خطأ: تعذر تحديث بيانات إعادة التوجيه. نتيجة المستودع: %s"
 
-# translation-verified: en-fallback awaiting native pass
 #: includes/
 msgid "Error: Unable to save redirect conditions. Repository result: %s"
-msgstr "Error: Unable to save redirect conditions. Repository result: %s"
+msgstr "خطأ: تعذر حفظ شروط إعادة التوجيه. نتيجة المستودع: %s"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Loading status..."
-msgstr "Loading status..."
+msgstr "جاري تحميل الحالة..."
 
 #: includes/
 msgid "Loading..."
 msgstr "جاري التحميل..."
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Collected URL deletion value must be a number greater than or equal to zero"
-msgstr "Error: Collected URL deletion value must be a number greater than or equal to zero"
+msgstr "خطأ: يجب أن تكون قيمة حذف الروابط المجمّعة رقمًا أكبر من أو يساوي صفرًا"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Manual redirect deletion value must be a number greater than or equal to zero"
-msgstr "Error: Manual redirect deletion value must be a number greater than or equal to zero"
+msgstr "خطأ: يجب أن تكون قيمة حذف عمليات إعادة التوجيه اليدوية رقمًا أكبر من أو يساوي صفرًا"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Log deletion value must be a number greater than or equal to zero"
-msgstr "Error: Log deletion value must be a number greater than or equal to zero"
+msgstr "خطأ: يجب أن تكون قيمة حذف السجلات رقمًا أكبر من أو يساوي صفرًا"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Auto redirect deletion value must be a number greater than or equal to zero"
-msgstr "Error: Auto redirect deletion value must be a number greater than or equal to zero"
+msgstr "خطأ: يجب أن تكون قيمة حذف عمليات إعادة التوجيه التلقائية رقمًا أكبر من أو يساوي صفرًا"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Auto-redirect expiration days must be a number greater than or equal to zero"
-msgstr "Error: Auto-redirect expiration days must be a number greater than or equal to zero"
+msgstr "خطأ: يجب أن يكون عدد أيام انتهاء صلاحية إعادة التوجيه التلقائية رقمًا أكبر من أو يساوي صفرًا"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Maximum log disk usage must be a number greater than zero"
-msgstr "Error: Maximum log disk usage must be a number greater than zero"
+msgstr "خطأ: يجب أن يكون الحد الأقصى لاستخدام القرص للسجلات رقمًا أكبر من صفر"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Keep my redirects (%d)"
-msgstr "Keep my redirects (%d)"
+msgstr "الاحتفاظ بعمليات إعادة التوجيه الخاصة بي (%d)"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%d minutes ago"
-msgstr "%d minutes ago"
+msgstr "قبل %d دقيقة"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%d hours ago"
-msgstr "%d hours ago"
+msgstr "قبل %d ساعة"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%d days ago"
-msgstr "%d days ago"
+msgstr "قبل %d يوم"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Unknown status filter. Valid values are: manual, auto, regex (or omit for all active)."
-msgstr "Unknown status filter. Valid values are: manual, auto, regex (or omit for all active)."
+msgstr "مرشّح حالة غير معروف. القيم الصالحة هي: manual و auto و regex (أو اتركه فارغًا لعرض كل العناصر النشطة)."
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "The \"to\" URL must be a relative path or an http/https URL."
-msgstr "The \"to\" URL must be a relative path or an http/https URL."
+msgstr "يجب أن يكون رابط الوجهة مسارًا نسبيًا أو رابط http/https."
 
 msgid "Contact your hosting provider. This is usually caused by a database quota, tablespace limit, or full /tmp partition - not necessarily a full disk."
 msgstr "تواصل مع مزود الاستضافة الخاص بك. عادةً ما يكون السبب حصة قاعدة بيانات أو حدّ مساحة جداول أو امتلاء قسم /tmp، وليس بالضرورة امتلاء القرص بأكمله."
@@ -4112,10 +4078,9 @@ msgstr "اطلب من مزود الاستضافة مراجعة صلاحيات م
 msgid "This database does not support session-scoped GET_LOCK named locks. The plugin is using a WordPress option-row fallback to coordinate the staged view-build. Common on PlanetScale, Vitess, and split-routing ProxySQL deployments."
 msgstr "لا تدعم قاعدة البيانات هذه أقفال GET_LOCK المسماة المرتبطة بالجلسة. تستخدم الإضافة آلية احتياطية تعتمد على صف خيار في WordPress لتنسيق بناء العرض على مراحل. وهذا شائع في عمليات نشر PlanetScale وVitess وProxySQL ذات التوجيه المنقسم."
 
-# translation-verified: en-fallback awaiting native pass (t_260618_093531_671)
 #: includes/view/View_CapturedURLsTable.php:332
 msgid "Preparing the captured 404s table. The list is still loading and will appear in a moment."
-msgstr "Preparing the captured 404s table. The list is still loading and will appear in a moment."
+msgstr "جاري تحضير جدول أخطاء 404 الملتقطة. ما زالت القائمة قيد التحميل وستظهر بعد لحظات."
 
 #: includes/admin/AdminTableColumnHeaders.php:178
 msgid "Sorting by this column is being prepared for your number of URLs (%d%% complete). The list shows newest first until it is ready."
@@ -4209,54 +4174,138 @@ msgstr "هذا الموقع لديه تقارير تشخيصية %s. يمكنك 
 msgid "When checked, the text is treated as a regular expression. Note that including a bad regular expression or one that takes too long will break your website. So please use caution and test them elsewhere before trying them here. If you don't know what you're doing please don't use this option (as it's not necessary for the functioning of the plugin)."
 msgstr "عند التحديد، يُعامل النص كتعبير نمطي. لاحظ أن تعبيراً نمطياً غير صحيح أو بطيئاً للغاية سيعطل موقعك. لذا يرجى توخي الحذر واختبارها في مكان آخر قبل تجربتها هنا. إذا كنت لا تعرف ما تفعله، يرجى عدم استخدام هذا الخيار (فهو غير ضروري لعمل الإضافة)."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "/events/(.+) will match any URL that begins with /events/. Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
-msgstr "/events/(.+) will match any URL that begins with /events/. Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
+msgstr "يطابق /events/(.+) أي رابط يبدأ بـ /events/. استخدم $1 في الوجهة لإدراج النص الملتقط. المسارات النسبية للموقع مثل /archive/$1 وروابط HTTP(S) الكاملة مدعومة."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
-msgstr "Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
+msgstr "استخدم $1 في الوجهة لإدراج النص الملتقط. المسارات النسبية للموقع مثل /archive/$1 وروابط HTTP(S) الكاملة مدعومة."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains control characters."
-msgstr "Error: Regex destination contains control characters."
+msgstr "خطأ: وجهة التعبير النمطي تحتوي على أحرف تحكم."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination must be an HTTP(S) URL or a site-relative path starting with /."
-msgstr "Error: Regex destination must be an HTTP(S) URL or a site-relative path starting with /."
+msgstr "خطأ: يجب أن تكون وجهة التعبير النمطي رابط HTTP(S) أو مسارًا نسبيًا للموقع يبدأ بـ /."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: A site-relative regex destination must start with a single /. URLs beginning with // are not allowed."
-msgstr "Error: A site-relative regex destination must start with a single /. URLs beginning with // are not allowed."
+msgstr "خطأ: يجب أن تبدأ وجهة التعبير النمطي النسبية للموقع بشرطة مائلة واحدة /. الروابط التي تبدأ بـ // غير مسموح بها."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination must not contain spaces. Use URL encoding such as %20 instead."
-msgstr "Error: Regex destination must not contain spaces. Use URL encoding such as %20 instead."
+msgstr "خطأ: يجب ألا تحتوي وجهة التعبير النمطي على مسافات. استخدم ترميز الروابط مثل %20 بدلاً من ذلك."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains invalid percent encoding."
-msgstr "Error: Regex destination contains invalid percent encoding."
+msgstr "خطأ: وجهة التعبير النمطي تحتوي على ترميز نسبة مئوية غير صالح."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains characters that are not safe in a redirect URL."
-msgstr "Error: Regex destination contains characters that are not safe in a redirect URL."
+msgstr "خطأ: وجهة التعبير النمطي تحتوي على أحرف غير آمنة في رابط إعادة التوجيه."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination must not contain . or .. path segments."
-msgstr "Error: Regex destination must not contain . or .. path segments."
+msgstr "خطأ: يجب ألا تحتوي وجهة التعبير النمطي على مقاطع المسار . أو .."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Source regular expression is invalid."
-msgstr "Error: Source regular expression is invalid."
+msgstr "خطأ: التعبير النمطي المصدر غير صالح."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains unsupported replacement syntax. Use $1, $2, and so on."
-msgstr "Error: Regex destination contains unsupported replacement syntax. Use $1, $2, and so on."
+msgstr "خطأ: وجهة التعبير النمطي تحتوي على بنية استبدال غير مدعومة. استخدم $1 و $2 وهكذا."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Relative regex destinations support numbered capture groups written as (...). Named and branch-reset groups are not supported."
-msgstr "Error: Relative regex destinations support numbered capture groups written as (...). Named and branch-reset groups are not supported."
+msgstr "خطأ: تدعم وجهات التعبير النمطي النسبية مجموعات الالتقاط المرقمة المكتوبة على شكل (...). المجموعات المسماة ومجموعات branch reset غير مدعومة."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination references $%1$d, but the source pattern defines %2$d capture group(s)."
-msgstr "Error: Regex destination references $%1$d, but the source pattern defines %2$d capture group(s)."
+msgstr "خطأ: تشير وجهة التعبير النمطي إلى $%1$d، لكن النمط المصدر يعرّف %2$d من مجموعات الالتقاط."
+
+msgid "Could not load chart data. Reload this page and try again."
+msgstr "تعذر تحميل بيانات الرسم البياني. أعد تحميل هذه الصفحة وحاول مرة أخرى."
+
+msgid "This sends a one-time diagnostic report to the plugin developer so they can investigate the issue you are seeing."
+msgstr "يؤدي هذا إلى إرسال تقرير تشخيصي لمرة واحدة إلى مطور الإضافة ليتمكن من فحص المشكلة التي تواجهها."
+
+msgid "This report includes:"
+msgstr "يتضمن هذا التقرير:"
+
+msgid "Site URL"
+msgstr "رابط الموقع"
+
+msgid "Plugin, PHP, WordPress, and database versions"
+msgstr "إصدارات الإضافة وPHP وووردبريس وقاعدة البيانات"
+
+msgid "List of active plugins"
+msgstr "قائمة الإضافات النشطة"
+
+msgid "Recent debug log excerpt"
+msgstr "مقتطف حديث من سجل التصحيح"
+
+msgid "Optional message and reply email you provide below"
+msgstr "رسالة اختيارية وبريد إلكتروني للرد تقدمهما أدناه"
+
+msgid "Show what's in this report"
+msgstr "عرض محتويات هذا التقرير"
+
+msgid "Hide report contents"
+msgstr "إخفاء محتويات التقرير"
+
+msgid "Loading report contents..."
+msgstr "جاري تحميل محتويات التقرير..."
+
+msgid "Could not load preview. The full report is still safe to send."
+msgstr "تعذر تحميل المعاينة. لا يزال بالإمكان إرسال التقرير الكامل بأمان."
+
+msgid "What went wrong? (optional, helps us diagnose)"
+msgstr "ما الخطأ الذي حدث؟ (اختياري، يساعدنا في التشخيص)"
+
+msgid "Where should we reply? (optional)"
+msgstr "إلى أين نرد؟ (اختياري)"
+
+msgid "By clicking Send report, you consent to transmitting the information above to the plugin developer for support purposes. The data is used only to diagnose your issue and is not shared with third parties."
+msgstr "بالنقر على إرسال التقرير، فإنك توافق على إرسال المعلومات أعلاه إلى مطور الإضافة لأغراض الدعم. تُستخدم البيانات فقط لتشخيص مشكلتك ولا تتم مشاركتها مع أطراف أخرى."
+
+msgid "Send report"
+msgstr "إرسال التقرير"
+
+msgid "Sending..."
+msgstr "جاري الإرسال..."
+
+msgid "Retry"
+msgstr "إعادة المحاولة"
+
+msgid "Sent. Reference: "
+msgstr "تم الإرسال. الرقم المرجعي: "
+
+msgid ". Thank you."
+msgstr ". شكراً لك."
+
+msgid "You already sent a report recently. Try again in {minutes} minute(s)."
+msgstr "لقد أرسلت تقريراً مؤخراً. حاول مرة أخرى بعد {minutes} دقيقة."
+
+msgid "Network error: could not reach the server. Check your internet connection and try again."
+msgstr "خطأ في الشبكة: تعذر الوصول إلى الخادم. تحقق من اتصالك بالإنترنت وحاول مرة أخرى."
+
+msgid "Could not send report. Please try again later."
+msgstr "تعذر إرسال التقرير. يرجى المحاولة مرة أخرى لاحقاً."
+
+msgid "Could not load the migration tool configuration. Reload this page and try again."
+msgstr "تعذر تحميل إعدادات أداة الترحيل. أعد تحميل هذه الصفحة وحاول مرة أخرى."
+
+msgid "No suggested match was scored for this URL"
+msgstr "لم يتم تسجيل أي تطابق مقترح لهذا الرابط"
+
+msgid "No confidence score was recorded for this redirect"
+msgstr "لم يتم تسجيل درجة ثقة لإعادة التوجيه هذه"
+
+msgid "No score"
+msgstr "لا توجد درجة"
+
+msgid "Redirect this URL"
+msgstr "إعادة توجيه هذا الرابط"
+
+msgid "Change the minimum score"
+msgstr "تغيير الحد الأدنى للدرجة"
+
+msgid "404 Solution, admin only: nothing on the site scored close enough to suggest."
+msgstr "404 Solution، للمسؤولين فقط: لم يحصل أي محتوى في الموقع على درجة كافية لاقتراحه."
+
+msgid "404 Solution, admin only: best match %1$s, under the %2$s needed to redirect automatically."
+msgstr "404 Solution، للمسؤولين فقط: أفضل تطابق %1$s، أقل من %2$s المطلوبة لإعادة التوجيه تلقائيًا."
+
+msgid "404 Solution, admin only: best match %1$s, at or above the %2$s needed to redirect automatically."
+msgstr "404 Solution، للمسؤولين فقط: أفضل تطابق %1$s، مساوٍ أو أعلى من %2$s المطلوبة لإعادة التوجيه تلقائيًا."
+

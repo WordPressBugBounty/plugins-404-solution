@@ -5,6 +5,7 @@ if (!defined('ABSPATH')) {
 }
 
 require_once __DIR__ . '/GscConfig.php';
+require_once __DIR__ . '/GscFetchLock.php';
 
 /**
  * Owns Google Search Console Search Analytics requests, cache writes, fetch
@@ -27,10 +28,14 @@ class ABJ_404_Solution_GscSearchAnalyticsClient {
     /** @var ABJ_404_Solution_GscOAuthTokenStore */
     private $oauthStore;
 
+    /** @var ABJ_404_Solution_GscFetchLock */
+    private $fetchLock;
+
     /** @param ABJ_404_Solution_Logging $logger */
     public function __construct($logger, ABJ_404_Solution_GscOAuthTokenStore $oauthStore) {
         $this->logger = $logger;
         $this->oauthStore = $oauthStore;
+        $this->fetchLock = new ABJ_404_Solution_GscFetchLock($logger);
     }
 
     /**
@@ -51,7 +56,8 @@ class ABJ_404_Solution_GscSearchAnalyticsClient {
             return $cachedRows;
         }
 
-        $allRows = $this->doFetchFromApi($urls, $days);
+        $fetchResult = $this->doFetchFromApi($urls, $days);
+        $allRows = $fetchResult['rows'];
         // allow-cache-empty: empty GSC result sets are valid recent fetches and drive the explicit no-data UI state.
         set_transient(ABJ_404_Solution_GscConfig::TRANSIENT_KEY, $allRows, ABJ_404_Solution_GscConfig::TRANSIENT_TTL);
         update_option(ABJ_404_Solution_GscConfig::LAST_FETCH_OPTION_KEY, abj_clock()->now(), false);
@@ -68,23 +74,22 @@ class ABJ_404_Solution_GscSearchAnalyticsClient {
             return;
         }
 
-        if (get_transient(ABJ_404_Solution_GscConfig::LOCK_TRANSIENT_KEY)) {
+        if (!$this->fetchLock->claim()) {
             return;
         }
-        set_transient(
-            ABJ_404_Solution_GscConfig::LOCK_TRANSIENT_KEY,
-            '1',
-            ABJ_404_Solution_GscConfig::LOCK_TTL
-        );
 
         try {
             $urls = $this->getUrlsToQuery();
-            $allRows = $this->doFetchFromApi($urls);
+            $fetchResult = $this->doFetchFromApi($urls);
+            if (!$fetchResult['completed']) {
+                return;
+            }
+            $allRows = $fetchResult['rows'];
             // allow-cache-empty: empty GSC result sets are valid recent fetches and drive the explicit no-data UI state.
             set_transient(ABJ_404_Solution_GscConfig::TRANSIENT_KEY, $allRows, ABJ_404_Solution_GscConfig::TRANSIENT_TTL);
             update_option(ABJ_404_Solution_GscConfig::LAST_FETCH_OPTION_KEY, abj_clock()->now(), false);
         } finally {
-            delete_transient(ABJ_404_Solution_GscConfig::LOCK_TRANSIENT_KEY);
+            $this->fetchLock->release();
         }
     }
 
@@ -128,7 +133,8 @@ class ABJ_404_Solution_GscSearchAnalyticsClient {
      * @return void
      */
     public function scheduleBackgroundRefresh(): void {
-        if (get_transient(ABJ_404_Solution_GscConfig::LOCK_TRANSIENT_KEY)) {
+        $this->fetchLock->initializeAtomicLockMigrationState();
+        if ($this->fetchLock->isHeld()) {
             return;
         }
         abj_cron_scheduler()->scheduleSingleIfMissing(
@@ -158,14 +164,14 @@ class ABJ_404_Solution_GscSearchAnalyticsClient {
      *
      * @param string[] $urls Relative or absolute URLs to query.
      * @param int $days Number of days to look back.
-     * @return array<int, array<string, mixed>>
+     * @return array{rows: array<int, array<string, mixed>>, completed: bool}
      */
     private function doFetchFromApi(array $urls, int $days = 90): array {
         $s = $this->oauthStore->getSettings();
         $token = get_option(ABJ_404_Solution_GscConfig::TOKEN_OPTION_KEY, false);
         $accessToken = $this->tokenAccessToken($token);
         if ($accessToken === '') {
-            return array();
+            return array('rows' => array(), 'completed' => true);
         }
 
         $siteUrl = $s['site_url'];
@@ -179,6 +185,9 @@ class ABJ_404_Solution_GscSearchAnalyticsClient {
         $allRows = array();
 
         foreach ($urls as $url) {
+            if (!$this->fetchLock->renewIfDue()) {
+                return array('rows' => $allRows, 'completed' => false);
+            }
             $absoluteUrl = (strpos($url, 'http') === 0) ? $url : rtrim(home_url('/'), '/') . '/' . ltrim($url, '/');
             $body = array(
                 'startDate'       => $startDate,
@@ -239,7 +248,7 @@ class ABJ_404_Solution_GscSearchAnalyticsClient {
             return $b['clicks'] - $a['clicks'];
         });
 
-        return $allRows;
+        return array('rows' => $allRows, 'completed' => true);
     }
 
     /**

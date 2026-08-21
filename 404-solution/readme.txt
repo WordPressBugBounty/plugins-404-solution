@@ -5,7 +5,7 @@ Tags: 404, redirect, 404 redirect, broken links, spell check
 Requires at least: 5.0
 Requires PHP: 7.4
 Tested up to: 7.1
-Stable tag: 4.3.3
+Stable tag: 4.3.4
 License: GPL-3.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -202,6 +202,44 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 
 == Changelog ==
 
+= Version 4.3.4 (August 20, 2026) =
+
+**Bug Fixes**
+
+* Fixed concurrent diagnostic writers being able to discard the newest retained journal generation. A writer whose file had already been rotated could retain its old near-limit size and mistakenly rotate a much smaller live file; destructive rotation now revalidates that the writer still owns the live path before renaming or deleting any journal.
+* Fixed sites with more than 51 active regex redirects evaluating only the 51 oldest rules. The cache safety check used a 51-row query to decide whether the result was small enough to cache, but when it found more rules it kept using that same limited query instead of continuing through the table. Newer regex redirects therefore stayed at "Never Used" and matching requests fell through to the 404 page. Regex rules are now read completely in bounded batches, preserving their existing oldest-first precedence without imposing a matching limit.
+* Fixed a fatal error on the plugin's own Page Redirects and Captured 404s screens for sites running WordPress 5.0, 5.1 or 5.2. The plugin supports WordPress 5.0 and above, but eight places that render a date called a WordPress function that only arrived in 5.3, so those screens died with "Call to undefined function wp_date()" instead of rendering.
+* Fixed a redirect loop in which a request was answered with a redirect back to that same request. When a 404's destination was the home page and the request carried a query string such as `?page=1`, the destination was rebuilt into the original URL, so a browser or crawler looped until it gave up. Every hop was counted as another 404 hit, and one site recorded 3,892 hits on a single row this way. The home destination now resolves to the home page's own path, and no redirect is sent when the destination is the request being answered.
+* Fixed a fatal error during a plugin update, when a request that started under the old version was still running as WordPress replaced the plugin files. The plugin now notices its own files changed mid-request and re-reads its class list, instead of looking up the new files through the previous version's list and failing with "Class ABJ_404_Solution_... not found".
+* Fixed the Confidence column on the Captured 404s tab reading as a dash for every row on every install. The match score was worked out when the 404 was captured and then thrown away, so the column, its tooltip and the two indexes that exist to sort by it had no value to work with. Captured 404s now record the score of their closest match.
+* Fixed apostrophes and quotes being stored with a backslash in front of them, so text typed as "didn't" was saved as "didn\'t". This affected support and uninstall feedback and other text saved from the admin screens. The redirect destination and 404 log search boxes had the same problem, so searching for a term containing an apostrophe matched nothing.
+* Fixed the plugin emailing "Failed to schedule cron hook" reports for scheduling requests that had not failed. WordPress refuses a request when an equivalent scheduled task already exists, and reports that the task list "could not be saved" when the list is written with no change; both are normal outcomes that mean the task is scheduled. One site received 18 copies of the same message, 14 of them inside one second.
+* Fixed the reverse scheduled-task check: a failed recurring schedule could be reported as successful when a different occurrence of the same task already existed. Exact schedule and removal checks now require the requested timestamp, and malformed WordPress cron responses are logged with their original context instead of being treated as success.
+* Fixed two simultaneous requests being able to schedule separate links in the permalink-cache background chain. The existing hook-wide check stopped a later request from restarting an already-visible chain, but the check and cron write were separate, so racing requests could both observe an empty store and queue events with different arguments. Scheduling that chain is now serialized by an expiring database claim, and the claim holder refreshes WordPress's process-local cron cache before deciding, preserving the chain's execution limit without leaving a permanent lock if a request dies.
+* Fixed canonical pagination handling terminating the request and recording a successful hit after WordPress rejected the redirect. A rejected redirect now keeps normal 404 handling active and records the destination, status and source in the debug log. Its captured evidence row is now inserted only when the source is absent, inside a serializable database transaction that prevents two simultaneous requests from both inserting it, and duplicate cleanup preserves a user-authored redirect over newer captured evidence.
+* Fixed schema checks, database upgrades and internal database lock rows being able to wait effectively forever behind another connection's schema change. Metadata-lock waits for those operations are now bounded, the site's previous database-session setting is restored afterward, and the original database error remains available in the debug log.
+* Fixed database index repair retrying an `ALTER TABLE` after failures that removing the optional online-DDL clauses could not cure, such as permission or storage errors. The bare fallback now runs only when the database specifically rejects `ALGORITHM=INPLACE` or `LOCK=NONE`.
+* Fixed the plugin retrying forever when WordPress refused to remove one of its scheduled tasks. Nothing in the retry could make progress, so a deactivation or cleanup request kept asking until the server's time limit killed it. Security and scheduled-task manager plugins can refuse the removal, which is what made this reachable.
+* Fixed a code path that could wait for one of the plugin's internal locks with no time limit at all. On a read-only database replica, a full disk, or an unwritable uploads directory the wait could never succeed, so the request slept and retried until the server's time limit killed it.
+* Fixed the same internal lock being granted to two requests at once on sites with no persistent object cache. Ownership was decided by writing a value and reading it back, but WordPress answered the read from its own in-memory copy, so each competing request read back its own write and concluded it had won. Two database upgrades were seen starting in the same second on one site.
+* Fixed two simultaneous requests entering the same database upgrade and the losing one reporting the winner's success as a string of errors, including a second change that could not succeed because the change it asked for had already been made.
+* Fixed "COLLATION 'latin1_swedish_ci' is not valid for CHARACTER SET 'utf8mb4'" database errors repeating every few seconds on sites whose database settings still name a latin1 collation. The permalink cache never refreshed on those sites and the published-content lookup returned nothing.
+* Fixed "Illegal mix of collations" errors when the plugin compared its own log rows against WordPress's posts table on sites where the two tables were created with different collations. The comparison returned no rows rather than failing visibly, so the check that depends on it silently found nothing.
+* Fixed the plugin repeatedly trying to add a column named "using" of type "btree" to its redirects table, and logging the resulting database error, on sites where an index definition ended in USING BTREE. The error was logged three times per upgrade and three more times per scheduled run, indefinitely.
+* Fixed the plugin rewriting a database table that was already correct. A table's character set was read from the first column that named one rather than from the table's own settings, so a correctly configured table could be read as out of date and converted when nothing had drifted.
+* Fixed one of the plugin's index repairs naming a column without first checking that the column exists. That repair removes and re-adds an index in a single statement, so a database server that applied only half of it could leave the log table with neither index.
+
+**Improvements**
+
+* The Simple Mode setting for automatic redirects now says what the match score has to reach and where to change it, instead of only saying that a good match is required. It names the score actually in force on the site rather than the shipped default.
+* The page that offers suggestions for a 404 now explains, to administrators only, what the number beside each suggestion means, what the current bar for an automatic redirect is, and the two ways to act on it: redirect that URL, or change the bar.
+
+**Internationalization**
+
+* Completed the translations for every language the plugin ships. 80 entries in Swedish and 846 across the other catalogs were still being shown in English; each is now translated, or marked to record that the English word is the right one in that language.
+* The support request dialog, the confidence chart on the stats screen and the plugin migration tool now have translations. Their text previously rendered in English in every language, no matter how complete that language's translation was.
+* Restored accented characters in seven Latin-script translations where entries had been typed without them.
+
 = Version 4.3.3 (August 12, 2026) =
 
 **New Features**
@@ -336,98 +374,4 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 **Internationalization**
 
 * Added translations for 13 admin strings that were previously displayed in English even on non-English sites.
-
-= Version 4.1.17 (May 10, 2026) =
-
-**Bug Fixes**
-
-* Fixed repeated "Access denied" errors and silently-stuck Captured 404s and Page Redirects pages on shared and managed hosting environments where certain database privileges are restricted. The rebuild now skips the affected step and continues, instead of retrying the same denied operation on every cron run and emailing the site administrator.
-* Fixed the rebuild silently never starting on managed or sharded MySQL services (such as PlanetScale and Vitess) that do not support standard MySQL named locks. The plugin now uses an alternate locking mechanism on these hosts.
-* Fixed the rebuild getting permanently stuck after a previous run was interrupted (for example, by a server restart mid-rebuild). The plugin now detects and cleans up leftover state at the start of the next rebuild so it can complete normally.
-* Fixed the rebuild silently waiting forever when WordPress scheduled tasks (cron) are disabled and no external cron is configured. The plugin now shows a clear admin notice with guidance on how to resolve it.
-* Improved compatibility with multisite networks during long-running rebuilds that span multiple background tasks.
-* Improved compatibility with persistent object caches (Redis, Memcached) so that rebuild progress is reliably saved even when the cache layer is briefly inconsistent.
-* Improved compatibility with HyperDB, LudicrousDB, and other custom database drop-ins.
-
-**Improvements**
-
-* The plugin now self-detects unusual PHP and database hosting limits (memory limit, time limit, strict SQL modes, query packet size) at the start of each rebuild and adapts to work within them, instead of failing on restrictive hosts.
-
-= Version 4.1.16 (May 8, 2026) =
-
-**Bug Fixes**
-
-* Fixed the Captured 404s and Page Redirects admin pages getting stuck on "Creating build buffer (1/11)" forever on hosts with the standard 30-second PHP execution limit (the default on most shared hosting). The cache rebuild was yielding before inserting any rows because it was reserving more PHP time than the request actually had, so each rebuild request returned without making progress. The first batch of every rebuild step now always runs, so the rebuild reliably moves forward on a typical 30-second host.
-* Fixed Captured 404s and Page Redirects admin pages still failing to load when the database killed a single rebuild step (max statement time exceeded, lost connection, lock timeout): the entire rebuild used to give up, but it now resumes on the next request from where it left off, at every step.
-* Fixed brief network blips and intermittent 5xx responses during a long rebuild causing the admin page to show "Could not finish refreshing data" instead of continuing to wait. Transient errors are now treated as a no-progress tick and the page keeps polling.
-* Fixed the rebuild getting stuck retrying the same single-statement step (index build, hit-count update, or sort-index step) when the host's database statement timeout was shorter than that step needed to complete. Those steps used to retry with the same too-tight timeout forever; now the per-query timeout is extended for the retry so the step can finish.
-
-**Improvements**
-
-* The admin-table rebuild now adapts its batch size to the host. If a batch is killed by the database, the next attempt uses a smaller batch, and the smaller size is remembered for the rest of the rebuild so slow shared hosts converge on a size they can actually finish.
-* Per-query timeouts during the rebuild are now sized to the host's own statement timeout (MariaDB max_statement_time / MySQL max_execution_time), so a kill produces a clean classifiable error the rebuild can resume from rather than a dropped connection.
-
-= Version 4.1.15 (May 6, 2026) =
-
-**Bug Fixes**
-
-* Fixed a plugin load fatal on PHP 7.4 to 8.1 hosts that was introduced in 4.1.14. A constant inside a trait (added with the staged view rebuild) is only valid in PHP 8.2 and later; the declared minimum is PHP 7.4, so this restores compatibility for all supported PHP versions.
-
-= Version 4.1.14 (May 6, 2026) =
-
-**Bug Fixes**
-
-* Fixed Captured 404s and Page Redirects admin tables getting stuck or returning "Could not load table data" on very large sites while the table cache was being rebuilt. The rebuild now resumes in small background steps and the admin screen keeps polling progress until the data is ready.
-* Fixed a race where an admin table could retry too soon after a background rebuild started, causing repeated loading failures instead of waiting for the rebuilt data.
-
-**Improvements**
-
-* The Captured 404s and Page Redirects admin tables now use a staged cache rebuild that splits expensive destination, status, and hit-count work into bounded batches. Large sites should see more reliable table loading without long-running AJAX requests.
-* Added clearer in-page progress handling while the admin table cache is warming, so administrators can tell the plugin is still working instead of seeing a static loading state.
-
-= Version 4.1.13 (May 2, 2026) =
-
-**Bug Fixes**
-
-* Fixed "Could not load table data" timeouts on the Captured 404s and Page Redirects admin tables. On sites with a large WordPress posts table, the count query now skips unrelated JOINs when no search filter is active, and admin table caches are warmed in the background across multiple short requests instead of one long one — so the tables reliably load even when individual queries are slow.
-
-**Improvements**
-
-* The plugin admin footer now includes a collapsible Debug Info section showing per-stage AJAX timings, errors, and database query timings for the Captured 404s and Page Redirects views. When reporting a slow or stuck admin table, you can copy this directly without opening browser developer tools.
-* SQL errors are now recorded before any automatic recovery (table repair, retry with a relaxed collation) runs, so the original cause of a failing query stays visible in the support log instead of being overwritten by the recovery attempt's own messages.
-
-= Version 4.1.12 (May 1, 2026) =
-
-**Bug Fixes**
-
-* Fixed Captured 404s and Page Redirects table AJAX requests timing out while background log-cache maintenance was running. Maintenance that is triggered by an AJAX table load now runs through scheduled background tasks instead of shutdown work tied to the same HTTP request.
-* Fixed debug-log setup failing on sites with negative or fractional WordPress timezone offsets.
-* Fixed diagnostic logging paths that could throw while trying to report another error, which could hide the original problem behind a secondary logging failure.
-
-= Version 4.1.11 (May 1, 2026) =
-
-**Bug Fixes**
-
-* Fixed loss of captured-404 history when the database performed automatic repair of a crashed log table. The plugin previously dropped and recreated the affected table after repeated repair failures, destroying logged hits in the process. It now leaves the table alone if repair cannot succeed, preserving your captured-404 history.
-* Fixed loss of log data during repair of damaged plugin tables that were missing their primary key column. This was the underlying cause of the log-history loss reported during the 4.1.6 to 4.1.7 upgrade. The repair now preserves all existing rows instead of recreating the table from scratch.
-* Fixed timeouts during the nightly log-cache rebuild on sites with aggressive log retention. The rebuild now reliably completes within shared-host time limits.
-
-**Improvements**
-
-* The Captured 404s list and other admin views that read log data now load substantially faster on sites with large log tables. A new indexed column replaces a slower per-row computation; existing sites are updated in the background during nightly maintenance and speed up over time.
-
-= Version 4.1.10 (Apr 30, 2026) =
-
-**Bug Fixes**
-
-* Fixed disk-full, read-only, and crashed-table conditions encountered during log flush and N-gram cron scheduling escalating to error level and triggering developer email reports. These hosting conditions are now classified as warnings — the plugin already degrades past them — so they no longer spam the admin's inbox.
-* Fixed admin AJAX error notices showing only generic HTTP/textStatus information when a paginated admin view timed out or returned a 500. The notice now includes the elapsed request time, the server-side processing stage that was in flight when the failure occurred, and the redacted SQL of the failing query when available, so the cause is identifiable without a server log dump.
-* Fixed a parse-time fatal on PHP 7.4 through 8.1 caused by two trait-level constants introduced with the canonical-URL backfill work. The constants are now declared on the using class so the trait file parses cleanly on every supported PHP version.
-
-**Improvements**
-
-* The Page Redirects and Captured 404s admin views are now significantly faster on installs with very large redirects tables. Each redirect now stores a precomputed canonical URL that is indexed and JOINed against the hits rollup, eliminating the per-row CONCAT/TRIM evaluation that could time out the admin AJAX request on sites with hundreds of thousands of captured rows. The column is backfilled in chunks during the upgrade and the nightly maintenance cron, so large sites converge across cron ticks without blocking any single request.
-* The daily cron that flags dead-destination redirects now scales with URL count rather than raw log-row count. The query now JOINs against the precomputed `logs_hits` rollup with a new `failed_hits` column, completing in milliseconds even on sites with millions of log rows where it previously timed out.
-* The admin AJAX timeout for explicit user actions (sorting, filtering, pagination) was raised from 15 seconds to 45 seconds. Background detect-only refreshes still use the tight 15-second budget, so the longer timeout only applies when the admin is actively waiting.
-* Several catch blocks across the plugin that previously swallowed exceptions silently now emit a warning breadcrumb to the support log, so unexpected failure paths are visible in support bundles instead of vanishing.
 

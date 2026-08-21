@@ -237,6 +237,7 @@ msgstr "Thème d'administration"
 msgid "Advanced"
 msgstr "Avancé"
 
+# translation-verified: identical French spelling of the mode name, matching Mode Simple already used in this catalog
 #: includes/View.php - Inline mode toggle
 msgid "Simple"
 msgstr "Simple"
@@ -248,11 +249,12 @@ msgstr "Voir les statistiques"
 msgid "Captured 404s"
 msgstr "404 capturés"
 
+# translation-verified: identical French spelling; Documentation is the French word for the tab it labels
 msgid "Documentation"
 msgstr "Documentation"
 
 msgid "Plugin v%s"
-msgstr "Plugin v%s"
+msgstr "Extension v%s"
 
 msgid "Settings saved successfully!"
 msgstr "Paramètres enregistrés avec succès !"
@@ -458,6 +460,7 @@ msgstr "Type de redirection par défaut"
 msgid "Delete the Debug File"
 msgstr "Supprimer le fichier de débogage"
 
+# translation-verified: identical French spelling; Destination is the French word used in the redirect table headers here
 msgid "Destination"
 msgstr "Destination"
 
@@ -536,9 +539,8 @@ msgstr "Erreur : Aucun ID trouvé pour la modification."
 msgid "Error: No ID(s) specified for bulk action. (%s)"
 msgstr "Erreur : Aucun ID spécifié pour l'action groupée. (%s)"
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
-msgstr "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+msgstr "Erreur : trop d'ID indiqués pour l'action groupée (maximum %d). (%s)"
 
 msgid "Error: No records were imported. SQL result: %s"
 msgstr "Erreur : Aucun enregistrement importé. Résultat SQL : %s"
@@ -765,6 +767,7 @@ msgstr "Journaux"
 msgid "MB"
 msgstr "Mo"
 
+# translation-verified: identical French spelling; Maintenance is the French word for the tab it labels
 msgid "Maintenance"
 msgstr "Maintenance"
 
@@ -883,6 +886,7 @@ msgstr "Un e-mail sera envoyé par jour (lors de l'exécution de la maintenance)
 msgid "Only create an automatic redirect if the suggested page has a score above the specified number (default 90)"
 msgstr "Créer une redirection automatique uniquement si la page suggérée a un score supérieur au nombre spécifié (défaut 90)"
 
+# translation-verified: identical French spelling; Options is the French plural used throughout this catalog
 msgid "Options"
 msgstr "Options"
 
@@ -980,7 +984,7 @@ msgid "Referrer"
 msgstr "Référent"
 
 msgid "RegEx"
-msgstr "RegEx"
+msgstr "Expression régulière"
 
 msgid "Regular Expression (Manually Created)"
 msgstr "Expression régulière (créée manuellement)"
@@ -1078,6 +1082,7 @@ msgstr "Spécial"
 msgid "Stats"
 msgstr "Statistiques"
 
+# translation-verified: identical French spelling; Suggestions is the French plural used throughout this catalog
 msgid "Suggestions"
 msgstr "Suggestions"
 
@@ -1887,8 +1892,8 @@ msgstr "Destination 404 par défaut"
 msgid "Where to send visitors when a 404 error occurs"
 msgstr "Où envoyer les visiteurs lorsqu'une erreur 404 se produit"
 
-msgid "Automatically redirect 404s to similar pages when a good match is found"
-msgstr "Rediriger automatiquement les 404 vers des pages similaires lorsqu'une bonne correspondance est trouvée"
+msgid "Automatically redirect 404s to similar pages that score at least %1$s out of 100. To change that number, switch to Advanced Mode and look for %2$s in the System section."
+msgstr "Rediriger automatiquement les 404 vers des pages similaires obtenant au moins %1$s sur 100. Pour modifier ce nombre, passez en mode avancé et cherchez %2$s dans la section Système."
 
 msgid "Redirect type"
 msgstr "Type de redirection"
@@ -1987,7 +1992,7 @@ msgid "Ignored URL - will not be suggested"
 msgstr "URL ignorée - ne sera pas suggérée"
 
 msgid "Edit"
-msgstr "editer"
+msgstr "éditer"
 
 msgid "View Logs"
 msgstr "Voir les logs"
@@ -2058,6 +2063,7 @@ msgstr "Les redirections apparaîtront ici une fois créées."
 msgid "Redirect Logs"
 msgstr "Journaux des redirections"
 
+# translation-verified: identical French spelling; Action is the French word for the table column it labels
 msgid "Action"
 msgstr "Action"
 
@@ -2082,17 +2088,9 @@ msgstr "Visiter URL"
 msgid "This page doesn't exist or is not published so the redirect won't work."
 msgstr "Cette page n'existe pas ou n'est pas publiée, de sorte que la redirection ne fonctionnera pas."
 
-#: includes/DataAccess.php
-msgid "Just now"
-msgstr "À l'instant"
-
-#: includes/View.php
-msgid "Data may not be immediately updated. Refresh to see latest changes."
-msgstr "Les données peuvent ne pas être immédiatement mises à jour. Actualisez pour voir les dernières modifications."
-
 #: includes/View.php
 msgid "Refresh scheduled"
-msgstr "Actualisation planifiee"
+msgstr "Actualisation planifiée"
 
 #: includes/View.php
 msgid "Refresh running"
@@ -2213,6 +2211,7 @@ msgstr "Filtrer les résultats"
 msgid "Press Enter to search"
 msgstr "Appuyez sur Entrée pour rechercher"
 
+# translation-verified: identical French spelling; Pagination is the French term for the page navigation it labels
 #: includes/html/paginationLinks.html
 msgid "Pagination"
 msgstr "Pagination"
@@ -2263,16 +2262,16 @@ msgid "Timestamp"
 msgstr "Horodatage"
 
 msgid "Requested URL"
-msgstr "URL demandee"
+msgstr "URL demandée"
 
 msgid "Destination URL"
 msgstr "URL de destination"
 
 msgid "Some items could not be anonymized."
-msgstr "Certains elements n'ont pas pu etre anonymises."
+msgstr "Certains éléments n'ont pas pu être anonymisés."
 
 msgid "Rate limit exceeded. Please try again later."
-msgstr "Limite de taux depassee. Veuillez reessayer plus tard."
+msgstr "Limite de taux dépassée. Veuillez réessayer plus tard."
 
 msgid "Invalid nonce. Please reload the page."
 msgstr "Nonce invalide. Veuillez recharger la page."
@@ -2283,7 +2282,7 @@ msgstr "Diagnostic"
 
 #: includes/View.php
 msgid "Quick environment checks for troubleshooting and support."
-msgstr "Verifications rapides de l'environnement pour le depannage et le support."
+msgstr "Vérifications rapides de l'environnement pour le dépannage et le support."
 
 #: includes/View.php
 msgid "OK"
@@ -2311,7 +2310,7 @@ msgstr "Version de PHP"
 
 #: includes/View.php
 msgid "Uploads Directory"
-msgstr "Repertoire de televersement"
+msgstr "Répertoire de téléversement"
 
 #: includes/View.php
 msgid "Not available"
@@ -2319,7 +2318,7 @@ msgstr "Non disponible"
 
 #: includes/View.php
 msgid "Uploads Writable"
-msgstr "Televersement inscriptible"
+msgstr "Téléversement inscriptible"
 
 #: includes/View.php
 msgid "Yes"
@@ -2335,7 +2334,7 @@ msgstr "Extension mbstring"
 
 #: includes/View.php
 msgid "Loaded"
-msgstr "Chargee"
+msgstr "Chargée"
 
 #: includes/View.php
 msgid "Missing"
@@ -2355,11 +2354,11 @@ msgstr "Mode débogage WP "
 
 #: includes/View.php
 msgid "Enabled"
-msgstr "Active"
+msgstr "Activé"
 
 #: includes/View.php
 msgid "Disabled"
-msgstr "Desactive"
+msgstr "Désactivé"
 
 #: includes/html/paginationLinks.html
 msgid "data-pagination-auto-refresh"
@@ -2801,6 +2800,7 @@ msgstr "Rôle utilisateur"
 msgid "Referrer URL"
 msgstr "URL de référence"
 
+# translation-verified: HTTP header field name, kept in English here as French technical interfaces do
 msgid "User Agent"
 msgstr "User Agent"
 
@@ -2969,6 +2969,7 @@ msgstr "URLs 404 avec trafic de recherche (90 derniers jours)"
 msgid "Clicks"
 msgstr "Clics"
 
+# translation-verified: identical French spelling; Impressions is the French term used in the stats tables here
 msgid "Impressions"
 msgstr "Impressions"
 
@@ -3202,7 +3203,7 @@ msgid "URL Pattern"
 msgstr "Modèle d'URL"
 
 msgid "Regex"
-msgstr "Regex"
+msgstr "Expression régulière"
 
 msgid "Engines"
 msgstr "Moteurs"
@@ -3213,6 +3214,7 @@ msgstr "Priorité"
 msgid "Active"
 msgstr "Actif"
 
+# translation-verified: identical French spelling; Actions is the French plural for the table column it labels
 msgid "Actions"
 msgstr "Actions"
 
@@ -3309,6 +3311,7 @@ msgstr "Envoyer un commentaire"
 msgid "301"
 msgstr "301"
 
+# translation-verified: identical French spelling; Permanent is the French adjective already used for this redirect type
 msgid "Permanent"
 msgstr "Permanent"
 
@@ -3398,6 +3401,7 @@ msgstr "Recherche de redirection"
 msgid "Redirect lookup (without comments)"
 msgstr "Recherche de redirection (sans commentaires)"
 
+# translation-verified: identical French spelling; Conditions is the French plural used for redirect conditions here
 msgid "Conditions"
 msgstr "Conditions"
 
@@ -3577,103 +3581,103 @@ msgid "No access token received from authorization."
 msgstr "Aucun jeton d'accès reçu lors de l'autorisation."
 
 msgid "Automatically trash bot and spam URLs"
-msgstr "Automatically trash bot and spam URLs"
+msgstr "Mettre automatiquement à la corbeille les URL de robots et de spam"
 
 msgid "Auto-trash captured URLs from bots and security scanners during daily maintenance"
-msgstr "Auto-trash captured URLs from bots and security scanners during daily maintenance"
+msgstr "Mettre automatiquement à la corbeille les URL capturées provenant de robots et de scanners de sécurité lors de la maintenance quotidienne"
 
 msgid "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected. We will email you if something needs attention."
-msgstr "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected. We will email you if something needs attention."
+msgstr "404 Solution surveille maintenant votre site. Lorsque des visiteurs atteignent des liens brisés, ils sont automatiquement redirigés. Nous vous enverrons un e-mail si quelque chose nécessite votre attention."
 
 msgid "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected."
-msgstr "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected."
+msgstr "404 Solution surveille maintenant votre site. Lorsque des visiteurs atteignent des liens brisés, ils sont automatiquement redirigés."
 
 msgid "404 Solution is now monitoring your site. We will email you if captured 404 URLs need attention."
-msgstr "404 Solution is now monitoring your site. We will email you if captured 404 URLs need attention."
+msgstr "404 Solution surveille maintenant votre site. Nous vous enverrons un e-mail si des URL 404 capturées nécessitent votre attention."
 
 msgid "404 Solution is now monitoring your site. You can create manual redirects anytime from the Page Redirects tab."
-msgstr "404 Solution is now monitoring your site. You can create manual redirects anytime from the Page Redirects tab."
+msgstr "404 Solution surveille maintenant votre site. Vous pouvez créer des redirections manuelles à tout moment depuis l'onglet Redirections de page."
 
 msgid "You're all set!"
-msgstr "You're all set!"
+msgstr "Tout est prêt !"
 
 msgid "Get email alerts about 404 problems?"
-msgstr "Get email alerts about 404 problems?"
+msgstr "Recevoir des alertes par e-mail sur les problèmes 404 ?"
 
 msgid "Yes, email me a weekly summary (recommended)"
-msgstr "Yes, email me a weekly summary (recommended)"
+msgstr "Oui, envoyez-moi un résumé hebdomadaire (recommandé)"
 
 msgid "Get notified when captured 404 URLs exceed 50"
-msgstr "Get notified when captured 404 URLs exceed 50"
+msgstr "Être averti lorsque les URL 404 capturées dépassent 50"
 
 msgid "You can always enable email alerts later in Options"
-msgstr "You can always enable email alerts later in Options"
+msgstr "Vous pouvez toujours activer les alertes par e-mail plus tard dans Options"
 
 msgid "No, I'll check manually"
-msgstr "No, I'll check manually"
+msgstr "Non, je vérifierai manuellement"
 
 msgid "Automatic Permanent Redirects"
-msgstr "Automatic Permanent Redirects"
+msgstr "Redirections permanentes automatiques"
 
 msgid "Automatic Temporary Redirects"
-msgstr "Automatic Temporary Redirects"
+msgstr "Redirections temporaires automatiques"
 
 msgid "Manual Permanent Redirects"
-msgstr "Manual Permanent Redirects"
+msgstr "Redirections permanentes manuelles"
 
 msgid "Manual Temporary Redirects"
-msgstr "Manual Temporary Redirects"
+msgstr "Redirections temporaires manuelles"
 
 msgid "Broken links visitors tried to reach. Create Redirect for important ones, Dismiss the rest."
-msgstr "Broken links visitors tried to reach. Create Redirect for important ones, Dismiss the rest."
+msgstr "Liens brisés que les visiteurs ont tenté d'atteindre. Utilisez Créer une Redirection pour les plus importants et Ignorer pour les autres."
 
 msgid "Needs Review"
-msgstr "Needs Review"
+msgstr "À examiner"
 
 msgid "Handled"
-msgstr "Handled"
+msgstr "Traité"
 
 msgid "Dismiss"
-msgstr "Dismiss"
+msgstr "Ignorer"
 
 msgid "All good — %d redirects active, no URLs need attention"
-msgstr "All good — %d redirects active, no URLs need attention"
+msgstr "Tout va bien : %d redirections actives, aucune URL ne nécessite d'attention"
 
 msgid "%1$d redirects active — %2$d captured URLs have repeat visitors"
-msgstr "%1$d redirects active — %2$d captured URLs have repeat visitors"
+msgstr "%1$d redirections actives : %2$d URL capturées ont des visiteurs récurrents"
 
 msgid "View"
 msgstr "View"
 
 msgid "The plugin creates these automatically. You only need to act when the status bar above says so."
-msgstr "The plugin creates these automatically. You only need to act when the status bar above says so."
+msgstr "L'extension les crée automatiquement. Vous n'avez à intervenir que lorsque la barre d'état ci-dessus l'indique."
 
 msgid "Blocked"
-msgstr "Blocked"
+msgstr "Bloqué"
 
 msgid "Best for moved pages"
-msgstr "Best for moved pages"
+msgstr "Idéal pour les pages déplacées"
 
 msgid "Best for seasonal or test pages"
-msgstr "Best for seasonal or test pages"
+msgstr "Idéal pour les pages saisonnières ou de test"
 
 msgid "Permanent is best for most redirects. Use Temporary if the page may come back."
-msgstr "Permanent is best for most redirects. Use Temporary if the page may come back."
+msgstr "Permanent convient à la plupart des redirections. Utilisez Temporaire si la page peut revenir."
 
 msgid "Back to Captured 404s"
-msgstr "Back to Captured 404s"
+msgstr "Retour aux 404 capturés"
 
 msgid "Suggested destination"
-msgstr "Suggested destination"
+msgstr "Destination suggérée"
 
 msgid "match"
-msgstr "match"
+msgstr "de correspondance"
 
 msgid "Accept Suggestion"
-msgstr "Accept Suggestion"
+msgstr "Accepter la suggestion"
 
 msgid "Pick a Different Page"
-msgstr "Pick a Different Page"
+msgstr "Choisir une autre page"
 
 msgid "Post"
 msgstr "Post"
@@ -3905,116 +3909,91 @@ msgstr "La reconstruction des vues/clics est suspendue après %d échecs conséc
 msgid "Retry Now"
 msgstr "Réessayer maintenant"
 
-# translation-verified: en-fallback awaiting native pass (i310)
-#: includes/
-msgid "literal text"
-msgstr "literal text"
-
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "literal"
-msgstr "literal"
+msgstr "littéral"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%1$d of %2$d"
-msgstr "%1$d of %2$d"
+msgstr "%1$d sur %2$d"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%s item"
 msgid_plural "%s items"
-msgstr[0] "%s item"
-msgstr[1] "%s items"
+msgstr[0] "%s élément"
+msgstr[1] "%s éléments"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Unknown purge result: %s"
-msgstr "Error: Unknown purge result: %s"
+msgstr "Erreur : résultat de purge inconnu : %s"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%s redirect entries were moved to the trash."
-msgstr "%s redirect entries were moved to the trash."
+msgstr "%s entrées de redirection ont été mises à la corbeille."
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Unable to update redirect data. Repository result: %s"
-msgstr "Error: Unable to update redirect data. Repository result: %s"
+msgstr "Erreur : impossible de mettre à jour les données de redirection. Résultat du dépôt : %s"
 
-# translation-verified: en-fallback awaiting native pass
 #: includes/
 msgid "Error: Unable to save redirect conditions. Repository result: %s"
-msgstr "Error: Unable to save redirect conditions. Repository result: %s"
+msgstr "Erreur : impossible d'enregistrer les conditions de redirection. Résultat du dépôt : %s"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Loading status..."
-msgstr "Loading status..."
+msgstr "Chargement du statut..."
 
 #: includes/
 msgid "Loading..."
 msgstr "Chargement..."
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Collected URL deletion value must be a number greater than or equal to zero"
-msgstr "Error: Collected URL deletion value must be a number greater than or equal to zero"
+msgstr "Erreur : la valeur de suppression des URL collectées doit être un nombre supérieur ou égal à zéro"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Manual redirect deletion value must be a number greater than or equal to zero"
-msgstr "Error: Manual redirect deletion value must be a number greater than or equal to zero"
+msgstr "Erreur : la valeur de suppression des redirections manuelles doit être un nombre supérieur ou égal à zéro"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Log deletion value must be a number greater than or equal to zero"
-msgstr "Error: Log deletion value must be a number greater than or equal to zero"
+msgstr "Erreur : la valeur de suppression des journaux doit être un nombre supérieur ou égal à zéro"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Auto redirect deletion value must be a number greater than or equal to zero"
-msgstr "Error: Auto redirect deletion value must be a number greater than or equal to zero"
+msgstr "Erreur : la valeur de suppression des redirections automatiques doit être un nombre supérieur ou égal à zéro"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Auto-redirect expiration days must be a number greater than or equal to zero"
-msgstr "Error: Auto-redirect expiration days must be a number greater than or equal to zero"
+msgstr "Erreur : le nombre de jours avant expiration des redirections automatiques doit être un nombre supérieur ou égal à zéro"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Maximum log disk usage must be a number greater than zero"
-msgstr "Error: Maximum log disk usage must be a number greater than zero"
+msgstr "Erreur : l'utilisation disque maximale des journaux doit être un nombre supérieur à zéro"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Keep my redirects (%d)"
-msgstr "Keep my redirects (%d)"
+msgstr "Conserver mes redirections (%d)"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%d minutes ago"
-msgstr "%d minutes ago"
+msgstr "il y a %d minutes"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%d hours ago"
-msgstr "%d hours ago"
+msgstr "il y a %d heures"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%d days ago"
-msgstr "%d days ago"
+msgstr "il y a %d jours"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Unknown status filter. Valid values are: manual, auto, regex (or omit for all active)."
-msgstr "Unknown status filter. Valid values are: manual, auto, regex (or omit for all active)."
+msgstr "Filtre de statut inconnu. Les valeurs valides sont : manual, auto, regex (ou omettez-le pour toutes les redirections actives)."
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "The \"to\" URL must be a relative path or an http/https URL."
-msgstr "The \"to\" URL must be a relative path or an http/https URL."
+msgstr "L'URL de destination doit être un chemin relatif ou une URL http/https."
 
 msgid "Contact your hosting provider. This is usually caused by a database quota, tablespace limit, or full /tmp partition - not necessarily a full disk."
 msgstr "Contactez votre hébergeur. Le problème provient généralement d'un quota de base de données, d'une limite d'espace de tables ou d'une partition /tmp saturée - pas nécessairement d'un disque plein."
@@ -4073,10 +4052,9 @@ msgstr "Demandez à votre hébergeur de revoir les privilèges de votre utilisat
 msgid "This database does not support session-scoped GET_LOCK named locks. The plugin is using a WordPress option-row fallback to coordinate the staged view-build. Common on PlanetScale, Vitess, and split-routing ProxySQL deployments."
 msgstr "Cette base de données ne prend pas en charge les verrous nommés GET_LOCK à portée de session. L'extension utilise une solution de repli basée sur une ligne d'option WordPress pour coordonner la construction de vue par étapes. Courant sur les déploiements PlanetScale, Vitess et ProxySQL à routage réparti."
 
-# translation-verified: en-fallback awaiting native pass (t_260618_093531_671)
 #: includes/view/View_CapturedURLsTable.php:332
 msgid "Preparing the captured 404s table. The list is still loading and will appear in a moment."
-msgstr "Preparing the captured 404s table. The list is still loading and will appear in a moment."
+msgstr "Préparation du tableau des 404 capturés. La liste est encore en cours de chargement et apparaîtra dans un instant."
 
 #: includes/admin/AdminTableColumnHeaders.php:178
 msgid "Sorting by this column is being prepared for your number of URLs (%d%% complete). The list shows newest first until it is ready."
@@ -4170,54 +4148,138 @@ msgstr "Ce site a la collecte de rapports de diagnostic %s. Vous pouvez téléch
 msgid "When checked, the text is treated as a regular expression. Note that including a bad regular expression or one that takes too long will break your website. So please use caution and test them elsewhere before trying them here. If you don't know what you're doing please don't use this option (as it's not necessary for the functioning of the plugin)."
 msgstr "Lorsque coché, le texte est traité comme une expression régulière. Notez qu'une expression régulière incorrecte ou trop lente ENDOMMAGERA votre site web. Veuillez donc faire preuve de prudence et les tester ailleurs avant de les essayer ici. Si vous ne savez pas ce que vous faites, veuillez ne pas utiliser cette option (elle n'est pas nécessaire au fonctionnement du plugin)."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "/events/(.+) will match any URL that begins with /events/. Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
-msgstr "/events/(.+) will match any URL that begins with /events/. Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
+msgstr "/events/(.+) correspond à toute URL commençant par /events/. Utilisez $1 dans la destination pour insérer le texte capturé. Les chemins relatifs au site tels que /archive/$1 et les URL HTTP(S) complètes sont pris en charge."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
-msgstr "Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
+msgstr "Utilisez $1 dans la destination pour insérer le texte capturé. Les chemins relatifs au site tels que /archive/$1 et les URL HTTP(S) complètes sont pris en charge."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains control characters."
-msgstr "Error: Regex destination contains control characters."
+msgstr "Erreur : la destination regex contient des caractères de contrôle."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination must be an HTTP(S) URL or a site-relative path starting with /."
-msgstr "Error: Regex destination must be an HTTP(S) URL or a site-relative path starting with /."
+msgstr "Erreur : la destination regex doit être une URL HTTP(S) ou un chemin relatif au site commençant par /."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: A site-relative regex destination must start with a single /. URLs beginning with // are not allowed."
-msgstr "Error: A site-relative regex destination must start with a single /. URLs beginning with // are not allowed."
+msgstr "Erreur : une destination regex relative au site doit commencer par un seul /. Les URL commençant par // ne sont pas autorisées."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination must not contain spaces. Use URL encoding such as %20 instead."
-msgstr "Error: Regex destination must not contain spaces. Use URL encoding such as %20 instead."
+msgstr "Erreur : la destination regex ne doit pas contenir d'espaces. Utilisez un encodage d'URL tel que %20 à la place."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains invalid percent encoding."
-msgstr "Error: Regex destination contains invalid percent encoding."
+msgstr "Erreur : la destination regex contient un encodage pourcent invalide."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains characters that are not safe in a redirect URL."
-msgstr "Error: Regex destination contains characters that are not safe in a redirect URL."
+msgstr "Erreur : la destination regex contient des caractères qui ne sont pas sûrs dans une URL de redirection."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination must not contain . or .. path segments."
-msgstr "Error: Regex destination must not contain . or .. path segments."
+msgstr "Erreur : la destination regex ne doit pas contenir de segments de chemin . ou .."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Source regular expression is invalid."
-msgstr "Error: Source regular expression is invalid."
+msgstr "Erreur : l'expression régulière source est invalide."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains unsupported replacement syntax. Use $1, $2, and so on."
-msgstr "Error: Regex destination contains unsupported replacement syntax. Use $1, $2, and so on."
+msgstr "Erreur : la destination regex contient une syntaxe de remplacement non prise en charge. Utilisez $1, $2, et ainsi de suite."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Relative regex destinations support numbered capture groups written as (...). Named and branch-reset groups are not supported."
-msgstr "Error: Relative regex destinations support numbered capture groups written as (...). Named and branch-reset groups are not supported."
+msgstr "Erreur : les destinations regex relatives prennent en charge les groupes de capture numérotés écrits sous la forme (...). Les groupes nommés et les groupes branch reset ne sont pas pris en charge."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination references $%1$d, but the source pattern defines %2$d capture group(s)."
-msgstr "Error: Regex destination references $%1$d, but the source pattern defines %2$d capture group(s)."
+msgstr "Erreur : la destination regex référence $%1$d, mais le motif source définit %2$d groupe(s) de capture."
+
+msgid "Could not load chart data. Reload this page and try again."
+msgstr "Impossible de charger les données du graphique. Rechargez cette page et réessayez."
+
+msgid "This sends a one-time diagnostic report to the plugin developer so they can investigate the issue you are seeing."
+msgstr "Ceci envoie un rapport de diagnostic ponctuel au développeur de l'extension afin qu'il puisse examiner le problème que vous rencontrez."
+
+msgid "This report includes:"
+msgstr "Ce rapport contient :"
+
+msgid "Site URL"
+msgstr "URL du site"
+
+msgid "Plugin, PHP, WordPress, and database versions"
+msgstr "Versions de l'extension, de PHP, de WordPress et de la base de données"
+
+msgid "List of active plugins"
+msgstr "Liste des extensions actives"
+
+msgid "Recent debug log excerpt"
+msgstr "Extrait récent du journal de débogage"
+
+msgid "Optional message and reply email you provide below"
+msgstr "Message facultatif et adresse e-mail de réponse que vous indiquez ci-dessous"
+
+msgid "Show what's in this report"
+msgstr "Afficher le contenu de ce rapport"
+
+msgid "Hide report contents"
+msgstr "Masquer le contenu du rapport"
+
+msgid "Loading report contents..."
+msgstr "Chargement du contenu du rapport..."
+
+msgid "Could not load preview. The full report is still safe to send."
+msgstr "Impossible de charger l'aperçu. Le rapport complet peut tout de même être envoyé."
+
+msgid "What went wrong? (optional, helps us diagnose)"
+msgstr "Que s'est-il passé ? (facultatif, cela nous aide à diagnostiquer)"
+
+msgid "Where should we reply? (optional)"
+msgstr "Où devons-nous répondre ? (facultatif)"
+
+msgid "By clicking Send report, you consent to transmitting the information above to the plugin developer for support purposes. The data is used only to diagnose your issue and is not shared with third parties."
+msgstr "En cliquant sur Envoyer le rapport, vous consentez à la transmission des informations ci-dessus au développeur de l'extension à des fins d'assistance. Ces données servent uniquement à diagnostiquer votre problème et ne sont partagées avec aucun tiers."
+
+msgid "Send report"
+msgstr "Envoyer le rapport"
+
+msgid "Sending..."
+msgstr "Envoi en cours..."
+
+msgid "Retry"
+msgstr "Réessayer"
+
+msgid "Sent. Reference: "
+msgstr "Envoyé. Référence : "
+
+msgid ". Thank you."
+msgstr ". Merci."
+
+msgid "You already sent a report recently. Try again in {minutes} minute(s)."
+msgstr "Vous avez déjà envoyé un rapport récemment. Réessayez dans {minutes} minute(s)."
+
+msgid "Network error: could not reach the server. Check your internet connection and try again."
+msgstr "Erreur réseau : impossible de joindre le serveur. Vérifiez votre connexion Internet et réessayez."
+
+msgid "Could not send report. Please try again later."
+msgstr "Impossible d'envoyer le rapport. Veuillez réessayer plus tard."
+
+msgid "Could not load the migration tool configuration. Reload this page and try again."
+msgstr "Impossible de charger la configuration de l'outil de migration. Rechargez cette page et réessayez."
+
+msgid "No suggested match was scored for this URL"
+msgstr "Aucune correspondance suggérée n'a été notée pour cette URL"
+
+msgid "No confidence score was recorded for this redirect"
+msgstr "Aucun indice de confiance n'a été enregistré pour cette redirection"
+
+msgid "No score"
+msgstr "Aucun score"
+
+msgid "Redirect this URL"
+msgstr "Rediriger cette URL"
+
+msgid "Change the minimum score"
+msgstr "Modifier le score minimum"
+
+msgid "404 Solution, admin only: nothing on the site scored close enough to suggest."
+msgstr "404 Solution, administrateurs uniquement : aucun contenu du site n'a obtenu un score suffisant pour être suggéré."
+
+msgid "404 Solution, admin only: best match %1$s, under the %2$s needed to redirect automatically."
+msgstr "404 Solution, administrateurs uniquement : meilleure correspondance %1$s, en dessous des %2$s requis pour rediriger automatiquement."
+
+msgid "404 Solution, admin only: best match %1$s, at or above the %2$s needed to redirect automatically."
+msgstr "404 Solution, administrateurs uniquement : meilleure correspondance %1$s, égale ou supérieure aux %2$s requis pour rediriger automatiquement."
+

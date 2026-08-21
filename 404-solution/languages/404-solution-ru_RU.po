@@ -445,7 +445,7 @@ msgid "Debug logging"
 msgstr "Запись отладки"
 
 msgid "Default"
-msgstr "Default"
+msgstr "По умолчанию"
 
 msgid "Default WordPress post types are \"post\" and \"page.\""
 msgstr "Типы записей WordPress по умолчанию — это \"post\" и \"page.\""
@@ -534,9 +534,8 @@ msgstr "Ошибка: Не найдены ID для запроса редакт�
 msgid "Error: No ID(s) specified for bulk action. (%s)"
 msgstr "Ошибка: Не указаны ID для массового действия. (%s)"
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
-msgstr "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+msgstr "Ошибка: указано слишком много ID для массового действия (максимум %d). (%s)"
 
 msgid "Error: No records were imported. SQL result: %s"
 msgstr "Ошибка: Записи не были импортированы. Результат SQL: %s"
@@ -978,7 +977,7 @@ msgid "Referrer"
 msgstr "Источник перехода"
 
 msgid "RegEx"
-msgstr "RegEx"
+msgstr "Регулярное выражение"
 
 msgid "Regular Expression (Manually Created)"
 msgstr "Регулярное выражение (создано вручную)"
@@ -1891,8 +1890,8 @@ msgstr "Назначение 404 по умолчанию"
 msgid "Where to send visitors when a 404 error occurs"
 msgstr "Куда направлять посетителей при возникновении ошибки 404"
 
-msgid "Automatically redirect 404s to similar pages when a good match is found"
-msgstr "Автоматически перенаправлять 404 на похожие страницы при обнаружении хорошего совпадения"
+msgid "Automatically redirect 404s to similar pages that score at least %1$s out of 100. To change that number, switch to Advanced Mode and look for %2$s in the System section."
+msgstr "Автоматически перенаправлять ошибки 404 на похожие страницы, набравшие не менее %1$s из 100 баллов. Чтобы изменить это число, переключитесь в расширенный режим и найдите %2$s в разделе «Система»."
 
 msgid "Redirect type"
 msgstr "Тип перенаправления"
@@ -1928,13 +1927,13 @@ msgid "Need more control? Switch to Advanced Mode for 30+ additional options."
 msgstr "Нужно больше контроля? Переключитесь в расширенный режим для 30+ дополнительных параметров."
 
 msgid "Need more control?"
-msgstr "Need more control?"
+msgstr "Нужно больше контроля?"
 
 msgid "Switch to Advanced Mode"
-msgstr "Switch to Advanced Mode"
+msgstr "Переключиться в расширенный режим"
 
 msgid "for 30+ additional options."
-msgstr "for 30+ additional options."
+msgstr "для 30+ дополнительных настроек."
 
 msgid "Statistics"
 msgstr "Статистика"
@@ -2086,14 +2085,6 @@ msgstr "Перейти по URL"
 msgid "This page doesn't exist or is not published so the redirect won't work."
 msgstr "Эта страница не существует или не опубликована, поэтому перенаправление не будет работать."
 
-#: includes/DataAccess.php
-msgid "Just now"
-msgstr "Just now"
-
-#: includes/View.php
-msgid "Data may not be immediately updated. Refresh to see latest changes."
-msgstr "Data may not be immediately updated. Refresh to see latest changes."
-
 #: includes/View.php
 msgid "Refresh scheduled"
 msgstr "Обновление запланировано"
@@ -2192,7 +2183,7 @@ msgstr "url-looks-like-regex"
 
 #: includes/html/tableRowPageRedirects.html
 msgid "This URL looks like a regular expression but is not marked as one. Edit the redirect and check \"Treat this URL as a regular expression\"."
-msgstr "This URL looks like a regular expression but is not marked as one. Edit the redirect and check \"Treat this URL as a regular expression\"."
+msgstr "Этот URL похож на регулярное выражение, но не отмечен как таковой. Отредактируйте перенаправление и установите флажок «Обрабатывать этот URL как регулярное выражение»."
 
 msgid "Create redirect from old URL to new URL"
 msgstr "Создать перенаправление со старого URL на новый URL"
@@ -3590,103 +3581,103 @@ msgid "No access token received from authorization."
 msgstr "Токен доступа не был получен при авторизации."
 
 msgid "Automatically trash bot and spam URLs"
-msgstr "Automatically trash bot and spam URLs"
+msgstr "Автоматически перемещать URL ботов и спама в корзину"
 
 msgid "Auto-trash captured URLs from bots and security scanners during daily maintenance"
-msgstr "Auto-trash captured URLs from bots and security scanners during daily maintenance"
+msgstr "Автоматически перемещать в корзину захваченные URL от ботов и сканеров безопасности во время ежедневного обслуживания"
 
 msgid "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected. We will email you if something needs attention."
-msgstr "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected. We will email you if something needs attention."
+msgstr "404 Solution теперь следит за вашим сайтом. Когда посетители попадают на неработающие ссылки, они автоматически перенаправляются. Мы отправим вам письмо, если что-то потребует внимания."
 
 msgid "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected."
-msgstr "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected."
+msgstr "404 Solution теперь следит за вашим сайтом. Когда посетители попадают на неработающие ссылки, они автоматически перенаправляются."
 
 msgid "404 Solution is now monitoring your site. We will email you if captured 404 URLs need attention."
-msgstr "404 Solution is now monitoring your site. We will email you if captured 404 URLs need attention."
+msgstr "404 Solution теперь следит за вашим сайтом. Мы отправим вам письмо, если захваченные URL с ошибкой 404 потребуют внимания."
 
 msgid "404 Solution is now monitoring your site. You can create manual redirects anytime from the Page Redirects tab."
-msgstr "404 Solution is now monitoring your site. You can create manual redirects anytime from the Page Redirects tab."
+msgstr "404 Solution теперь следит за вашим сайтом. Вы можете создать перенаправления вручную в любое время на вкладке «Перенаправления страниц»."
 
 msgid "You're all set!"
-msgstr "You're all set!"
+msgstr "Всё готово!"
 
 msgid "Get email alerts about 404 problems?"
-msgstr "Get email alerts about 404 problems?"
+msgstr "Получать уведомления по электронной почте о проблемах 404?"
 
 msgid "Yes, email me a weekly summary (recommended)"
-msgstr "Yes, email me a weekly summary (recommended)"
+msgstr "Да, присылайте мне еженедельную сводку (рекомендуется)"
 
 msgid "Get notified when captured 404 URLs exceed 50"
-msgstr "Get notified when captured 404 URLs exceed 50"
+msgstr "Получать уведомление, когда захваченных URL с ошибкой 404 станет больше 50"
 
 msgid "You can always enable email alerts later in Options"
-msgstr "You can always enable email alerts later in Options"
+msgstr "Вы всегда можете включить уведомления по электронной почте позже в разделе «Настройки»"
 
 msgid "No, I'll check manually"
-msgstr "No, I'll check manually"
+msgstr "Нет, я проверю вручную"
 
 msgid "Automatic Permanent Redirects"
-msgstr "Automatic Permanent Redirects"
+msgstr "Автоматические постоянные перенаправления"
 
 msgid "Automatic Temporary Redirects"
-msgstr "Automatic Temporary Redirects"
+msgstr "Автоматические временные перенаправления"
 
 msgid "Manual Permanent Redirects"
-msgstr "Manual Permanent Redirects"
+msgstr "Ручные постоянные перенаправления"
 
 msgid "Manual Temporary Redirects"
-msgstr "Manual Temporary Redirects"
+msgstr "Ручные временные перенаправления"
 
 msgid "Broken links visitors tried to reach. Create Redirect for important ones, Dismiss the rest."
-msgstr "Broken links visitors tried to reach. Create Redirect for important ones, Dismiss the rest."
+msgstr "Неработающие ссылки, на которые пытались перейти посетители. Используйте «Создать перенаправление» для важных и «Отклонить» для остальных."
 
 msgid "Needs Review"
-msgstr "Needs Review"
+msgstr "Требует проверки"
 
 msgid "Handled"
-msgstr "Handled"
+msgstr "Обработано"
 
 msgid "Dismiss"
-msgstr "Dismiss"
+msgstr "Отклонить"
 
 msgid "All good — %d redirects active, no URLs need attention"
-msgstr "All good — %d redirects active, no URLs need attention"
+msgstr "Всё в порядке: %d перенаправлений активно, ни один URL не требует внимания"
 
 msgid "%1$d redirects active — %2$d captured URLs have repeat visitors"
-msgstr "%1$d redirects active — %2$d captured URLs have repeat visitors"
+msgstr "%1$d перенаправлений активно: у %2$d захваченных URL есть повторные посетители"
 
 msgid "View"
 msgstr "View"
 
 msgid "The plugin creates these automatically. You only need to act when the status bar above says so."
-msgstr "The plugin creates these automatically. You only need to act when the status bar above says so."
+msgstr "Плагин создаёт их автоматически. Вмешательство нужно только тогда, когда об этом сообщает строка состояния выше."
 
 msgid "Blocked"
-msgstr "Blocked"
+msgstr "Заблокировано"
 
 msgid "Best for moved pages"
-msgstr "Best for moved pages"
+msgstr "Лучше всего для перемещённых страниц"
 
 msgid "Best for seasonal or test pages"
-msgstr "Best for seasonal or test pages"
+msgstr "Лучше всего для сезонных или тестовых страниц"
 
 msgid "Permanent is best for most redirects. Use Temporary if the page may come back."
-msgstr "Permanent is best for most redirects. Use Temporary if the page may come back."
+msgstr "Постоянное подходит для большинства перенаправлений. Используйте Временное, если страница может вернуться."
 
 msgid "Back to Captured 404s"
-msgstr "Back to Captured 404s"
+msgstr "Назад к захваченным 404"
 
 msgid "Suggested destination"
-msgstr "Suggested destination"
+msgstr "Предлагаемое назначение"
 
 msgid "match"
-msgstr "match"
+msgstr "совпадение"
 
 msgid "Accept Suggestion"
-msgstr "Accept Suggestion"
+msgstr "Принять предложение"
 
 msgid "Pick a Different Page"
-msgstr "Pick a Different Page"
+msgstr "Выбрать другую страницу"
 
 msgid "Post"
 msgstr "Post"
@@ -3918,22 +3909,14 @@ msgstr "Перестроение просмотров/попаданий при�
 msgid "Retry Now"
 msgstr "Повторить сейчас"
 
-# translation-verified: en-fallback awaiting native pass (i310)
-#: includes/
-msgid "literal text"
-msgstr "literal text"
-
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "literal"
-msgstr "literal"
+msgstr "буквальный"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%1$d of %2$d"
-msgstr "%1$d of %2$d"
+msgstr "%1$d из %2$d"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%s item"
 msgid_plural "%s items"
@@ -3941,94 +3924,77 @@ msgstr[0] "%s элемент"
 msgstr[1] "%s элемента"
 msgstr[2] "%s элементов"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Unknown purge result: %s"
-msgstr "Error: Unknown purge result: %s"
+msgstr "Ошибка: неизвестный результат очистки: %s"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%s redirect entries were moved to the trash."
-msgstr "%s redirect entries were moved to the trash."
+msgstr "%s записей перенаправлений перемещено в корзину."
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Unable to update redirect data. Repository result: %s"
-msgstr "Error: Unable to update redirect data. Repository result: %s"
+msgstr "Ошибка: невозможно обновить данные перенаправления. Результат репозитория: %s"
 
-# translation-verified: en-fallback awaiting native pass
 #: includes/
 msgid "Error: Unable to save redirect conditions. Repository result: %s"
-msgstr "Error: Unable to save redirect conditions. Repository result: %s"
+msgstr "Ошибка: невозможно сохранить условия перенаправления. Результат репозитория: %s"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Loading status..."
-msgstr "Loading status..."
+msgstr "Загрузка состояния..."
 
 #: includes/
 msgid "Loading..."
 msgstr "Загрузка..."
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Collected URL deletion value must be a number greater than or equal to zero"
-msgstr "Error: Collected URL deletion value must be a number greater than or equal to zero"
+msgstr "Ошибка: значение удаления собранных URL должно быть числом больше или равным нулю"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Manual redirect deletion value must be a number greater than or equal to zero"
-msgstr "Error: Manual redirect deletion value must be a number greater than or equal to zero"
+msgstr "Ошибка: значение удаления ручных перенаправлений должно быть числом больше или равным нулю"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Log deletion value must be a number greater than or equal to zero"
-msgstr "Error: Log deletion value must be a number greater than or equal to zero"
+msgstr "Ошибка: значение удаления журналов должно быть числом больше или равным нулю"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Auto redirect deletion value must be a number greater than or equal to zero"
-msgstr "Error: Auto redirect deletion value must be a number greater than or equal to zero"
+msgstr "Ошибка: значение удаления автоматических перенаправлений должно быть числом больше или равным нулю"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Auto-redirect expiration days must be a number greater than or equal to zero"
-msgstr "Error: Auto-redirect expiration days must be a number greater than or equal to zero"
+msgstr "Ошибка: число дней до истечения автоматических перенаправлений должно быть числом больше или равным нулю"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Maximum log disk usage must be a number greater than zero"
-msgstr "Error: Maximum log disk usage must be a number greater than zero"
+msgstr "Ошибка: максимальное использование диска журналами должно быть числом больше нуля"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Keep my redirects (%d)"
-msgstr "Keep my redirects (%d)"
+msgstr "Сохранить мои перенаправления (%d)"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%d minutes ago"
-msgstr "%d minutes ago"
+msgstr "%d минут назад"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%d hours ago"
-msgstr "%d hours ago"
+msgstr "%d часов назад"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%d days ago"
-msgstr "%d days ago"
+msgstr "%d дней назад"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Unknown status filter. Valid values are: manual, auto, regex (or omit for all active)."
-msgstr "Unknown status filter. Valid values are: manual, auto, regex (or omit for all active)."
+msgstr "Неизвестный фильтр статуса. Допустимые значения: manual, auto, regex (или не указывайте для всех активных)."
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "The \"to\" URL must be a relative path or an http/https URL."
-msgstr "The \"to\" URL must be a relative path or an http/https URL."
+msgstr "URL назначения должен быть относительным путём или URL http/https."
 
 msgid "Contact your hosting provider. This is usually caused by a database quota, tablespace limit, or full /tmp partition - not necessarily a full disk."
 msgstr "Обратитесь к вашему хостинг-провайдеру. Обычно причина в квоте базы данных, ограничении табличного пространства или переполненном разделе /tmp, а не обязательно в заполненном диске."
@@ -4087,10 +4053,9 @@ msgstr "Попросите ваш хостинг проверить привил
 msgid "This database does not support session-scoped GET_LOCK named locks. The plugin is using a WordPress option-row fallback to coordinate the staged view-build. Common on PlanetScale, Vitess, and split-routing ProxySQL deployments."
 msgstr "Эта база данных не поддерживает именованные блокировки GET_LOCK в области сессии. Плагин использует резервный механизм на основе строки параметров WordPress для координации поэтапного построения представления. Часто встречается в развёртываниях PlanetScale, Vitess и ProxySQL с разделением маршрутизации."
 
-# translation-verified: en-fallback awaiting native pass (t_260618_093531_671)
 #: includes/view/View_CapturedURLsTable.php:332
 msgid "Preparing the captured 404s table. The list is still loading and will appear in a moment."
-msgstr "Preparing the captured 404s table. The list is still loading and will appear in a moment."
+msgstr "Подготовка таблицы захваченных 404. Список ещё загружается и появится через мгновение."
 
 #: includes/admin/AdminTableColumnHeaders.php:178
 msgid "Sorting by this column is being prepared for your number of URLs (%d%% complete). The list shows newest first until it is ready."
@@ -4184,54 +4149,138 @@ msgstr "Для этого сайта диагностическая отчетн
 msgid "When checked, the text is treated as a regular expression. Note that including a bad regular expression or one that takes too long will break your website. So please use caution and test them elsewhere before trying them here. If you don't know what you're doing please don't use this option (as it's not necessary for the functioning of the plugin)."
 msgstr "Если отмечено, текст обрабатывается как регулярное выражение. Обратите внимание, что неправильное или слишком медленное регулярное выражение нарушит работу вашего сайта. Поэтому, пожалуйста, соблюдайте осторожность и протестируйте их в другом месте, прежде чем пробовать здесь. Если вы не знаете, что делаете, пожалуйста, не используйте эту опцию (она не требуется для работы плагина)."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "/events/(.+) will match any URL that begins with /events/. Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
-msgstr "/events/(.+) will match any URL that begins with /events/. Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
+msgstr "/events/(.+) соответствует любому URL, начинающемуся с /events/. Используйте $1 в назначении, чтобы вставить захваченный текст. Поддерживаются относительные пути сайта, такие как /archive/$1, и полные URL HTTP(S)."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
-msgstr "Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
+msgstr "Используйте $1 в назначении, чтобы вставить захваченный текст. Поддерживаются относительные пути сайта, такие как /archive/$1, и полные URL HTTP(S)."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains control characters."
-msgstr "Error: Regex destination contains control characters."
+msgstr "Ошибка: назначение регулярного выражения содержит управляющие символы."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination must be an HTTP(S) URL or a site-relative path starting with /."
-msgstr "Error: Regex destination must be an HTTP(S) URL or a site-relative path starting with /."
+msgstr "Ошибка: назначение регулярного выражения должно быть URL HTTP(S) или относительным путём сайта, начинающимся с /."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: A site-relative regex destination must start with a single /. URLs beginning with // are not allowed."
-msgstr "Error: A site-relative regex destination must start with a single /. URLs beginning with // are not allowed."
+msgstr "Ошибка: относительное назначение регулярного выражения должно начинаться с одной косой черты /. URL, начинающиеся с //, не допускаются."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination must not contain spaces. Use URL encoding such as %20 instead."
-msgstr "Error: Regex destination must not contain spaces. Use URL encoding such as %20 instead."
+msgstr "Ошибка: назначение регулярного выражения не должно содержать пробелов. Используйте URL-кодирование, например %20."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains invalid percent encoding."
-msgstr "Error: Regex destination contains invalid percent encoding."
+msgstr "Ошибка: назначение регулярного выражения содержит недопустимое процентное кодирование."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains characters that are not safe in a redirect URL."
-msgstr "Error: Regex destination contains characters that are not safe in a redirect URL."
+msgstr "Ошибка: назначение регулярного выражения содержит символы, небезопасные в URL перенаправления."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination must not contain . or .. path segments."
-msgstr "Error: Regex destination must not contain . or .. path segments."
+msgstr "Ошибка: назначение регулярного выражения не должно содержать сегменты пути . или .."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Source regular expression is invalid."
-msgstr "Error: Source regular expression is invalid."
+msgstr "Ошибка: исходное регулярное выражение недопустимо."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains unsupported replacement syntax. Use $1, $2, and so on."
-msgstr "Error: Regex destination contains unsupported replacement syntax. Use $1, $2, and so on."
+msgstr "Ошибка: назначение регулярного выражения содержит неподдерживаемый синтаксис замены. Используйте $1, $2 и так далее."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Relative regex destinations support numbered capture groups written as (...). Named and branch-reset groups are not supported."
-msgstr "Error: Relative regex destinations support numbered capture groups written as (...). Named and branch-reset groups are not supported."
+msgstr "Ошибка: относительные назначения регулярных выражений поддерживают нумерованные группы захвата, записанные как (...). Именованные группы и группы branch reset не поддерживаются."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination references $%1$d, but the source pattern defines %2$d capture group(s)."
-msgstr "Error: Regex destination references $%1$d, but the source pattern defines %2$d capture group(s)."
+msgstr "Ошибка: назначение регулярного выражения ссылается на $%1$d, но исходный шаблон определяет %2$d групп(ы) захвата."
+
+msgid "Could not load chart data. Reload this page and try again."
+msgstr "Не удалось загрузить данные диаграммы. Перезагрузите эту страницу и повторите попытку."
+
+msgid "This sends a one-time diagnostic report to the plugin developer so they can investigate the issue you are seeing."
+msgstr "Это отправит разработчику плагина однократный диагностический отчет, чтобы он смог разобраться в возникшей у вас проблеме."
+
+msgid "This report includes:"
+msgstr "Этот отчет включает:"
+
+msgid "Site URL"
+msgstr "URL сайта"
+
+msgid "Plugin, PHP, WordPress, and database versions"
+msgstr "Версии плагина, PHP, WordPress и базы данных"
+
+msgid "List of active plugins"
+msgstr "Список активных плагинов"
+
+msgid "Recent debug log excerpt"
+msgstr "Недавний фрагмент журнала отладки"
+
+msgid "Optional message and reply email you provide below"
+msgstr "Необязательное сообщение и адрес для ответа, указанные вами ниже"
+
+msgid "Show what's in this report"
+msgstr "Показать содержимое этого отчета"
+
+msgid "Hide report contents"
+msgstr "Скрыть содержимое отчета"
+
+msgid "Loading report contents..."
+msgstr "Загрузка содержимого отчета..."
+
+msgid "Could not load preview. The full report is still safe to send."
+msgstr "Не удалось загрузить предпросмотр. Полный отчет по-прежнему можно безопасно отправить."
+
+msgid "What went wrong? (optional, helps us diagnose)"
+msgstr "Что пошло не так? (необязательно, помогает нам с диагностикой)"
+
+msgid "Where should we reply? (optional)"
+msgstr "Куда нам ответить? (необязательно)"
+
+msgid "By clicking Send report, you consent to transmitting the information above to the plugin developer for support purposes. The data is used only to diagnose your issue and is not shared with third parties."
+msgstr "Нажимая кнопку «Отправить отчет», вы соглашаетесь на передачу указанных выше сведений разработчику плагина в целях поддержки. Эти данные используются только для диагностики вашей проблемы и не передаются третьим лицам."
+
+msgid "Send report"
+msgstr "Отправить отчет"
+
+msgid "Sending..."
+msgstr "Отправка..."
+
+msgid "Retry"
+msgstr "Повторить"
+
+msgid "Sent. Reference: "
+msgstr "Отправлено. Номер: "
+
+msgid ". Thank you."
+msgstr ". Спасибо."
+
+msgid "You already sent a report recently. Try again in {minutes} minute(s)."
+msgstr "Вы уже отправляли отчет недавно. Повторите попытку через {minutes} мин."
+
+msgid "Network error: could not reach the server. Check your internet connection and try again."
+msgstr "Сетевая ошибка: не удалось связаться с сервером. Проверьте подключение к интернету и повторите попытку."
+
+msgid "Could not send report. Please try again later."
+msgstr "Не удалось отправить отчет. Повторите попытку позже."
+
+msgid "Could not load the migration tool configuration. Reload this page and try again."
+msgstr "Не удалось загрузить конфигурацию инструмента миграции. Перезагрузите эту страницу и повторите попытку."
+
+msgid "No suggested match was scored for this URL"
+msgstr "Для этого URL не оценено ни одного предложенного совпадения"
+
+msgid "No confidence score was recorded for this redirect"
+msgstr "Для этого перенаправления не записан показатель достоверности"
+
+msgid "No score"
+msgstr "Нет оценки"
+
+msgid "Redirect this URL"
+msgstr "Перенаправить этот URL"
+
+msgid "Change the minimum score"
+msgstr "Изменить минимальную оценку"
+
+msgid "404 Solution, admin only: nothing on the site scored close enough to suggest."
+msgstr "404 Solution, только для администраторов: ничто на сайте не набрало достаточно баллов, чтобы быть предложенным."
+
+msgid "404 Solution, admin only: best match %1$s, under the %2$s needed to redirect automatically."
+msgstr "404 Solution, только для администраторов: лучшее совпадение %1$s, ниже %2$s, необходимых для автоматического перенаправления."
+
+msgid "404 Solution, admin only: best match %1$s, at or above the %2$s needed to redirect automatically."
+msgstr "404 Solution, только для администраторов: лучшее совпадение %1$s, не ниже %2$s, необходимых для автоматического перенаправления."
+

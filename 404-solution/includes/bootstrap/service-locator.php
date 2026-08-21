@@ -75,6 +75,7 @@ require_once __DIR__ . '/../core/ServiceContainer.php';
  *     $name is 'engine_spelling' ? ABJ_404_Solution_SpellingMatchingEngine : (
  *     $name is 'engine_archive_fallback' ? ABJ_404_Solution_ArchiveFallbackEngine : (
  *     $name is 'matching_engines' ? array<int, object> : (
+ *     $name is 'near_miss_recorder' ? ABJ_404_Solution_NearMissRecorder : (
  *     $name is 'wordpress_connector' ? ABJ_404_Solution_WordPress_Connector : (
  *     $name is 'slug_change_handler' ? ABJ_404_Solution_SlugChangeHandler : (
  *     $name is 'sync_utils' ? ABJ_404_Solution_SynchronizationUtils : (
@@ -91,7 +92,7 @@ require_once __DIR__ . '/../core/ServiceContainer.php';
  *     $name is 'settings_mode_preference' ? ABJ_404_Solution_SettingsModePreference : (
  *     $name is 'not_found_response' ? ABJ_404_Solution_NotFoundResponseService :
  *     mixed
- * )))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+ * ))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
  */
 function abj_service($name) {
     if ($name === 'logging' && class_exists('ABJ_404_Solution_Logging', false)) {
@@ -150,6 +151,7 @@ function abj_service($name) {
  *     $name is 'view' ? ABJ_404_Solution_View|null : (
  *     $name is 'database_upgrades' ? ABJ_404_Solution_DatabaseUpgradesEtc|null : (
  *     $name is 'cron_scheduler' ? ABJ_404_Solution_CronScheduler|null : (
+ *     $name is 'cron_recurrence_migration' ? ABJ_404_Solution_CronRecurrenceMigration|null : (
  *     $name is 'clock' ? ABJ_404_Solution_Clock|null : (
  *     $name is 'not_found_response' ? ABJ_404_Solution_NotFoundResponseService|null : (
  *     $name is 'request_ignore_normalizer' ? ABJ_404_Solution_RequestIgnoreNormalizer|null : (
@@ -159,7 +161,7 @@ function abj_service($name) {
  *     $name is 'view_read_service' ? ABJ_404_Solution_ViewReadService|null : (
  *     $name is 'rebuild_health' ? ABJ_404_Solution_RebuildHealthState|null :
  *     mixed|null
- * )))))))))))))))
+ * ))))))))))))))))
  */
 function abj_service_optional($name) {
     $container = ABJ_404_Solution_ServiceContainer::getInstance();
@@ -195,6 +197,24 @@ function abj_cron_scheduler(): ABJ_404_Solution_CronScheduler {
     $logger = abj_service_optional('logging');
     return new ABJ_404_Solution_CronScheduler(
         $clock instanceof ABJ_404_Solution_Clock ? $clock : new ABJ_404_Solution_SystemClock(),
+        $logger instanceof ABJ_404_Solution_Logging ? $logger : null
+    );
+}
+
+/**
+ * Typed accessor for the daily-recurrence cadence policy.
+ *
+ * @return ABJ_404_Solution_CronRecurrenceMigration
+ */
+function abj_cron_recurrence_migration(): ABJ_404_Solution_CronRecurrenceMigration {
+    $migration = abj_service_optional('cron_recurrence_migration');
+    if ($migration instanceof ABJ_404_Solution_CronRecurrenceMigration) {
+        return $migration;
+    }
+    $logger = abj_service_optional('logging');
+    return new ABJ_404_Solution_CronRecurrenceMigration(
+        abj_cron_scheduler(),
+        new ABJ_404_Solution_ScheduledEventInspector(),
         $logger instanceof ABJ_404_Solution_Logging ? $logger : null
     );
 }

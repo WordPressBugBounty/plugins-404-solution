@@ -4,6 +4,9 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/DatabaseCollationHelper.php';
+require_once __DIR__ . '/../core/DatabaseMetadataLockWaitGuard.php';
+
 /**
  * Resolves plugin table names and reads table schema metadata.
  *
@@ -27,16 +30,21 @@ class ABJ_404_Solution_DatabaseTableNameResolver {
     /** @var callable(string, array<string,mixed>): array<string,mixed> */
     private $queryRunner;
 
+    /** @var ABJ_404_Solution_DatabaseMetadataLockWaitGuard */
+    private $metadataLockWaitGuard;
+
     /**
      * @param ABJ_404_Solution_Functions $functions
      * @param callable(string, array<string,mixed>): array<string,mixed> $queryRunner
      *   Runs a SQL query through the centralized error-handling pipeline and
      *   returns its result array. Supplied by DatabaseCore as a bound closure
      *   over queryAndGetResults() so this class needs no DatabaseCore reference.
+     * @param ABJ_404_Solution_Logging|null $logger
      */
-    public function __construct($functions, callable $queryRunner) {
+    public function __construct($functions, callable $queryRunner, $logger = null) {
         $this->f = $functions;
         $this->queryRunner = $queryRunner;
+        $this->metadataLockWaitGuard = new ABJ_404_Solution_DatabaseMetadataLockWaitGuard($logger);
     }
 
     /** The engine answered, and the table is there. */
@@ -91,7 +99,14 @@ class ABJ_404_Solution_DatabaseTableNameResolver {
         }
         // @utf8-audit: opt-out - tableExistenceStatus receives system-generated plugin table names from DAO/core callers.
         // DAO-bypass-approved: metadata table existence probe for system-generated plugin table names.
-        $table = $wpdb->get_var("SHOW TABLES LIKE '" . esc_sql($tableName) . "'");
+        $guarded = $this->metadataLockWaitGuard->runWithBoundedWait($wpdb, array(
+            'description' => 'probing whether database table ' . $tableName . ' exists',
+            'operation' => function () use ($wpdb, $tableName) {
+                // DAO-bypass-approved: bounded metadata existence probe for a system-generated table name.
+                return $wpdb->get_var("SHOW TABLES LIKE '" . esc_sql($tableName) . "'");
+            },
+        ));
+        $table = $guarded['value'];
         if ($table == $tableName) {
             return self::TABLE_PRESENT;
         }
@@ -112,7 +127,14 @@ class ABJ_404_Solution_DatabaseTableNameResolver {
         if (!isset($wpdb) || !is_object($wpdb) || !is_callable(array($wpdb, 'get_results'))) { return []; }
         // @utf8-audit: opt-out - getTableColumnNames receives system-generated plugin table names only.
         // DAO-bypass-approved: metadata column probe for system-generated plugin table names.
-        $rows = $wpdb->get_results("SHOW COLUMNS FROM `" . esc_sql($tableName) . "`", ARRAY_A);
+        $guarded = $this->metadataLockWaitGuard->runWithBoundedWait($wpdb, array(
+            'description' => 'reading database columns for ' . $tableName,
+            'operation' => function () use ($wpdb, $tableName) {
+                // DAO-bypass-approved: bounded metadata column probe for a system-generated table name.
+                return $wpdb->get_results("SHOW COLUMNS FROM `" . esc_sql($tableName) . "`", ARRAY_A);
+            },
+        ));
+        $rows = $guarded['value'];
         if (!is_array($rows) || !empty($wpdb->last_error)) { return []; }
         $columns = [];
         foreach ($rows as $row) {
@@ -149,14 +171,15 @@ class ABJ_404_Solution_DatabaseTableNameResolver {
         $replacements['{wp_prefix}'] = $prefix;
         $replacements['{wp_prefix_lower}'] = $this->getLowercasePrefix();
 
-        $wpdbCollate = 'utf8mb4_unicode_ci';
-        if (isset($wpdb->collate) && !empty($wpdb->collate)) {
-            $sanitized = preg_replace('/[^A-Za-z0-9_]/', '', $wpdb->collate);
-            if ($sanitized !== '' && $sanitized !== null) {
-                $wpdbCollate = $sanitized;
-            }
-        }
-        $replacements['{wpdb_collate}'] = $wpdbCollate;
+        // Every template that uses this token pins it on an expression already
+        // CONVERTed to utf8mb4, so the collation has to belong to that charset.
+        // Handing back $wpdb->collate raw is what made a latin1-configured site
+        // fail every one of those statements with errno 1253; the token is named
+        // for the charset it is valid under so no future template can read it as
+        // "whatever the site collation happens to be".
+        $rawCollate = (isset($wpdb->collate) && is_scalar($wpdb->collate)) ? (string)$wpdb->collate : '';
+        $replacements['{utf8mb4_collate}'] =
+            ABJ_404_Solution_DatabaseCollationHelper::utf8mb4CollationOrFallback($rawCollate);
 
         $query = $this->f->str_replace(array_keys($replacements), array_values($replacements), $query);
 

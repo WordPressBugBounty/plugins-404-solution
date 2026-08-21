@@ -130,7 +130,9 @@ class ABJ_404_Solution_RedirectRowPresenter {
         $lastUsed = $state['lastUsed'];
         $rowEngine = $state['rowEngine'];
         $rowCode = is_scalar($row['code'] ?? '') ? (string)($row['code'] ?? '') : '';
-        $last = $lastUsed != 0 ? (string)wp_date('Y/m/d h:i:s A', abs($lastUsed)) : __('Never Used', '404-solution');
+        $last = $lastUsed != 0
+            ? ABJ_404_Solution_SiteLocalTimestamp::format('Y/m/d h:i:s A', abs($lastUsed))
+            : __('Never Used', '404-solution');
         $rowId = is_scalar($row['id'] ?? '') ? (string)($row['id'] ?? '') : '';
         $regexState = $state['regexState'];
         $actions = $state['actions'];
@@ -162,7 +164,7 @@ class ABJ_404_Solution_RedirectRowPresenter {
             '{statusTitle}' => $this->statusTitle($rowStatus),
             '{engineHTML}' => $this->engineLabelHtml($rowEngine),
             '{rowScore}' => '',
-            '{scoreCell}' => $this->buildScoreCell($row['score'] ?? null, $rowEngine),
+            '{scoreCell}' => $this->buildScoreCell($row['score'] ?? null, $rowEngine, $rowStatus),
             '{type}' => esc_html($this->typeLabel($row)),
             '{rowCode}' => esc_html($this->codeDisplay($rowCode)),
             '{hits}' => esc_html((string)(is_scalar($row['logshits'] ?? 0) ? (int)($row['logshits'] ?? 0) : 0)),
@@ -171,7 +173,7 @@ class ABJ_404_Solution_RedirectRowPresenter {
             '{ajaxTrashLink}' => $links['ajaxTrashLink'],
             '{trashtitle}' => $links['trashtitle'],
             '{deletelink}' => $links['deletelink'],
-            '{created_date}' => esc_html((string)wp_date(
+            '{created_date}' => esc_html(ABJ_404_Solution_SiteLocalTimestamp::format(
                 'Y/m/d h:i:s A',
                 abs(is_scalar($row['timestamp'] ?? 0) ? intval($row['timestamp'] ?? 0) : 0)
             )),
@@ -241,8 +243,10 @@ class ABJ_404_Solution_RedirectRowPresenter {
 
     /**
      * @param mixed $rawScore
+     * @param string $rowEngine
+     * @param int $rowStatus ABJ404_STATUS_* of the row being rendered.
      */
-    public function buildScoreCell($rawScore, string $rowEngine): string {
+    public function buildScoreCell($rawScore, string $rowEngine, int $rowStatus): string {
         if ($rawScore !== null && $rawScore !== '') {
             $scoreNum = (float)(is_numeric($rawScore) ? $rawScore : 0);
             $scorePct = number_format($scoreNum, 0);
@@ -253,14 +257,41 @@ class ABJ_404_Solution_RedirectRowPresenter {
             );
         }
 
-        $noScoreTitle = ($rowEngine !== '')
-            ? __('No confidence score for this engine', '404-solution')
-            : __('Manual redirect, no confidence score', '404-solution');
         return $this->functions->str_replace(
             '{title_attr}',
-            esc_attr($noScoreTitle),
+            esc_attr($this->noScoreTitle($rowEngine, $rowStatus)),
             $this->tpl('viewRedirectsTableScoreManual.html')
         );
+    }
+
+    /**
+     * Explain an empty Confidence cell in terms of the row it is on.
+     *
+     * A missing score used to be reported as "Manual redirect" for every row,
+     * which was written when only an admin-created redirect could lack one.
+     * Captured 404s are not manual redirects, and until near-miss scores were
+     * threaded into the capture insert every captured row was scoreless -- so
+     * the Captured tab told the admin that a whole table of URLs the plugin
+     * had recorded automatically had been typed in by hand.
+     *
+     * @param string $rowEngine
+     * @param int $rowStatus
+     * @return string
+     */
+    private function noScoreTitle(string $rowEngine, int $rowStatus): string {
+        if ($rowEngine !== '') {
+            return __('No confidence score for this engine', '404-solution');
+        }
+        if (defined('ABJ404_STATUS_CAPTURED') && $rowStatus === ABJ404_STATUS_CAPTURED) {
+            // Either automatic matching is off, or it ran and nothing scored.
+            // The row cannot tell the two apart, and both mean the same thing
+            // to the admin reading the column.
+            return __('No suggested match was scored for this URL', '404-solution');
+        }
+        if ($rowStatus === ABJ404_STATUS_AUTO) {
+            return __('No confidence score was recorded for this redirect', '404-solution');
+        }
+        return __('Manual redirect, no confidence score', '404-solution');
     }
 
     /**

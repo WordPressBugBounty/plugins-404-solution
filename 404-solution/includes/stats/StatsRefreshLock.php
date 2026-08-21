@@ -21,6 +21,9 @@ class ABJ_404_Solution_StatsRefreshLock {
     /** @var ABJ_404_Solution_DatabaseCoreInterface */
     private $dbCore;
 
+    /** @var array<string, string> Cache key to exact row value held by this instance. */
+    private $heldValues = array();
+
     /** @param ABJ_404_Solution_DatabaseCoreInterface $dbCore */
     public function __construct(ABJ_404_Solution_DatabaseCoreInterface $dbCore) {
         $this->dbCore = $dbCore;
@@ -28,30 +31,41 @@ class ABJ_404_Solution_StatsRefreshLock {
 
     /** @param string $cacheKey @return bool */
     public function acquire(string $cacheKey): bool {
-        if (!function_exists('add_option')) {
-            return true;
-        }
-
         $lockKey = $this->getOptionName($cacheKey);
-        if (add_option($lockKey, abj_clock()->now(), '', false)) {
+        $lockRow = $this->lockRow();
+        $now = abj_clock()->now();
+        $claimValue = ABJ_404_Solution_ExclusiveOptionRow::uniqueClaimValue((string)$now);
+
+        if ($lockRow->claim(array('optionName' => $lockKey, 'value' => $claimValue))) {
+            $this->heldValues[$cacheKey] = $claimValue;
             return true;
         }
 
-        if (!function_exists('get_option')) {
-            return false;
-        }
-
-        $lockValue = get_option($lockKey, false);
-        if ($lockValue === false || $lockValue === '' || $lockValue === null) {
-            return (bool)add_option($lockKey, abj_clock()->now(), '', false);
-        }
-
-        $lockTs = is_numeric($lockValue) ? (int)$lockValue : 0;
-        if ($lockTs > 0 && (abj_clock()->now() - $lockTs) > self::REFRESH_LOCK_COOLDOWN_SECONDS) {
-            if (function_exists('delete_option')) {
-                delete_option($lockKey);
+        // A row already exists. Read it from the table (not from the options
+        // cache, which answers a concurrent request with its own write) and
+        // displace it only when it has genuinely aged out. Both the removal and
+        // the retry are conditional/atomic, so several requests finding the
+        // same expired lock still produce exactly one winner.
+        $lockValue = $lockRow->valueOf($lockKey);
+        if ($lockValue === '') {
+            $claimValue = ABJ_404_Solution_ExclusiveOptionRow::uniqueClaimValue((string)$now);
+            $claimed = $lockRow->claim(array('optionName' => $lockKey, 'value' => $claimValue));
+            if ($claimed) {
+                $this->heldValues[$cacheKey] = $claimValue;
             }
-            return (bool)add_option($lockKey, abj_clock()->now(), '', false);
+            return $claimed;
+        }
+
+        $timestampPart = explode(':', $lockValue, 2)[0];
+        $lockTs = is_numeric($timestampPart) ? (int)$timestampPart : 0;
+        if ($lockTs > 0 && ($now - $lockTs) > self::REFRESH_LOCK_COOLDOWN_SECONDS) {
+            $lockRow->releaseIfValueIs(array('optionName' => $lockKey, 'value' => $lockValue));
+            $claimValue = ABJ_404_Solution_ExclusiveOptionRow::uniqueClaimValue((string)$now);
+            $claimed = $lockRow->claim(array('optionName' => $lockKey, 'value' => $claimValue));
+            if ($claimed) {
+                $this->heldValues[$cacheKey] = $claimValue;
+            }
+            return $claimed;
         }
 
         return false;
@@ -59,9 +73,20 @@ class ABJ_404_Solution_StatsRefreshLock {
 
     /** @param string $cacheKey @return void */
     public function release(string $cacheKey): void {
-        if (function_exists('delete_option')) {
-            delete_option($this->getOptionName($cacheKey));
+        if (!isset($this->heldValues[$cacheKey])) {
+            return;
         }
+        $this->lockRow()->releaseIfValueIs(array(
+            'optionName' => $this->getOptionName($cacheKey),
+            'value' => $this->heldValues[$cacheKey],
+        ));
+        unset($this->heldValues[$cacheKey]);
+    }
+
+    /** The lock row itself. Stateless, so a fresh instance costs nothing.
+     * @return ABJ_404_Solution_ExclusiveOptionRow */
+    private function lockRow(): ABJ_404_Solution_ExclusiveOptionRow {
+        return new ABJ_404_Solution_ExclusiveOptionRow();
     }
 
     /** @param string $cacheKey @return string */

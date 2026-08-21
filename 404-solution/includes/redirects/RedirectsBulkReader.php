@@ -21,6 +21,9 @@ if (!defined('ABSPATH')) {
  */
 class ABJ_404_Solution_RedirectsBulkReader {
 
+    /** Number of rows fetched by each keyset page once caching is unsafe. */
+    const REGEX_READ_BATCH_SIZE = 250;
+
     /** @var ABJ_404_Solution_DatabaseCore */
     private $dbCore;
 
@@ -96,8 +99,8 @@ class ABJ_404_Solution_RedirectsBulkReader {
         }
     }
 
-    /** @return array<int, array<string, mixed>> */
-    public function getRedirectsWithRegEx(): array {
+    /** @return iterable<int, array<string, mixed>> */
+    public function getRedirectsWithRegEx(): iterable {
         $cached = ABJ_404_Solution_RedirectsRepository::getRegexRedirectsCache();
         $disabled = ABJ_404_Solution_RedirectsRepository::isRegexCacheDisabled();
 
@@ -106,7 +109,7 @@ class ABJ_404_Solution_RedirectsBulkReader {
         }
 
         if ($disabled) {
-            return $this->queryBuilder->queryRegexRedirects(ABJ_404_Solution_RedirectsRepository::REGEX_CACHE_MAX_COUNT + 1);
+            return $this->iterateAllRegexRedirectsInBatches();
         }
 
         $results = $this->queryBuilder->queryRegexRedirects(ABJ_404_Solution_RedirectsRepository::REGEX_CACHE_MAX_COUNT + 1);
@@ -115,9 +118,62 @@ class ABJ_404_Solution_RedirectsBulkReader {
             ABJ_404_Solution_RedirectsRepository::setRegexRedirectsCache($results);
         } else {
             ABJ_404_Solution_RedirectsRepository::setRegexCacheDisabled(true);
+            return $this->iterateAllRegexRedirectsInBatches($results);
         }
 
         return $results;
+    }
+
+    /**
+     * Stream a complete regex redirect read without allowing either a SQL
+     * result set or the PHP row collection to grow without bound. The optional
+     * leading rows are the cache-threshold probe and are reused so the common
+     * 51+ path does not reread them.
+     *
+     * @param array<int, array<string, mixed>> $leadingRows
+     * @return iterable<int, array<string, mixed>>
+     */
+    private function iterateAllRegexRedirectsInBatches(array $leadingRows = array()): iterable {
+        // DESIGN-AUDIT-OK(2026-08-21, owner): A total-work cap would silently make later valid regex rules unreachable, reproducing Troy's 51-rule defect.
+        // The admin-owned finite table is streamed in 250-row pages, holds bounded memory, and stops as soon as a caller finds a match.
+        $afterId = $this->greatestRedirectId($leadingRows);
+        foreach ($leadingRows as $row) {
+            yield $row;
+        }
+
+        do {
+            $page = $this->queryBuilder->queryRegexRedirectsPage(array(
+                'after_id' => $afterId,
+                'limit' => self::REGEX_READ_BATCH_SIZE,
+            ));
+            if (empty($page)) {
+                break;
+            }
+
+            $nextAfterId = $this->greatestRedirectId($page);
+            if ($nextAfterId <= $afterId) {
+                throw new UnexpectedValueException(
+                    'Regex redirect keyset page did not advance past id ' . $afterId . '.'
+                );
+            }
+
+            foreach ($page as $row) {
+                yield $row;
+            }
+            $afterId = $nextAfterId;
+        } while (count($page) === self::REGEX_READ_BATCH_SIZE);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     */
+    private function greatestRedirectId(array $rows): int {
+        $greatestId = 0;
+        foreach ($rows as $row) {
+            $id = isset($row['id']) && is_scalar($row['id']) ? (int)$row['id'] : 0;
+            $greatestId = max($greatestId, $id);
+        }
+        return $greatestId;
     }
 
     /** @return array<int, array<string, mixed>> */

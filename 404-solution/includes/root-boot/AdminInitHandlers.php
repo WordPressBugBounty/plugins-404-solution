@@ -116,12 +116,12 @@ function abj404_loadSomethingWhenWordPressIsReady() {
 
 	$action = null;
 	if ($isAdminRequest) {
-		$actionGet = isset($_GET['action']) && is_string($_GET['action']) ? $_GET['action'] : '';
-		$actionPost = isset($_POST['action']) && is_string($_POST['action']) ? $_POST['action'] : '';
+		$actionGet = ABJ_404_Solution_RequestInputNormalizer::readText($_GET, array('name' => 'action'));
+		$actionPost = ABJ_404_Solution_RequestInputNormalizer::readText($_POST, array('name' => 'action'));
 		if ($actionGet !== '') {
-			$action = sanitize_text_field($actionGet);
+			$action = $actionGet;
 		} else if ($actionPost !== '') {
-			$action = sanitize_text_field($actionPost);
+			$action = $actionPost;
 		} else {
 			$action = null;
 		}
@@ -134,6 +134,17 @@ function abj404_loadSomethingWhenWordPressIsReady() {
 			$newMs = max(0, min(5000, absint(is_scalar($simMsRaw) ? $simMsRaw : 0)));
 			update_option('abj404_simulated_db_latency_ms', $newMs, false);
 		}
+	}
+
+	// An admin-only link on the front-end suggestions page can ask to open a
+	// field that only exists in Advanced Mode. Honour it before the page
+	// renders, so the field is there when the browser jumps to the anchor.
+	// The literal must stay in step with SettingsModeDeepLink::QUERY_ARG; it is
+	// spelled out here so the guard costs nothing on requests that do not
+	// carry it (the class is not loaded until it is).
+	if ($isAdminRequest && isset($_GET['abj404_show_advanced'])) {
+		require_once(plugin_dir_path( ABJ404_FILE ) . "includes/Loader.php");
+		ABJ_404_Solution_SettingsModeDeepLink::applyIfRequested();
 	}
 
 	$ttl = defined('HOUR_IN_SECONDS') ? (12 * HOUR_IN_SECONDS) : 43200;

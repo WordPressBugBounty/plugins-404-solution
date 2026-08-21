@@ -309,7 +309,7 @@ msgid "At the same level as the Settings and Tools menu"
 msgstr "Allo stesso livello del menu Impostazioni e Strumenti"
 
 msgid "Auto"
-msgstr "Auto *"
+msgstr "Auto"
 
 msgid "Delete automatic redirects after"
 msgstr "Elimina redirect automatici dopo"
@@ -533,9 +533,8 @@ msgstr "Errore: nessun ID trovato per la richiesta di modifica."
 msgid "Error: No ID(s) specified for bulk action. (%s)"
 msgstr "Errore: nessun ID specificato per l'azione di massa. (%s)"
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
-msgstr "Error: Too many ID(s) specified for bulk action (maximum %d). (%s)"
+msgstr "Errore: troppi ID specificati per l'azione di gruppo (massimo %d). (%s)"
 
 msgid "Error: No records were imported. SQL result: %s"
 msgstr "Errore: nessun record è stato importato. Risultato SQL: %s"
@@ -730,16 +729,16 @@ msgid "Keeps the most recent (and deletes the oldest) log records when the disk 
 msgstr "Mantiene i record di log più recenti (ed elimina i più vecchi) quando l'utilizzo del disco raggiunge questo limite."
 
 msgid "LINK_FIRST_PAGE"
-msgstr "LINK_FIRST_PAGE *"
+msgstr "LINK_FIRST_PAGE"
 
 msgid "LINK_LAST_PAGE"
-msgstr "LINK_LAST_PAGE *"
+msgstr "LINK_LAST_PAGE"
 
 msgid "LINK_NEXT_PAGE"
-msgstr "LINK_NEXT_PAGE *"
+msgstr "LINK_NEXT_PAGE"
 
 msgid "LINK_PREVIOUS_PAGE"
-msgstr "LINK_PREVIOUS_PAGE *"
+msgstr "LINK_PREVIOUS_PAGE"
 
 msgid "Last Used"
 msgstr "Ultimo utilizzo"
@@ -760,7 +759,7 @@ msgid "Logs"
 msgstr "Log"
 
 msgid "MB"
-msgstr "MB *"
+msgstr "MB"
 
 msgid "Maintenance"
 msgstr "Manutenzione"
@@ -872,7 +871,7 @@ msgid "OPTION_MIN_AUTO_SCORE"
 msgstr "OPZIONE_MIN_AUTO_SCORE"
 
 msgid "OPTION_TEMPLATE_REDIRECT_PRIORITY"
-msgstr "OPTION_TEMPLATE_REDIRECT_PRIORITY *"
+msgstr "OPTION_TEMPLATE_REDIRECT_PRIORITY"
 
 msgid "One email will be sent per day (when maintenance is run) until the number of captured 404s goes below the number specified in the alert settings."
 msgstr "Verrà inviata un'email al giorno (quando viene eseguita la manutenzione) fino a quando il numero di 404 acquisiti scende al di sotto del numero specificato nelle impostazioni di avviso."
@@ -923,7 +922,7 @@ msgid "Purge Type"
 msgstr "Tipo di eliminazione"
 
 msgid "REDIRECT_TO_USER_FIELD_WARNING"
-msgstr "REDIRECT_TO_USER_FIELD_WARNING *"
+msgstr "REDIRECT_TO_USER_FIELD_WARNING"
 
 msgid "Recognized Post Types"
 msgstr "Tipi di post riconosciuti"
@@ -977,7 +976,7 @@ msgid "Referrer"
 msgstr "Referente"
 
 msgid "RegEx"
-msgstr "RegEx *"
+msgstr "Espressione regolare"
 
 msgid "Regular Expression (Manually Created)"
 msgstr "Espressione regolare (creata manualmente)"
@@ -1013,37 +1012,37 @@ msgid "Run maintenance to delete old data (etc).&nbsp;&nbsp;It is not necessary 
 msgstr "Esegui la manutenzione per eliminare i dati vecchi (ecc.).&nbsp;&nbsp;Non è necessario eseguirla manualmente, poiché viene eseguita automaticamente su base giornaliera."
 
 msgid "SELECTED_SUGGEST_CATS"
-msgstr "SELECTED_SUGGEST_CATS *"
+msgstr "SELECTED_SUGGEST_CATS"
 
 msgid "SELECTED_SUGGEST_TAGS"
-msgstr "SELECTED_SUGGEST_TAGS *"
+msgstr "SELECTED_SUGGEST_TAGS"
 
 msgid "SELECTED_SUGGEST_URL"
-msgstr "SELECTED_SUGGEST_URL *"
+msgstr "SELECTED_SUGGEST_URL"
 
 msgid "SUGGEST_MAX_SUGGESTIONS"
-msgstr "SUGGEST_MAX_SUGGESTIONS *"
+msgstr "SUGGEST_MAX_SUGGESTIONS"
 
 msgid "SUGGEST_MIN_SCORE"
-msgstr "SUGGEST_MIN_SCORE *"
+msgstr "SUGGEST_MIN_SCORE"
 
 msgid "SUGGEST_USER_AFTER"
-msgstr "SUGGEST_USER_AFTER *"
+msgstr "SUGGEST_USER_AFTER"
 
 msgid "SUGGEST_USER_BEFORE"
-msgstr "SUGGEST_USER_BEFORE *"
+msgstr "SUGGEST_USER_BEFORE"
 
 msgid "SUGGEST_USER_ENTRY_AFTER"
-msgstr "SUGGEST_USER_ENTRY_AFTER *"
+msgstr "SUGGEST_USER_ENTRY_AFTER"
 
 msgid "SUGGEST_USER_ENTRY_BEFORE"
-msgstr "SUGGEST_USER_ENTRY_BEFORE *"
+msgstr "SUGGEST_USER_ENTRY_BEFORE"
 
 msgid "SUGGEST_USER_NO_RESULTS"
-msgstr "SUGGEST_USER_NO_RESULTS *"
+msgstr "SUGGEST_USER_NO_RESULTS"
 
 msgid "SUGGEST_USER_TITLE"
-msgstr "SUGGEST_USER_TITLE *"
+msgstr "SUGGEST_USER_TITLE"
 
 msgid "Sanity Check"
 msgstr "Controllo di integrità"
@@ -1082,25 +1081,25 @@ msgid "Supported formats are: <B>from_url,status,type,to_url,wp_type</B>"
 msgstr "I formati supportati sono: <B>from_url,status,type,to_url,wp_type</B>"
 
 msgid "TEXT_BEFORE_LINKS"
-msgstr "TEXT_BEFORE_LINKS *"
+msgstr "TEXT_BEFORE_LINKS"
 
 msgid "TEXT_CURRENT_PAGE"
-msgstr "TEXT_CURRENT_PAGE *"
+msgstr "TEXT_CURRENT_PAGE"
 
 msgid "TEXT_SHOW_ROWS"
 msgstr "TEXT_MOSTRA_ROWS"
 
 msgid "TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING"
-msgstr "TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING *"
+msgstr "TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING"
 
 msgid "TOOLTIP_POPUP_EXPLANATION_EMPTY"
-msgstr "TOOLTIP_POPUP_EXPLANATION_EMPTY *"
+msgstr "TOOLTIP_POPUP_EXPLANATION_EMPTY"
 
 msgid "TOOLTIP_POPUP_EXPLANATION_PAGE"
-msgstr "TOOLTIP_POPUP_EXPLANATION_PAGE *"
+msgstr "TOOLTIP_POPUP_EXPLANATION_PAGE"
 
 msgid "TOOLTIP_POPUP_EXPLANATION_URL"
-msgstr "TOOLTIP_POPUP_EXPLANATION_URL *"
+msgstr "TOOLTIP_POPUP_EXPLANATION_URL"
 
 msgid "Tag"
 msgstr "Etichetta"
@@ -1214,7 +1213,7 @@ msgid "Type a page name here and select it to add it to the exclusion list"
 msgstr "Digita qui il nome di una pagina e selezionala per aggiungerla all'elenco di esclusione"
 
 msgid "URL"
-msgstr "URL *"
+msgstr "URL"
 
 msgid "URL(s) deleted"
 msgstr "URL eliminato/i"
@@ -1313,10 +1312,10 @@ msgid "add-exclude-page-data-url"
 msgstr "aggiungi-escludi-URL-dati-della-pagina"
 
 msgid "addManualRedirectAction"
-msgstr "addManualRedirectAction *"
+msgstr "addManualRedirectAction"
 
 msgid "ajaxTrashLink"
-msgstr "ajaxTrashLink *"
+msgstr "ajaxTrashLink"
 
 msgid "and <B>from_url,to_url</B>"
 msgstr "e <B>from_url,to_url</B>"
@@ -1325,7 +1324,7 @@ msgid "and redirect to the specified page."
 msgstr "e reindirizza alla pagina specificata."
 
 msgid "bulkOptions"
-msgstr "bulkOptions *"
+msgstr "bulkOptions"
 
 msgid "data-pagination-ajax-url"
 msgstr "data-pagination-ajax-url"
@@ -1337,7 +1336,7 @@ msgid "data-pagination-ajax-subpage"
 msgstr "data-pagination-ajax-sottopagina"
 
 msgid "data-pagination-ajax-nonce"
-msgstr "data-pagination-ajax-nonce *"
+msgstr "data-pagination-ajax-nonce"
 
 msgid "data-url"
 msgstr "URL-dati"
@@ -1346,7 +1345,7 @@ msgid "days (0 means immediately, default 30)"
 msgstr "giorni (0 significa immediatamente, predefinito 30)"
 
 msgid "deletePermanentlyHTML"
-msgstr "deletePermanentlyHTML *"
+msgstr "deletePermanentlyHTML"
 
 msgid "destination-does-not-exist"
 msgstr "destination-does-not-exist"
@@ -1367,7 +1366,7 @@ msgid "editlinkHTML"
 msgstr "modificalinkHTML"
 
 msgid "filterText"
-msgstr "filterText *"
+msgstr "filterText"
 
 msgid "is maintained by"
 msgstr "è mantenuto da"
@@ -1376,19 +1375,19 @@ msgid "loaded-excluded-pages"
 msgstr "pagine-escluse-caricate"
 
 msgid "logCurrentRowCount"
-msgstr "logCurrentRowCount *"
+msgstr "logCurrentRowCount"
 
 msgid "logCurrentSizeDiskUsage"
-msgstr "logCurrentSizeDiskUsage *"
+msgstr "logCurrentSizeDiskUsage"
 
 msgid "logslinkHTML"
-msgstr "logslinkHTML *"
+msgstr "logslinkHTML"
 
 msgid "of"
 msgstr "di"
 
 msgid "pageIDAndType"
-msgstr "pageIDAndType *"
+msgstr "pageIDAndType"
 
 msgid "postedURL"
 msgstr "URL pubblicato"
@@ -1400,10 +1399,10 @@ msgid "rowActions"
 msgstr "rigaAzioni"
 
 msgid "rowClass"
-msgstr "rowClass *"
+msgstr "rowClass"
 
 msgid "rowCode"
-msgstr "rowCode *"
+msgstr "rowCode"
 
 msgid "rowURL"
 msgstr "rigaURL"
@@ -1457,7 +1456,7 @@ msgid "statusTitle"
 msgstr "statoTitolo"
 
 msgid "toolsExportRedirectsLink"
-msgstr "toolsExportRedirectsLink *"
+msgstr "toolsExportRedirectsLink"
 
 msgid "toolsImportFormActionLink"
 msgstr "strumentiImportFormActionLink"
@@ -1469,7 +1468,7 @@ msgid "toolsMaintenanceFormActionLink"
 msgstr "strumentiMaintenanceFormActionLink"
 
 msgid "toolsPurgeFormActionLink"
-msgstr "toolsPurgeFormActionLink *"
+msgstr "toolsPurgeFormActionLink"
 
 msgid "urlPlaceholder"
 msgstr "urlSegnaposto"
@@ -1887,8 +1886,8 @@ msgstr "Destinazione 404 predefinita"
 msgid "Where to send visitors when a 404 error occurs"
 msgstr "Dove inviare i visitatori quando si verifica un errore 404"
 
-msgid "Automatically redirect 404s to similar pages when a good match is found"
-msgstr "Reindirizza automaticamente i 404 a pagine simili quando viene trovata una buona corrispondenza"
+msgid "Automatically redirect 404s to similar pages that score at least %1$s out of 100. To change that number, switch to Advanced Mode and look for %2$s in the System section."
+msgstr "Reindirizza automaticamente i 404 a pagine simili che ottengono almeno %1$s su 100. Per modificare questo numero, passa alla modalità avanzata e cerca %2$s nella sezione Sistema."
 
 msgid "Redirect type"
 msgstr "Tipo di reindirizzamento"
@@ -2082,14 +2081,6 @@ msgstr "Visita URL"
 msgid "This page doesn't exist or is not published so the redirect won't work."
 msgstr "Questa pagina non esiste o non è pubblicata, quindi il redirect non funzionerà."
 
-#: includes/DataAccess.php
-msgid "Just now"
-msgstr "Proprio adesso"
-
-#: includes/View.php
-msgid "Data may not be immediately updated. Refresh to see latest changes."
-msgstr "I dati potrebbero non essere aggiornati immediatamente. Aggiorna per vedere le ultime modifiche."
-
 #: includes/View.php
 msgid "Refresh scheduled"
 msgstr "Aggiornamento programmato"
@@ -2272,7 +2263,7 @@ msgid "Some items could not be anonymized."
 msgstr "Alcuni elementi non possono essere anonimizzati."
 
 msgid "Rate limit exceeded. Please try again later."
-msgstr "Limite di richieste superato. Riprova piu tardi."
+msgstr "Limite di richieste superato. Riprova più tardi."
 
 msgid "Invalid nonce. Please reload the page."
 msgstr "Nonce non valido. Ricarica la pagina."
@@ -2287,7 +2278,7 @@ msgstr "Controlli rapidi dell'ambiente per la risoluzione dei problemi e il supp
 
 #: includes/View.php
 msgid "OK"
-msgstr "OK *"
+msgstr "OK"
 
 #: includes/View.php
 msgid "Warning"
@@ -2351,7 +2342,7 @@ msgstr "Disponibile"
 
 #: includes/View.php
 msgid "WP_DEBUG"
-msgstr "WP_DEBUG *"
+msgstr "WP_DEBUG"
 
 #: includes/View.php
 msgid "Enabled"
@@ -2748,7 +2739,7 @@ msgid "Safe Redirect Manager"
 msgstr "Safe Redirect Manager"
 
 msgid "Redirection Plugin"
-msgstr "Redirection Plugin"
+msgstr "Plugin Redirection"
 
 msgid "No supported redirect plugins detected on this site."
 msgstr "Nessun plugin di redirect supportato rilevato su questo sito."
@@ -2804,6 +2795,7 @@ msgstr "Ruolo utente"
 msgid "Referrer URL"
 msgstr "URL di provenienza"
 
+# translation-verified: HTTP header field name, kept in English here as Italian technical interfaces do
 msgid "User Agent"
 msgstr "User Agent"
 
@@ -2904,10 +2896,10 @@ msgid "Enter your Client ID and Client Secret below."
 msgstr "Inserire il Client ID e il Client Secret qui sotto."
 
 msgid "Client ID"
-msgstr "Client ID"
+msgstr "ID client"
 
 msgid "Client Secret"
-msgstr "Client Secret"
+msgstr "Segreto client"
 
 msgid "Search Console Site URL"
 msgstr "URL del sito in Search Console"
@@ -3064,6 +3056,7 @@ msgstr "Gestisci impostazioni"
 msgid "Sent"
 msgstr "Inviato"
 
+# translation-verified: identical Italian spelling; plugin is the standard Italian term, already used in Utenti amministratori del plugin here
 msgid "Plugin"
 msgstr "Plugin"
 
@@ -3205,7 +3198,7 @@ msgid "URL Pattern"
 msgstr "Pattern URL"
 
 msgid "Regex"
-msgstr "Regex"
+msgstr "Espressione regolare"
 
 msgid "Engines"
 msgstr "Motori"
@@ -3580,103 +3573,103 @@ msgid "No access token received from authorization."
 msgstr "Nessun token di accesso ricevuto dall'autorizzazione."
 
 msgid "Automatically trash bot and spam URLs"
-msgstr "Automatically trash bot and spam URLs"
+msgstr "Sposta automaticamente nel cestino gli URL di bot e spam"
 
 msgid "Auto-trash captured URLs from bots and security scanners during daily maintenance"
-msgstr "Auto-trash captured URLs from bots and security scanners during daily maintenance"
+msgstr "Sposta automaticamente nel cestino gli URL catturati da bot e scanner di sicurezza durante la manutenzione giornaliera"
 
 msgid "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected. We will email you if something needs attention."
-msgstr "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected. We will email you if something needs attention."
+msgstr "404 Solution ora monitora il tuo sito. Quando i visitatori raggiungono link non funzionanti, vengono reindirizzati automaticamente. Ti invieremo un'e-mail se qualcosa richiede attenzione."
 
 msgid "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected."
-msgstr "404 Solution is now monitoring your site. When visitors hit broken links, they will be automatically redirected."
+msgstr "404 Solution ora monitora il tuo sito. Quando i visitatori raggiungono link non funzionanti, vengono reindirizzati automaticamente."
 
 msgid "404 Solution is now monitoring your site. We will email you if captured 404 URLs need attention."
-msgstr "404 Solution is now monitoring your site. We will email you if captured 404 URLs need attention."
+msgstr "404 Solution ora monitora il tuo sito. Ti invieremo un'e-mail se gli URL 404 catturati richiedono attenzione."
 
 msgid "404 Solution is now monitoring your site. You can create manual redirects anytime from the Page Redirects tab."
-msgstr "404 Solution is now monitoring your site. You can create manual redirects anytime from the Page Redirects tab."
+msgstr "404 Solution ora monitora il tuo sito. Puoi creare redirect manuali in qualsiasi momento dalla scheda Redirect di pagina."
 
 msgid "You're all set!"
-msgstr "You're all set!"
+msgstr "Tutto pronto!"
 
 msgid "Get email alerts about 404 problems?"
-msgstr "Get email alerts about 404 problems?"
+msgstr "Vuoi ricevere avvisi via e-mail sui problemi 404?"
 
 msgid "Yes, email me a weekly summary (recommended)"
-msgstr "Yes, email me a weekly summary (recommended)"
+msgstr "Sì, inviami un riepilogo settimanale (consigliato)"
 
 msgid "Get notified when captured 404 URLs exceed 50"
-msgstr "Get notified when captured 404 URLs exceed 50"
+msgstr "Ricevi un avviso quando gli URL 404 catturati superano 50"
 
 msgid "You can always enable email alerts later in Options"
-msgstr "You can always enable email alerts later in Options"
+msgstr "Puoi sempre attivare gli avvisi via e-mail più tardi in Opzioni"
 
 msgid "No, I'll check manually"
-msgstr "No, I'll check manually"
+msgstr "No, controllerò manualmente"
 
 msgid "Automatic Permanent Redirects"
-msgstr "Automatic Permanent Redirects"
+msgstr "Redirect permanenti automatici"
 
 msgid "Automatic Temporary Redirects"
-msgstr "Automatic Temporary Redirects"
+msgstr "Redirect temporanei automatici"
 
 msgid "Manual Permanent Redirects"
-msgstr "Manual Permanent Redirects"
+msgstr "Redirect permanenti manuali"
 
 msgid "Manual Temporary Redirects"
-msgstr "Manual Temporary Redirects"
+msgstr "Redirect temporanei manuali"
 
 msgid "Broken links visitors tried to reach. Create Redirect for important ones, Dismiss the rest."
-msgstr "Broken links visitors tried to reach. Create Redirect for important ones, Dismiss the rest."
+msgstr "Link non funzionanti che i visitatori hanno provato a raggiungere. Usa Crea redirect per quelli importanti e Ignora per gli altri."
 
 msgid "Needs Review"
-msgstr "Needs Review"
+msgstr "Da rivedere"
 
 msgid "Handled"
-msgstr "Handled"
+msgstr "Gestito"
 
 msgid "Dismiss"
-msgstr "Dismiss"
+msgstr "Ignora"
 
 msgid "All good — %d redirects active, no URLs need attention"
-msgstr "All good — %d redirects active, no URLs need attention"
+msgstr "Tutto a posto: %d redirect attivi, nessun URL richiede attenzione"
 
 msgid "%1$d redirects active — %2$d captured URLs have repeat visitors"
-msgstr "%1$d redirects active — %2$d captured URLs have repeat visitors"
+msgstr "%1$d redirect attivi: %2$d URL catturati hanno visitatori ricorrenti"
 
 msgid "View"
 msgstr "View"
 
 msgid "The plugin creates these automatically. You only need to act when the status bar above says so."
-msgstr "The plugin creates these automatically. You only need to act when the status bar above says so."
+msgstr "Il plugin li crea automaticamente. Devi intervenire solo quando la barra di stato qui sopra lo indica."
 
 msgid "Blocked"
-msgstr "Blocked"
+msgstr "Bloccato"
 
 msgid "Best for moved pages"
-msgstr "Best for moved pages"
+msgstr "Ideale per le pagine spostate"
 
 msgid "Best for seasonal or test pages"
-msgstr "Best for seasonal or test pages"
+msgstr "Ideale per le pagine stagionali o di prova"
 
 msgid "Permanent is best for most redirects. Use Temporary if the page may come back."
-msgstr "Permanent is best for most redirects. Use Temporary if the page may come back."
+msgstr "Permanente è la scelta migliore per la maggior parte dei redirect. Usa Temporaneo se la pagina potrebbe tornare."
 
 msgid "Back to Captured 404s"
-msgstr "Back to Captured 404s"
+msgstr "Torna ai 404 catturati"
 
 msgid "Suggested destination"
-msgstr "Suggested destination"
+msgstr "Destinazione suggerita"
 
 msgid "match"
-msgstr "match"
+msgstr "di corrispondenza"
 
 msgid "Accept Suggestion"
-msgstr "Accept Suggestion"
+msgstr "Accetta il suggerimento"
 
 msgid "Pick a Different Page"
-msgstr "Pick a Different Page"
+msgstr "Scegli un'altra pagina"
 
 msgid "Post"
 msgstr "Post"
@@ -3908,143 +3901,118 @@ msgstr "La ricostruzione di visualizzazioni/accessi è stata sospesa dopo %d err
 msgid "Retry Now"
 msgstr "Riprova ora"
 
-# translation-verified: en-fallback awaiting native pass (i310)
-#: includes/
-msgid "literal text"
-msgstr "literal text"
-
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "literal"
-msgstr "literal"
+msgstr "letterale"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%1$d of %2$d"
-msgstr "%1$d of %2$d"
+msgstr "%1$d di %2$d"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%s item"
 msgid_plural "%s items"
-msgstr[0] "%s item"
-msgstr[1] "%s items"
+msgstr[0] "%s elemento"
+msgstr[1] "%s elementi"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Unknown purge result: %s"
-msgstr "Error: Unknown purge result: %s"
+msgstr "Errore: risultato di pulizia sconosciuto: %s"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%s redirect entries were moved to the trash."
-msgstr "%s redirect entries were moved to the trash."
+msgstr "%s voci di redirect sono state spostate nel cestino."
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Unable to update redirect data. Repository result: %s"
-msgstr "Error: Unable to update redirect data. Repository result: %s"
+msgstr "Errore: impossibile aggiornare i dati del redirect. Risultato del repository: %s"
 
-# translation-verified: en-fallback awaiting native pass
 #: includes/
 msgid "Error: Unable to save redirect conditions. Repository result: %s"
-msgstr "Error: Unable to save redirect conditions. Repository result: %s"
+msgstr "Errore: impossibile salvare le condizioni del redirect. Risultato del repository: %s"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Loading status..."
-msgstr "Loading status..."
+msgstr "Caricamento dello stato..."
 
 #: includes/
 msgid "Loading..."
 msgstr "Caricamento..."
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Collected URL deletion value must be a number greater than or equal to zero"
-msgstr "Error: Collected URL deletion value must be a number greater than or equal to zero"
+msgstr "Errore: il valore di eliminazione degli URL raccolti deve essere un numero maggiore o uguale a zero"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Manual redirect deletion value must be a number greater than or equal to zero"
-msgstr "Error: Manual redirect deletion value must be a number greater than or equal to zero"
+msgstr "Errore: il valore di eliminazione dei redirect manuali deve essere un numero maggiore o uguale a zero"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Log deletion value must be a number greater than or equal to zero"
-msgstr "Error: Log deletion value must be a number greater than or equal to zero"
+msgstr "Errore: il valore di eliminazione dei log deve essere un numero maggiore o uguale a zero"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Auto redirect deletion value must be a number greater than or equal to zero"
-msgstr "Error: Auto redirect deletion value must be a number greater than or equal to zero"
+msgstr "Errore: il valore di eliminazione dei redirect automatici deve essere un numero maggiore o uguale a zero"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Auto-redirect expiration days must be a number greater than or equal to zero"
-msgstr "Error: Auto-redirect expiration days must be a number greater than or equal to zero"
+msgstr "Errore: i giorni di scadenza dei redirect automatici devono essere un numero maggiore o uguale a zero"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Error: Maximum log disk usage must be a number greater than zero"
-msgstr "Error: Maximum log disk usage must be a number greater than zero"
+msgstr "Errore: l'utilizzo massimo del disco per i log deve essere un numero maggiore di zero"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Keep my redirects (%d)"
-msgstr "Keep my redirects (%d)"
+msgstr "Mantieni i miei redirect (%d)"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%d minutes ago"
-msgstr "%d minutes ago"
+msgstr "%d minuti fa"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%d hours ago"
-msgstr "%d hours ago"
+msgstr "%d ore fa"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "%d days ago"
-msgstr "%d days ago"
+msgstr "%d giorni fa"
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "Unknown status filter. Valid values are: manual, auto, regex (or omit for all active)."
-msgstr "Unknown status filter. Valid values are: manual, auto, regex (or omit for all active)."
+msgstr "Filtro di stato sconosciuto. I valori validi sono: manual, auto, regex (oppure omettilo per tutti quelli attivi)."
 
-# translation-verified: en-fallback awaiting native pass (i310)
 #: includes/
 msgid "The \"to\" URL must be a relative path or an http/https URL."
-msgstr "The \"to\" URL must be a relative path or an http/https URL."
+msgstr "L'URL di destinazione deve essere un percorso relativo o un URL http/https."
 
 msgid "Contact your hosting provider. This is usually caused by a database quota, tablespace limit, or full /tmp partition - not necessarily a full disk."
-msgstr "Contatta il tuo provider di hosting. Di solito la causa e una quota del database, un limite di tablespace o una partizione /tmp piena - non necessariamente un disco pieno."
+msgstr "Contatta il tuo provider di hosting. Di solito la causa è una quota del database, un limite di tablespace o una partizione /tmp piena - non necessariamente un disco pieno."
 
 msgid "A database lock wait timeout occurred. If this persists, contact your host - another process may be holding a long-running lock."
-msgstr "Si e verificato un timeout durante l'attesa di un blocco del database. Se il problema persiste, contatta il tuo host - un altro processo potrebbe trattenere un blocco di lunga durata."
+msgstr "Si è verificato un timeout durante l'attesa di un blocco del database. Se il problema persiste, contatta il tuo host - un altro processo potrebbe trattenere un blocco di lunga durata."
 
 msgid "404 Solution cannot function correctly: the database table %s is missing, and the plugin tried to recreate it but the CREATE TABLE statement could not be executed. This almost always means the WordPress database user does not have permission to run CREATE TABLE (and likely ALTER TABLE / CREATE INDEX) on this database. Until this is fixed, the plugin cannot record 404s, serve redirects, or generate suggestions. To fix it: ask your hosting provider or database administrator to grant CREATE, ALTER, and INDEX privileges to the WordPress database user for this site, then reload this page. Alternatively, restore the missing table from a recent database backup."
-msgstr "404 Solution non puo funzionare correttamente: la tabella del database %s manca e il plugin ha tentato di ricrearla, ma l'istruzione CREATE TABLE non e stata eseguita. Questo significa quasi sempre che l'utente del database WordPress non dispone dell'autorizzazione per eseguire CREATE TABLE (e probabilmente ALTER TABLE / CREATE INDEX) su questo database. Finche non viene risolto, il plugin non puo registrare i 404, servire i reindirizzamenti o generare suggerimenti. Per risolvere: chiedi al tuo provider di hosting o all'amministratore del database di concedere i privilegi CREATE, ALTER e INDEX all'utente del database WordPress di questo sito, quindi ricarica questa pagina. In alternativa, ripristina la tabella mancante da un backup recente del database."
+msgstr "404 Solution non può funzionare correttamente: la tabella del database %s manca e il plugin ha tentato di ricrearla, ma l'istruzione CREATE TABLE non è stata eseguita. Questo significa quasi sempre che l'utente del database WordPress non dispone dell'autorizzazione per eseguire CREATE TABLE (e probabilmente ALTER TABLE / CREATE INDEX) su questo database. Finché non viene risolto, il plugin non può registrare i 404, servire i reindirizzamenti o generare suggerimenti. Per risolvere: chiedi al tuo provider di hosting o all'amministratore del database di concedere i privilegi CREATE, ALTER e INDEX all'utente del database WordPress di questo sito, quindi ricarica questa pagina. In alternativa, ripristina la tabella mancante da un backup recente del database."
 
 msgid "Original database error: %s"
 msgstr "Errore originale del database: %s"
 
 msgid "A database temporary table is corrupted - this is usually caused by a full or failing disk. Please contact your host. (MySQL error 1034)"
-msgstr "Una tabella temporanea del database e danneggiata - di solito la causa e un disco pieno o difettoso. Contatta il tuo host. (MySQL error 1034)"
+msgstr "Una tabella temporanea del database è danneggiata - di solito la causa è un disco pieno o difettoso. Contatta il tuo host. (MySQL error 1034)"
 
 msgid "Permalink cache appears empty after rebuild - suggestions may be degraded. Try rebuilding again or check available disk space."
 msgstr "La cache dei permalink risulta vuota dopo la ricostruzione - i suggerimenti potrebbero essere ridotti. Prova a ricostruire di nuovo oppure verifica lo spazio disponibile su disco."
 
 msgid "WordPress cron does not appear to be running. The earliest overdue cron event has been waiting at least %d hours, so cron-dependent plugin features (staged view-build, daily cleanup, log updates, digest emails) are not advancing. To resolve: if DISABLE_WP_CRON is set in wp-config.php either remove it, or configure a system cron job that requests wp-cron.php periodically. To force the redirect view to rebuild right now in your browser (workaround while cron is broken), open the 404 Solution Redirects page with ?abj404_force_view_rebuild=1 appended to the URL."
-msgstr "Il cron di WordPress non sembra essere in esecuzione. L'evento cron scaduto piu vecchio e in attesa da almeno %d ore, quindi le funzionalita del plugin che dipendono dal cron (compilazione a fasi della vista, pulizia quotidiana, aggiornamenti dei log, email di riepilogo) non avanzano. Per risolvere: se DISABLE_WP_CRON e impostato in wp-config.php, rimuovilo oppure configura un'attivita cron di sistema che richiami periodicamente wp-cron.php. Per forzare subito la ricostruzione della vista dei reindirizzamenti nel browser (soluzione temporanea mentre il cron non funziona), apri la pagina Reindirizzamenti di 404 Solution aggiungendo ?abj404_force_view_rebuild=1 all'URL."
+msgstr "Il cron di WordPress non sembra essere in esecuzione. L'evento cron scaduto più vecchio è in attesa da almeno %d ore, quindi le funzionalità del plugin che dipendono dal cron (compilazione a fasi della vista, pulizia quotidiana, aggiornamenti dei log, email di riepilogo) non avanzano. Per risolvere: se DISABLE_WP_CRON è impostato in wp-config.php, rimuovilo oppure configura un'attività cron di sistema che richiami periodicamente wp-cron.php. Per forzare subito la ricostruzione della vista dei reindirizzamenti nel browser (soluzione temporanea mentre il cron non funziona), apri la pagina Reindirizzamenti di 404 Solution aggiungendo ?abj404_force_view_rebuild=1 all'URL."
 
 msgid "Scheduling the 404 Solution staged view-build cron event failed. The build will not advance in the background until this clears. This usually indicates the WordPress cron lock is held, the cron option is unwritable, or a custom cron implementation rejected the event. Check your hosting provider and any cron-replacement plugins. To force the redirect view to rebuild right now in your browser (workaround while cron scheduling is failing), open the 404 Solution Redirects page with ?abj404_force_view_rebuild=1 appended to the URL."
-msgstr "La pianificazione dell'evento cron di compilazione a fasi della vista di 404 Solution non e riuscita. La compilazione non avanzera in background finche il problema non si risolve. Di solito questo indica che il blocco del cron di WordPress e trattenuto, che l'opzione cron non e scrivibile oppure che un'implementazione cron personalizzata ha rifiutato l'evento. Verifica il tuo provider di hosting ed eventuali plugin che sostituiscono il cron. Per forzare subito la ricostruzione della vista dei reindirizzamenti nel browser (soluzione temporanea mentre la pianificazione del cron non riesce), apri la pagina Reindirizzamenti di 404 Solution aggiungendo ?abj404_force_view_rebuild=1 all'URL."
+msgstr "La pianificazione dell'evento cron di compilazione a fasi della vista di 404 Solution non è riuscita. La compilazione non avanzerà in background finché il problema non si risolve. Di solito questo indica che il blocco del cron di WordPress è trattenuto, che l'opzione cron non è scrivibile oppure che un'implementazione cron personalizzata ha rifiutato l'evento. Verifica il tuo provider di hosting ed eventuali plugin che sostituiscono il cron. Per forzare subito la ricostruzione della vista dei reindirizzamenti nel browser (soluzione temporanea mentre la pianificazione del cron non riesce), apri la pagina Reindirizzamenti di 404 Solution aggiungendo ?abj404_force_view_rebuild=1 all'URL."
 
 msgid "Your PHP memory_limit (%s) is below the recommended 128M; the redirect view rebuild may fail on large sites."
-msgstr "Il tuo PHP memory_limit (%s) e inferiore ai 128M consigliati; la ricostruzione della vista dei reindirizzamenti potrebbe non riuscire sui siti di grandi dimensioni."
+msgstr "Il tuo PHP memory_limit (%s) è inferiore ai 128M consigliati; la ricostruzione della vista dei reindirizzamenti potrebbe non riuscire sui siti di grandi dimensioni."
 
 msgid "The 404 Solution view-build pipeline detected filesystem host constraints that may degrade the next rebuild: "
 msgstr "La pipeline di compilazione della vista di 404 Solution ha rilevato vincoli dell'host del filesystem che potrebbero ridurre la prossima ricostruzione: "
@@ -4056,19 +4024,19 @@ msgid "Original error: %s"
 msgstr "Errore originale: %s"
 
 msgid "The 404 Solution view-build pipeline halted at stage %d/11."
-msgstr "La pipeline di compilazione della vista di 404 Solution si e arrestata alla fase %d/11."
+msgstr "La pipeline di compilazione della vista di 404 Solution si è arrestata alla fase %d/11."
 
 msgid "The 404 Solution view-build pipeline skipped optional stage %d/11."
 msgstr "La pipeline di compilazione della vista di 404 Solution ha saltato la fase opzionale %d/11."
 
 msgid "Ask your host to grant the CREATE TEMPORARY TABLES privilege to your WordPress database user so the hits aggregate column can be populated."
-msgstr "Chiedi al tuo host di concedere il privilegio CREATE TEMPORARY TABLES all'utente del database WordPress affinche la colonna aggregata degli accessi possa essere popolata."
+msgstr "Chiedi al tuo host di concedere il privilegio CREATE TEMPORARY TABLES all'utente del database WordPress affinché la colonna aggregata degli accessi possa essere popolata."
 
 msgid "Ask your host to grant the ALTER privilege to your WordPress database user."
 msgstr "Chiedi al tuo host di concedere il privilegio ALTER all'utente del database WordPress."
 
 msgid "Ask your host to grant ALTER + DROP + CREATE on the database used by WordPress so the view-build swap can complete."
-msgstr "Chiedi al tuo host di concedere ALTER + DROP + CREATE sul database usato da WordPress affinche lo scambio di compilazione della vista possa completarsi."
+msgstr "Chiedi al tuo host di concedere ALTER + DROP + CREATE sul database usato da WordPress affinché lo scambio di compilazione della vista possa completarsi."
 
 msgid "Ask your host to review your WordPress database user privileges."
 msgstr "Chiedi al tuo host di rivedere i privilegi dell'utente del database WordPress."
@@ -4076,10 +4044,9 @@ msgstr "Chiedi al tuo host di rivedere i privilegi dell'utente del database Word
 msgid "This database does not support session-scoped GET_LOCK named locks. The plugin is using a WordPress option-row fallback to coordinate the staged view-build. Common on PlanetScale, Vitess, and split-routing ProxySQL deployments."
 msgstr "Questo database non supporta i blocchi denominati GET_LOCK con ambito di sessione. Il plugin sta usando un meccanismo di ripiego basato su una riga delle opzioni di WordPress per coordinare la compilazione a fasi della vista. Comune nelle distribuzioni PlanetScale, Vitess e ProxySQL con instradamento separato."
 
-# translation-verified: en-fallback awaiting native pass (t_260618_093531_671)
 #: includes/view/View_CapturedURLsTable.php:332
 msgid "Preparing the captured 404s table. The list is still loading and will appear in a moment."
-msgstr "Preparing the captured 404s table. The list is still loading and will appear in a moment."
+msgstr "Preparazione della tabella dei 404 catturati. L'elenco è ancora in caricamento e apparirà tra un momento."
 
 #: includes/admin/AdminTableColumnHeaders.php:178
 msgid "Sorting by this column is being prepared for your number of URLs (%d%% complete). The list shows newest first until it is ready."
@@ -4173,54 +4140,138 @@ msgstr "Questo sito ha la segnalazione diagnostica %s. Puoi scaricare tutto ciò
 msgid "When checked, the text is treated as a regular expression. Note that including a bad regular expression or one that takes too long will break your website. So please use caution and test them elsewhere before trying them here. If you don't know what you're doing please don't use this option (as it's not necessary for the functioning of the plugin)."
 msgstr "Quando selezionato, il testo viene trattato come un'espressione regolare. Nota che un'espressione regolare errata o troppo lenta COMPROMETTERÀ il tuo sito web. Quindi usa cautela e testale altrove prima di provarle qui. Se non sai cosa stai facendo, per favore non usare questa opzione (non è necessaria per il funzionamento del plugin)."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "/events/(.+) will match any URL that begins with /events/. Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
-msgstr "/events/(.+) will match any URL that begins with /events/. Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
+msgstr "/events/(.+) corrisponde a qualsiasi URL che inizia con /events/. Usa $1 nella destinazione per inserire il testo catturato. Sono supportati i percorsi relativi al sito come /archive/$1 e gli URL HTTP(S) completi."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
-msgstr "Use $1 in the destination to insert the captured text. Site-relative paths such as /archive/$1 and full HTTP(S) URLs are supported."
+msgstr "Usa $1 nella destinazione per inserire il testo catturato. Sono supportati i percorsi relativi al sito come /archive/$1 e gli URL HTTP(S) completi."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains control characters."
-msgstr "Error: Regex destination contains control characters."
+msgstr "Errore: la destinazione regex contiene caratteri di controllo."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination must be an HTTP(S) URL or a site-relative path starting with /."
-msgstr "Error: Regex destination must be an HTTP(S) URL or a site-relative path starting with /."
+msgstr "Errore: la destinazione regex deve essere un URL HTTP(S) o un percorso relativo al sito che inizia con /."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: A site-relative regex destination must start with a single /. URLs beginning with // are not allowed."
-msgstr "Error: A site-relative regex destination must start with a single /. URLs beginning with // are not allowed."
+msgstr "Errore: una destinazione regex relativa al sito deve iniziare con una sola /. Gli URL che iniziano con // non sono consentiti."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination must not contain spaces. Use URL encoding such as %20 instead."
-msgstr "Error: Regex destination must not contain spaces. Use URL encoding such as %20 instead."
+msgstr "Errore: la destinazione regex non deve contenere spazi. Usa una codifica URL come %20."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains invalid percent encoding."
-msgstr "Error: Regex destination contains invalid percent encoding."
+msgstr "Errore: la destinazione regex contiene una codifica percentuale non valida."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains characters that are not safe in a redirect URL."
-msgstr "Error: Regex destination contains characters that are not safe in a redirect URL."
+msgstr "Errore: la destinazione regex contiene caratteri non sicuri in un URL di reindirizzamento."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination must not contain . or .. path segments."
-msgstr "Error: Regex destination must not contain . or .. path segments."
+msgstr "Errore: la destinazione regex non deve contenere i segmenti di percorso . o .."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Source regular expression is invalid."
-msgstr "Error: Source regular expression is invalid."
+msgstr "Errore: l'espressione regolare di origine non è valida."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination contains unsupported replacement syntax. Use $1, $2, and so on."
-msgstr "Error: Regex destination contains unsupported replacement syntax. Use $1, $2, and so on."
+msgstr "Errore: la destinazione regex contiene una sintassi di sostituzione non supportata. Usa $1, $2 e così via."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Relative regex destinations support numbered capture groups written as (...). Named and branch-reset groups are not supported."
-msgstr "Error: Relative regex destinations support numbered capture groups written as (...). Named and branch-reset groups are not supported."
+msgstr "Errore: le destinazioni regex relative supportano i gruppi di cattura numerati scritti come (...). I gruppi con nome e i gruppi branch reset non sono supportati."
 
-# translation-verified: en-fallback awaiting native pass
 msgid "Error: Regex destination references $%1$d, but the source pattern defines %2$d capture group(s)."
-msgstr "Error: Regex destination references $%1$d, but the source pattern defines %2$d capture group(s)."
+msgstr "Errore: la destinazione regex fa riferimento a $%1$d, ma il modello di origine definisce %2$d gruppo/i di cattura."
+
+msgid "Could not load chart data. Reload this page and try again."
+msgstr "Impossibile caricare i dati del grafico. Ricarica questa pagina e riprova."
+
+msgid "This sends a one-time diagnostic report to the plugin developer so they can investigate the issue you are seeing."
+msgstr "Questo invia un rapporto diagnostico una tantum allo sviluppatore del plugin, in modo che possa esaminare il problema che stai riscontrando."
+
+msgid "This report includes:"
+msgstr "Questo rapporto include:"
+
+msgid "Site URL"
+msgstr "URL del sito"
+
+msgid "Plugin, PHP, WordPress, and database versions"
+msgstr "Versioni del plugin, di PHP, di WordPress e del database"
+
+msgid "List of active plugins"
+msgstr "Elenco dei plugin attivi"
+
+msgid "Recent debug log excerpt"
+msgstr "Estratto recente del log di debug"
+
+msgid "Optional message and reply email you provide below"
+msgstr "Messaggio facoltativo e indirizzo e-mail di risposta che indichi qui sotto"
+
+msgid "Show what's in this report"
+msgstr "Mostra il contenuto di questo rapporto"
+
+msgid "Hide report contents"
+msgstr "Nascondi il contenuto del rapporto"
+
+msgid "Loading report contents..."
+msgstr "Caricamento del contenuto del rapporto..."
+
+msgid "Could not load preview. The full report is still safe to send."
+msgstr "Impossibile caricare l'anteprima. Il rapporto completo può comunque essere inviato senza problemi."
+
+msgid "What went wrong? (optional, helps us diagnose)"
+msgstr "Che cosa non ha funzionato? (facoltativo, ci aiuta nella diagnosi)"
+
+msgid "Where should we reply? (optional)"
+msgstr "Dove dobbiamo rispondere? (facoltativo)"
+
+msgid "By clicking Send report, you consent to transmitting the information above to the plugin developer for support purposes. The data is used only to diagnose your issue and is not shared with third parties."
+msgstr "Facendo clic su Invia rapporto, acconsenti alla trasmissione delle informazioni sopra riportate allo sviluppatore del plugin a scopo di assistenza. I dati sono usati solo per diagnosticare il tuo problema e non sono condivisi con terze parti."
+
+msgid "Send report"
+msgstr "Invia rapporto"
+
+msgid "Sending..."
+msgstr "Invio in corso..."
+
+msgid "Retry"
+msgstr "Riprova"
+
+msgid "Sent. Reference: "
+msgstr "Inviato. Riferimento: "
+
+msgid ". Thank you."
+msgstr ". Grazie."
+
+msgid "You already sent a report recently. Try again in {minutes} minute(s)."
+msgstr "Hai già inviato un rapporto di recente. Riprova tra {minutes} minuto/i."
+
+msgid "Network error: could not reach the server. Check your internet connection and try again."
+msgstr "Errore di rete: impossibile raggiungere il server. Controlla la connessione a Internet e riprova."
+
+msgid "Could not send report. Please try again later."
+msgstr "Impossibile inviare il rapporto. Riprova più tardi."
+
+msgid "Could not load the migration tool configuration. Reload this page and try again."
+msgstr "Impossibile caricare la configurazione dello strumento di migrazione. Ricarica questa pagina e riprova."
+
+msgid "No suggested match was scored for this URL"
+msgstr "Nessuna corrispondenza suggerita è stata valutata per questo URL"
+
+msgid "No confidence score was recorded for this redirect"
+msgstr "Nessun punteggio di affidabilità è stato registrato per questo reindirizzamento"
+
+msgid "No score"
+msgstr "Nessun punteggio"
+
+msgid "Redirect this URL"
+msgstr "Reindirizza questo URL"
+
+msgid "Change the minimum score"
+msgstr "Modifica il punteggio minimo"
+
+msgid "404 Solution, admin only: nothing on the site scored close enough to suggest."
+msgstr "404 Solution, solo per amministratori: nessun contenuto del sito ha ottenuto un punteggio sufficiente per essere suggerito."
+
+msgid "404 Solution, admin only: best match %1$s, under the %2$s needed to redirect automatically."
+msgstr "404 Solution, solo per amministratori: migliore corrispondenza %1$s, sotto i %2$s necessari per reindirizzare automaticamente."
+
+msgid "404 Solution, admin only: best match %1$s, at or above the %2$s needed to redirect automatically."
+msgstr "404 Solution, solo per amministratori: migliore corrispondenza %1$s, pari o superiore ai %2$s necessari per reindirizzare automaticamente."
+
