@@ -260,9 +260,16 @@ class ABJ_404_Solution_EditRedirectHandler {
         }
 
         if ($id > 0) {
-            $conditionsError = $redirectsRepo->saveRedirectConditions($id, $this->sanitizeRedirectConditions());
+            $sanitized = $this->sanitizeRedirectConditions();
+            $conditionsError = $redirectsRepo->saveRedirectConditions($id, $sanitized['conditions']);
             if ($conditionsError !== '') {
                 return $this->formatSaveConditionsError($conditionsError) . "<BR/>";
+            }
+            // After the save, not instead of it: the conditions that fit were
+            // stored and the rest of the edit stands. This reports what did
+            // not fit so the admin is not left believing all of it was kept.
+            if ($sanitized['droppedOverMaximum'] > 0) {
+                return $this->formatConditionsCappedNotice($sanitized['droppedOverMaximum']) . "<BR/>";
             }
         }
         return '';
@@ -276,6 +283,29 @@ class ABJ_404_Solution_EditRedirectHandler {
         $message = "";
         $redirectsRepo = $this->parent->getRedirectsRepo();
         $redirectsMultiple = $redirectsRepo->getRedirectsByIDs($idsMultiple);
+        if (empty($redirectsMultiple)) {
+            // Every selected row is gone: another admin deleted them, or
+            // deleteOldRedirectsCron did, while the list page holding the
+            // checkboxes was still open. Without this branch the loop below
+            // runs zero times and returns "", which handleActionEdit() reads
+            // as success and answers "Redirect Information Updated
+            // Successfully!" after writing nothing. Same "the id no longer has
+            // a row" condition the edit screen reports (production report 349),
+            // on the write side. Below error level for the same reason: the
+            // plugin worked correctly, the selection did not survive.
+            $this->parent->getLogger()->debugMessage("Bulk redirect update: no redirect rows exist " .
+                    "for requested id(s): " . esc_html(implode(', ', array_map('strval', $idsMultiple))));
+            return sprintf(
+                /* translators: %s is a comma-separated list of redirect id numbers. */
+                _n(
+                    'Redirect %s was not found. It may have been deleted since this page was opened.',
+                    'Redirects %s were not found. They may have been deleted since this page was opened.',
+                    count($idsMultiple),
+                    '404-solution'
+                ),
+                implode(', ', array_map('strval', $idsMultiple))
+            ) . "<BR/>";
+        }
         foreach ($redirectsMultiple as $redirect) {
             $redirectUrl = is_string($redirect['url']) ? $redirect['url'] : '';
             $redirectId = is_scalar($redirect['id']) ? (int)$redirect['id'] : 0;
@@ -325,11 +355,12 @@ class ABJ_404_Solution_EditRedirectHandler {
      * @return array{source_page: string, redirect_url: string}
      */
     private function buildPostEditRedirect(): array {
-        $valid_tabs = array('abj404_redirects', 'abj404_captured', 'abj404_logs',
-                          'abj404_stats', 'abj404_tools', 'abj404_options');
+        // Through RedirectEditRequest's list, not a second copy of it: the read
+        // side answers the same question for the back link and the hidden
+        // inputs, and two lists of "which subpage is valid" drift apart.
         $source_page = ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('source_page');
-        if ($source_page === '' || !in_array($source_page, $valid_tabs)) {
-            $source_page = 'abj404_redirects';
+        if (!ABJ_404_Solution_RedirectEditRequest::isListSubpage($source_page)) {
+            $source_page = ABJ_404_Solution_RedirectEditRequest::DEFAULT_SUBPAGE;
         }
 
         $redirect_url = "?page=" . ABJ404_PP . "&subpage=" . $source_page . "&updated=1";
@@ -371,16 +402,24 @@ class ABJ_404_Solution_EditRedirectHandler {
      * accepts. Whitelists condition types and operators; coerces logic to
      * AND/OR.
      *
-     * @return array<int, array<string, mixed>>
+     * Reports how many were dropped for being over the maximum, separately
+     * from the ones the loop below skips for being unrecognized. The two are
+     * not the same event: an unknown condition type is garbage and dropping it
+     * silently is right, while a VALID rule dropped for arriving 51st changes
+     * how the redirect behaves versus what the admin configured, and the only
+     * signal they would otherwise get is the rows being absent next time they
+     * happen to open the screen.
+     *
+     * @return array{conditions: array<int, array<string, mixed>>, droppedOverMaximum: int}
      */
     private function sanitizeRedirectConditions(): array {
         $rawConditions = (isset($_POST['conditions']) && is_array($_POST['conditions']))
             ? $_POST['conditions'] : [];
-        // Enforce the domain maximum before sanitizing/inserting: mirrors the
-        // loop's existing "skip silently, never fail the whole request" shape
-        // (see the condition-type/operator handling below) rather than
-        // rejecting the entire edit over an oversized payload.
-        if (count($rawConditions) > self::MAX_REDIRECT_CONDITIONS) {
+        // Enforce the domain maximum before sanitizing/inserting, rather than
+        // rejecting the entire edit over an oversized payload: the rest of the
+        // save is the admin's real work and is valid.
+        $droppedOverMaximum = max(0, count($rawConditions) - self::MAX_REDIRECT_CONDITIONS);
+        if ($droppedOverMaximum > 0) {
             $rawConditions = array_slice($rawConditions, 0, self::MAX_REDIRECT_CONDITIONS);
         }
         $sanitizedConditions = [];
@@ -419,6 +458,27 @@ class ABJ_404_Solution_EditRedirectHandler {
                 'sort_order'     => $condSortOrder,
             ];
         }
-        return $sanitizedConditions;
+        return array(
+            'conditions' => $sanitizedConditions,
+            'droppedOverMaximum' => $droppedOverMaximum,
+        );
+    }
+
+    /**
+     * @param int $droppedCount How many valid conditions were dropped for
+     *     arriving past MAX_REDIRECT_CONDITIONS.
+     */
+    private function formatConditionsCappedNotice(int $droppedCount): string {
+        return sprintf(
+            /* translators: 1: number of conditions that were not saved. 2: the maximum allowed. */
+            _n(
+                'Note: %1$s condition was not saved. A redirect may have at most %2$s conditions.',
+                'Note: %1$s conditions were not saved. A redirect may have at most %2$s conditions.',
+                $droppedCount,
+                '404-solution'
+            ),
+            number_format_i18n($droppedCount),
+            number_format_i18n(self::MAX_REDIRECT_CONDITIONS)
+        );
     }
 }

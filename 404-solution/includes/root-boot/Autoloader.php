@@ -1,7 +1,17 @@
 <?php
+
 if (!defined('ABSPATH')) {
     exit;
 }
+
+// Every capability boundary this file CALLS is required by path, never
+// autoloaded: this IS the autoloader, so a class it needs while refreshing the
+// classmap cannot be resolved through the classmap it is in the middle of
+// rereading. Splitting the boundary into per-extension files made that easy to
+// forget once; ClassmapIndependentBootReferencesTest now fails the build if any
+// referenced ABJ_404_Solution_* class here lacks its require_once.
+require_once dirname(__DIR__) . '/core/PhpRuntimeCapabilityAdapter.php';
+require_once dirname(__DIR__) . '/core/OpcacheAdapter.php';
 
 /**
  * Plugin class autoloader.
@@ -86,10 +96,10 @@ function abj404_autoloader_read_classmap($mapFile, $refreshBytecode = false) {
 	if (!is_file($mapFile)) {
 		return array();
 	}
-	if ($refreshBytecode && function_exists('opcache_invalidate')
+	if ($refreshBytecode && ABJ_404_Solution_PhpRuntimeCapabilityAdapter::isFunctionAvailable('opcache_invalidate')
 			&& (!function_exists('abj404_opcache_api_is_restricted')
 				|| !abj404_opcache_api_is_restricted(ini_get('opcache.restrict_api'), __FILE__))) {
-		@opcache_invalidate($mapFile, true);
+		ABJ_404_Solution_OpcacheAdapter::invalidate($mapFile, true);
 	}
 	try {
 		$loadedMap = require $mapFile;

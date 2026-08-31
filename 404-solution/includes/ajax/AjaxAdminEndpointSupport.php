@@ -9,14 +9,14 @@ if (!defined('ABSPATH')) {
  * Cross-cutting infrastructure consumed by every admin-AJAX endpoint
  * handler in includes/ajax/Ajax_*.php. Owns the request lifecycle that
  * surrounds a response: debug-context start, response-sent marker, output
- * buffer management, error envelope construction, admin-status fallback
+ * buffer management, admin-status fallback
  * resolution, request reader, failure logging shim, and view instance
  * resolution. Actually emitting the JSON response (header/ledger stamping,
  * the encode+echo boundary, output-buffer drain, connection-detach, exit)
  * is ABJ_404_Solution_AjaxResponseEmitter's own cohesive responsibility --
  * see that class for why it is split out rather than kept here.
  *
- * Shared cross-cutting helpers (error-envelope builder, fatal-error
+ * Shared cross-cutting helpers (fatal-error
  * classifier, debug-context starter, admin-nonce action list) for the
  * per-endpoint admin-table AJAX handlers, so each handler can own a single
  * endpoint's logic in its own file while reusing this common surface.
@@ -55,25 +55,6 @@ class ABJ_404_Solution_AjaxAdminEndpointSupport {
     }
 
     /**
-     * @param string $message
-     * @param array<string, mixed>|null $details
-     * @param bool $isPluginAdmin
-     * @return array<string, mixed>
-     */
-    public static function buildAjaxErrorResponse($message, $details, $isPluginAdmin) {
-        $data = array(
-            'message' => $message,
-        );
-        if ($isPluginAdmin && $details !== null) {
-            $data['details'] = $details;
-        }
-        return array(
-            'success' => false,
-            'data' => $data,
-        );
-    }
-
-    /**
      * Verify an admin AJAX nonce and plugin-admin authorization, then emit
      * this layer's diagnostic error envelope on failure.
      *
@@ -89,7 +70,7 @@ class ABJ_404_Solution_AjaxAdminEndpointSupport {
         string $handlerName,
         array $options = array()
     ): bool {
-        $checkpointRequestId = ABJ_404_Solution_AjaxRequestLedger::instrumentedRequestId($context);
+        $checkpointRequestId = ABJ_404_Solution_AjaxDiagnosticRequestPolicy::instrumentedRequestId($context);
         $gate = function_exists('abj_service_optional') ? abj_service_optional('ajax_security_gate') : null;
         if (!is_object($gate) || !method_exists($gate, 'authorizeAdminWithNonce')) {
             ABJ_404_Solution_AjaxCheckpointLogger::record($checkpointRequestId, 'auth_service_unavailable_branch', array('handler' => $handlerName));
@@ -97,7 +78,7 @@ class ABJ_404_Solution_AjaxAdminEndpointSupport {
             self::markAjaxResponseSent();
             self::getAndClearAjaxBufferedOutput();
             ABJ_404_Solution_AjaxResponseEmitter::sendJsonResponseAndExit(
-                self::buildAjaxErrorResponse('Unauthorized', null, false),
+                ABJ_404_Solution_AjaxErrorEnvelope::build('Unauthorized', null, false),
                 403
             );
             return false;
@@ -127,7 +108,7 @@ class ABJ_404_Solution_AjaxAdminEndpointSupport {
         self::markAjaxResponseSent();
         self::getAndClearAjaxBufferedOutput();
         ABJ_404_Solution_AjaxResponseEmitter::sendJsonResponseAndExit(
-            self::buildAjaxErrorResponse($message, null, false),
+            ABJ_404_Solution_AjaxErrorEnvelope::build($message, null, false),
             $status
         );
         return false;
@@ -283,6 +264,9 @@ class ABJ_404_Solution_AjaxAdminEndpointSupport {
         $context['ajax_expected_json'] = true;
         $context['response_sent'] = false;
         $context['ob_level_before'] = ob_get_level();
+        // Response-head bookkeeping is request state, and this is the one
+        // arming point every JSON endpoint passes through.
+        ABJ_404_Solution_JsonResponseHead::resetForRequest();
 
         // Prevent WordPress's "critical error" HTML page from masking details for AJAX calls.
         if (!headers_sent()) {
@@ -292,8 +276,20 @@ class ABJ_404_Solution_AjaxAdminEndpointSupport {
             if (array_key_exists('subpage', $context) && is_string($context['subpage']) && $context['subpage'] !== '') {
                 header('X-ABJ404-Subpage: ' . preg_replace('/[\r\n]+/', '', $context['subpage']));
             }
-            @ini_set('display_errors', '0');
         }
+        // Outside that guard on purpose. A header genuinely cannot be set once
+        // output has started, but display_errors is PHP_INI_ALL with no such
+        // restriction, so sharing the guard stopped suppressing notices on
+        // exactly the request that had ALREADY emitted stray bytes -- the one
+        // whose body was already suspect.
+        //
+        // Recorded rather than assumed, because ini_set is refusable: a host
+        // carrying it in disable_functions is a live user environment. Without
+        // this, PHP notices print into a body every consumer parses as JSON,
+        // and in a support payload that is indistinguishable from the
+        // transport corruption the canary ladder is investigating.
+        $context['display_errors_suppressed'] = ABJ_404_Solution_PhpRuntimeCapabilityAdapter::setIni(
+            array('directive' => 'display_errors', 'value' => '0')) !== false;
         if (apply_filters('abj404_should_manage_output_buffer', true, array('source' => 'viewUpdater_startAjaxDebugContext'))) {
             @ob_start();
         }
@@ -307,7 +303,7 @@ class ABJ_404_Solution_AjaxAdminEndpointSupport {
         // path and produce a COMPARABLE trace -- came back with none of the
         // records it is compared against. Both predicates still require the
         // debug opt-in, so a default GA request stays inert either way.
-        $diagnosticsEnabled = ABJ_404_Solution_AjaxRequestLedger::diagnosticRequestId($context) !== '';
+        $diagnosticsEnabled = ABJ_404_Solution_AjaxDiagnosticRequestPolicy::diagnosticRequestId($context) !== '';
         self::configureDiagnosticOperationTracers($diagnosticsEnabled);
         return $context;
     }
@@ -325,7 +321,7 @@ class ABJ_404_Solution_AjaxAdminEndpointSupport {
     public static function armAuthorizedRetryDiagnostics(array $context): array {
         $context['diagnostic_retry_authorized'] = true;
         $GLOBALS['abj404_ajax_context'] = $context;
-        $diagnosticsEnabled = ABJ_404_Solution_AjaxRequestLedger::diagnosticRequestId($context) !== '';
+        $diagnosticsEnabled = ABJ_404_Solution_AjaxDiagnosticRequestPolicy::diagnosticRequestId($context) !== '';
         self::configureDiagnosticOperationTracers($diagnosticsEnabled);
         return $context;
     }
@@ -385,7 +381,7 @@ class ABJ_404_Solution_AjaxAdminEndpointSupport {
             return '';
         }
 
-        $checkpointRequestId = ABJ_404_Solution_AjaxRequestLedger::instrumentedRequestIdFromGlobalContext();
+        $checkpointRequestId = ABJ_404_Solution_AjaxDiagnosticRequestPolicy::instrumentedRequestIdFromGlobalContext();
         $out = '';
         if (ob_get_level() > 0) {
             if ($checkpointRequestId === '') {

@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
  * independent sequences into one file. The support-request handler reads only
  * the CLICKING tab's session id, and both server-side conclusions
  * (ABJ_404_Solution_DetachAbEvidence::verdictForSession and
- * ABJ_404_Solution_CheckpointJournalReader::latestEncodedTableResponseForSession)
+ * ABJ_404_Solution_EncodedTableResponseSize::forSession)
  * were then scoped to that one session -- even when the failed request ids
  * carried in the same support payload belong to another tab, or to a tab the
  * admin has already closed. Multi-tab failure is established for Bruno, so the
@@ -115,7 +115,7 @@ final class ABJ_404_Solution_FailingSessionEvidence {
         string $clickSessionId
     ): array {
         $clickSessionId = substr($clickSessionId, 0, 64);
-        $clickSessionKey = ABJ_404_Solution_AjaxRequestLedger::detachAbSessionKey($clickSessionId);
+        $clickSessionKey = ABJ_404_Solution_DetachAbExperiment::sessionKey($clickSessionId);
         $record = self::emptyRecord($clickSessionKey);
         try {
             $failing = self::normalizeIdSet($failingIds);
@@ -246,7 +246,7 @@ final class ABJ_404_Solution_FailingSessionEvidence {
     ): array {
         $keyOf = array();
         foreach (array_keys($idsBySession) as $rawSessionId) {
-            $keyOf[$rawSessionId] = ABJ_404_Solution_AjaxRequestLedger::detachAbSessionKey($rawSessionId);
+            $keyOf[$rawSessionId] = ABJ_404_Solution_DetachAbExperiment::sessionKey($rawSessionId);
         }
         uksort($idsBySession, static function ($a, $b) use ($keyOf) {
             return strcmp($keyOf[$a], $keyOf[$b]);
@@ -273,7 +273,7 @@ final class ABJ_404_Solution_FailingSessionEvidence {
                 'detach' => self::compactVerdict(
                     ABJ_404_Solution_DetachAbEvidence::verdictForSession($rawSessionId)),
                 'encoded_size' =>
-                    ABJ_404_Solution_CheckpointJournalReader::latestEncodedTableResponseForSession(
+                    ABJ_404_Solution_EncodedTableResponseSize::forSession(
                         $rawSessionId),
             );
         }

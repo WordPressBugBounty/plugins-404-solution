@@ -47,15 +47,11 @@ class ABJ_404_Solution_AjaxFatalErrorResponder {
             $this->diagnostics->safeJsonEncode($details);
         $this->diagnostics->writeLine($line);
 
-        $payload = array(
-            'success' => false,
-            'data' => array(
-                'message' => 'Server error while updating the table.',
-            ),
+        $payload = ABJ_404_Solution_AjaxErrorEnvelope::build(
+            'Server error while updating the table.',
+            $details,
+            $this->isPluginAdmin($context)
         );
-        if ($this->isPluginAdmin($context)) {
-            $payload['data']['details'] = $details;
-        }
 
         if (isset($GLOBALS['abj404_ajax_context']) && is_array($GLOBALS['abj404_ajax_context'])) {
             $GLOBALS['abj404_ajax_context']['response_sent'] = true;
@@ -179,7 +175,12 @@ class ABJ_404_Solution_AjaxFatalErrorResponder {
                 http_response_code($httpStatus);
             }
         }
-        echo json_encode($payload);
+        // The fatal-error responder is the last thing standing between a
+        // PHP fatal and a browser waiting on JSON. `echo json_encode(...)`
+        // would answer an unencodable payload with an empty 200 -- the
+        // diagnostic path going dark exactly when it is needed. See
+        // ABJ_404_Solution_JsonResponseEncoder.
+        echo ABJ_404_Solution_JsonResponseEncoder::encode($payload)->json();
         $shouldExit = function_exists('apply_filters')
             ? apply_filters('abj404_should_exit', true, array('source' => 'errorHandler_emitJson'))
             : true;

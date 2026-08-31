@@ -9,7 +9,7 @@ if (!defined('ABSPATH')) {
  * timeout cause matrix, gap G9 / gap-hunt iteration 2 Codex gap #2).
  *
  * The experiment produces its two halves in two different places and never in
- * the same record. ABJ_404_Solution_AjaxRequestLedger::resolveDetachAbMode()
+ * the same record. ABJ_404_Solution_DetachAbExperiment::assignNextAttempt()
  * decides whether a given table request detaches the connection, and the
  * response tail journals that decision under the request's own id. Whether
  * that same request ever COMPLETED is something only the browser can say, and
@@ -21,7 +21,7 @@ if (!defined('ABSPATH')) {
  * Joining them was, until this class, a manual step performed by a human
  * reading JSONL at analysis time. That is the same manual step that has
  * already gone wrong once in this investigation, and it is the reason the
- * decision rule (ABJ_404_Solution_AjaxCanaryLadder::interpretDetachAbResults())
+ * decision rule (ABJ_404_Solution_DetachAbVerdict::fromAttempts())
  * had no production caller at all.
  *
  * This class owns the join and nothing else: which mode records belong to one
@@ -67,7 +67,7 @@ final class ABJ_404_Solution_DetachAbEvidence {
 
     /**
      * Attempts listed verbatim on the journaled record. One workload scope is
-     * ABJ_404_Solution_AjaxRequestLedger::AB_DETACH_MAX_ATTEMPTS attempts.
+     * ABJ_404_Solution_DetachAbExperiment::MAX_ATTEMPTS attempts.
      * This copy has headroom for a restarted scope, but the TALLY is never
      * bounded by it: only the human-readable copy is, so one long-lived
      * session cannot turn a decision record into a large one.
@@ -91,14 +91,14 @@ final class ABJ_404_Solution_DetachAbEvidence {
      * @return array<string, mixed>
      */
     public static function verdictForSession(string $sessionId): array {
-        $sessionKey = ABJ_404_Solution_AjaxRequestLedger::detachAbSessionKey($sessionId);
+        $sessionKey = ABJ_404_Solution_DetachAbExperiment::sessionKey($sessionId);
         $record = self::emptyRecord($sessionKey);
         try {
             if ($sessionKey === '') {
                 $record['status'] = self::STATUS_NO_SESSION;
                 return $record;
             }
-            if (!ABJ_404_Solution_AjaxRequestLedger::isDetachAbDiagnosticEnabled()) {
+            if (!ABJ_404_Solution_DetachAbExperiment::isEnabled()) {
                 $record['status'] = self::STATUS_NOT_ARMED;
                 return $record;
             }
@@ -120,7 +120,7 @@ final class ABJ_404_Solution_DetachAbEvidence {
      * literal, so a "nothing to decide" record can never drift out of step with
      * the shape a decided one has.
      *
-     * @param string $sessionKey ABJ_404_Solution_AjaxRequestLedger::detachAbSessionKey().
+     * @param string $sessionKey ABJ_404_Solution_DetachAbExperiment::sessionKey().
      * @return array<string, mixed>
      */
     private static function emptyRecord(string $sessionKey): array {
@@ -133,7 +133,7 @@ final class ABJ_404_Solution_DetachAbEvidence {
             'attempts_resolved' => 0,
             'attempts_unresolved' => 0,
             'journal_lines_scanned' => 0,
-            'verdict' => ABJ_404_Solution_AjaxCanaryLadder::interpretDetachAbResults(array()),
+            'verdict' => ABJ_404_Solution_DetachAbVerdict::fromAttempts(array()),
         );
     }
 
@@ -144,22 +144,27 @@ final class ABJ_404_Solution_DetachAbEvidence {
      * counted, listed with a null outcome, and otherwise ignored.
      *
      * @param array<string, mixed> $record
-     * @param array{attempts: array<int, array<string, mixed>>, unresolved: int, with_mode: int} $joined
+     * @param array{attempts: array<int, ABJ_404_Solution_DetachAbAttempt>, unresolved: int,
+     *   with_mode: int} $joined
      * @return array<string, mixed>
      */
     private static function decide(array $record, array $joined, int $linesScanned): array {
         $resolved = array();
+        $onRecord = array();
         foreach ($joined['attempts'] as $attempt) {
-            if ($attempt['ok'] !== null) {
+            if ($attempt->isResolved()) {
                 $resolved[] = $attempt;
             }
+            if (count($onRecord) < self::MAX_ATTEMPTS_ON_RECORD) {
+                $onRecord[] = $attempt->toJournalArray();
+            }
         }
-        $record['attempts'] = array_slice($joined['attempts'], 0, self::MAX_ATTEMPTS_ON_RECORD);
+        $record['attempts'] = $onRecord;
         $record['attempts_with_mode'] = $joined['with_mode'];
         $record['attempts_resolved'] = count($resolved);
         $record['attempts_unresolved'] = $joined['unresolved'];
         $record['journal_lines_scanned'] = $linesScanned;
-        $record['verdict'] = ABJ_404_Solution_AjaxCanaryLadder::interpretDetachAbResults($resolved);
+        $record['verdict'] = ABJ_404_Solution_DetachAbVerdict::fromAttempts($resolved);
         return $record;
     }
 
@@ -178,48 +183,41 @@ final class ABJ_404_Solution_DetachAbEvidence {
      * groups for an entire release.
      *
      * @param array<int, string> $lines JSONL lines, oldest first.
-     * @param string $sessionKey ABJ_404_Solution_AjaxRequestLedger::detachAbSessionKey().
-     * @return array{attempts: array<int, array<string, mixed>>, unresolved: int, with_mode: int}
+     * @param string $sessionKey ABJ_404_Solution_DetachAbExperiment::sessionKey().
+     * @return array{attempts: array<int, ABJ_404_Solution_DetachAbAttempt>, unresolved: int,
+     *   with_mode: int}
      */
     public static function attemptsIn(array $lines, string $sessionKey): array {
-        $modes = self::modesInSession($lines, $sessionKey);
+        $parsed = self::modesInSession($lines, $sessionKey);
         $outcomes = ABJ_404_Solution_DiagnosticClientVerdict::reportedOutcomesIn($lines);
 
         $attempts = array();
         $unresolved = 0;
-        foreach ($modes as $requestId => $modeRecord) {
+        foreach ($parsed as $requestId => $attempt) {
             $requestId = (string)$requestId;
             $resolved = array_key_exists($requestId, $outcomes);
             if (!$resolved) {
                 $unresolved++;
             }
-            $attempts[] = array(
-                'request_id' => $requestId,
-                'mode' => $modeRecord['mode'],
-                'part' => $modeRecord['part'],
-                'payload_key' => $modeRecord['payload_key'],
-                'ordinal' => $modeRecord['ordinal'],
-                'pair_ordinal' => $modeRecord['pair_ordinal'],
-                'pair_position' => $modeRecord['pair_position'],
-                // null, never false: "the browser has not said" and "the
-                // browser said it failed" are opposite findings, and only one
-                // of them belongs in the tally.
-                'ok' => $resolved ? $outcomes[$requestId] : null,
-            );
+            // null, never false: "the browser has not said" and "the browser
+            // said it failed" are opposite findings, and only one of them
+            // belongs in the tally.
+            $attempts[] = $attempt->withOutcome($resolved ? (bool)$outcomes[$requestId] : null);
         }
-        return array('attempts' => $attempts, 'unresolved' => $unresolved, 'with_mode' => count($modes));
+        return array('attempts' => $attempts, 'unresolved' => $unresolved, 'with_mode' => count($parsed));
     }
 
     /**
-     * Request id to A/B slot for one session, in journal order.
+     * Request id to parsed attempt for one session, in journal order.
      *
-     * Only 'on' and 'off' are slots. 'inert' (the experiment did not run) and
-     * 'default' (the session's bounded run is over) are deliberately recorded
-     * by the ledger as positive evidence, and neither is a measurement: folding
-     * them in would compare the experiment against itself.
+     * This class owns which records belong to the session; what one record
+     * MEANS belongs to ABJ_404_Solution_DetachAbAttempt, which is why the
+     * mode vocabulary and the ordinal parse are not repeated here. Records
+     * that are not measurements (MODE_INERT, MODE_DEFAULT) are dropped by that
+     * parse rather than by a second copy of the rule.
      *
      * @param array<int, string> $lines
-     * @return array<string, array<string, mixed>>
+     * @return array<string, ABJ_404_Solution_DetachAbAttempt>
      */
     private static function modesInSession(array $lines, string $sessionKey): array {
         $modes = array();
@@ -237,27 +235,11 @@ final class ABJ_404_Solution_DetachAbEvidence {
             if (self::scalarField($record, 'session_key') !== $sessionKey) {
                 continue;
             }
-            $mode = self::scalarField($record, 'mode');
-            $requestId = self::scalarField($record, 'request_id');
-            if (($mode !== 'on' && $mode !== 'off') || $requestId === '') {
+            $attempt = ABJ_404_Solution_DetachAbAttempt::fromJournalRecord($record);
+            if ($attempt === null) {
                 continue;
             }
-            $part = self::scalarField($record, 'part');
-            $payloadKey = self::scalarField($record, 'payload_key');
-            $ordinal = isset($record['ordinal']) && is_numeric($record['ordinal'])
-                ? (int)$record['ordinal'] : -1;
-            $pairOrdinal = isset($record['pair_ordinal']) && is_numeric($record['pair_ordinal'])
-                ? (int)$record['pair_ordinal'] : -1;
-            $pairPosition = isset($record['pair_position']) && is_numeric($record['pair_position'])
-                ? (int)$record['pair_position'] : -1;
-            $modes[$requestId] = array(
-                'mode' => $mode,
-                'part' => $part,
-                'payload_key' => $payloadKey,
-                'ordinal' => $ordinal,
-                'pair_ordinal' => $pairOrdinal,
-                'pair_position' => $pairPosition,
-            );
+            $modes[$attempt->requestId()] = $attempt;
         }
         return $modes;
     }

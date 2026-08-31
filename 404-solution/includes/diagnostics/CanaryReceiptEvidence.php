@@ -13,9 +13,22 @@ if (!defined('ABSPATH')) {
  * This class recovers the matrix from those receipts without trusting missing
  * evidence as a failed probe.
  *
- * The trace journal supplies the session boundary: checkpoint records carry
- * request joins but intentionally omit raw browser session IDs. Only receipts
- * whose carrier request is traced to the requested session are considered.
+ * A receipt names its own browser session -- as `session_key`, the md5 this
+ * journal already files `detach_ab_mode` under -- so the checkpoint journal
+ * answers the scoping question on its own. It did not always: the session used to live
+ * only in the stage-trace journal, and this class resolved it across the two
+ * channels. That join fails whenever the trace channel is silent for ANY
+ * reason, and on the 2026-08-27 Azure App Service capture it was silent because
+ * its writer had never been armed -- so a complete fifteen-receipt run in the
+ * checkpoint journal reconstructed as `no_receipts`, with no verdict in the
+ * payload and nothing in the report to say why.
+ *
+ * The trace journal is still read, for two things it alone owns: the plugin
+ * version that produced the run, and the carrier-request join that scopes
+ * receipts written by a build older than the session stamp. A record that
+ * carries a session is scoped by it and never by the carrier, so a stamped
+ * foreign run cannot be adopted by a carrier that happens to be in range.
+ *
  * The last static-asset receipt starts the latest ladder run, preventing two
  * runs in one tab from being folded into one matrix.
  */
@@ -32,14 +45,14 @@ final class ABJ_404_Solution_CanaryReceiptEvidence {
 
     /** Evidence required before absence can never be mistaken for failure. */
     const REQUIRED_STEPS = array(
-        ABJ_404_Solution_AjaxCanaryLadder::STEP_STATIC_ASSET,
-        ABJ_404_Solution_AjaxCanaryLadder::STEP_AUTH_ONLY,
-        ABJ_404_Solution_AjaxCanaryLadder::STEP_POST_LIMITER,
-        ABJ_404_Solution_AjaxCanaryLadder::STEP_SUMMARY,
-        ABJ_404_Solution_AjaxCanaryLadder::STEP_INERT,
-        ABJ_404_Solution_AjaxCanaryLadder::STEP_COMPRESS_ON,
-        ABJ_404_Solution_AjaxCanaryLadder::STEP_COMPRESS_OFF,
-        ABJ_404_Solution_AjaxCanaryLadder::STEP_STREAM,
+        ABJ_404_Solution_CanaryLadderStep::STATIC_ASSET,
+        ABJ_404_Solution_CanaryLadderStep::AUTH_ONLY,
+        ABJ_404_Solution_CanaryLadderStep::POST_LIMITER,
+        ABJ_404_Solution_CanaryLadderStep::SUMMARY,
+        ABJ_404_Solution_CanaryLadderStep::INERT,
+        ABJ_404_Solution_CanaryLadderStep::COMPRESS_ON,
+        ABJ_404_Solution_CanaryLadderStep::COMPRESS_OFF,
+        ABJ_404_Solution_CanaryLadderStep::STREAM,
     );
 
     /**
@@ -49,6 +62,7 @@ final class ABJ_404_Solution_CanaryReceiptEvidence {
      */
     public static function forSession(string $sessionId): array {
         $sessionId = substr($sessionId, 0, 64);
+        $sessionKey = ABJ_404_Solution_DetachAbExperiment::sessionKey($sessionId);
         $record = self::emptyRecord($sessionId);
         if ($sessionId === '') {
             $record['status'] = self::STATUS_NO_SESSION;
@@ -66,10 +80,8 @@ final class ABJ_404_Solution_CanaryReceiptEvidence {
             $session = self::sessionRequests($traceLines, $sessionId);
             $record['plugin_version'] = $session['plugin_version'];
             $record['journal_lines_scanned'] = count($traceLines) + count($checkpointLines);
-            if ($session['request_ids'] === array()) {
-                return $record;
-            }
-            return self::reconstruct($record, $checkpointLines, $session['request_ids']);
+            return self::reconstruct(
+                $record, $checkpointLines, $session['request_ids'], $sessionKey, $sessionId);
         } catch (Throwable $e) {
             $record['status'] = self::STATUS_ERROR;
             $record['error'] = substr($e->getMessage(), 0, 200);
@@ -82,13 +94,14 @@ final class ABJ_404_Solution_CanaryReceiptEvidence {
         return array(
             'status' => self::STATUS_NO_RECEIPTS,
             'source' => 'checkpoint_receipts',
-            'session_key' => ABJ_404_Solution_AjaxRequestLedger::detachAbSessionKey($sessionId),
+            'session_key' => ABJ_404_Solution_DetachAbExperiment::sessionKey($sessionId),
             'plugin_version' => '',
             'receipt_records' => 0,
             'baseline_receipts' => 0,
             'malformed_receipts' => 0,
             'missing_required_evidence' => array(),
             'journal_lines_scanned' => 0,
+            'body_delivery' => null,
             'interpretation' => null,
         );
     }
@@ -127,9 +140,11 @@ final class ABJ_404_Solution_CanaryReceiptEvidence {
     private static function reconstruct(
         array $record,
         array $lines,
-        array $sessionRequestIds
+        array $sessionRequestIds,
+        string $sessionKey,
+        string $sessionId
     ): array {
-        $receipts = self::sessionReceiptRecords($lines, $sessionRequestIds);
+        $receipts = self::sessionReceiptRecords($lines, $sessionRequestIds, $sessionKey);
         if ($receipts === array()) {
             return $record;
         }
@@ -157,20 +172,46 @@ final class ABJ_404_Solution_CanaryReceiptEvidence {
         }
 
         $observations = $projection['observations'];
-        $observations[ABJ_404_Solution_AjaxCanaryLadder::STEP_CONCURRENT_CONTROL] =
+        $observations[ABJ_404_Solution_CanaryLadderStep::CONCURRENT_CONTROL] =
             self::projectConcurrentControl($concurrent);
+        // The emitted-against-delivered join is rebuilt from the SAME
+        // receipts this reconstruction already holds. Recomputing the matrix
+        // without it would drop bodyRewrittenInTransitCausal from exactly the
+        // payload a maintainer reads when the live interpret response never
+        // arrived -- the case this whole path exists for.
+        $bodyDelivery = ABJ_404_Solution_ResponseBodyDeliveryEvidence::fromLines(
+            $lines,
+            $sessionKey,
+            ABJ_404_Solution_EncodedTableResponseSize::forSession($sessionId)
+        );
         $record['status'] = self::STATUS_RECONSTRUCTED;
+        $record['body_delivery'] = $bodyDelivery;
         $record['interpretation'] =
-            ABJ_404_Solution_AjaxCanaryLadder::interpretResults($observations, true);
+            ABJ_404_Solution_CanaryLadderInterpretation::interpret($observations, true, $bodyDelivery);
         return $record;
     }
 
     /**
+     * Every receipt belonging to this session, in journal order.
+     *
+     * A record that names a session is scoped BY that name and by nothing else:
+     * it is kept when the name matches and dropped when it does not, so a
+     * foreign run can never be adopted through a carrier that happens to be in
+     * the trace-derived set. Only a record with no session of its own -- one
+     * written before the stamp existed -- falls back to the carrier join, and
+     * on a host whose trace journal is silent that set is empty, which drops it.
+     * Unattributable evidence is dropped, never adopted.
+     *
      * @param array<int, string> $lines
      * @param array<string, bool> $sessionRequestIds
+     * @param string $sessionKey DetachAbExperiment::sessionKey() of the requested session.
      * @return array<int, array<string, mixed>>
      */
-    private static function sessionReceiptRecords(array $lines, array $sessionRequestIds): array {
+    private static function sessionReceiptRecords(
+        array $lines,
+        array $sessionRequestIds,
+        string $sessionKey
+    ): array {
         $receipts = array();
         foreach ($lines as $line) {
             if (strpos($line, 'canary_step_client_receipt') === false
@@ -178,12 +219,18 @@ final class ABJ_404_Solution_CanaryReceiptEvidence {
                 continue;
             }
             $decoded = json_decode($line, true);
-            if (!is_array($decoded)
-                    || !isset($sessionRequestIds[self::ledgerId($decoded['carried_by'] ?? null)])) {
+            if (!is_array($decoded)) {
                 continue;
             }
-            if (($decoded['event'] ?? '') === 'canary_step_client_receipt'
-                    || ($decoded['event'] ?? '') === 'concurrent_control_client_receipt') {
+            if (($decoded['event'] ?? '') !== 'canary_step_client_receipt'
+                    && ($decoded['event'] ?? '') !== 'concurrent_control_client_receipt') {
+                continue;
+            }
+            $recordSessionKey = self::scalarField($decoded, 'session_key');
+            $belongs = $recordSessionKey !== ''
+                ? $recordSessionKey === $sessionKey
+                : isset($sessionRequestIds[self::ledgerId($decoded['carried_by'] ?? null)]);
+            if ($belongs) {
                 $receipts[] = $decoded;
             }
         }
@@ -198,7 +245,7 @@ final class ABJ_404_Solution_CanaryReceiptEvidence {
         $start = -1;
         foreach ($receipts as $index => $receipt) {
             $step = self::reportedStep($receipt);
-            if ($step === ABJ_404_Solution_AjaxCanaryLadder::STEP_STATIC_ASSET) {
+            if ($step === ABJ_404_Solution_CanaryLadderStep::STATIC_ASSET) {
                 $start = $index;
             }
         }
@@ -220,7 +267,7 @@ final class ABJ_404_Solution_CanaryReceiptEvidence {
             $valid = ($receipt['envelope'] ?? '') === 'full'
                 && ($receipt['decoded'] ?? null) === true
                 && $step !== ''
-                && ($step === ABJ_404_Solution_AjaxCanaryLadder::STEP_STATIC_ASSET
+                && ($step === ABJ_404_Solution_CanaryLadderStep::STATIC_ASSET
                     || $stepRequestId !== '')
                 && empty($receipt['truncated_on_arrival']);
             if (!$valid) {
@@ -230,7 +277,7 @@ final class ABJ_404_Solution_CanaryReceiptEvidence {
                 }
                 continue;
             }
-            $identity = $step === ABJ_404_Solution_AjaxCanaryLadder::STEP_STATIC_ASSET
+            $identity = $step === ABJ_404_Solution_CanaryLadderStep::STATIC_ASSET
                 ? $step : $step . '|' . $stepRequestId;
             if (isset($seen[$identity])) {
                 continue;
@@ -240,14 +287,14 @@ final class ABJ_404_Solution_CanaryReceiptEvidence {
                 'ok' => ($receipt['ok'] ?? null) === true,
                 'ms' => is_numeric($receipt['ms'] ?? null) ? (int)$receipt['ms'] : -1,
             );
-            if ($step === ABJ_404_Solution_AjaxCanaryLadder::STEP_BASELINE_CONTROL) {
+            if ($step === ABJ_404_Solution_CanaryLadderStep::BASELINE_CONTROL) {
                 $baselines[] = $projected;
             } else {
                 $byStep[$step] = $projected;
             }
         }
         $observations = $byStep;
-        $observations[ABJ_404_Solution_AjaxCanaryLadder::STEP_BASELINE_CONTROL] = $baselines;
+        $observations[ABJ_404_Solution_CanaryLadderStep::BASELINE_CONTROL] = $baselines;
         return array(
             'observations' => $observations,
             'baselines' => $baselines,
@@ -280,13 +327,13 @@ final class ABJ_404_Solution_CanaryReceiptEvidence {
             }
         }
         if (count($projection['baselines']) < self::REQUIRED_BASELINE_RECEIPTS) {
-            $missing[] = ABJ_404_Solution_AjaxCanaryLadder::STEP_BASELINE_CONTROL;
+            $missing[] = ABJ_404_Solution_CanaryLadderStep::BASELINE_CONTROL;
         }
         if ($concurrent === null
-                || !ABJ_404_Solution_ClientTransportReport::isCompleteConcurrentControlJournalRecord(
+                || !ABJ_404_Solution_ConcurrentControlReceipt::isCompleteJournalRecord(
                     $concurrent
                 )) {
-            $missing[] = ABJ_404_Solution_AjaxCanaryLadder::STEP_CONCURRENT_CONTROL;
+            $missing[] = ABJ_404_Solution_CanaryLadderStep::CONCURRENT_CONTROL;
         }
         if ($projection['malformed'] > 0 && $missing === array()) {
             $missing[] = 'malformed_receipt';

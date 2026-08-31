@@ -94,7 +94,7 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
     private static $ownEntry = '';
 
     /**
-     * @var array{started_at_ms: int, channel: string, action: string, pid: int}|null
+     * @var array{started_at_ms: int, channel: string, action: string, pid: int|null}|null
      * What this request registered with. Retained so a phase update can rewrite
      * the row from these values instead of reading it back first -- a
      * read-modify-write is the one thing that would cost the registry the
@@ -126,9 +126,16 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
                 // the safe failure.
                 return '';
             }
+            $action = self::actionForThisRequest();
+            $pid = ABJ_404_Solution_PhpRuntimeCapabilityAdapter::processId();
             $optionName = ABJ_404_Solution_SameSiteRequestRegistry::add(
-                $startedAt, $channel, self::actionForThisRequest(), self::processId(),
-                self::PHASE_BOOT);
+                $startedAt,
+                $channel,
+                $action,
+                $pid,
+                self::PHASE_BOOT,
+                ABJ_404_Solution_PhpRuntimeCapabilityAdapter::processToken()
+            );
             if ($optionName === '') {
                 return '';
             }
@@ -136,8 +143,8 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
             self::$ownIdentity = array(
                 'started_at_ms' => $startedAt,
                 'channel' => $channel,
-                'action' => self::actionForThisRequest(),
-                'pid' => self::processId(),
+                'action' => $action,
+                'pid' => $pid,
             );
             self::$ownPhase = self::PHASE_BOOT;
             register_shutdown_function(array(__CLASS__, 'leave'));
@@ -261,7 +268,7 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
         // filterable the way WordPress itself lets other code correct the
         // signal, and it can be substituted in a test instead of leaking a
         // process-wide constant the moment one test defines it. Same reasoning
-        // as AjaxRequestLedger::bootWaypointRequestId()'s wp_doing_ajax() call.
+        // as AjaxDiagnosticRequestPolicy::bootWaypointRequestId()'s wp_doing_ajax() call.
         if (function_exists('wp_doing_cron') && wp_doing_cron()) {
             return 'cron';
         }
@@ -276,11 +283,6 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
         $raw = isset($_REQUEST['action']) && is_scalar($_REQUEST['action'])
             ? (string)$_REQUEST['action'] : '';
         return preg_match('/^[A-Za-z0-9_-]{1,64}$/', $raw) === 1 ? $raw : '';
-    }
-
-    private static function processId(): int {
-        $pid = getmypid();
-        return is_int($pid) ? $pid : 0;
     }
 
     /**

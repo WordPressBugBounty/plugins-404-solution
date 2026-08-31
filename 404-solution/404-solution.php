@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 	Author:      Aaron J
 	Author URI:  https://www.ajexperience.com/404-solution/
 
-	Version: 4.3.4
+	Version: 4.3.5
 	Requires at least: 5.0
 	Requires PHP: 7.4
 
@@ -49,7 +49,7 @@ if (!defined('ABJ404_PATH')) {
 // Content-addressed release marker compiled into the earliest boot file.
 // DiagnosticModuleManifestTest recomputes it from every covered PHP module.
 if (!defined('ABJ404_DIAGNOSTIC_BUILD_ID')) {
-define('ABJ404_DIAGNOSTIC_BUILD_ID', 'c27332fdd6d42f1ba2109a879a82e4514fec75b6');
+define('ABJ404_DIAGNOSTIC_BUILD_ID', '1675af0a29435f25cc1afbaef80703108620b1f8');
 }
 
 // The plugin version is read from this file's own header (single source of
@@ -133,7 +133,7 @@ spl_autoload_register('abj404_autoloader');
 // a slow auth/DB path were indistinguishable. These checkpoints localize a
 // slow boot to a phase instead of a total. Gated to our own table-AJAX and
 // canary-ladder requests only (see
-// ABJ_404_Solution_AjaxRequestLedger::bootWaypointRequestId()); the frontend
+// ABJ_404_Solution_AjaxDiagnosticRequestPolicy::bootWaypointRequestId()); the frontend
 // 404 path is hot and must never pay this write cost.
 //
 // 'muplugins_loaded' is not separately hooked here: WordPress fires that
@@ -299,17 +299,22 @@ if (file_exists($__abj404_loader_path)) {
 unset($__abj404_loader_path);
 
 if ($GLOBALS['abj404_boot_ok']) {
-	// admin
-	if (is_admin()) {
-		try {
-			ABJ_404_Solution_WordPress_Connector::init();
+	// Lifecycle hooks must be registered in every load context. WP-CLI loads
+	// the plugin outside wp-admin before `wp plugin activate`, then fires the
+	// callback registered during that load. Admin-only hooks remain guarded
+	// inside WordPressHookRegistrar::registerAdminHooks().
+	try {
+		ABJ_404_Solution_WordPress_Connector::init();
+		if (is_admin()) {
 			ABJ_404_Solution_AjaxAdminEndpointRegistrar::register();
-		} catch (\Throwable $e) {
-			// init() failed. Fall through to register the degraded admin page
-			// so the user still has a menu item with error details instead of nothing.
-			$GLOBALS['abj404_boot_ok'] = false;
-			$GLOBALS['abj404_boot_error'] = 'Plugin initialization failed: ' . $e->getMessage();
-			abj404_logRuntimeWarning('Admin initialization failed', $e);
+		}
+	} catch (\Throwable $e) {
+		// init() failed. On admin requests, register the degraded page so the
+		// user still gets the original error detail instead of a missing menu.
+		$GLOBALS['abj404_boot_ok'] = false;
+		$GLOBALS['abj404_boot_error'] = 'Plugin initialization failed: ' . $e->getMessage();
+		abj404_logRuntimeWarning('Plugin initialization failed', $e);
+		if (is_admin()) {
 			add_action('admin_menu', 'abj404_degraded_admin_menu');
 			add_action('admin_notices', 'abj404_degraded_admin_notice');
 		}

@@ -42,22 +42,47 @@ if (!defined('ABSPATH')) {
  *                        compression/output-handler behavior.
  *   9. stream         - a flushed leading-whitespace block before the JSON,
  *                        so the client can observe XHR progress and locate
- *                        downstream buffering.
+ *                        downstream buffering. Emitted only where the flush
+ *                        can actually reach the client (see
+ *                        AjaxCanaryStreamFlushPlan::fromObservation); elsewhere
+ *                        the step reports why it could not stream rather than
+ *                        prefixing the body with bytes nobody sees early.
  *   interpret         - journals the client-computed interpretation matrix
  *                        (never re-derives it from server-side timing alone:
  *                        the browser is the only side that saw every step).
  */
 class ABJ_404_Solution_Ajax_CanaryLadder {
 
-    /** Maximum browser-observation bytes accepted by the interpretation step. */
-    const MAX_INTERPRETATION_BYTES = 8192;
+    /**
+     * Reuses the real table endpoint's nonce action. A separately minted
+     * nonce would test a different credential from the request under
+     * diagnosis while providing no additional capability boundary.
+     */
+    const NONCE_ACTION = 'abj404_updatePaginationLink';
+
+    /**
+     * Steps that do real work get the shared abuse ceiling. Auth-only must
+     * bypass it by design, while post-limiter measures the real limiter and
+     * must not add a second ceiling in front of that measurement.
+     */
+    private const RATE_LIMITED_STEPS = array(
+        ABJ_404_Solution_CanaryLadderStep::SUMMARY,
+        ABJ_404_Solution_CanaryLadderStep::SIZE_TARGET,
+        ABJ_404_Solution_CanaryLadderStep::SIZE_PROBE,
+        ABJ_404_Solution_CanaryLadderStep::INERT,
+        ABJ_404_Solution_CanaryLadderStep::COMPRESS_ON,
+        ABJ_404_Solution_CanaryLadderStep::COMPRESS_OFF,
+        ABJ_404_Solution_CanaryLadderStep::STREAM,
+    );
 
     /** @return void */
     public function handle() {
         $requestReader = ABJ_404_Solution_AjaxAdminEndpointSupport::getRequestReader();
         $requestId = ABJ_404_Solution_AjaxRequestLedger::normalizeId(
             $requestReader->getPostOrGetSanitize('requestId', ABJ_404_Solution_AjaxRequestLedger::UNKNOWN_ID));
-        $step = ABJ_404_Solution_AjaxCanaryLadder::normalizeStep($requestReader->getPostOrGetSanitize('canaryStep', ''));
+        $step = ABJ_404_Solution_CanaryLadderStep::normalize(
+            $requestReader->getPostOrGetSanitize('canaryStep', '')
+        );
         $subpage = (string)$requestReader->getPostOrGetSanitize('subpage', 'abj404_redirects');
         $ledger = ABJ_404_Solution_AjaxRequestLedger::readFields($requestReader);
 
@@ -78,7 +103,7 @@ class ABJ_404_Solution_Ajax_CanaryLadder {
 
         try {
             if (!ABJ_404_Solution_AjaxAdminEndpointSupport::requireAdminWithNonceOrRespond(
-                ABJ_404_Solution_AjaxCanaryLadder::NONCE_ACTION,
+                self::NONCE_ACTION,
                 $context,
                 'ajaxRunCanaryStep'
             )) {
@@ -94,25 +119,32 @@ class ABJ_404_Solution_Ajax_CanaryLadder {
             // receipts off the final `interpret` POST is that they survive a
             // request that does not complete normally.
             self::journalPriorStepReceipts(
-                $requestId, $requestReader->getPostOrGetSanitize('canaryStepReceipts', ''));
+                $requestId,
+                (string)$ledger['session_id'],
+                $requestReader->getPostOrGetSanitize('canaryStepReceipts', ''));
 
             if ($step === '') {
                 ABJ_404_Solution_AjaxAdminEndpointSupport::safeLogAjaxFailure('AJAX unknown canary step in ajaxRunCanaryStep.', $context);
                 ABJ_404_Solution_AjaxAdminEndpointSupport::markAjaxResponseSent();
-                $payload = ABJ_404_Solution_AjaxAdminEndpointSupport::buildAjaxErrorResponse('Unknown canary step.', null, false);
+                $payload = ABJ_404_Solution_AjaxErrorEnvelope::build('Unknown canary step.', null, false);
                 ABJ_404_Solution_AjaxAdminEndpointSupport::getAndClearAjaxBufferedOutput();
                 ABJ_404_Solution_AjaxResponseEmitter::sendJsonResponseAndExit($payload, 400);
                 return;
             }
 
-            if (in_array($step, ABJ_404_Solution_AjaxCanaryLadder::RATE_LIMITED_STEPS, true)
+            if (in_array($step, self::RATE_LIMITED_STEPS, true)
                     && !self::checkWorkRateLimitOrRespond($context)) {
                 return;
             }
 
             ABJ_404_Solution_AjaxStageDiagnostics::beginRequest($context);
 
-            $data = self::runStep($step, $requestReader, $requestId, $subpage, $context);
+            $data = ABJ_404_Solution_AjaxCanaryStepRunner::dispatchStep(array(
+                'step' => $step,
+                'request_reader' => $requestReader,
+                'request_id' => $requestId,
+                'subpage' => $subpage,
+            ), $context);
             $data['requestId'] = $requestId;
             $data['canaryStep'] = $step;
 
@@ -141,20 +173,44 @@ class ABJ_404_Solution_Ajax_CanaryLadder {
      * probe has no server request of its own and falls back to the carrying
      * id, which is the only id it can honestly be filed under.
      *
+     * The browser session rides the record itself rather than being looked up
+     * later through the stage-trace journal. That cross-channel join is what
+     * failed on the 2026-08-27 Azure capture: all fifteen receipts were in the
+     * checkpoint journal, the session id existed only in the stage trace, the
+     * stage trace was empty, and the reconstruction reported "no_receipts" over
+     * a complete set of them. A record that names its own session cannot be
+     * lost by the silence of a channel it does not live in.
+     *
+     * Carried as `session_key` -- the md5 this journal already files
+     * `detach_ab_mode` under (DetachAbExperiment::sessionKey) -- rather
+     * than as a raw id. The reconstruction needs equality and nothing else, and
+     * the checkpoint channel has never carried a browser session in the clear.
+     *
      * Never throws: ABJ_404_Solution_AjaxCheckpointLogger::record() is
      * failure-safe by contract, and a malformed report must not affect the
      * canary step that carried it.
      *
+     * @param string $sessionId Already bounded by
+     *   ABJ_404_Solution_AjaxRequestLedger::readFields(); '' when the client
+     *   sent none, which stays '' rather than inheriting another run's.
      * @param mixed $raw
      */
-    private static function journalPriorStepReceipts(string $carrierRequestId, $raw): void {
-        foreach (ABJ_404_Solution_AjaxCanaryLadder::parseStepReceipts($raw) as $receipt) {
+    private static function journalPriorStepReceipts(
+        string $carrierRequestId,
+        string $sessionId,
+        $raw
+    ): void {
+        foreach (ABJ_404_Solution_AjaxCanaryReceiptParser::parse($raw) as $receipt) {
             $stepRequestId = isset($receipt['step_request_id']) && is_string($receipt['step_request_id'])
                 ? $receipt['step_request_id'] : '';
             ABJ_404_Solution_AjaxCheckpointLogger::record(
                 $stepRequestId !== '' ? $stepRequestId : $carrierRequestId,
                 'canary_step_client_receipt',
-                array_merge($receipt, array('carried_by' => $carrierRequestId))
+                array_merge($receipt, array(
+                    'carried_by' => $carrierRequestId,
+                    'session_key' =>
+                        ABJ_404_Solution_DetachAbExperiment::sessionKey($sessionId),
+                ))
             );
         }
     }
@@ -168,268 +224,10 @@ class ABJ_404_Solution_Ajax_CanaryLadder {
         }
         ABJ_404_Solution_AjaxAdminEndpointSupport::safeLogAjaxFailure('AJAX rate limit in ajaxRunCanaryStep.', $context);
         ABJ_404_Solution_AjaxAdminEndpointSupport::markAjaxResponseSent();
-        $payload = ABJ_404_Solution_AjaxAdminEndpointSupport::buildAjaxErrorResponse('Rate limit exceeded. Please try again later.', null, false);
+        $payload = ABJ_404_Solution_AjaxErrorEnvelope::build('Rate limit exceeded. Please try again later.', null, false);
         ABJ_404_Solution_AjaxAdminEndpointSupport::getAndClearAjaxBufferedOutput();
         ABJ_404_Solution_AjaxResponseEmitter::sendJsonResponseAndExit($payload, 429);
         return false;
-    }
-
-    /**
-     * @param ABJ_404_Solution_RequestInputNormalizer $requestReader
-     * @param array<string, mixed> $context
-     * @return array<string, mixed>
-     */
-    private static function runStep(string $step, $requestReader, string $requestId, string $subpage, array &$context): array {
-        switch ($step) {
-            case ABJ_404_Solution_AjaxCanaryLadder::STEP_CONCURRENT_CONTROL:
-            case ABJ_404_Solution_AjaxCanaryLadder::STEP_AUTH_ONLY:
-                return ABJ_404_Solution_AjaxStageDiagnostics::runStage($context, 'canary_' . $step,
-                    static function () use ($requestId, $step) {
-                        return ABJ_404_Solution_AjaxCanaryLadder::buildFillerPayload(
-                            $requestId, $step,
-                            ABJ_404_Solution_AjaxCanaryLadder::AUTH_ONLY_BYTES);
-                    });
-
-            case ABJ_404_Solution_AjaxCanaryLadder::STEP_SIZE_TARGET:
-                $rawSessionId = $context['session_id'] ?? '';
-                $sessionId = is_scalar($rawSessionId) ? (string)$rawSessionId : '';
-                return ABJ_404_Solution_AjaxStageDiagnostics::runStage($context, 'canary_size_target',
-                    static function () use ($sessionId) {
-                        $target = ABJ_404_Solution_CheckpointJournalReader::latestEncodedTableResponseForSession(
-                            $sessionId);
-                        return array(
-                            'realResponseBytes' => $target['bytes'],
-                            'realResponseBytesSource' => $target['source'],
-                            'realResponseRequestId' => $target['request_id'],
-                        );
-                    });
-
-            case ABJ_404_Solution_AjaxCanaryLadder::STEP_BASELINE_CONTROL:
-                $rawOrdinal = $requestReader->getPostOrGetSanitize('baselineOrdinal', '0');
-                $ordinal = is_numeric($rawOrdinal) ? max(0, min(20, (int)$rawOrdinal)) : 0;
-                return ABJ_404_Solution_AjaxStageDiagnostics::runStage(
-                    $context,
-                    'canary_baseline_control',
-                    static function () use ($requestId, $ordinal) {
-                        $payload = ABJ_404_Solution_AjaxCanaryLadder::buildFillerPayload(
-                            $requestId,
-                            ABJ_404_Solution_AjaxCanaryLadder::STEP_BASELINE_CONTROL,
-                            ABJ_404_Solution_AjaxCanaryLadder::AUTH_ONLY_BYTES
-                        );
-                        $payload['baselineOrdinal'] = $ordinal;
-                        $encodedBytes = strlen((string)json_encode($payload));
-                        $excessBytes = max(
-                            0,
-                            $encodedBytes - ABJ_404_Solution_AjaxCanaryLadder::AUTH_ONLY_BYTES
-                        );
-                        if ($excessBytes > 0) {
-                            $filler = $payload['filler'];
-                            $payload['filler'] = substr(
-                                $filler,
-                                0,
-                                max(0, strlen($filler) - $excessBytes)
-                            );
-                        }
-                        return $payload;
-                    }
-                );
-
-            case ABJ_404_Solution_AjaxCanaryLadder::STEP_POST_LIMITER:
-                return ABJ_404_Solution_AjaxStageDiagnostics::runStage($context, 'canary_post_limiter',
-                    static function () use ($requestId) {
-                        // Same limiter call the real table endpoint makes, on
-                        // its own bucket with a ceiling high enough to never
-                        // actually trip: this step measures the limiter's own
-                        // overhead, not its enforcement.
-                        ABJ_404_Solution_Ajax_Php::consumeRateLimit('canary_ladder_probe', 6000, 60);
-                        return ABJ_404_Solution_AjaxCanaryLadder::buildFillerPayload(
-                            $requestId, ABJ_404_Solution_AjaxCanaryLadder::STEP_POST_LIMITER,
-                            ABJ_404_Solution_AjaxCanaryLadder::AUTH_ONLY_BYTES);
-                    });
-
-            case ABJ_404_Solution_AjaxCanaryLadder::STEP_SUMMARY:
-                return ABJ_404_Solution_AjaxStageDiagnostics::runStage($context, 'canary_summary',
-                    static function () use ($subpage) {
-                        /** @var ABJ_404_Solution_ViewReadServiceInterface $viewReadService */
-                        $viewReadService = abj_service('view_read_service');
-                        $counts = $subpage === 'abj404_captured'
-                            ? $viewReadService->getCapturedStatusCounts()
-                            : $viewReadService->getRedirectStatusCounts();
-                        return array('summaryTotal' => (int)($counts['all'] ?? 0));
-                    });
-
-            case ABJ_404_Solution_AjaxCanaryLadder::STEP_SIZE_PROBE:
-                $bytes = ABJ_404_Solution_AjaxCanaryLadder::clampTargetBytes(
-                    $requestReader->getPostOrGetSanitize('payloadBytes', ''));
-                $variant = ABJ_404_Solution_AjaxCanaryLadder::normalizePayloadVariant(
-                    $requestReader->getPostOrGetSanitize('payloadVariant', ''));
-                $rungPercent = ABJ_404_Solution_AjaxCanaryLadder::normalizePayloadRungPercent(
-                    $requestReader->getPostOrGetSanitize('payloadRungPercent', ''));
-                $targetSource = ABJ_404_Solution_AjaxCanaryLadder::normalizeTargetBytesSource(
-                    $requestReader->getPostOrGetSanitize('targetBytesSource', ''));
-                return ABJ_404_Solution_AjaxStageDiagnostics::runStage($context, 'canary_size_probe',
-                    static function () use ($requestId, $bytes, $variant, $rungPercent, $targetSource) {
-                        return ABJ_404_Solution_AjaxCanaryLadder::buildPayloadVariant(array(
-                            'request_id' => $requestId,
-                            'target_bytes' => $bytes,
-                            'variant' => $variant,
-                            'rung_percent' => $rungPercent,
-                            'target_source' => $targetSource,
-                        ));
-                    });
-
-            case ABJ_404_Solution_AjaxCanaryLadder::STEP_INERT:
-                $bytes = ABJ_404_Solution_AjaxCanaryLadder::clampTargetBytes($requestReader->getPostOrGetSanitize('payloadBytes', ''));
-                return ABJ_404_Solution_AjaxStageDiagnostics::runStage($context, 'canary_inert',
-                    static function () use ($requestId, $bytes) {
-                        return ABJ_404_Solution_AjaxCanaryLadder::buildFillerPayload(
-                            $requestId, ABJ_404_Solution_AjaxCanaryLadder::STEP_INERT, $bytes);
-                    });
-
-            case ABJ_404_Solution_AjaxCanaryLadder::STEP_COMPRESS_ON:
-            case ABJ_404_Solution_AjaxCanaryLadder::STEP_COMPRESS_OFF:
-                $bytes = ABJ_404_Solution_AjaxCanaryLadder::clampTargetBytes($requestReader->getPostOrGetSanitize('payloadBytes', ''));
-                return ABJ_404_Solution_AjaxStageDiagnostics::runStage($context, 'canary_' . $step,
-                    static function () use ($requestId, $step, $bytes) {
-                        if ($step === ABJ_404_Solution_AjaxCanaryLadder::STEP_COMPRESS_OFF) {
-                            // Ask any compressing intermediary (LiteSpeed,
-                            // Cloudflare) not to transform this response, and
-                            // disable PHP's own output compression if it was
-                            // on, so the on/off canaries actually differ.
-                            if (!headers_sent()) {
-                                header('Cache-Control: no-transform');
-                            }
-                            @ini_set('zlib.output_compression', '0');
-                        }
-                        $payload = ABJ_404_Solution_AjaxCanaryLadder::buildFillerPayload($requestId, $step, $bytes);
-                        $payload['compressionMode'] = $step;
-                        return $payload;
-                    });
-
-            case ABJ_404_Solution_AjaxCanaryLadder::STEP_STREAM:
-                return ABJ_404_Solution_AjaxStageDiagnostics::runStage($context, 'canary_stream',
-                    static function () use ($requestId) {
-                        echo str_repeat(' ', ABJ_404_Solution_AjaxCanaryLadder::STREAM_WHITESPACE_BYTES);
-                        // Routed through the same output-buffer-management
-                        // filter every other flush in this codebase respects
-                        // (AjaxAdminEndpointSupport::checkpointedFlushAndFinish),
-                        // so tests that disable OB management (and so must
-                        // read the whitespace back via ob_get_clean()) are
-                        // unaffected: this is a real mid-response flush only
-                        // in production, never a premature one in test output
-                        // buffering.
-                        //
-                        // around()-bracketed rather than announced by a bare
-                        // pre-call record (gap-hunt iteration 2, the same
-                        // Codex gap #5 shape fixed in AjaxResponseEmitter's
-                        // ob_close): a stall inside ob_flush()/flush() behind
-                        // a buffering intermediary is exactly what this canary
-                        // step exists to detect, and a record with no matching
-                        // end could only ever prove a flush was ATTEMPTED.
-                        // 'flushed' keeps the skip branch positive evidence
-                        // instead of an absence -- without it an elapsed of 0
-                        // reads as an instant flush rather than no flush.
-                        $manageOutputBuffer = (bool)apply_filters(
-                            'abj404_should_manage_output_buffer', true, array('source' => 'canaryLadder_stream'));
-                        ABJ_404_Solution_AjaxCheckpointLogger::around(
-                            $requestId,
-                            'canary_stream_first_flush',
-                            static function () use ($manageOutputBuffer) {
-                                if (!$manageOutputBuffer) {
-                                    return;
-                                }
-                                if (ob_get_level() > 0) {
-                                    @ob_flush();
-                                }
-                                @flush();
-                            },
-                            array(
-                                'bytes' => ABJ_404_Solution_AjaxCanaryLadder::STREAM_WHITESPACE_BYTES,
-                                'flushed' => $manageOutputBuffer,
-                                'ob_level' => ob_get_level(),
-                            )
-                        );
-                        return ABJ_404_Solution_AjaxCanaryLadder::buildFillerPayload(
-                            $requestId, ABJ_404_Solution_AjaxCanaryLadder::STEP_STREAM,
-                            ABJ_404_Solution_AjaxCanaryLadder::AUTH_ONLY_BYTES);
-                    });
-
-            case ABJ_404_Solution_AjaxCanaryLadder::STEP_INTERPRET:
-                return self::runInterpretStep($requestReader, $requestId, $context);
-
-            default:
-                return array();
-        }
-    }
-
-    /**
-     * The ladder's closing step: two independent verdicts, both journaled.
-     *
-     * The ladder interpretation matrix is computed by the BROWSER (it is
-     * the only side that saw every step) and journaled here. The detach A/B
-     * verdict is computed HERE, from the durable journal, because its two
-     * halves never meet on the client: the server chose each real table
-     * request's detach mode, the browser reported whether that request
-     * completed, and until this call site existed nothing joined them --
-     * ABJ_404_Solution_AjaxCanaryLadder::interpretDetachAbResults() was a
-     * decision rule with no production caller, so the verdict a beta session
-     * exists to produce depended on a human joining two record kinds by hand.
-     *
-     * The A/B verdict is written through the checkpoint channel rather than
-     * only into the stage trace: its source evidence lives in that same
-     * journal, so verdict and evidence travel together into the support
-     * payload and the developer log archive, and a defect in the trace class
-     * cannot erase the conclusion drawn about it.
-     *
-     * The two verdicts stay separate records computed from disjoint inputs.
-     * Merging them would let an ambiguous quadrant in one leak into the
-     * other's conclusion, which is the same reason the pure rules are
-     * separate functions.
-     *
-     * @param ABJ_404_Solution_RequestInputNormalizer $requestReader
-     * @param array<string, mixed> $context
-     * @return array<string, mixed>
-     */
-    private static function runInterpretStep($requestReader, string $requestId, array &$context): array {
-        $raw = (string)$requestReader->getPostOrGetSanitize('observations', '');
-        $parsed = ABJ_404_Solution_RequestInputNormalizer::decodeBoundedJsonArray(array(
-            'raw' => $raw,
-            'max_bytes' => self::MAX_INTERPRETATION_BYTES,
-            'unavailable_label' => 'Interpretation unavailable: observations',
-        ));
-        $realFailed = (string)$requestReader->getPostOrGetSanitize('realRequestFailed', '1') !== '0';
-        $rawSessionId = $context['session_id'] ?? '';
-        $sessionId = is_scalar($rawSessionId) ? (string)$rawSessionId : '';
-
-        return ABJ_404_Solution_AjaxStageDiagnostics::runStage($context, 'canary_interpret',
-            static function () use ($parsed, $realFailed, $requestId, $sessionId) {
-                $interpretation = null;
-                $stageMetadata = array();
-                if ($parsed['status'] === 'available') {
-                    $interpretation = ABJ_404_Solution_AjaxCanaryLadder::interpretResults(
-                        $parsed['observations'], $realFailed);
-                    foreach ($interpretation as $key => $value) {
-                        if (is_scalar($value)) {
-                            $stageMetadata[$key] = $value;
-                        }
-                    }
-                } else {
-                    $stageMetadata = $parsed['unavailable'];
-                }
-                ABJ_404_Solution_AjaxStageDiagnostics::addStageMetadata($stageMetadata);
-
-                $detachAb = ABJ_404_Solution_DetachAbEvidence::verdictForSession($sessionId);
-                ABJ_404_Solution_AjaxCheckpointLogger::record(
-                    $requestId, ABJ_404_Solution_DetachAbEvidence::VERDICT_EVENT, $detachAb);
-
-                return array(
-                    'interpretation' => $interpretation,
-                    'interpretationUnavailable' => $parsed['status'] === 'unavailable'
-                        ? $parsed['unavailable'] : null,
-                    'detachAb' => $detachAb,
-                    'received' => $parsed['status'] === 'available',
-                );
-            });
     }
 
     /**
@@ -455,7 +253,7 @@ class ABJ_404_Solution_Ajax_CanaryLadder {
         }
 
         ABJ_404_Solution_AjaxAdminEndpointSupport::markAjaxResponseSent();
-        $payload = ABJ_404_Solution_AjaxAdminEndpointSupport::buildAjaxErrorResponse(
+        $payload = ABJ_404_Solution_AjaxErrorEnvelope::build(
             'Server error while running the canary ladder.',
             $details,
             $isPluginAdmin

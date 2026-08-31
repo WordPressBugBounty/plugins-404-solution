@@ -30,9 +30,7 @@ final class ABJ_404_Solution_DetachAbResolutionTracer {
      * @return array<string, mixed>
      */
     public static function traceResolution(
-        string $sessionId,
-        string $part,
-        string $payloadKey,
+        ABJ_404_Solution_DetachAbScope $scope,
         callable $resolution
     ): array {
         $requestId = self::requestId();
@@ -42,9 +40,9 @@ final class ABJ_404_Solution_DetachAbResolutionTracer {
         $fields = array(
             'operation_id' => self::operationId($requestId, 'resolve_detach_ab_mode'),
             'operation' => 'resolve_detach_ab_mode',
-            'session_state' => $sessionId === '' ? 'absent' : 'present',
-            'part' => self::safePart($part),
-            'payload_key' => self::payloadFingerprint($payloadKey),
+            'session_state' => $scope->isSessionless() ? 'absent' : 'present',
+            'part' => self::safePart($scope->part()),
+            'payload_key' => self::payloadFingerprint($scope->payloadKey()),
         );
         $checkpointId = self::recordStart(
             $requestId,
@@ -76,7 +74,7 @@ final class ABJ_404_Solution_DetachAbResolutionTracer {
                 'elapsed_ms' => self::elapsedMilliseconds($startedAt),
                 'mode' => self::safeMode($result['mode'] ?? null),
                 'diagnostic_enabled' => ($result['diagnostic_enabled'] ?? false) === true,
-                'counter_status' => self::counterStatus($sessionId, $result),
+                'counter_status' => self::counterStatus($scope, $result),
             ))
         );
         return $result;
@@ -142,10 +140,10 @@ final class ABJ_404_Solution_DetachAbResolutionTracer {
     }
 
     private static function requestId(): string {
-        if (!class_exists('ABJ_404_Solution_AjaxRequestLedger')) {
+        if (!class_exists('ABJ_404_Solution_AjaxDiagnosticRequestPolicy')) {
             return '';
         }
-        return ABJ_404_Solution_AjaxRequestLedger::instrumentedRequestIdFromGlobalContext();
+        return ABJ_404_Solution_AjaxDiagnosticRequestPolicy::instrumentedRequestIdFromGlobalContext();
     }
 
     /** @return array<string, string> */
@@ -195,11 +193,14 @@ final class ABJ_404_Solution_DetachAbResolutionTracer {
     /**
      * @param array<string, mixed> $result
      */
-    private static function counterStatus(string $sessionId, array $result): string {
+    private static function counterStatus(
+        ABJ_404_Solution_DetachAbScope $scope,
+        array $result
+    ): string {
         if (($result['diagnostic_enabled'] ?? false) !== true) {
             return 'disabled';
         }
-        if ($sessionId === '') {
+        if ($scope->isSessionless()) {
             return 'no_session';
         }
         $attemptIndex = $result['attempt_index'] ?? null;
@@ -224,9 +225,17 @@ final class ABJ_404_Solution_DetachAbResolutionTracer {
         return preg_match('/^[a-z_]{1,32}$/', $type) === 1 ? $type : 'unknown';
     }
 
-    /** @param mixed $mode */
+    /**
+     * The journaled mode, narrowed to the vocabulary the ledger can actually
+     * assign. The list is not repeated here: a fifth mode added to
+     * ABJ_404_Solution_DetachAbAttempt must not silently start tracing as
+     * 'unknown'.
+     *
+     * @param mixed $mode
+     */
     private static function safeMode($mode): string {
-        return is_string($mode) && in_array($mode, array('inert', 'on', 'off', 'default'), true)
+        return is_string($mode)
+            && in_array($mode, ABJ_404_Solution_DetachAbAttempt::everyMode(), true)
             ? $mode : 'unknown';
     }
 
