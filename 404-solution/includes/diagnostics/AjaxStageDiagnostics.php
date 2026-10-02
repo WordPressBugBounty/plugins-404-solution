@@ -92,6 +92,10 @@ class ABJ_404_Solution_AjaxStageDiagnostics {
             if ($trace !== null) {
                 $trace->endStage($completed ? 'complete' : 'error');
             }
+            // The stage's end on the always-on timeline, armed or not. The
+            // trace above only exists for armed requests; the stamp is the
+            // record an unarmed request keeps of having run this stage.
+            ABJ_404_Solution_RequestPhaseTimeline::stamp('st:' . $stage);
         }
     }
 
@@ -154,7 +158,9 @@ class ABJ_404_Solution_AjaxStageDiagnostics {
      * that do not otherwise have the raw request context in hand.
      */
     private static function currentRequestIdForCheckpoints(): string {
-        return ABJ_404_Solution_AjaxDiagnosticRequestPolicy::diagnosticRequestIdFromGlobalContext();
+        return class_exists('ABJ_404_Solution_AjaxRequestIdScopes')
+            ? ABJ_404_Solution_AjaxRequestIdScopes::fromGlobalContext()->measured()
+            : '';
     }
 
     /**

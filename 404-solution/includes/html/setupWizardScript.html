@@ -40,8 +40,21 @@
             var xhr = new XMLHttpRequest();
             xhr.open('POST', ajaxurl, true);
             xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            // The toast stays a fixed sentence (no new admin surface); the
+            // status and body excerpt that explain a failure go to the console.
+            function recordDismissalFailure(parseError) {
+                if (window.console && window.console.warn) {
+                    window.console.warn('404 Solution: setup wizard dismissal failed', {
+                        status: xhr.status,
+                        statusText: xhr.statusText,
+                        responseExcerpt: String(xhr.responseText || '').substring(0, 200),
+                        parseError: parseError ? String(parseError.message || parseError) : ''
+                    });
+                }
+            }
             xhr.onload = function() {
                 if (xhr.status !== 200) {
+                    recordDismissalFailure(null);
                     showToast({dismissal_failed_message});
                     return;
                 }
@@ -52,6 +65,7 @@
                         showToast({dismissal_prefix} + msg + {dismissal_suffix});
                     }
                 } catch (e) {
+                    recordDismissalFailure(e);
                     showToast({dismissal_failed_message});
                 }
             };

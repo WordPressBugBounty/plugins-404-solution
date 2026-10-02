@@ -219,9 +219,9 @@ class ABJ_404_Solution_NGramCacheSyncRebuilder {
         }
         $stats = $rebuilder->rebuildCache($batchSize, $offset);
         return [
-            'processed' => is_array($stats) && isset($stats['processed']) && is_numeric($stats['processed']) ? (int)$stats['processed'] : 0,
-            'success' => is_array($stats) && isset($stats['success']) && is_numeric($stats['success']) ? (int)$stats['success'] : 0,
-            'failed' => is_array($stats) && isset($stats['failed']) && is_numeric($stats['failed']) ? (int)$stats['failed'] : 0,
+            'processed' => is_array($stats) ? ABJ_404_Solution_ExactInteger::readOr($stats['processed'] ?? null, 0, 0) : 0,
+            'success' => is_array($stats) ? ABJ_404_Solution_ExactInteger::readOr($stats['success'] ?? null, 0, 0) : 0,
+            'failed' => is_array($stats) ? ABJ_404_Solution_ExactInteger::readOr($stats['failed'] ?? null, 0, 0) : 0,
         ];
     }
 }

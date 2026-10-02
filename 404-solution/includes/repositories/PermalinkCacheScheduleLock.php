@@ -40,7 +40,8 @@ final class ABJ_404_Solution_PermalinkCacheScheduleLock {
 
         $existing = $lockRow->valueOf(self::OPTION_NAME);
         $expiryPart = explode(':', $existing, 2)[0];
-        $existingIsStale = $existing === '' || !is_numeric($expiryPart) || (int)$expiryPart <= $now;
+        $expiry = ABJ_404_Solution_ExactInteger::read($expiryPart, 0);
+        $existingIsStale = $existing === '' || $expiry === null || $expiry <= $now;
         if (!$existingIsStale) {
             return null;
         }

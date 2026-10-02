@@ -35,7 +35,7 @@ class ABJ_404_Solution_AdminPaginationLinks {
             'state|sanitize|Loading|item(s)|page count|navigation|URL|nonce|refresh available',
             function () use ($sub, $tableOptionOverrides): string {
                 $state = $this->paginationState($sub, $tableOptionOverrides);
-                return $this->renderTemplate($sub, $state);
+                return $this->renderPaginationStrip($sub, $state);
             }
         );
     }
@@ -149,7 +149,7 @@ class ABJ_404_Solution_AdminPaginationLinks {
      *     filter: string, paged: int, perpage: int, totalPages: int, numRecords: int, filterText: string,
      *     urls: array{first: string, previous: string, next: string, last: string}} $state
      */
-    private function renderTemplate(string $sub, array $state): string {
+    private function renderPaginationStrip(string $sub, array $state): string {
         $tableOptions = $state['tableOptions'];
         $logsid = $state['logsid'];
         $orderby = $state['orderby'];
@@ -183,33 +183,36 @@ class ABJ_404_Solution_AdminPaginationLinks {
             );
 
         $html = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . '/../html/paginationLinks.html');
-        $html = $this->f->str_replace('{TEXT_BEFORE_LINKS}', $currentlyShowingText, $html);
-        $html = $this->f->str_replace('{BTN_FIRST_PAGE}', $this->pageButton($paged <= 1, $urls['first'], esc_attr__('Go to first page', '404-solution'), '&laquo;'), $html);
-        $html = $this->f->str_replace('{BTN_PREV_PAGE}', $this->pageButton($paged <= 1, $urls['previous'], esc_attr__('Go to previous page', '404-solution'), '&lsaquo;'), $html);
-        $html = $this->f->str_replace('{TEXT_CURRENT_PAGE}', $currentPageText, $html);
-        $html = $this->f->str_replace('{BTN_NEXT_PAGE}', $this->pageButton($paged >= $totalPages, $urls['next'], esc_attr__('Go to next page', '404-solution'), '&rsaquo;'), $html);
-        $html = $this->f->str_replace('{BTN_LAST_PAGE}', $this->pageButton($paged >= $totalPages, $urls['last'], esc_attr__('Go to last page', '404-solution'), '&raquo;'), $html);
-        $html = $this->f->str_replace('{filterText}', esc_attr($filterText), $html);
-        $html = $this->f->str_replace('{data-pagination-ajax-url}', esc_attr(admin_url('admin-ajax.php')), $html);
-        $html = $this->f->str_replace('{data-pagination-ajax-action}', esc_attr('ajaxUpdatePaginationLinks'), $html);
-        $html = $this->f->str_replace('{data-pagination-ajax-subpage}', esc_attr($sub), $html);
-        $html = $this->f->str_replace('{data-pagination-ajax-nonce}', esc_attr(wp_create_nonce('abj404_updatePaginationLink')), $html);
-        $html = $this->f->str_replace('{data-lazy-backfill-ajax-url}', esc_attr(admin_url('admin-ajax.php')), $html);
-        $html = $this->f->str_replace('{data-lazy-backfill-nonce}', esc_attr(wp_create_nonce('abj404_runLazyBackfill')), $html);
-        $html = $this->f->str_replace('{data-pagination-current-signature}', esc_attr($this->shared->getCurrentTableDataSignature($sub)), $html);
-        $html = $this->f->str_replace('{data-pagination-current-orderby}', esc_attr($orderby), $html);
-        $html = $this->f->str_replace('{data-pagination-current-order}', esc_attr($order), $html);
-        $html = $this->f->str_replace('{data-pagination-current-filter}', esc_attr($filter), $html);
-        $html = $this->f->str_replace('{data-pagination-current-paged}', esc_attr((string)$paged), $html);
         $rawScoreRange = $tableOptions['score_range'] ?? 'all';
         $scoreRangeForAttr = is_string($rawScoreRange) ? $rawScoreRange : 'all';
-        $html = $this->f->str_replace('{data-pagination-current-score-range}', esc_attr($scoreRangeForAttr), $html);
-        $html = $this->f->str_replace('{data-pagination-current-logsid}', esc_attr($logsid), $html);
         $autoRefresh = (($sub === 'abj404_redirects' || $sub === 'abj404_captured' || $sub === 'abj404_logs') ? '1' : '0');
-        $html = $this->f->str_replace('{data-pagination-auto-refresh}', esc_attr($autoRefresh), $html);
-        $html = $this->f->str_replace('{data-pagination-refresh-available-text}', esc_attr(__('Refresh available', '404-solution')), $html);
 
-        return $this->f->doNormalReplacements($html);
+        // Every value (including the filter text a user typed) is bound in one pass AFTER the
+        // template's own {msgid} tokens (e.g. {Pagination}) are translated.
+        return $this->f->renderTemplate($html, array(
+            '{TEXT_BEFORE_LINKS}' => $currentlyShowingText,
+            '{BTN_FIRST_PAGE}' => $this->pageButton($paged <= 1, $urls['first'], esc_attr__('Go to first page', '404-solution'), '&laquo;'),
+            '{BTN_PREV_PAGE}' => $this->pageButton($paged <= 1, $urls['previous'], esc_attr__('Go to previous page', '404-solution'), '&lsaquo;'),
+            '{TEXT_CURRENT_PAGE}' => $currentPageText,
+            '{BTN_NEXT_PAGE}' => $this->pageButton($paged >= $totalPages, $urls['next'], esc_attr__('Go to next page', '404-solution'), '&rsaquo;'),
+            '{BTN_LAST_PAGE}' => $this->pageButton($paged >= $totalPages, $urls['last'], esc_attr__('Go to last page', '404-solution'), '&raquo;'),
+            '{filterText}' => esc_attr($filterText),
+            '{data-pagination-ajax-url}' => esc_attr(admin_url('admin-ajax.php')),
+            '{data-pagination-ajax-action}' => esc_attr('ajaxUpdatePaginationLinks'),
+            '{data-pagination-ajax-subpage}' => esc_attr($sub),
+            '{data-pagination-ajax-nonce}' => esc_attr(wp_create_nonce('abj404_updatePaginationLink')),
+            '{data-lazy-backfill-ajax-url}' => esc_attr(admin_url('admin-ajax.php')),
+            '{data-lazy-backfill-nonce}' => esc_attr(wp_create_nonce('abj404_runLazyBackfill')),
+            '{data-pagination-current-signature}' => esc_attr($this->shared->getCurrentTableDataSignature($sub)),
+            '{data-pagination-current-orderby}' => esc_attr($orderby),
+            '{data-pagination-current-order}' => esc_attr($order),
+            '{data-pagination-current-filter}' => esc_attr($filter),
+            '{data-pagination-current-paged}' => esc_attr((string)$paged),
+            '{data-pagination-current-score-range}' => esc_attr($scoreRangeForAttr),
+            '{data-pagination-current-logsid}' => esc_attr($logsid),
+            '{data-pagination-auto-refresh}' => esc_attr($autoRefresh),
+            '{data-pagination-refresh-available-text}' => esc_attr(__('Refresh available', '404-solution')),
+        ));
     }
 
     private function pageButton(bool $disabled, string $href, string $label, string $glyph): string {

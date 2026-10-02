@@ -319,8 +319,8 @@ final class ABJ_404_Solution_AjaxTraceJournal {
 
     /** @param array<string, mixed> $record */
     private function appendJsonLine(string $path, array $record): bool {
-        $json = json_encode($record, JSON_UNESCAPED_SLASHES);
-        if (!is_string($json)) {
+        $json = ABJ_404_Solution_Utf8SafeRecord::encode($record, 'AJAX trace record', JSON_UNESCAPED_SLASHES);
+        if ($json === '') {
             $this->reportFailure('AJAX trace JSON encoding failed.');
             return false;
         }

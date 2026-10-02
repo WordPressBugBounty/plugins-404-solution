@@ -250,17 +250,21 @@ class ABJ_404_Solution_SpellPostListeners {
 					": Exception while deleting spelling cache: " . $e->getMessage());
 			}
 
-			if ($this->logger->isDebug()) {
-				$httpUserAgent = "(none)";
-				if (array_key_exists("HTTP_USER_AGENT", $_SERVER)) {
-					$httpUserAgent = $_SERVER['HTTP_USER_AGENT'];
-				}
-
-				$this->logger->debugMessage(__CLASS__ . "/" . __FUNCTION__ .
-					": Spelling cache deleted (post change). Action: " . $saveOrDelete .
-					", ID: " . $post_id . ", type: " . $postType . ", reason: " .
-					$reason . ", agent: " . $httpUserAgent);
+			// The line itself is not gated on isDebug(): debugMessage() already
+			// writes at once in debug mode and otherwise buffers it for the next
+			// error, and "the spelling cache was emptied by this post change" is
+			// what explains a suggestion list that suddenly changed. Only the
+			// visitor-side user agent stays debug-only, so the held line carries
+			// no client identity.
+			$agentNote = '';
+			if ($this->logger->isDebug() && array_key_exists("HTTP_USER_AGENT", $_SERVER)) {
+				$agentNote = ", agent: " . $_SERVER['HTTP_USER_AGENT'];
 			}
+
+			$this->logger->debugMessage(__CLASS__ . "/" . __FUNCTION__ .
+				": Spelling cache deleted (post change). Action: " . $saveOrDelete .
+				", ID: " . $post_id . ", type: " . $postType . ", reason: " .
+				$reason . $agentNote);
 		}
 
 		if ($saveOrDelete == 'save' && in_array($post->post_status, array('publish', 'published'))) {

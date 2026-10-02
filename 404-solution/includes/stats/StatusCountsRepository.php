@@ -44,6 +44,9 @@ class ABJ_404_Solution_StatusCountsRepository {
     /** @var ABJ_404_Solution_DatabaseQueryInterface */
     private $dbCore;
 
+    /** @var string See lastRecomputeFailure(). */
+    private $lastRecomputeFailure = '';
+
     /** @var ABJ_404_Solution_LogsRepository */
     private $logsRepo;
 
@@ -74,6 +77,31 @@ class ABJ_404_Solution_StatusCountsRepository {
     /** @param callable(string,array<string,mixed>,callable):mixed|null $tracer */
     public static function setOperationTracer($tracer): void {
         self::$operationTracer = $tracer;
+    }
+
+    /**
+     * Why the most recent recompute*() returned false ('' after a success). The
+     * bool flattens "table absent", "timed out" and "query error"; the caller
+     * that logs (the refresh coordinator) knows the scope, this class the cause.
+     */
+    public function lastRecomputeFailure(): string {
+        return $this->lastRecomputeFailure;
+    }
+
+    /** Record a failed recompute and return false, so each exit stays one line. */
+    private function failRecompute(string $reason): bool {
+        $this->lastRecomputeFailure = $reason;
+        return false;
+    }
+
+    /** @param mixed $result A queryAndGetResults() result. */
+    private function describeQueryFailure($result, int $timeoutSeconds): string {
+        if (is_array($result) && !empty($result['timed_out'])) {
+            return 'aggregate timed out (budget ' . $timeoutSeconds . 's)';
+        }
+        $error = (is_array($result) && isset($result['last_error']) && is_string($result['last_error']))
+            ? $result['last_error'] : '';
+        return 'aggregate query error: ' . substr($error, 0, 300);
     }
 
     /**
@@ -170,17 +198,15 @@ class ABJ_404_Solution_StatusCountsRepository {
         ?int $timeoutSeconds
     ): bool {
         if ($this->readiness->isKnownAbsent('{wp_abj404_redirects}')) {
-            return false;
+            return $this->failRecompute('redirects table not present');
         }
 
         $query = $this->dbCore->doTableNameReplacements(self::buildScopeAggregateQuery($scope));
-        $result = $this->dbCore->queryAndGetResults(
-            $query,
-            array('timeout' => self::resolveTimeout($timeoutSeconds, self::STATUS_QUERY_TIMEOUT_SECONDS))
-        );
+        $budget = self::resolveTimeout($timeoutSeconds, self::STATUS_QUERY_TIMEOUT_SECONDS);
+        $result = $this->dbCore->queryAndGetResults($query, array('timeout' => $budget));
         $hadError = !empty($result['last_error']) || !empty($result['timed_out']);
         if ($hadError) {
-            return false;
+            return $this->failRecompute($this->describeQueryFailure($result, $budget));
         }
 
         $rows = is_array($result['rows']) ? $result['rows'] : array();
@@ -194,6 +220,7 @@ class ABJ_404_Solution_StatusCountsRepository {
 
         set_transient($cacheKey, $counts, self::STATUS_CACHE_TTL);
         set_transient($lastKnownKey, $counts, self::STATUS_LAST_KNOWN_CACHE_TTL);
+        $this->lastRecomputeFailure = '';
         return true;
     }
 
@@ -354,8 +381,9 @@ class ABJ_404_Solution_StatusCountsRepository {
                     array('family' => 'high_impact_current', 'expected' => 'numeric'),
                     static fn() => get_transient(self::CACHE_KEY_HIGH_IMPACT_CAPTURED)
                 );
-                if (is_numeric($current)) {
-                    return array('count' => intval($current), 'needs_refresh' => false);
+                $currentCount = ABJ_404_Solution_ExactInteger::read($current, 0);
+                if ($currentCount !== null) {
+                    return array('count' => $currentCount, 'needs_refresh' => false);
                 }
 
                 $lastKnown = self::trace(
@@ -363,8 +391,9 @@ class ABJ_404_Solution_StatusCountsRepository {
                     array('family' => 'high_impact_last_known', 'expected' => 'numeric'),
                     static fn() => get_transient(self::CACHE_KEY_HIGH_IMPACT_CAPTURED_LAST_KNOWN)
                 );
-                if (is_numeric($lastKnown)) {
-                    return array('count' => intval($lastKnown), 'needs_refresh' => true);
+                $lastKnownCount = ABJ_404_Solution_ExactInteger::read($lastKnown, 0);
+                if ($lastKnownCount !== null) {
+                    return array('count' => $lastKnownCount, 'needs_refresh' => true);
                 }
 
                 return array('count' => null, 'needs_refresh' => true);
@@ -380,19 +409,17 @@ class ABJ_404_Solution_StatusCountsRepository {
      */
     public function recomputeHighImpactCapturedCount(?int $timeoutSeconds = null): bool {
         if ($this->readiness->isKnownAbsent('{wp_abj404_redirects}')) {
-            return false;
+            return $this->failRecompute('redirects table not present');
         }
         if (!$this->logsRepo->logsHitsTableExists()) {
             $this->logsRepo->scheduleHitsTableRebuild();
-            return false;
+            return $this->failRecompute('logs_hits table not present; rebuild scheduled');
         }
 
         $query = $this->queryBuilder->buildHighImpactCapturedCountQuery();
 
-        $result = $this->dbCore->queryAndGetResults(
-            $query,
-            array('timeout' => self::resolveTimeout($timeoutSeconds, self::HIGH_IMPACT_QUERY_TIMEOUT_SECONDS))
-        );
+        $budget = self::resolveTimeout($timeoutSeconds, self::HIGH_IMPACT_QUERY_TIMEOUT_SECONDS);
+        $result = $this->dbCore->queryAndGetResults($query, array('timeout' => $budget));
         $timedOut = !empty($result['timed_out']);
         $hadError = !empty($result['last_error']) || $timedOut;
         $rows = is_array($result['rows']) ? $result['rows'] : array();
@@ -401,21 +428,22 @@ class ABJ_404_Solution_StatusCountsRepository {
 
         if ($timedOut) {
             $this->logsRepo->scheduleHitsTableRebuild();
-            return false;
+            return $this->failRecompute($this->describeQueryFailure($result, $budget) . '; rebuild scheduled');
         }
 
         if ($hadError) {
-            return false;
+            return $this->failRecompute($this->describeQueryFailure($result, $budget));
         }
 
         if ($count === 0 && $this->isHitsTableEmpty()) {
             $this->logsRepo->scheduleHitsTableRebuild();
-            return false;
+            return $this->failRecompute('logs_hits table empty; rebuild scheduled');
         }
 
         set_transient(self::CACHE_KEY_HIGH_IMPACT_CAPTURED, $count, self::STATUS_CACHE_TTL);
         set_transient(self::CACHE_KEY_HIGH_IMPACT_CAPTURED_LAST_KNOWN, $count, self::STATUS_LAST_KNOWN_CACHE_TTL);
 
+        $this->lastRecomputeFailure = '';
         return true;
     }
 

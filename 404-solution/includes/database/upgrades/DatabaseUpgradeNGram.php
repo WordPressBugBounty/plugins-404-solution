@@ -221,9 +221,11 @@ class ABJ_404_Solution_DatabaseUpgradeNGram extends ABJ_404_Solution_DatabaseUpg
             return;
         }
 
-        $remaining = isset($stats['posts_remaining']) && is_numeric($stats['posts_remaining'])
-            ? (string)(int)$stats['posts_remaining']
-            : 'an unknown number of';
+        $remainingCount = ABJ_404_Solution_ExactInteger::read(
+            $stats['posts_remaining'] ?? null,
+            0
+        );
+        $remaining = $remainingCount === null ? 'an unknown number of' : (string)$remainingCount;
 
         $this->logger->infoMessage(
             "N-gram cache backlog of {$remaining} posts is beyond incremental sync capacity. "

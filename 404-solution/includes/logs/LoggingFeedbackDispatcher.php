@@ -210,6 +210,6 @@ class ABJ_404_Solution_LoggingFeedbackDispatcher {
             return 0;
         }
         $installedAt = get_option('abj404_installed_time', null);
-        return is_scalar($installedAt) && is_numeric($installedAt) ? (int)$installedAt : 0;
+        return ABJ_404_Solution_ExactInteger::readOr($installedAt, 0, 0);
     }
 }

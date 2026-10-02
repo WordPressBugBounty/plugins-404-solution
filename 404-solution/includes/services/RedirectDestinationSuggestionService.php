@@ -45,9 +45,7 @@ class ABJ_404_Solution_RedirectDestinationSuggestionService {
                 'type_label' => $this->buildTypeLabelForIdAndType($match['id_and_type']),
             );
         } catch (\Throwable $e) {
-            $this->logger->debugMessage(
-                'Unable to build redirect suggestion for captured URL: ' . $e->getMessage()
-            );
+            $this->logger->warnCaught('Unable to build redirect suggestion for captured URL.', $e);
             return null;
         }
     }
@@ -109,7 +107,7 @@ class ABJ_404_Solution_RedirectDestinationSuggestionService {
      */
     private function buildTypeLabelForIdAndType(string $idAndType): string {
         $typeParts = explode('|', $idAndType);
-        $typeInt = isset($typeParts[1]) && is_numeric($typeParts[1]) ? (int)$typeParts[1] : -1;
+        $typeInt = ABJ_404_Solution_ExactInteger::readOr($typeParts[1] ?? null, 0, -1);
         return $this->buildTypeLabel($typeInt, $typeParts);
     }
 

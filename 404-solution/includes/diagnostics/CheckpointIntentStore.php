@@ -42,8 +42,8 @@ final class ABJ_404_Solution_CheckpointIntentStore {
                 return self::result('failed', 'temp_directory_unavailable',
                     $requestId, $event, $startedNs);
             }
-            $json = json_encode($record, JSON_UNESCAPED_SLASHES);
-            if (!is_string($json)) {
+            $json = ABJ_404_Solution_Utf8SafeRecord::encode($record, 'AJAX checkpoint intent record', JSON_UNESCAPED_SLASHES);
+            if ($json === '') {
                 self::reportFailure('AJAX checkpoint intent JSON encoding failed.');
                 return self::result('failed', 'json_encode_failed',
                     $requestId, $event, $startedNs);

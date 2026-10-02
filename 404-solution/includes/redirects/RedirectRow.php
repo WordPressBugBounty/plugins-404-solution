@@ -220,20 +220,7 @@ final class ABJ_404_Solution_RedirectRow {
         if (!isset($raw[$key])) {
             return 0;
         }
-        $v = $raw[$key];
-        if (is_int($v)) {
-            return $v;
-        }
-        if (is_float($v)) {
-            return (int)$v;
-        }
-        if (is_string($v) && is_numeric($v)) {
-            return (int)$v;
-        }
-        if (is_bool($v)) {
-            return $v ? 1 : 0;
-        }
-        return 0;
+        return ABJ_404_Solution_ExactInteger::readOr($raw[$key], 0, 0);
     }
 
     /**

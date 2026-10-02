@@ -53,12 +53,15 @@ final class ABJ_404_Solution_CheckpointJournalReader {
      * state, recorded once and never re-derivable from any journal, and it is
      * the difference between answering "what suppressed canonicalization on
      * your site" out of the report and writing to the site owner to ask them to
-     * go run a command. The remaining
+     * go run a command. A further 5 KB then funded the promoted request
+     * timelines inside the stranded-request block, which keep the phase
+     * history of noteworthy requests that finished too fast to leave any
+     * other trace. The remaining
      * budget is still far above the whole-failing-session floor
      * SupportExcerptBudgetContractTest pins, and the per-section budgets are
      * proven to sum inside the report contract by that same test.
      */
-    const MAX_SUPPORT_EXCERPT_BYTES = 139264;
+    const MAX_SUPPORT_EXCERPT_BYTES = 134144;
 
     /**
      * Bounded recent checkpoint lines for the support-request payload.
@@ -206,8 +209,9 @@ final class ABJ_404_Solution_CheckpointJournalReader {
                 continue;
             }
             $previous = $record['previous_checkpoint_write'] ?? null;
-            $totalUs = is_array($previous) && is_numeric($previous['total_us'] ?? null)
-                ? (int)$previous['total_us'] : -1;
+            $totalUs = is_array($previous)
+                ? ABJ_404_Solution_ExactInteger::readOr($previous['total_us'] ?? null, 0, -1)
+                : -1;
             if ($totalUs > $slowestTotalUs) {
                 $slowestIndex = $index;
                 $slowestTotalUs = $totalUs;
@@ -250,8 +254,11 @@ final class ABJ_404_Solution_CheckpointJournalReader {
                 continue;
             }
             $previous = $record['previous_checkpoint_write'];
-            $totalUs = is_numeric($previous['total_us'] ?? null)
-                ? (int)$previous['total_us'] : -1;
+            $totalUs = ABJ_404_Solution_ExactInteger::readOr(
+                $previous['total_us'] ?? null,
+                0,
+                -1
+            );
             $isSlowest = $slowestIndex === $index;
             $isSlow = $totalUs >= self::RECORDER_PHASE_DETAIL_THRESHOLD_US;
             $failed = ($previous['status'] ?? '') !== 'complete'

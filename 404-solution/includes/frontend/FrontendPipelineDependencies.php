@@ -54,9 +54,6 @@ class ABJ_404_Solution_FrontendPipelineDependencies {
     /** @var ABJ_404_Solution_FrontendHitRecorder */
     private $hitRecorder;
 
-    /** @var ABJ_404_Solution_FrontendAsyncSuggestionTrigger */
-    private $asyncSuggestionTrigger;
-
     /** @var ABJ_404_Solution_FrontendRuntimeOptions */
     private $runtimeOptions;
 
@@ -123,7 +120,6 @@ class ABJ_404_Solution_FrontendPipelineDependencies {
         $this->candidateEvaluator = new ABJ_404_Solution_RedirectCandidateEvaluator($redirectsRepository);
         $this->telemetry = new ABJ_404_Solution_FrontendPipelineTelemetry($logging, $functions);
         $this->hitRecorder = new ABJ_404_Solution_FrontendHitRecorder($this->logsRepository);
-        $this->asyncSuggestionTrigger = new ABJ_404_Solution_FrontendAsyncSuggestionTrigger($spellChecker);
         $this->runtimeOptions = new ABJ_404_Solution_FrontendRuntimeOptions();
         $this->wpGuessFallback = new ABJ_404_Solution_WordPressGuessFallback(
             $pluginLogic->urlNormalization(),
@@ -141,8 +137,7 @@ class ABJ_404_Solution_FrontendPipelineDependencies {
             $this->notFoundResponse,
             $this->previousRequestCookieTracker,
             $this->telemetry,
-            $this->logsRepository,
-            $this->asyncSuggestionTrigger
+            $this->logsRepository
         );
         $this->existingRedirectLookup = new ABJ_404_Solution_ExistingRedirectLookup(
             $redirectsRepository,
@@ -217,11 +212,6 @@ class ABJ_404_Solution_FrontendPipelineDependencies {
     /** @return ABJ_404_Solution_FrontendHitRecorder */
     function hitRecorder(): ABJ_404_Solution_FrontendHitRecorder {
         return $this->hitRecorder;
-    }
-
-    /** @return ABJ_404_Solution_FrontendAsyncSuggestionTrigger */
-    function asyncSuggestionTrigger(): ABJ_404_Solution_FrontendAsyncSuggestionTrigger {
-        return $this->asyncSuggestionTrigger;
     }
 
     /** @return ABJ_404_Solution_FrontendRuntimeOptions */

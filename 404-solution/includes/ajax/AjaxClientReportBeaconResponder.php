@@ -46,16 +46,36 @@ final class ABJ_404_Solution_AjaxClientReportBeaconResponder {
         // of a request failed, so naming an attempt here is itself a verdict --
         // see ABJ_404_Solution_DiagnosticClientVerdict::condemnedRequestId().
         $reportedAttemptId = self::reportedAttemptId($reader);
+        // A beacon fires only after the final attempt of a request failed, so
+        // the attempt it names is condemned by the browser's own verdict.
+        // Promote its timeline into the durable ledger while it is named.
+        if ($reportedAttemptId !== '') {
+            ABJ_404_Solution_RequestTimelinePromoter::promoteNamed(array(
+                'request_id' => $reportedAttemptId,
+                'reason' => ABJ_404_Solution_StrandedRequestLedger::REASON_CLIENT_REPORTED,
+            ));
+        }
         $rawThresholdMs = $reader->getPostOrGetSanitize('clientThresholdMs', '0');
-        $thresholdMs = is_scalar($rawThresholdMs) && is_numeric($rawThresholdMs)
-            ? (int)$rawThresholdMs
-            : 0;
+        $thresholdMs = ABJ_404_Solution_ExactInteger::readOr($rawThresholdMs, 0, 0);
+        // A beacon reporting a parse failure is the one client verdict that
+        // can arrive with debug_mode off (this branch always runs), so it is
+        // the arming point for the bounded trace window: the NEXT requests of
+        // that action get a durable stage trace even on a site that never
+        // turned the debug setting on. Support report 521 needed exactly this
+        // and had nothing.
+        $parseFailureAction = ABJ_404_Solution_ClientTransportReport::parseFailureActionInReport(
+            (string)$reader->getPostOrGetSanitize('clientReport', ''));
+        $armedAction = $parseFailureAction !== ''
+                && ABJ_404_Solution_AjaxDiagnosticRequestPolicy::armTraceForClientParseFailure(
+                    $parseFailureAction)
+            ? $parseFailureAction : '';
         ABJ_404_Solution_AjaxCheckpointLogger::record($requestId, 'client_report_only_branch', array(
             'reported_attempt_id' => $reportedAttemptId,
             'client_threshold_ms' => $thresholdMs === 20000 ? $thresholdMs : 0,
+            'client_parse_failure_armed' => $armedAction,
         ));
         if ($thresholdMs === 20000) {
-            self::recordThresholdCrossing($reportedAttemptId, $thresholdMs);
+            self::recordThresholdCrossing($reportedAttemptId, $thresholdMs, $requestId);
         }
         ABJ_404_Solution_AjaxStageDiagnostics::finishRequest('complete');
         ABJ_404_Solution_AjaxAdminEndpointSupport::markAjaxResponseSent();
@@ -71,7 +91,7 @@ final class ABJ_404_Solution_AjaxClientReportBeaconResponder {
         return true;
     }
 
-    private static function recordThresholdCrossing(string $reportedAttemptId, int $thresholdMs): void {
+    private static function recordThresholdCrossing(string $reportedAttemptId, int $thresholdMs, string $recordedByRequestId): void {
         if ($reportedAttemptId === '') {
             return;
         }
@@ -82,6 +102,8 @@ final class ABJ_404_Solution_AjaxClientReportBeaconResponder {
         $operation = $active === array() ? array() : $active[count($active) - 1];
         $fields = array(
             'threshold_ms' => $thresholdMs,
+            // The record lands under the reported attempt's id but is written by this report request, so its rusage and pid describe the report request.
+            'recorded_by_request_id' => $recordedByRequestId,
             'active_operation_status' => $operation === array() ? 'unavailable' : 'available',
         );
         foreach (array(

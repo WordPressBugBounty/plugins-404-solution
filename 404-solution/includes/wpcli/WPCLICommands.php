@@ -133,7 +133,7 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
             return;
         }
 
-        $count = isset($prepared['count']) && is_numeric($prepared['count']) ? (int)$prepared['count'] : 0;
+        $count = ABJ_404_Solution_ExactInteger::readOr($prepared['count'] ?? null, 0, 0);
         $this->presenter()->confirm(
             "This will permanently delete {$count} captured 404 entr" . ($count === 1 ? 'y' : 'ies') . '. Continue?',
             $assocArgs

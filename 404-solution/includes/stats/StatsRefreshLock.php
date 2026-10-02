@@ -57,7 +57,7 @@ class ABJ_404_Solution_StatsRefreshLock {
         }
 
         $timestampPart = explode(':', $lockValue, 2)[0];
-        $lockTs = is_numeric($timestampPart) ? (int)$timestampPart : 0;
+        $lockTs = ABJ_404_Solution_ExactInteger::readOr($timestampPart, 0, 0);
         if ($lockTs > 0 && ($now - $lockTs) > self::REFRESH_LOCK_COOLDOWN_SECONDS) {
             $lockRow->releaseIfValueIs(array('optionName' => $lockKey, 'value' => $lockValue));
             $claimValue = ABJ_404_Solution_ExclusiveOptionRow::uniqueClaimValue((string)$now);

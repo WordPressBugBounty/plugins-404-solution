@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 	Author:      Aaron J
 	Author URI:  https://www.ajexperience.com/404-solution/
 
-	Version: 4.3.5
+	Version: 4.3.6
 	Requires at least: 5.0
 	Requires PHP: 7.4
 
@@ -49,7 +49,7 @@ if (!defined('ABJ404_PATH')) {
 // Content-addressed release marker compiled into the earliest boot file.
 // DiagnosticModuleManifestTest recomputes it from every covered PHP module.
 if (!defined('ABJ404_DIAGNOSTIC_BUILD_ID')) {
-define('ABJ404_DIAGNOSTIC_BUILD_ID', '1675af0a29435f25cc1afbaef80703108620b1f8');
+define('ABJ404_DIAGNOSTIC_BUILD_ID', 'd9a360884e5d34fda457b7c2767dc2702f786908');
 }
 
 // The plugin version is read from this file's own header (single source of
@@ -144,6 +144,36 @@ spl_autoload_register('abj404_autoloader');
 // checkpoint logger, is therefore the honest measurement of that entire
 // pre-active-plugin window: mu-plugins, every listener on muplugins_loaded,
 // and any plugin that loads ahead of us in the active-plugins list.
+// Start the always-on per-request phase timeline at the earliest point our
+// own code runs, so every stamp after this is measurable against it. Missing
+// on a corrupt install degrades to no timeline, never to a fatal.
+if (class_exists('ABJ_404_Solution_RequestPhaseTimeline')) {
+	ABJ_404_Solution_RequestPhaseTimeline::markPluginBoot();
+	// Stamp each WordPress lifecycle hook as it starts, so a request that dies
+	// of max_execution_time says which window (core, other plugins, theme,
+	// main query, our 404 work) spent the time (plmcb.fr reports 505/506).
+	if (class_exists('ABJ_404_Solution_LifecycleHookStamps')) {
+		ABJ_404_Solution_LifecycleHookStamps::register();
+	}
+}
+// Per-plugin and per-callback timing, in memory only, so a request killed by
+// the PHP time limit can name the component that used the time (c305).
+// Registered while this file is being included, so the first plugin_loaded
+// it sees is our own.
+if (class_exists('ABJ_404_Solution_RequestTimeRecorder')) {
+	ABJ_404_Solution_RequestTimeRecorder::register(array('ABJ_404_Solution_TimeLimitFatalRecorder', 'onDetailedTiming'));
+}
+// Put that breakdown into core's recovery email and error page when the time
+// limit fires inside our files (and let core email about it on a front-end
+// request too). Three add_filter calls; nothing runs until a fatal.
+if (class_exists('ABJ_404_Solution_TimeLimitFatalReporter')) {
+	ABJ_404_Solution_TimeLimitFatalReporter::register();
+}
+// The quiet notice on the plugin's own screens that links to the Tools card
+// of timed-out requests. One add_action, admin requests only.
+if (class_exists('ABJ_404_Solution_TimeLimitAdminReport')) {
+	ABJ_404_Solution_TimeLimitAdminReport::register();
+}
 ABJ_404_Solution_BootWaypointRecorder::record('boot_plugin_entry', array(
 	'module' => '404-solution',
 	'path' => __FILE__,

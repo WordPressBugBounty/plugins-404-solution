@@ -215,7 +215,9 @@ final class ABJ_404_Solution_AjaxRowLoopProgress {
 
     private static function resolveRequestId(): string {
         try {
-            return ABJ_404_Solution_AjaxDiagnosticRequestPolicy::instrumentedRequestIdFromGlobalContext();
+            return class_exists('ABJ_404_Solution_AjaxRequestIdScopes')
+                ? ABJ_404_Solution_AjaxRequestIdScopes::fromGlobalContext()->checkpoint()
+                : '';
         } catch (Throwable $e) {
             self::reportFailure('row loop arming failed: ' . $e->getMessage());
             return '';
@@ -310,9 +312,10 @@ final class ABJ_404_Solution_AjaxRowLoopProgress {
                 continue;
             }
             foreach ($source as $hook => $count) {
-                if (is_numeric($count) && (int)$count >= 0) {
+                $countInt = ABJ_404_Solution_ExactInteger::read($count, 0);
+                if ($countInt !== null) {
                     $name = (string)$hook;
-                    $counts[$name] = ($counts[$name] ?? 0) + (int)$count;
+                    $counts[$name] = ($counts[$name] ?? 0) + $countInt;
                 }
             }
         }

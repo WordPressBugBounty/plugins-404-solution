@@ -106,6 +106,13 @@ class ABJ_404_Solution_DatabaseQueryDiagnostics {
         if (class_exists('ABJ_404_Solution_AjaxQueryTimeline', false)) {
             ABJ_404_Solution_AjaxQueryTimeline::endQuery($elapsedMs);
         }
+        // The count on the always-on timeline, armed or not. Guarded without
+        // autoload: this runs for every query on every request, so a missing
+        // timeline on a partially-updated install must degrade to no count,
+        // never to a fatal on the query path.
+        if (class_exists('ABJ_404_Solution_RequestPhaseTimeline', false)) {
+            ABJ_404_Solution_RequestPhaseTimeline::noteQuery($elapsedMs);
+        }
     }
 
     /**
@@ -135,11 +142,47 @@ class ABJ_404_Solution_DatabaseQueryDiagnostics {
         if (is_array($rows)) {
             return;
         }
-        $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->extractSqlFilename($query);
+        $sqlInfo = $this->sqlForErrorLog($query);
         $this->logger->errorMessage(
             "Query result is not an array. Query: " . $sqlInfo,
             new Exception("Query result is not an array.") // allow-raw-error: behavior preserved from pre-extraction DatabaseCore; passed to logger as diagnostic context, not thrown
         );
+    }
+
+    /**
+     * The SQL field of an error log line.
+     *
+     * WP_DEBUG on: the statement itself. WP_DEBUG off (the default): the source
+     * label, then a statement identity, never the text. The filename alone could
+     * not say WHICH statement failed when a .sql file holds several, and the
+     * text can carry user-supplied values. The identity is the one
+     * AjaxQueryTimeline records (`sql_id`: a hash of the literal-stripped
+     * shape, so the same statement groups across differing values), plus the
+     * shape's length and the leading verb. It adds no literal, table or column
+     * name, so the filename-only contract for production logs still holds.
+     *
+     * @param string $query
+     * @return string
+     */
+    public function sqlForErrorLog(string $query): string {
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            return $query;
+        }
+        $source = $this->extractSqlFilename($query);
+        if (!class_exists('ABJ_404_Solution_AjaxFailureLogger')) {
+            return $source;
+        }
+        $redactor = new ABJ_404_Solution_AjaxFailureLogger();
+        $shape = $redactor->redactSqlShape($query);
+        if ($shape === '') {
+            return $source;
+        }
+        $verb = 'UNKNOWN';
+        if (preg_match('/^\s*(?:\/\*.*?\*\/\s*)*([A-Za-z]+)/s', $query, $verbMatch) === 1) {
+            $verb = strtoupper($verbMatch[1]);
+        }
+        return $source . ' [sql_id=' . $redactor->sqlIdForShape($shape)
+            . ' len=' . strlen($shape) . ' verb=' . $verb . ']';
     }
 
     /**

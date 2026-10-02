@@ -78,6 +78,12 @@ class ABJ_404_Solution_TermCandidateSource {
      * @return array<int, object> Uniform term-row shape; same either way.
      */
     public function getCandidateTermRows(string $type, string $query): array {
+        $budget = ABJ_404_Solution_MatchingTimeBudget::current();
+        if ($budget !== null && $budget->isExhausted()) {
+            $this->logBudgetExhaustedSkip();
+            return [];
+        }
+
         if ($query !== ''
             && $this->ngramFilter !== null
             && $this->publishedTermsProvider !== null
@@ -93,6 +99,17 @@ class ABJ_404_Solution_TermCandidateSource {
         }
 
         return $this->fullScan($type);
+    }
+
+    /**
+     * Log the budget-exhaustion skip for this source. Kept out of the public
+     * getter so the read-like name hides no telemetry write, matching the
+     * private trip-helper shape the other budget guards use.
+     *
+     * @return void
+     */
+    private function logBudgetExhaustedSkip(): void {
+        abj_service('logging')->debugMessage("Term candidates: time budget exhausted, returning no candidates");
     }
 
     /**

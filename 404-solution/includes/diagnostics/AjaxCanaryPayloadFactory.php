@@ -85,7 +85,7 @@ final class ABJ_404_Solution_AjaxCanaryPayloadFactory {
         $raw,
         int $default = self::DEFAULT_TARGET_BYTES
     ): int {
-        $value = is_numeric($raw) ? (int)$raw : $default;
+        $value = ABJ_404_Solution_ExactInteger::readOr($raw, 0, $default);
         if ($value <= 0) {
             $value = $default;
         }
@@ -103,7 +103,7 @@ final class ABJ_404_Solution_AjaxCanaryPayloadFactory {
 
     /** @param mixed $raw */
     public static function normalizeRungPercent($raw): int {
-        return is_numeric($raw) ? max(1, min(100, (int)$raw)) : 100;
+        return min(100, ABJ_404_Solution_ExactInteger::readOr($raw, 1, 100));
     }
 
     /** @param mixed $raw */

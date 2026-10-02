@@ -35,12 +35,13 @@ class ABJ_404_Solution_SpellingCacheRepository {
         $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/insertSpellingCache.sql");
 
         $cleanURL = $this->f->sanitizeInvalidUTF8($requestedURLRaw);
-
-        $query = $this->f->str_replace('{url}', esc_sql($cleanURL), $query);
         $jsonEncoded = json_encode($returnValue);
-        $query = $this->f->str_replace('{matchdata}', esc_sql(is_string($jsonEncoded) ? $jsonEncoded : ''), $query);
+        $matchData = is_string($jsonEncoded) ? $jsonEncoded : '';
 
-        $this->dbCore->queryAndGetResults($query);
+        // The URL is visitor-chosen and the match data is built from post slugs. Both are
+        // bound by the executor AFTER its {wp_...} token pass, so a token in either one
+        // reaches the table as written. The template's third placeholder is the update clause.
+        $this->dbCore->queryAndGetResults($query, array('query_params' => array($cleanURL, $matchData, $matchData)));
     }
 
     /**
@@ -55,8 +56,8 @@ class ABJ_404_Solution_SpellingCacheRepository {
     public function getSpellingPermalinksFromCache(string $requestedURLRaw) {
         $requestedURLRaw = $this->f->sanitizeInvalidUTF8($requestedURLRaw);
         // allow-unbounded-select: single-URL equality lookup (where url = one exact value); returns only the cache rows for that one URL
-        $query = "select id, url, matchdata from {wp_abj404_spelling_cache} where url = '" . esc_sql($requestedURLRaw) . "'";
-        $results = $this->dbCore->queryAndGetResults($query);
+        $query = "select id, url, matchdata from {wp_abj404_spelling_cache} where url = %s";
+        $results = $this->dbCore->queryAndGetResults($query, array('query_params' => array($requestedURLRaw)));
 
         $rows = is_array($results['rows']) ? $results['rows'] : array();
 

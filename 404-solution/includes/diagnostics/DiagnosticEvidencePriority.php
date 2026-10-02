@@ -17,30 +17,37 @@ if (!defined('ABSPATH')) {
  *
  * So selection is by request, not by byte offset, and requests are ranked:
  *
- *   1. Requests that failed -- the browser reported a non-success outcome for
- *      them, they recorded a failure branch, or they simply stop with no
- *      terminal record at all (the signature of a request that hung).
+ *   1. Condemned requests -- the browser reported a non-success outcome for
+ *      them, they recorded a failure branch, or a verdict from another
+ *      journal condemned them. These are known failures.
  *   2. Requests joined to a failing one by the retry chain, transitively, so a
  *      retry is always readable next to the attempt it was retrying.
- *   3. Everything else, newest first. Healthy traffic and canary probes are
- *      context; they are spent last and they can never evict tier 1.
+ *   3. Suspected hangs -- requests that stop with no terminal record and
+ *      either an unclosed step or at least two records. A single post-hoc
+ *      record with no terminal event is not a hang; it is an uninstrumented
+ *      request that wrote once and left.
+ *   4. Everything else, newest first. Healthy traffic and canary probes are
+ *      context; they are spent last and they can never evict the tiers above.
  *
- * Tier 1 is decided from ONE index across every journal, not from each file's
- * own contents: the browser's verdicts are written to the checkpoint journal
+ * The condemned tier is decided from ONE index across every journal, not from
+ * each file's own contents: the browser's verdicts are written to the checkpoint journal
  * alone, and a request PHP completed but the browser never received looks
  * exactly like healthy traffic anywhere else. Resolving and collecting those
  * verdicts is ABJ_404_Solution_DiagnosticClientVerdict's; this class only
  * receives the resulting ids and promotes the groups it already holds.
  *
- * Within tiers 1 and 2 the order is OLDEST first: the first failure happened
- * without the confounding effect of retries, warmed caches, or an already
- * degraded host, so it is the most diagnostic single request in the file.
+ * Within the condemned, chain and suspected tiers the order is OLDEST first:
+ * the first failure happened without the confounding effect of retries,
+ * warmed caches, or an already degraded host, so it is the most diagnostic
+ * single request in the file.
  * Each prioritized request also holds a reserved share of the budget, so one
- * pathologically long request cannot starve the other failures -- except a
- * request with no terminal event, which is granted its full record run
- * before any share is split at all. Its middle is the only account of the
- * stall; a completed request's middle is comparatively spendable, so a
- * completed request's records are trimmed first when the budget is tight
+ * pathologically long request cannot starve the other failures -- except its
+ * anchors (its last record and its last unclosed step), which are granted
+ * before any share is split at all, and except a request with no terminal
+ * event, which is granted its full record run next when it fits. Its middle
+ * is the only account of the stall; a completed request's middle is
+ * comparatively spendable, so a completed request's records are trimmed
+ * first when the budget is tight
  * (report 193: a 165-second holder with no request_end had 7 of its records
  * dropped by an even split before this ordering existed).
  *
@@ -81,6 +88,32 @@ final class ABJ_404_Solution_DiagnosticEvidencePriority {
     const UNJOINABLE_KEY = "\0unjoinable";
 
     /**
+     * Every key summarize() returns, in the exact order it returns them.
+     *
+     * This is the single source of truth for the summary's shape.
+     * ABJ_404_Solution_DiagnosticJournalExcerpt::summaryReserveBytes() derives
+     * its worst-case byte reserve from this list (plus its own
+     * COMPOSE_SUMMARY_KEYS) rather than from a hand-sized constant, so a new
+     * summary key can never silently outgrow an old reservation again.
+     */
+    const SUMMARY_KEYS = array(
+        'requests_on_disk',
+        'requests_included',
+        'records_on_disk',
+        'records_included',
+        'records_elided',
+        'records_unjoinable',
+        'failing_requests',
+        'failing_requests_included',
+        'failing_requests_without_records',
+        'condemned_requests',
+        'condemned_requests_included',
+        'bytes_on_disk',
+        'bytes_included',
+        'bytes_budget',
+    );
+
+    /**
      * Choose the lines to ship, in their original file order.
      *
      * @param array<int, string> $lines JSONL lines, oldest first, newline-free.
@@ -93,15 +126,15 @@ final class ABJ_404_Solution_DiagnosticEvidencePriority {
     public static function select(array $lines, int $budgetBytes, array $knownFailingIds = array()): array {
         $groups = self::group($lines);
         self::applyKnownFailures($groups, $knownFailingIds);
-        $failingIds = self::classifyFailures($groups);
-        $ordered = self::orderByPriority($groups, $failingIds);
+        $classification = ABJ_404_Solution_DiagnosticFailureClassification::fromGroups($groups);
+        $ordered = self::orderByPriority($groups, $classification);
 
         $selection = ABJ_404_Solution_DiagnosticEvidenceBudget::allocate(
             $lines, $groups, $ordered['ids'], $ordered['prioritized'], $budgetBytes);
 
         return array(
             'lines' => $selection['lines'],
-            'summary' => self::summarize($lines, $groups, $failingIds, $selection, $budgetBytes),
+            'summary' => self::summarize($lines, $groups, $classification, $selection, $budgetBytes),
         );
     }
 
@@ -187,48 +220,35 @@ final class ABJ_404_Solution_DiagnosticEvidencePriority {
     }
 
     /**
-     * Ids of every request that failed.
-     *
-     * @param array<string, ABJ_404_Solution_DiagnosticRequestGroup> $groups
-     * @return array<string, bool>
-     */
-    private static function classifyFailures(array $groups): array {
-        $failing = array();
-        foreach ($groups as $id => $group) {
-            if ($group->isFailing()) {
-                $failing[$id] = true;
-            }
-        }
-        return $failing;
-    }
-
-    /**
      * Request ids in the order their budget is granted, plus how many of them
-     * are prioritized (tiers 1 and 2) and therefore hold a reserved share.
+     * are prioritized (condemned, chain and suspected) and therefore hold a reserved share.
      *
      * @param array<string, ABJ_404_Solution_DiagnosticRequestGroup> $groups
-     * @param array<string, bool> $failingIds
      * @return array{ids: array<int, string>, prioritized: int}
      */
-    private static function orderByPriority(array $groups, array $failingIds): array {
-        $chainIds = self::retryChainOf($groups, $failingIds);
+    private static function orderByPriority(array $groups,
+            ABJ_404_Solution_DiagnosticFailureClassification $classification): array {
+        $chainIds = self::retryChainOf($groups, $classification->failingIds());
 
-        $failing = array();
+        $condemned = array();
         $chain = array();
+        $suspected = array();
         $rest = array();
         foreach ($groups as $id => $group) {
             if (!$group->hasRecords()) {
                 continue;
             }
-            if (isset($failingIds[$id])) {
-                $failing[] = $id;
+            if ($classification->isCondemned((string)$id)) {
+                $condemned[] = $id;
             } elseif (isset($chainIds[$id])) {
                 $chain[] = $id;
+            } elseif ($classification->isSuspected((string)$id)) {
+                $suspected[] = $id;
             } else {
                 $rest[] = $id;
             }
         }
-        // Tier 3 newest first: recent context is what a reader can still
+        // Tier 4 newest first: recent context is what a reader can still
         // correlate with the moment the admin clicked "send". Unjoinable lines
         // lead it, because a torn journal is itself a finding.
         //
@@ -247,8 +267,8 @@ final class ABJ_404_Solution_DiagnosticEvidencePriority {
         }
 
         return array(
-            'ids' => array_merge($failing, $chain, $unjoinable, $joinable),
-            'prioritized' => count($failing) + count($chain),
+            'ids' => array_merge($condemned, $chain, $suspected, $unjoinable, $joinable),
+            'prioritized' => count($condemned) + count($chain) + count($suspected),
         );
     }
 
@@ -296,12 +316,14 @@ final class ABJ_404_Solution_DiagnosticEvidencePriority {
      *
      * @param array<int, string> $lines
      * @param array<string, ABJ_404_Solution_DiagnosticRequestGroup> $groups
-     * @param array<string, bool> $failingIds
      * @param array{requests: int, records: int, bytes: int, includedIds: array<string, bool>, elided: int} $selection
      * @return array<string, int>
      */
-    private static function summarize(array $lines, array $groups, array $failingIds,
+    private static function summarize(array $lines, array $groups,
+            ABJ_404_Solution_DiagnosticFailureClassification $classification,
             array $selection, int $budgetBytes): array {
+        $failingIds = $classification->failingIds();
+        $condemnedIds = $classification->condemnedIds();
         $bytesOnDisk = 0;
         $withRecords = 0;
         $unjoinable = 0;
@@ -324,6 +346,12 @@ final class ABJ_404_Solution_DiagnosticEvidencePriority {
                 $failingWithoutRecords++;
             }
         }
+        $condemnedIncluded = 0;
+        foreach (array_keys($condemnedIds) as $id) {
+            if (isset($selection['includedIds'][$id])) {
+                $condemnedIncluded++;
+            }
+        }
         return array(
             'requests_on_disk' => $withRecords,
             'requests_included' => $selection['requests'],
@@ -334,6 +362,8 @@ final class ABJ_404_Solution_DiagnosticEvidencePriority {
             'failing_requests' => count($failingIds),
             'failing_requests_included' => $failingIncluded,
             'failing_requests_without_records' => $failingWithoutRecords,
+            'condemned_requests' => count($condemnedIds),
+            'condemned_requests_included' => $condemnedIncluded,
             'bytes_on_disk' => $bytesOnDisk,
             'bytes_included' => $selection['bytes'],
             'bytes_budget' => $budgetBytes,

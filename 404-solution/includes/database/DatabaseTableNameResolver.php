@@ -21,6 +21,8 @@ require_once __DIR__ . '/../core/DatabaseMetadataLockWaitGuard.php';
  * on DatabaseCore itself (no cyclic coupling). The callable signature is
  * the same as DatabaseCore::queryAndGetResults():
  *   function(string $query, array<string,mixed> $options): array<string,mixed>
+ *
+ * @phpstan-import-type SqlFragment from ABJ_404_Solution_DatabaseQueryBuilderInterface
  */
 class ABJ_404_Solution_DatabaseTableNameResolver {
 
@@ -222,86 +224,77 @@ class ABJ_404_Solution_DatabaseTableNameResolver {
 
     /**
      * @param array<string, mixed> $options
-     * @return string A comma-separated list of quoted SQL literals, or '' when
-     *   the setting is empty. Callers splice it into IN (...).
+     * @return SqlFragment The IN (...) list for recognized_post_types: one `%s` per type
+     *   and the types to bind. Empty when the setting is empty.
      */
-    public function buildPostTypeSqlList(array $options): string {
-        return $this->buildQuotedSqlList($options, 'recognized_post_types');
+    public function buildPostTypeSqlList(array $options): array {
+        return $this->buildPlaceholderList($options, 'recognized_post_types');
     }
 
     /**
      * @param array<string, mixed> $options
-     * @return string A comma-separated list of quoted SQL literals, or '' when
-     *   the setting is empty. Callers splice it into IN (...).
+     * @return SqlFragment The IN (...) list for recognized_categories: one `%s` per category
+     *   and the categories to bind. Empty when the setting is empty.
      */
-    public function buildCategorySqlList(array $options): string {
-        return $this->buildQuotedSqlList($options, 'recognized_categories');
+    public function buildCategorySqlList(array $options): array {
+        return $this->buildPlaceholderList($options, 'recognized_categories');
     }
 
     /**
-     * Turn one free-text setting into a list of quoted SQL literals safe to
-     * splice into an IN (...) clause.
+     * Turn one free-text setting into an IN (...) list of `%s` placeholders and the values
+     * that fill them. The values never enter the SQL text.
      *
-     * The escaping lives here, at the only point that writes the quotes, and
-     * not at the settings screen or the four call sites. Both of those were
-     * tried by omission and failed: SettingsWordPressPolicy stores these values
-     * through wp_kses_post(), an HTML sanitizer that does nothing whatever to a
-     * single quote, and the call sites hand the fragment straight to
-     * str_replace() against a .sql template. A value carrying a quote therefore
-     * closed its own literal and ran as syntax inside three live queries
-     * against wp_posts and wp_term_taxonomy -- a stored injection whose trigger
-     * is separated from the write by however long it takes someone to ask for
-     * published content.
+     * The setting is a free-text textarea, stored through wp_kses_post() (an HTML sanitizer
+     * that does nothing to a single quote), and its content reaches three live queries
+     * against wp_posts and wp_term_taxonomy. Two earlier designs failed on it. Splicing the
+     * raw value let a quote close its own literal and run as syntax (a stored injection
+     * whose trigger is separated from the write by however long it takes someone to ask for
+     * published content). Quoting it here with esc_sql() and splicing the result stopped
+     * that but still put data in the statement text, where the executor's `{wp_...}` token
+     * pass runs, so a value containing `{wp_posts}` came out as `wp_posts` and never
+     * matched. Binding through query_params is the one form where neither can happen: the
+     * executor's pass has already run when the values are bound, and wpdb::prepare() owns
+     * the quoting, including the NO_BACKSLASH_ESCAPES mode a hand-rolled quote would miss.
      *
-     * Escaped rather than allowlisted on purpose. recognized_post_types would
-     * be safe under a strict [a-z0-9_-] identifier rule, but
-     * recognized_categories is matched against lower(wp_terms.name) as well as
-     * the taxonomy key (getPublishedCategories.sql), and a term name is display
-     * text: "women's shoes" is a legitimate setting. One rule for both builders
-     * is also what keeps them from drifting apart again, which is how one of
-     * them ended up unescaped while three sibling list builders elsewhere in
-     * the plugin were not.
-     *
-     * esc_sql() is the right primitive and not merely the conventional one: it
-     * reaches mysqli_real_escape_string(), which honours the server's SQL mode
-     * and switches to doubled quotes under NO_BACKSLASH_ESCAPES, where a
-     * hand-rolled addslashes() would silently stop escaping. It is also a no-op
-     * for values with nothing to escape, so ordinary post-type keys still
-     * compare byte-identically.
+     * Bound rather than allowlisted on purpose. recognized_post_types would be safe under
+     * a strict [a-z0-9_-] identifier rule, but recognized_categories is matched against
+     * lower(wp_terms.name) as well as the taxonomy key (getPublishedCategories.sql), and a
+     * term name is display text: "women's shoes" is a legitimate setting. One rule for both
+     * builders is also what keeps them from drifting apart.
      *
      * @param array<string, mixed> $options
      * @param string $optionName
-     * @return string
+     * @return SqlFragment
      */
-    private function buildQuotedSqlList(array $options, string $optionName): string {
+    private function buildPlaceholderList(array $options, string $optionName): array {
         $rawValue = $options[$optionName] ?? '';
         // explodeNewlineOrComma() already lowercases, trims and drops empties.
         $values = $this->f->explodeNewlineOrComma(is_string($rawValue) ? $rawValue : '');
-
-        $quoted = array();
-        foreach ($values as $value) {
-            // Sanitize BEFORE escaping, and do it here rather than trusting a
-            // caller. esc_sql() reaches mysqli_real_escape_string(), which
-            // escapes quotes and passes malformed byte sequences through
-            // untouched; on a connection whose charset disagrees with those
-            // bytes a truncated lead byte can absorb the escaping backslash and
-            // hand the next quote to the parser as syntax. Pattern 10
-            // ("invalid UTF-8 reaches SQL") is this project's own recurring
-            // class, and these two settings are free-text textareas, so their
-            // bytes are entirely attacker-chosen.
-            //
-            // It looked safe without this: explodeNewlineOrComma() lowercases,
-            // and with mbstring loaded mb_strtolower() substitutes malformed
-            // bytes as a side effect. MbStringAdapterPreg::strtolower() is
-            // plain strtolower() and does not, so every host without the
-            // mbstring extension -- a configuration this plugin supports on
-            // purpose -- had no sanitization at all here. A security property
-            // resting on an incidental side effect of a lowercasing call is not
-            // a security property.
-            $quoted[] = "'" . esc_sql($this->f->sanitizeInvalidUTF8($value)) . "'";
+        if (empty($values)) {
+            return array('sql' => '', 'params' => array());
         }
 
-        return implode(', ', $quoted);
+        $params = array();
+        foreach ($values as $value) {
+            // Sanitize BEFORE binding, and do it here rather than trusting a caller.
+            // wpdb::prepare() escapes through mysqli_real_escape_string(), which escapes
+            // quotes and passes malformed byte sequences through untouched; on a connection
+            // whose charset disagrees with those bytes a truncated lead byte can absorb the
+            // escaping backslash and hand the next quote to the parser as syntax. Pattern 10
+            // ("invalid UTF-8 reaches SQL") is this project's own recurring class, and these
+            // two settings are free-text textareas, so their bytes are entirely
+            // attacker-chosen.
+            //
+            // It looked safe without this: explodeNewlineOrComma() lowercases, and with
+            // mbstring loaded mb_strtolower() substitutes malformed bytes as a side effect.
+            // MbStringAdapterPreg::strtolower() is plain strtolower() and does not, so every
+            // host without the mbstring extension -- a configuration this plugin supports on
+            // purpose -- had no sanitization at all here. A security property resting on an
+            // incidental side effect of a lowercasing call is not a security property.
+            $params[] = $this->f->sanitizeInvalidUTF8($value);
+        }
+
+        return ABJ_404_Solution_SqlFragmentTemplate::inList($params);
     }
 
     /** @return void */

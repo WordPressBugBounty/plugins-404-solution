@@ -5,6 +5,18 @@ if (!defined('ABSPATH')) {
 }
 
 /**
+ * The daily-activity trend query failed or timed out.
+ *
+ * Thrown rather than answered with a zero-filled series: a series of zeros
+ * reads as "no activity", which misstates a site that failed to read its own
+ * log. Same policy as RedirectHitCountHistogramQueryException, whose docblock
+ * says query failures throw so the consumer omits the field instead of
+ * publishing a false zero.
+ */
+class ABJ_404_Solution_TrendDataQueryException extends RuntimeException {
+}
+
+/**
  * Read-side queries for the logsv2 table feeding the admin Logs page,
  * autocomplete dropdowns, and the daily-activity trend chart.
  *
@@ -97,15 +109,18 @@ class ABJ_404_Solution_LogsReadQueries {
      * @return array<int, array<string, mixed>>
      */
     public function getLogsIDandURL($specificURL = '') {
-        $whereClause = '';
+        $whereClause = ABJ_404_Solution_SqlFragmentTemplate::none();
         if ($specificURL != '') {
-            $specificURL = $this->f->sanitizeInvalidUTF8($specificURL);
-            $escapedURL = esc_sql($specificURL);
-            $whereClause = "where requested_url = '" . $escapedURL . "'";
+            // A 404 url is visitor-chosen. It is bound after the executor's token pass, so a
+            // {wp_...} token inside it still matches the row that was logged with it.
+            $whereClause = array(
+                'sql' => 'where requested_url = %s',
+                'params' => array($this->f->sanitizeInvalidUTF8($specificURL)),
+            );
         }
         $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getLogsIDandURL.sql");
-        $query = $this->f->str_replace('{where_clause_here}', $whereClause, $query);
-        $results = $this->dbCore->queryAndGetResults($query);
+        $statement = ABJ_404_Solution_SqlFragmentTemplate::fill($query, array('where_clause_here' => $whereClause));
+        $results = $this->dbCore->queryAndGetResults($statement['sql'], array('query_params' => $statement['params']));
         return is_array($results['rows']) ? $results['rows'] : array();
     }
 
@@ -116,17 +131,19 @@ class ABJ_404_Solution_LogsReadQueries {
      */
     public function getLogsIDandURLLike($specificURL, $limitResults) {
         global $wpdb;
-        $whereClause = '';
+        $whereClause = ABJ_404_Solution_SqlFragmentTemplate::none();
         if ($specificURL != '') {
-            $likePattern = '%' . $wpdb->esc_like($specificURL) . '%';
-            $escapedURL = esc_sql($likePattern);
-            $whereClause = "where lower(requested_url) like lower('" . $escapedURL . "')\n";
-            $whereClause .= "and min_log_id = true";
+            $whereClause = array(
+                'sql' => "where lower(requested_url) like lower(%s)\nand min_log_id = true",
+                'params' => array('%' . $wpdb->esc_like($specificURL) . '%'),
+            );
         }
         $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getLogsIDandURLForAjax.sql");
-        $query = $this->f->str_replace('{where_clause_here}', $whereClause, $query);
-        $query = $this->f->str_replace('{limit-results}', 'limit ' . absint($limitResults), $query);
-        $results = $this->dbCore->queryAndGetResults($query);
+        $statement = ABJ_404_Solution_SqlFragmentTemplate::fill($query, array(
+            'where_clause_here' => $whereClause,
+            'limit-results' => array('sql' => 'limit ' . absint($limitResults), 'params' => array()),
+        ));
+        $results = $this->dbCore->queryAndGetResults($statement['sql'], array('query_params' => $statement['params']));
         return is_array($results['rows']) ? $results['rows'] : array();
     }
 
@@ -199,6 +216,45 @@ class ABJ_404_Solution_LogsReadQueries {
         return is_string($raw) ? $raw : $default;
     }
 
+    /** @return int Current blog id for the trend cache key (1 when WordPress cannot say). */
+    private function trendCacheBlogId(): int {
+        $blogId = 1;
+        if (function_exists('get_current_blog_id')) {
+            $blogId = function_exists('absint') ? absint(get_current_blog_id()) : abs(intval(get_current_blog_id()));
+            if ($blogId <= 0) { $blogId = 1; }
+        }
+        return $blogId;
+    }
+
+    /**
+     * MAX(logsv2.id) for the trend cache key; 0 when the read fails (the
+     * failure is recorded, and a cache key with 0 only costs a cache miss).
+     */
+    private function trendCacheMaxLogId(ABJ_404_Solution_LogsRepositoryInterface $repo): int {
+        try {
+            return max(0, intval($repo->getMaxLogId()));
+        } catch (Throwable $e) {
+            $this->logger->warnCaught(__FUNCTION__ . ' getMaxLogId() failed; falling back to maxLogId=0 (cache key uses 0).', $e);
+            return 0;
+        }
+    }
+
+    /**
+     * The exception for a failed or timed-out trend query, carrying the
+     * database cause in the same `timed_out=true` / `last_error=...` form the
+     * histogram repository uses.
+     *
+     * @param array<string, mixed> $result A queryAndGetResults() result.
+     */
+    private function trendQueryFailure(array $result): ABJ_404_Solution_TrendDataQueryException {
+        $lastError = $result['last_error'] ?? 'unknown';
+        $lastErrorText = is_scalar($lastError)
+            ? (string)$lastError
+            : (is_object($lastError) ? get_class($lastError) : gettype($lastError));
+        $context = !empty($result['timed_out']) ? 'timed_out=true' : 'last_error=' . $lastErrorText;
+        return new ABJ_404_Solution_TrendDataQueryException('Trend query failed (' . $context . ')');
+    }
+
     /**
      * Daily activity trend for the dashboard chart. Cached for 15 min keyed
      * on (blog id, day count, current MAX logsv2 id) so the cache invalidates
@@ -210,19 +266,8 @@ class ABJ_404_Solution_LogsReadQueries {
      */
     public function getDailyActivityTrend(int $days, ABJ_404_Solution_LogsRepositoryInterface $repo): array {
         $days = max(1, min(90, $days));
-        $blogId = 1;
-        if (function_exists('get_current_blog_id')) {
-            $blogId = function_exists('absint') ? absint(get_current_blog_id()) : abs(intval(get_current_blog_id()));
-            if ($blogId <= 0) { $blogId = 1; }
-        }
-        $maxLogId = 0;
-        try {
-            $maxLogId = intval($repo->getMaxLogId());
-            if ($maxLogId < 0) { $maxLogId = 0; }
-        } catch (Throwable $e) {
-            $this->logger->debugMessage(__FUNCTION__ . ' getMaxLogId() failed: ' . $e->getMessage() . '. Falling back to maxLogId=0 (cache key uses 0).');
-            $maxLogId = 0;
-        }
+        $blogId = $this->trendCacheBlogId();
+        $maxLogId = $this->trendCacheMaxLogId($repo);
         $cacheKey = 'abj404_trend_v2_' . $blogId . '_' . $days . '_' . $maxLogId;
         if (function_exists('get_transient')) { $cached = get_transient($cacheKey); if (is_array($cached)) { return $cached; } }
         $logsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_logsv2}');
@@ -232,6 +277,9 @@ class ABJ_404_Solution_LogsReadQueries {
         $query = "SELECT FLOOR(`timestamp` / 86400) AS `day_index`, SUM(CASE WHEN `dest_url` = %s THEN 1 ELSE 0 END) AS `hits_404`, SUM(CASE WHEN `dest_url` <> %s THEN 1 ELSE 0 END) AS `hits_redirect` FROM " . $logsTable . " WHERE `timestamp` >= " . intval($cutoff) . " GROUP BY FLOOR(`timestamp` / 86400) ORDER BY `day_index` ASC";
         $result = $this->dbCore->queryAndGetResults($query, array('query_params' => array($notFoundDest, $notFoundDest)));
         $hadError = !empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] !== '');
+        if ($hadError) {
+            throw $this->trendQueryFailure($result);
+        }
         $rows = (isset($result['rows']) && is_array($result['rows'])) ? $result['rows'] : array();
         $byDayIndex = array();
         foreach ($rows as $row) {
@@ -247,7 +295,7 @@ class ABJ_404_Solution_LogsReadQueries {
             $counts = $byDayIndex[$dayIndex] ?? array('hits_404' => 0, 'hits_redirect' => 0, 'new_captures' => 0);
             $output[] = array('date' => $date) + $counts;
         }
-        if (!$hadError && function_exists('set_transient')) { set_transient($cacheKey, $output, self::TREND_DATA_CACHE_TTL_SECONDS); }
+        if (function_exists('set_transient')) { set_transient($cacheKey, $output, self::TREND_DATA_CACHE_TTL_SECONDS); }
         return $output;
     }
 }

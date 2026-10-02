@@ -277,9 +277,18 @@ class ABJ_404_Solution_DatabaseUpgradePluginUpdate extends ABJ_404_Solution_Data
             return true;
         }
 
-        $minDaysDifference = isset($options['days_wait_before_major_update']) && is_numeric($options['days_wait_before_major_update'])
-            ? (int)$options['days_wait_before_major_update']
-            : 0;
+        // An unreadable stored wait falls back to the shipped default, never to
+        // 0: the settings page defines 0 as "update immediately", so a corrupt
+        // value would otherwise switch this safety delay off.
+        $minDaysDifference = ABJ_404_Solution_ExactInteger::readOr(
+            $options['days_wait_before_major_update'] ?? null,
+            0,
+            ABJ_404_Solution_ExactInteger::readOr(
+                ABJ_404_Solution_PluginLogicDefaults::defaults()['days_wait_before_major_update'] ?? null,
+                0,
+                PHP_INT_MAX
+            )
+        );
         if ($daysDifference >= $minDaysDifference) {
             $this->logger->infoMessage("The latest major version is old enough for updating automatically (" . 
                     $minDaysDifference . "days minimum, version " . $latestVersion . " is " . $daysDifference . 

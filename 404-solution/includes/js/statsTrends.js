@@ -138,12 +138,26 @@
                         return fetchTrendData(days, false);
                     });
                 }
-                return r.json();
+                // Shared seam (abj404-admin-ajax.js): a non-JSON reply (WAF or
+                // gateway page) keeps its status and body in the console instead
+                // of surfacing as a bare SyntaxError. Guarded so a missing asset
+                // degrades to the plain parse.
+                return (typeof abj404AdminFetchJson === 'function')
+                    ? abj404AdminFetchJson(r, 'trend-data')
+                    : r.json();
             })
             .catch(function (e) {
                 clearTimeout(timeoutId);
                 throw e;
             });
+    }
+
+    function recordTrendFailure(details) {
+        if (typeof abj404AdminRecordFetchFailure === 'function') {
+            abj404AdminRecordFetchFailure('trend-data', details);
+        } else if (window.console && window.console.warn) {
+            window.console.warn('404 Solution: trend data request failed', details);
+        }
     }
 
     function fetchAndRender() {
@@ -159,6 +173,10 @@
             .then(function (resp) {
                 if (loadEl) { loadEl.style.display = 'none'; }
                 if (!resp || !resp.success || !Array.isArray(resp.data)) {
+                    recordTrendFailure({
+                        serverMessage: (resp && resp.data && typeof resp.data.message === 'string')
+                            ? resp.data.message : 'unexpected response shape: ' + typeof resp
+                    });
                     if (errEl) { errEl.style.display = ''; }
                     return;
                 }
@@ -174,7 +192,8 @@
                 chartInstances['abj404-chart-redirects'] = buildChart('abj404-chart-redirects', cfg.labelRedirect, 'rgb(70,170,100)', labels, valsRedir);
                 chartInstances['abj404-chart-captures']  = buildChart('abj404-chart-captures',  cfg.labelCapture,  'rgb(220,100,50)', labels, valsCapt);
             })
-            .catch(function () {
+            .catch(function (reason) {
+                recordTrendFailure({ error: reason });
                 if (loadEl) { loadEl.style.display = 'none'; }
                 if (errEl)  { errEl.style.display  = ''; }
             });

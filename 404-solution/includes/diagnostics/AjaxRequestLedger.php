@@ -64,9 +64,11 @@ final class ABJ_404_Solution_AjaxRequestLedger {
      */
     public static function readFields($requestReader): array {
         return array(
-            'session_id' => substr((string)$requestReader->getPostOrGetSanitize('sessionId', ''), 0, 64),
+            'session_id' => ABJ_404_Solution_Utf8SafeRecord::clip(
+                (string)$requestReader->getPostOrGetSanitize('sessionId', ''), 64),
             'retry_parent_id' => self::normalizeId($requestReader->getPostOrGetSanitize('retryParentId', ''), ''),
-            'client_sent_at' => substr((string)$requestReader->getPostOrGetSanitize('clientSentAt', ''), 0, 64),
+            'client_sent_at' => ABJ_404_Solution_Utf8SafeRecord::clip(
+                (string)$requestReader->getPostOrGetSanitize('clientSentAt', ''), 64),
             'header_request_id' => self::readRequestIdHeader(),
             'cf_ray' => self::readCfRayHeader(),
         );
@@ -83,7 +85,7 @@ final class ABJ_404_Solution_AjaxRequestLedger {
     /** Cloudflare's per-request trace ID, captured into the journal when present. */
     public static function readCfRayHeader(): string {
         $header = $_SERVER['HTTP_CF_RAY'] ?? '';
-        return is_scalar($header) ? substr((string)$header, 0, 64) : '';
+        return is_scalar($header) ? ABJ_404_Solution_Utf8SafeRecord::clip((string)$header, 64) : '';
     }
 
     /**

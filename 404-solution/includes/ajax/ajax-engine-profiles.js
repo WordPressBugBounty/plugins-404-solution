@@ -31,6 +31,47 @@
         }
     }
 
+    // Message for a failure the server did not explain: the framing sentence
+    // plus the underlying code in parentheses, never the bare sentence.
+    // Delegates to the shared seam (abj404-admin-ajax.js), which also records
+    // the failure to the console; when that asset did not load, the same shape
+    // is composed here so the message keeps its cause either way.
+    // `failure` is one object, not adjacent strings, so two of them cannot be
+    // swapped silently: {{fallback: string, source: string, textStatus: string,
+    // errorThrown: string}}.
+    function describeFailure(jqXHR, failure) {
+        if (typeof abj404AdminAjaxErrorMessage === 'function') {
+            return abj404AdminAjaxErrorMessage(jqXHR, failure);
+        }
+        var fallback = (typeof failure.fallback === 'string') ? failure.fallback : '';
+        var textStatus = (typeof failure.textStatus === 'string') ? failure.textStatus : '';
+        var errorThrown = (typeof failure.errorThrown === 'string') ? failure.errorThrown : '';
+        var status = (jqXHR && typeof jqXHR.status === 'number') ? jqXHR.status : 0;
+        var detail = 'no response from the server';
+        if (status === 0 && errorThrown && errorThrown.toLowerCase() !== 'error') {
+            detail = errorThrown;
+        } else if (status >= 200 && status < 300) {
+            detail = 'HTTP ' + status + (textStatus === 'parsererror'
+                ? ', the response was not valid JSON' : ', the server sent no message');
+        } else if (status > 0) {
+            var statusText = (typeof jqXHR.statusText === 'string') ? jqXHR.statusText : '';
+            detail = 'HTTP ' + status
+                + ((statusText !== '' && statusText.toLowerCase() !== 'error') ? ' ' + statusText : '');
+        }
+        return fallback + ' (' + detail + ')';
+    }
+
+    // `failure` is {{source: string, textStatus: string, errorThrown: string}}.
+    function recordFailure(jqXHR, failure) {
+        if (typeof abj404AdminAjaxRecordFailure === 'function') {
+            abj404AdminAjaxRecordFailure(jqXHR, failure);
+        } else if (window.console && window.console.warn) {
+            var source = (typeof failure.source === 'string') ? failure.source : '';
+            var textStatus = (typeof failure.textStatus === 'string') ? failure.textStatus : '';
+            window.console.warn('404 Solution: ' + source + ' failed', textStatus);
+        }
+    }
+
     // ── Load profiles ───────────────────────────────────────────────────────
 
     function loadProfiles() {
@@ -45,19 +86,31 @@
                 action: 'abj404_engine_profiles_list',
                 nonce:  nonce
             },
-            success: function (resp) {
+            success: function (resp, textStatus, jqXHR) {
                 // Validate shape before reading fields; a malformed
                 // body (non-JSON, plugin-conflict mangled output) must
                 // not throw and leave the table on its empty-row state.
                 if (!resp || typeof resp !== 'object' || resp.success !== true || !resp.data) {
+                    recordFailure(jqXHR, {
+                        source: 'engine-profiles-list-malformed',
+                        textStatus: textStatus,
+                        errorThrown: ''
+                    });
                     renderProfiles([]);
                     return;
                 }
                 renderProfiles(resp.data.profiles || []);
             },
-            error: function () {
+            error: function (jqXHR, textStatus, errorThrown) {
                 // Transport failure: render the empty state so the
-                // page does not appear stuck loading.
+                // page does not appear stuck loading, and record why, so
+                // "no profiles exist" is distinguishable from "the list
+                // request failed".
+                recordFailure(jqXHR, {
+                    source: 'engine-profiles-list',
+                    textStatus: textStatus,
+                    errorThrown: errorThrown
+                });
                 renderProfiles([]);
             }
         });
@@ -132,13 +185,15 @@
                 profiles.forEach(function (p) { if (parseInt(p.id, 10) === parseInt(id, 10)) { profile = p; } });
                 if (profile) { openForm(profile); }
             },
-            error: function (jqXHR, textStatus) {
+            error: function (jqXHR, textStatus, errorThrown) {
                 // Log transport failure to console; the edit click is
                 // recoverable (the user can retry from the still-visible
                 // row) so we do not need a blocking notice here.
-                if (window.console && window.console.warn) {
-                    window.console.warn('404 Solution: engine-profile reload failed', textStatus);
-                }
+                recordFailure(jqXHR, {
+                    source: 'engine-profile-reload',
+                    textStatus: textStatus,
+                    errorThrown: errorThrown
+                });
             }
         });
     });
@@ -229,15 +284,22 @@
                 priority:        priority,
                 status:          status
             },
-            success: function (resp) {
+            success: function (resp, textStatus, jqXHR) {
                 // Validate shape before reading fields. A malformed body
                 // (HTML error page from a WAF, plugin-conflict mangled
                 // output) previously threw on resp.success and left the
                 // form with no feedback at all.
                 if (!resp || typeof resp !== 'object' || resp.success !== true) {
-                    var message = abj404EngineProfiles.i18n.saveFailed;
+                    var message;
                     if (resp && typeof resp === 'object' && resp.data && resp.data.message) {
                         message = resp.data.message;
+                    } else {
+                        message = describeFailure(jqXHR, {
+                            fallback: abj404EngineProfiles.i18n.saveFailed,
+                            source: 'engine-profile-save-malformed',
+                            textStatus: textStatus,
+                            errorThrown: ''
+                        });
                     }
                     $msg.text(message).css('color', 'red').show();
                     return;
@@ -249,11 +311,17 @@
                     loadProfiles();
                 }, 800);
             },
-            error: function () {
-                // Transport failure: surface the same save-failed message
-                // so the form is recoverable (admin can retry) instead of
-                // appearing to silently succeed.
-                $msg.text(abj404EngineProfiles.i18n.saveFailed).css('color', 'red').show();
+            error: function (jqXHR, textStatus, errorThrown) {
+                // Transport failure: surface the save-failed message, with
+                // the server's own explanation (e.g. "DB error: ...") or the
+                // underlying status when it gave none, so the form is
+                // recoverable (admin can retry) and the failure reportable.
+                $msg.text(describeFailure(jqXHR, {
+                    fallback: abj404EngineProfiles.i18n.saveFailed,
+                    source: 'engine-profile-save',
+                    textStatus: textStatus,
+                    errorThrown: errorThrown
+                })).css('color', 'red').show();
             }
         });
     });
@@ -280,17 +348,31 @@
                 nonce:  nonce,
                 id:     id
             },
-            success: function (resp) {
+            success: function (resp, textStatus, jqXHR) {
                 // Validate shape before reading resp.success: a malformed
                 // body previously threw on null/non-object responses.
                 if (resp && typeof resp === 'object' && resp.success === true) {
                     loadProfiles();
                     return;
                 }
-                window.alert(abj404EngineProfiles.i18n.saveFailed);
+                if (resp && typeof resp === 'object' && resp.data && resp.data.message) {
+                    window.alert(resp.data.message);
+                    return;
+                }
+                window.alert(describeFailure(jqXHR, {
+                    fallback: abj404EngineProfiles.i18n.saveFailed,
+                    source: 'engine-profile-delete-malformed',
+                    textStatus: textStatus,
+                    errorThrown: ''
+                }));
             },
-            error: function () {
-                window.alert(abj404EngineProfiles.i18n.saveFailed);
+            error: function (jqXHR, textStatus, errorThrown) {
+                window.alert(describeFailure(jqXHR, {
+                    fallback: abj404EngineProfiles.i18n.saveFailed,
+                    source: 'engine-profile-delete',
+                    textStatus: textStatus,
+                    errorThrown: errorThrown
+                }));
             }
         });
     });

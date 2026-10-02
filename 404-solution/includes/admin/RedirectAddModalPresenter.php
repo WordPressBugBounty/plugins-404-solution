@@ -105,34 +105,18 @@ class ABJ_404_Solution_RedirectAddModalPresenter {
     }
 
     private function redirectToHtml(): string {
-        $redirectHtml = $this->tpl('addManualRedirectPageSearchDropdown.html');
-        $redirectHtml = $this->functions->str_replace(
-            array(
-                '{redirect_to_label}',
-                '{TOOLTIP_POPUP_EXPLANATION_EMPTY}',
-                '{TOOLTIP_POPUP_EXPLANATION_PAGE}',
-                '{TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING}',
-                '{TOOLTIP_POPUP_EXPLANATION_URL}',
-                '{REDIRECT_TO_USER_FIELD_WARNING}',
-                '{redirectPageTitle}',
-                '{pageIDAndType}',
-                '{data-url}',
-            ),
-            array(
-                esc_html__('Redirect to', '404-solution') . ' *',
-                __('(Type a page name or an external URL)', '404-solution'),
-                __('(A page has been selected.)', '404-solution'),
-                __('(A custom string has been entered.)', '404-solution'),
-                __('(An external URL will be used.)', '404-solution'),
-                '',
-                '',
-                '',
-                'admin-ajax.php?action=echoRedirectToPages&includeDefault404Page=true&includeSpecial=true&nonce=' .
-                    wp_create_nonce('abj404_ajax'),
-            ),
-            $redirectHtml
-        );
-        return $this->functions->doNormalReplacements($redirectHtml);
+        return $this->functions->renderTemplate($this->tpl('addManualRedirectPageSearchDropdown.html'), array(
+            '{redirect_to_label}' => esc_html__('Redirect to', '404-solution') . ' *',
+            '{TOOLTIP_POPUP_EXPLANATION_EMPTY}' => __('(Type a page name or an external URL)', '404-solution'),
+            '{TOOLTIP_POPUP_EXPLANATION_PAGE}' => __('(A page has been selected.)', '404-solution'),
+            '{TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING}' => __('(A custom string has been entered.)', '404-solution'),
+            '{TOOLTIP_POPUP_EXPLANATION_URL}' => __('(An external URL will be used.)', '404-solution'),
+            '{REDIRECT_TO_USER_FIELD_WARNING}' => '',
+            '{redirectPageTitle}' => '',
+            '{pageIDAndType}' => '',
+            '{data-url}' => 'admin-ajax.php?action=echoRedirectToPages&includeDefault404Page=true&includeSpecial=true&nonce=' .
+                wp_create_nonce('abj404_ajax'),
+        ));
     }
 
     /**
@@ -164,9 +148,14 @@ class ABJ_404_Solution_RedirectAddModalPresenter {
         ));
     }
 
-    /** @param array<string, string> $vars */
+    /**
+     * Single-pass render: a value bound early (the pre-filled URL from the query string) is never
+     * rescanned by a later key, so it cannot pull another token's value into itself.
+     *
+     * @param array<string, string> $vars
+     */
     private function fillTpl(string $name, array $vars): string {
-        return (string)$this->functions->str_replace(array_keys($vars), array_values($vars), $this->tpl($name));
+        return $this->functions->renderTemplate($this->tpl($name), $vars);
     }
 
     private function tpl(string $name): string {

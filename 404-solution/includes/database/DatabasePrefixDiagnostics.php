@@ -85,7 +85,7 @@ class ABJ_404_Solution_DatabasePrefixDiagnostics {
             }
             return $msg;
         } catch (Throwable $e) {
-            $this->logger->debugMessage(__METHOD__ . ': prefix diagnostic failed while preserving original DB error.', $e);
+            $this->logger->warnCaught(__METHOD__ . ': prefix diagnostic failed while preserving original DB error.', $e);
             return '';
         }
     }

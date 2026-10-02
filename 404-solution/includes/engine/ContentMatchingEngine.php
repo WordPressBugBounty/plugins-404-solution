@@ -12,6 +12,8 @@ if (!defined('ABSPATH')) {
  * via DataAccess::getPublishedPagesAndPostsIDs() with a LIKE-based WHERE clause
  * against post_content, then scores candidates by title keyword overlap to
  * avoid matching random keyword appearances in body text.
+ *
+ * @phpstan-import-type SqlFragment from ABJ_404_Solution_DatabaseQueryBuilderInterface
  */
 class ABJ_404_Solution_ContentMatchingEngine implements ABJ_404_Solution_MatchingEngine {
 
@@ -104,7 +106,8 @@ class ABJ_404_Solution_ContentMatchingEngine implements ABJ_404_Solution_Matchin
         $extraWhere = $this->buildWhereClause($keywords);
         $rows = $this->contentRepo->getPublishedPagesAndPostsIDs(array(
             'limit_results' => '0,' . self::QUERY_LIMIT,
-            'extra_where_clause' => $extraWhere,
+            'extra_where_clause' => ' and ' . $extraWhere['sql'],
+            'extra_where_params' => $extraWhere['params'],
         ));
 
         if (empty($rows)) {
@@ -215,21 +218,23 @@ class ABJ_404_Solution_ContentMatchingEngine implements ABJ_404_Solution_Matchin
      * When content_keywords is NULL (cache not yet populated), NULL LIKE '%x%'
      * evaluates to NULL (falsy), so no rows match — graceful degradation.
      *
+     * The keywords are bound values, not SQL text: the query executor rewrites `{wp_...}`
+     * tokens across the statement before it binds parameters, so a keyword spliced into the
+     * text would be rewritten with it.
+     *
      * @param array<int, string> $keywords
-     * @return string
+     * @return SqlFragment `(plc.content_keywords LIKE %s OR ...)` plus the `%keyword%` patterns.
      */
-    private function buildWhereClause(array $keywords): string {
-        $conditions = [];
+    private function buildWhereClause(array $keywords): array {
+        $needles = [];
         foreach ($keywords as $kw) {
-            // Strip invalid UTF-8 before SQL — keywords originate from
+            // Strip invalid UTF-8 before SQL. Keywords originate from
             // rawurldecode'd URL slugs and can carry scanner-attack bytes
-            // (Pattern 10 — esc_sql does not validate UTF-8).
-            $cleanKw = $this->f->sanitizeInvalidUTF8($this->f->strtolower($kw));
-            $escaped = esc_sql($cleanKw);
-            $conditions[] = "plc.content_keywords LIKE '%" . $escaped . "%'";
+            // (Pattern 10: binding a value does not validate its UTF-8).
+            $needles[] = $this->f->sanitizeInvalidUTF8($this->f->strtolower($kw));
         }
 
-        return ' and (' . implode(' OR ', $conditions) . ')';
+        return ABJ_404_Solution_SqlFragmentTemplate::anyLike('plc.content_keywords', $needles);
     }
 
     /**

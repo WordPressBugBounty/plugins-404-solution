@@ -16,6 +16,9 @@ class ABJ_404_Solution_RegexDestinationTemplateValidator {
     /** @var ABJ_404_Solution_RegexSourcePatternValidator */
     private $sourceValidator;
 
+    /** @var ABJ_404_Solution_RegexDestinationSubstitutor */
+    private $destinationSubstitutor;
+
     /**
      * @param ABJ_404_Solution_Functions $functions
      */
@@ -26,6 +29,7 @@ class ABJ_404_Solution_RegexDestinationTemplateValidator {
         $this->sourceValidator = $sourceValidator !== null
             ? $sourceValidator
             : new ABJ_404_Solution_RegexSourcePatternValidator($functions);
+        $this->destinationSubstitutor = new ABJ_404_Solution_RegexDestinationSubstitutor();
     }
 
     /**
@@ -117,6 +121,14 @@ class ABJ_404_Solution_RegexDestinationTemplateValidator {
                     $captureCount
                 ));
             }
+        }
+
+        // The runtime refuses any capture that would change the redirect's
+        // origin, so a token inside it would save a rule that never redirects.
+        if (!empty($tokenResult['tokens']) && !$this->destinationSubstitutor->keepsTokensOutsideTheOrigin($destination)) {
+            return $this->invalid(
+                __('Error: Regex destination puts a capture token ($1, $2, ...) inside the scheme, host or port, so every redirect would be refused. Write the host literally and use tokens only in the path, query or fragment, for example https://example.com/$1.', '404-solution')
+            );
         }
 
         return array('valid' => true, 'message' => '', 'detail' => '');

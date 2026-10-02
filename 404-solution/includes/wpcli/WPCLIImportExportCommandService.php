@@ -242,14 +242,14 @@ class ABJ_404_Solution_WPCLIImportExportCommandService {
         $tempFile = sys_get_temp_dir() . '/abj404_export_' . $this->clock->now() . '.csv';
         if ($format === 'redirection') {
             $nativeTemp = sys_get_temp_dir() . '/abj404_export_native_' . $this->clock->now() . '.csv';
-            $this->viewReadService()->doRedirectsExport($nativeTemp);
+            $svc->writeNativeCsv($nativeTemp);
             $error = $svc->convertExportCsvToRedirectionFormat($nativeTemp, $tempFile);
             @unlink($nativeTemp);
             if ($error !== '') {
                 return $this->error("Export conversion failed: {$error}");
             }
         } else {
-            $this->viewReadService()->doRedirectsExport($tempFile);
+            $svc->writeNativeCsv($tempFile);
         }
 
         if (!file_exists($tempFile)) {

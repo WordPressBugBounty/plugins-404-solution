@@ -190,20 +190,10 @@ final class ABJ_404_Solution_StatusCountsForegroundTracer {
     }
 
     private static function requestId(): string {
-        if (!class_exists('ABJ_404_Solution_AjaxDiagnosticRequestPolicy')) {
+        if (!class_exists('ABJ_404_Solution_AjaxRequestIdScopes')) {
             return '';
         }
-        $context = $GLOBALS['abj404_ajax_context'] ?? null;
-        $action = is_array($context) && is_scalar($context['action'] ?? null)
-            ? (string)$context['action'] : '';
-        if (!in_array($action, array(
-            ABJ_404_Solution_AjaxDiagnosticRequestPolicy::INSTRUMENTED_ACTION,
-            'ajaxRunCanaryStep',
-            'ajaxRefreshHealthBar',
-        ), true)) {
-            return '';
-        }
-        return ABJ_404_Solution_AjaxRequestLedger::requestIdFromGlobalContext();
+        return ABJ_404_Solution_AjaxRequestIdScopes::fromGlobalContext()->measured();
     }
 
     private static function reportFailure(string $message): void {

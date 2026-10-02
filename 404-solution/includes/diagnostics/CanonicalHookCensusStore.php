@@ -58,10 +58,9 @@ final class ABJ_404_Solution_CanonicalHookCensusStore {
         if (!function_exists('update_option')) {
             return;
         }
-        $encoded = json_encode($record);
-        if (!is_string($encoded)) {
-            abj404_logPhpFallback('canonical-hook-census',
-                'canonical hook census could not be encoded: ' . json_last_error_msg());
+        // encode() reports the JSON error on the durable WARN channel itself.
+        $encoded = ABJ_404_Solution_Utf8SafeRecord::encode($record, 'canonical hook census');
+        if ($encoded === '') {
             return;
         }
         if (!update_option(self::OPTION_NAME, $encoded, false)) {

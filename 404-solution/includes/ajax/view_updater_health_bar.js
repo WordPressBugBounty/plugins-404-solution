@@ -297,6 +297,41 @@ function abj404RenderHealthBarResult(context, health) {
 }
 
 /** @param {object} context @returns {object} */
+/**
+ * Keep the status and body excerpt of a failed health-bar request when the
+ * transport-telemetry module is not there to record it. That module is the
+ * only other record of the failure and it may be absent (its shim contract
+ * exists for that case); retiring the bar with nothing kept would leave "the
+ * bar vanished" with no cause.
+ *
+ * @param {object} jqXHR
+ * @param {{textStatus: string, errorThrown: string}} failure
+ *     One object, not adjacent strings, so the two cannot be swapped
+ *     silently: jQuery's own textStatus and errorThrown. The console-record
+ *     source ('health-bar') is owned here.
+ */
+function abj404RecordHealthBarFailure(jqXHR, failure) {
+    var textStatus = (typeof failure.textStatus === 'string') ? failure.textStatus : '';
+    var errorThrown = (typeof failure.errorThrown === 'string') ? failure.errorThrown : '';
+    if (typeof abj404AdminAjaxRecordFailure === 'function') {
+        abj404AdminAjaxRecordFailure(jqXHR, {
+            source: 'health-bar',
+            textStatus: textStatus,
+            errorThrown: errorThrown
+        });
+        return;
+    }
+    if (window.console && typeof window.console.warn === 'function') {
+        window.console.warn('404 Solution: health-bar request failed', {
+            source: 'health-bar',
+            status: jqXHR && typeof jqXHR.status === 'number' ? jqXHR.status : null,
+            textStatus: textStatus,
+            responseExcerpt: jqXHR && typeof jqXHR.responseText === 'string'
+                ? jqXHR.responseText.substring(0, 200) : ''
+        });
+    }
+}
+
 function abj404HealthBarAjaxOptions(context) {
     var healthBarAjaxRunner = typeof abj404AjaxWithNonceRetry === 'function'
         ? abj404AjaxWithNonceRetry : jQuery.ajax; // ajax-direct-approved: nonce helper fallback
@@ -327,7 +362,7 @@ function abj404HealthBarAjaxOptions(context) {
             }
             abj404RenderHealthBarResult(context, result);
         },
-        error: function(jqXHR, textStatus) {
+        error: function(jqXHR, textStatus, errorThrown) {
             if (context.telemetry) {
                 context.telemetry.finishAttempt(
                     context.record, abj404HealthBarOutcome(textStatus), jqXHR, textStatus);
@@ -335,6 +370,11 @@ function abj404HealthBarAjaxOptions(context) {
                 if (context.reportNonce && delivery && typeof delivery.sendBeacon === 'function') {
                     delivery.sendBeacon(context.url, context.record, context.reportNonce);
                 }
+            } else {
+                abj404RecordHealthBarFailure(jqXHR, {
+                    textStatus: textStatus,
+                    errorThrown: errorThrown
+                });
             }
             abj404RetireHealthBar(context.$bar);
         }
@@ -379,6 +419,7 @@ if (typeof window !== 'undefined' && window.abj404ClientBuildRegistry) {
         abj404HealthBarRequestPlan,
         abj404BeginHealthBarRequest,
         abj404RenderHealthBarResult,
+        abj404RecordHealthBarFailure,
         abj404HealthBarAjaxOptions,
         refreshHealthBarIfNeeded
     ]);

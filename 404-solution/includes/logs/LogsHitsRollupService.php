@@ -8,6 +8,7 @@ require_once __DIR__ . '/LogsHitsRollupServiceInterface.php';
 require_once __DIR__ . '/LogsHitsCanonicalUrlJoinHelper.php';
 require_once __DIR__ . '/LogsHitsTableRebuilder.php';
 require_once __DIR__ . '/LogsHitsRebuildLock.php';
+require_once __DIR__ . '/LogsHitsRollupStallWatchdog.php';
 
 /**
  * wp_abj404_logs_hits rollup lifecycle (existence checks, scheduling,
@@ -37,12 +38,12 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
     const HITS_TABLE_LAST_SCHEDULED_FLAG = 'abj404_logs_hits_last_scheduled_at';
     /** @var string Runtime flag: last successful hits-table rebuild completion. */
     const HITS_TABLE_LAST_REFRESHED_FLAG = 'abj404_logs_hits_last_refreshed_at';
-    /** @var string Runtime flag: first stale detection timestamp. */
-    const HITS_TABLE_FIRST_STALE_DETECTED_FLAG = 'abj404_logs_hits_first_stale_detected_at';
-    /** @var string Deduplicated admin-notice transient for stale logs_hits rollup. */
-    const HITS_TABLE_STALE_NOTICE_TRANSIENT = 'abj404_logs_hits_rollup_stale';
-    /** @var int Minimum age (seconds) of stale gap before surfacing admin notice. */
-    const HITS_TABLE_STALE_NOTICE_THRESHOLD_SECONDS = 3600;
+    /** @var string Durable flag: first stale detection timestamp. Canonical home is the stall watchdog. */
+    const HITS_TABLE_FIRST_STALE_DETECTED_FLAG = ABJ_404_Solution_LogsHitsRollupStallWatchdog::FIRST_STALL_FLAG;
+    /** @var string Notice-payload type for a stalled logs_hits rollup. Canonical home is the stall watchdog. */
+    const HITS_TABLE_STALE_NOTICE_TYPE = ABJ_404_Solution_LogsHitsRollupStallWatchdog::NOTICE_TYPE;
+    /** @var int Minimum age (seconds) of stale gap before surfacing admin notice. Canonical home is the stall watchdog. */
+    const HITS_TABLE_STALE_NOTICE_THRESHOLD_SECONDS = ABJ_404_Solution_LogsHitsRollupStallWatchdog::NOTICE_THRESHOLD_SECONDS;
 
     /** @var ABJ_404_Solution_DatabaseCore */
     private $dbCore;
@@ -79,6 +80,9 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
     /** @var ABJ_404_Solution_LogsHitsTableRebuilder */
     private $rebuilder;
 
+    /** @var ABJ_404_Solution_LogsHitsRollupStallWatchdog */
+    private $stallWatchdog;
+
     /**
      * @param ABJ_404_Solution_DatabaseCore $dbCore
      * @param ABJ_404_Solution_Logging|null $logging
@@ -105,6 +109,17 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
             $this->rebuildHealth,
             $this->joinHelper,
             array($this->rebuildLock, 'renew')
+        );
+        $this->stallWatchdog = new ABJ_404_Solution_LogsHitsRollupStallWatchdog(
+            $this->noticeState,
+            // The watchdog decides WHEN a rebuild may happen outside cron; the
+            // gate/lock protocol that decides whether it CAN stays here.
+            function (): bool {
+                return $this->hitsTableNeedsRebuild()
+                    ? $this->createRedirectsForViewHitsTable()
+                    : false;
+            },
+            $this->logger
         );
     }
 
@@ -136,36 +151,7 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
 
     /** @inheritDoc */
     public function recordLogsHitsRollupStalenessSignal(): void {
-        $currentMaxLogId = $this->getMaxLogId();
-        $storedMaxLogId = $this->getStoredMaxLogId();
-        if ($currentMaxLogId <= $storedMaxLogId) { $this->clearLogsHitsRollupStaleSignal(); return; }
-        $rawFirstStale = $this->noticeState->getRuntimeFlag(self::HITS_TABLE_FIRST_STALE_DETECTED_FLAG);
-        $firstStale = is_scalar($rawFirstStale) ? (int)$rawFirstStale : 0;
-        if ($firstStale <= 0) { $this->noticeState->setRuntimeFlag(self::HITS_TABLE_FIRST_STALE_DETECTED_FLAG, abj_clock()->now(), 86400); return; }
-        $age = abj_clock()->now() - $firstStale;
-        if ($age >= self::HITS_TABLE_STALE_NOTICE_THRESHOLD_SECONDS) { $this->setLogsHitsRollupStaleNotice($age); }
-    }
-
-    private function clearLogsHitsRollupStaleSignal(): void {
-        if (function_exists('delete_transient')) { delete_transient(self::HITS_TABLE_FIRST_STALE_DETECTED_FLAG); delete_transient(self::HITS_TABLE_STALE_NOTICE_TRANSIENT); return; }
-        if (function_exists('delete_option')) { delete_option(self::HITS_TABLE_FIRST_STALE_DETECTED_FLAG); delete_option(self::HITS_TABLE_STALE_NOTICE_TRANSIENT); }
-    }
-
-    /** @param int $ageSeconds @return void */
-    private function setLogsHitsRollupStaleNotice(int $ageSeconds): void {
-        if (!function_exists('set_transient')) { return; }
-        $key = self::HITS_TABLE_STALE_NOTICE_TRANSIENT;
-        if (function_exists('get_transient') && get_transient($key) !== false) { return; }
-        $hours = max(1, intval(floor($ageSeconds / 3600)));
-        $message = sprintf(
-            function_exists('__')
-                ? __('The 404 Solution redirects-hits rollup has been behind MAX(logsv2.id) for at least %d hour(s). The cron-driven rebuild event (abj404_updateLogsHitsTableAction) does not appear to be firing, so the redirects list will show stale "hits" and "last hit" columns until cron resumes. To resolve: if DISABLE_WP_CRON is set in wp-config.php either remove it, or configure a system cron job that requests wp-cron.php periodically. To force a rebuild right now in your browser, open the 404 Solution Redirects page with ?abj404_force_view_rebuild=1 appended to the URL.', '404-solution')
-                : 'The 404 Solution redirects-hits rollup has been behind MAX(logsv2.id) for at least %d hour(s). The cron-driven rebuild event (abj404_updateLogsHitsTableAction) does not appear to be firing, so the redirects list will show stale "hits" and "last hit" columns until cron resumes. To resolve: if DISABLE_WP_CRON is set in wp-config.php either remove it, or configure a system cron job that requests wp-cron.php periodically. To force a rebuild right now in your browser, open the 404 Solution Redirects page with ?abj404_force_view_rebuild=1 appended to the URL.',
-            $hours
-        );
-        $payload = array('type' => 'logs_hits_rollup_stale', 'message' => $message, 'timestamp' => abj_clock()->now(), 'error_string' => '', 'age_hours' => $hours);
-        // allow-cache-empty: intentional notice payload; error_string is empty by definition for stale-rollup state.
-        set_transient($key, $payload, 86400);
+        $this->stallWatchdog->observe($this->getMaxLogId(), $this->getStoredMaxLogId());
     }
 
     // =========================================================================
@@ -274,12 +260,12 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
 
     /** @return array<string, mixed> */
     private function getLogsHitsTableStatusRow() {
-        global $wpdb;
-        if (!isset($wpdb) || !method_exists($wpdb, 'prepare')) { return array(); }
         $tableName = $this->dbCore->doTableNameReplacements('{wp_abj404_logs_hits}');
-        $query = $wpdb->prepare("SHOW TABLE STATUS LIKE %s", $tableName);
-        if ($query === null) { return array(); }
-        $results = $this->dbCore->queryAndGetResults($query, array('log_errors' => false));
+        // The name is BOUND by the executor (`query_params`) after its `{token}` pass over the template.
+        $results = $this->dbCore->queryAndGetResults(
+            "SHOW TABLE STATUS LIKE %s",
+            array('query_params' => array($tableName), 'log_errors' => false)
+        );
         if (!is_array($results['rows']) || empty($results['rows']) || !is_array($results['rows'][0])) { return array(); }
         // Lower-cased explicitly rather than through array_change_key_case(),
         // which is typed as preserving the input's (here unknown) key type and
@@ -323,7 +309,7 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
                 return false;
             }
             $this->noticeState->setRuntimeFlag(self::HITS_TABLE_LAST_REFRESHED_FLAG, abj_clock()->now(), 86400);
-            $this->clearLogsHitsRollupStaleSignal();
+            $this->stallWatchdog->clearStallState();
             $this->writeBackDenormHitsColumns();
             return true;
         } catch (Throwable $e) {
@@ -374,12 +360,12 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
 
     /** @return bool */
     private function logsHitsTableExistsViaShowTables(): bool {
-        global $wpdb;
-        if (!isset($wpdb) || !method_exists($wpdb, 'prepare')) { return false; }
         $tableName = $this->dbCore->doTableNameReplacements('{wp_abj404_logs_hits}');
-        $showTablesQuery = $wpdb->prepare("SHOW TABLES LIKE %s", $tableName);
-        if ($showTablesQuery === null) { return false; }
-        $fallback = $this->dbCore->queryAndGetResults($showTablesQuery, array('log_errors' => false));
+        // The name is BOUND by the executor (`query_params`) after its `{token}` pass over the template.
+        $fallback = $this->dbCore->queryAndGetResults(
+            "SHOW TABLES LIKE %s",
+            array('query_params' => array($tableName), 'log_errors' => false)
+        );
         if (empty($fallback['rows'])) { return false; }
         $fbRows = is_array($fallback['rows']) ? $fallback['rows'] : array();
         $firstRow = isset($fbRows[0]) ? $fbRows[0] : null;
@@ -396,21 +382,31 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
             if ($this->rebuildLock->isHeld()) { $this->logger->debugMessage(__FUNCTION__ . " skipping scheduling because another rebuild is already running."); return; }
             $rawScheduledFlag = $this->noticeState->getRuntimeFlag(self::HITS_TABLE_LAST_SCHEDULED_FLAG);
             $lastScheduled = is_scalar($rawScheduledFlag) ? (int)$rawScheduledFlag : 0;
-            if ($lastScheduled > 0 && (abj_clock()->now() - $lastScheduled) < self::HITS_TABLE_SCHEDULE_COOLDOWN_SECONDS) { $this->logger->debugMessage(__FUNCTION__ . " skipping scheduling due to cooldown."); return; }
-            self::$hitsTableRebuildScheduled = true;
-            $this->noticeState->setRuntimeFlag(self::HITS_TABLE_LAST_SCHEDULED_FLAG, abj_clock()->now(), 86400);
-            // A full rollup rebuild is background work in every request
-            // context. PHP/LSAPI servers may send response headers early but
-            // buffer the body until WordPress shutdown callbacks finish, so a
-            // shutdown rebuild can keep the admin page blank for the entire
-            // database operation. The cron listener is the single execution
-            // boundary for this expensive pipeline.
-            $this->logger->debugMessage(__FUNCTION__ . " scheduling hits table rebuild via WP-Cron.");
-            abj_cron_scheduler()->scheduleSingle(
-                ABJ_404_Solution_CronScheduler::HOOK_UPDATE_LOGS_HITS_TABLE,
-                5
-            );
+            if ($lastScheduled > 0 && (abj_clock()->now() - $lastScheduled) < self::HITS_TABLE_SCHEDULE_COOLDOWN_SECONDS) {
+                $this->logger->debugMessage(__FUNCTION__ . " skipping scheduling due to cooldown.");
+            } else {
+                self::$hitsTableRebuildScheduled = true;
+                $this->noticeState->setRuntimeFlag(self::HITS_TABLE_LAST_SCHEDULED_FLAG, abj_clock()->now(), 86400);
+                // A full rollup rebuild is background work in every request
+                // context. PHP/LSAPI servers may send response headers early but
+                // buffer the body until WordPress shutdown callbacks finish, so a
+                // shutdown rebuild can keep the admin page blank for the entire
+                // database operation. WP-Cron is therefore where this pipeline
+                // is meant to run.
+                $this->logger->debugMessage(__FUNCTION__ . " scheduling hits table rebuild via WP-Cron.");
+                abj_cron_scheduler()->scheduleSingle(
+                    ABJ_404_Solution_CronScheduler::HOOK_UPDATE_LOGS_HITS_TABLE,
+                    5
+                );
+            }
         }
+        // Armed is not executed. A host whose wp-cron.php loopback is refused
+        // stores the event and never runs it, and this method would otherwise
+        // re-arm it forever while the watermark stays where it was, which is
+        // production report 395. The watchdog opens a post-response path on
+        // evidence of exactly that, and detaches the response before using it,
+        // so the buffered-body hazard above cannot occur on that path either.
+        $this->stallWatchdog->armDeferredRebuildIfCronIsNotExecuting();
     }
 
 
@@ -441,7 +437,7 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
         if (empty($resultRows)) { return 0; }
         $row = $resultRows[0];
         $minId = is_array($row) ? array_values($row)[0] : (array_values((array)$row)[0] ?? 0);
-        return is_numeric($minId) ? (int)$minId : 0;
+        return ABJ_404_Solution_ExactInteger::readOr($minId, 0, 0);
     }
 
     /** @inheritDoc */

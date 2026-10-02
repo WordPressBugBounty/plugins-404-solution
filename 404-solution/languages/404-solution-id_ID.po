@@ -591,6 +591,9 @@ msgstr "Kesalahan: Anda memilih URL eksternal tetapi tidak memasukkan URL."
 msgid "Error: unable to add new redirect."
 msgstr "Kesalahan: tidak dapat menambahkan pengalihan baru."
 
+msgid "Error: The database did not save the new redirect. The debug log has the underlying database error."
+msgstr "Kesalahan: basis data tidak menyimpan pengalihan baru. Log debug berisi kesalahan basis data yang mendasarinya."
+
 msgid "Error: unable to mark URL as %s"
 msgstr "Kesalahan: tidak dapat menandai URL sebagai %s"
 
@@ -1993,8 +1996,14 @@ msgstr "Edit"
 msgid "View Logs"
 msgstr "Lihat Log"
 
+msgid "View Redirect Logs"
+msgstr "Lihat Log Pengalihan"
+
 msgid "Delete Permanently"
 msgstr "Hapus Permanen"
+
+msgid "Delete Redirect Permanently"
+msgstr "Hapus Pengalihan Secara Permanen"
 
 msgid "Are you sure you want to permanently delete this item?"
 msgstr "Apakah Anda yakin ingin menghapus item ini secara permanen?"
@@ -2595,6 +2604,9 @@ msgstr "Kesalahan:"
 #: includes/ImportExport.php
 msgid "Ignored importing redirect because a redirect with the same from URL already exists. URL:"
 msgstr "Mengabaikan impor pengalihan karena pengalihan dengan URL asal yang sama sudah ada. URL:"
+
+msgid "Redirect not imported: the database did not save it. URL: %1$s (repository result: %2$s)"
+msgstr "Pengalihan tidak diimpor: basis data tidak menyimpannya. URL: %1$s (hasil repositori yang diterima: %2$s)"
 
 #: includes/ImportExport.php
 msgid "Unrecognized destination type while importing file. Destination:"
@@ -4189,6 +4201,9 @@ msgstr "Kesalahan: tujuan regex relatif mendukung grup tangkapan bernomor yang d
 msgid "Error: Regex destination references $%1$d, but the source pattern defines %2$d capture group(s)."
 msgstr "Kesalahan: tujuan regex merujuk ke $%1$d, tetapi pola sumber mendefinisikan %2$d grup tangkapan."
 
+msgid "Error: Regex destination puts a capture token ($1, $2, ...) inside the scheme, host or port, so every redirect would be refused. Write the host literally and use tokens only in the path, query or fragment, for example https://example.com/$1."
+msgstr "Kesalahan: tujuan regex menempatkan token tangkapan ($1, $2, ...) di dalam skema, host, atau port, sehingga setiap pengalihan akan ditolak. Tulis host secara literal dan gunakan token hanya di jalur, kueri, atau fragmen, misalnya https://example.com/$1."
+
 msgid "Could not load chart data. Reload this page and try again."
 msgstr "Tidak dapat memuat data grafik. Muat ulang halaman ini dan coba lagi."
 
@@ -4261,6 +4276,9 @@ msgstr "Tidak dapat mengirim laporan. Silakan coba lagi nanti."
 msgid "Could not load the migration tool configuration. Reload this page and try again."
 msgstr "Tidak dapat memuat konfigurasi alat migrasi. Muat ulang halaman ini dan coba lagi."
 
+msgid "Could not load trend data."
+msgstr "Tidak dapat memuat data tren."
+
 msgid "No suggested match was scored for this URL"
 msgstr "Tidak ada kecocokan yang disarankan yang dinilai untuk URL ini"
 
@@ -4304,3 +4322,239 @@ msgid "Note: %1$s condition was not saved. A redirect may have at most %2$s cond
 msgid_plural "Note: %1$s conditions were not saved. A redirect may have at most %2$s conditions."
 msgstr[0] "Catatan: %1$s kondisi tidak disimpan. Sebuah pengalihan dapat memiliki paling banyak %2$s kondisi."
 msgstr[1] "Catatan: %1$s kondisi tidak disimpan. Sebuah pengalihan dapat memiliki paling banyak %2$s kondisi."
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:296
+msgid "The Hits and Last Used columns on the Page Redirects screen have been out of date for at least %d hour(s). 404 Solution has not been able to finish rebuilding its hit-count summary in that time."
+msgstr "Kolom Kunjungan dan Terakhir Digunakan pada layar Pengalihan Halaman sudah kedaluwarsa setidaknya selama %d jam. 404 Solution tidak dapat menyelesaikan pembangunan ulang ringkasan jumlah kunjungan dalam waktu tersebut."
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:322
+msgid "This site's WP-Cron is not running the plugin's scheduled rebuild. If DISABLE_WP_CRON is set in wp-config.php, either remove it or configure a system cron job that requests wp-cron.php periodically. In the meantime 404 Solution retries the rebuild in the background after an admin page has finished loading."
+msgstr "WP-Cron situs ini tidak menjalankan pembangunan ulang terjadwal dari plugin. Jika DISABLE_WP_CRON diatur di wp-config.php, hapus pengaturan tersebut atau konfigurasikan tugas cron sistem yang meminta wp-cron.php secara berkala. Sementara itu 404 Solution mencoba lagi pembangunan ulang di latar belakang setelah halaman admin selesai dimuat."
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:326
+msgid "The scheduled rebuild is being picked up but is not completing. Enable debug logging on the 404 Solution Options screen and check the log for the reason the rebuild stopped."
+msgstr "Pembangunan ulang terjadwal sudah dimulai tetapi tidak selesai. Aktifkan pencatatan debug pada layar Opsi 404 Solution dan periksa log untuk mengetahui alasan pembangunan ulang berhenti."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:51
+msgid "WordPress core"
+msgstr "Inti WordPress"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:52
+msgid "Before 404 Solution loaded (WordPress start-up, drop-ins, must-use plugins)"
+msgstr "Sebelum 404 Solution dimuat (proses awal WordPress, drop-in, plugin wajib)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:53
+msgid "Main query (WordPress core and query filters)"
+msgstr "Kueri utama (inti WordPress dan filter kueri)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:54
+msgid "Page output (templates and content filters)"
+msgstr "Keluaran halaman (templat dan filter konten)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:55
+msgid "Other components"
+msgstr "Komponen lainnya"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:56
+msgid "Unattributed"
+msgstr "Tidak teratribusi"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:64
+msgid "Theme: %s"
+msgstr "Tema: %s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:66
+msgid "Must-use plugin: %s"
+msgstr "Plugin wajib: %s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:68
+msgid "Drop-in: %s"
+msgstr "Berkas drop-in: %s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:70
+msgid "%s action (all callbacks, not timed one by one)"
+msgstr "Aksi %s (semua callback, tidak diukur satu per satu)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:72
+msgid "Loading plugins"
+msgstr "Memuat plugin"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:72
+msgid "From the %s action to the next"
+msgstr "Dari aksi %s hingga aksi berikutnya"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:74
+msgid "Other code"
+msgstr "Kode lainnya"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:125
+msgid "PHP stopped this request at its %1$d second time limit while it was running %2$s."
+msgstr "PHP menghentikan permintaan ini pada batas waktunya, yaitu %1$d detik, saat sedang menjalankan %2$s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:127
+msgid "PHP stopped this request at its time limit while it was running %s."
+msgstr "PHP menghentikan permintaan ini pada batas waktunya saat sedang menjalankan %s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:130
+msgid "%s had already passed before 404 Solution loaded."
+msgstr "%s sudah berlalu sebelum 404 Solution dimuat."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:137
+msgid "404 Solution itself used %1$s of the request's %2$s."
+msgstr "404 Solution sendiri menggunakan %1$s dari total %2$s permintaan ini."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:140
+msgid "404 Solution's own measured time: %1$s of the request's %2$s (its callbacks inside the action totals are not split out)."
+msgstr "Waktu yang diukur untuk 404 Solution sendiri: %1$s dari total %2$s permintaan ini (callback-nya di dalam total per aksi tidak dipisahkan)."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:160
+msgid "Running when PHP stopped the request: %1$s (%2$s) on the %3$s action, %4$s so far."
+msgstr "Sedang berjalan saat PHP menghentikan permintaan: %1$s (%2$s) pada aksi %3$s, sejauh ini %4$s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:162
+msgid "Slow callback: %1$s (%2$s) on the %3$s action, %4$s."
+msgstr "Callback lambat: %1$s (%2$s) pada aksi %3$s, %4$s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:166
+msgid "Seen on this site in the last day, while 404 Solution timed callbacks: %1$s (%2$s) on the %3$s action took %4$s."
+msgstr "Terlihat di situs ini dalam sehari terakhir, saat 404 Solution mengukur callback: %1$s (%2$s) pada aksi %3$s memerlukan %4$s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:170
+msgid "CPU time after 404 Solution loaded: %1$s of %2$s wall-clock time."
+msgstr "Waktu CPU setelah 404 Solution dimuat: %1$s dari %2$s waktu nyata."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:186
+msgid "To name the slow callback, 404 Solution now times each callback on 1 in %1$d requests for the next %2$d minutes; what it finds appears on the 404 Solution admin screen."
+msgstr "Untuk mengidentifikasi callback yang lambat, 404 Solution kini mengukur setiap callback pada 1 dari %1$d permintaan selama %2$d menit ke depan; temuannya ditampilkan di layar admin 404 Solution."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:190
+msgid "Measured on this request: how long each plugin took to load, and each callback on the main WordPress actions (plugins_loaded, init, wp_loaded, template_redirect, admin_init and others). Time in filters and in code between those actions is shown as a window or as unattributed. Times are wall-clock seconds."
+msgstr "Diukur pada permintaan ini: berapa lama setiap plugin dimuat, dan setiap callback pada aksi utama WordPress (plugins_loaded, init, wp_loaded, template_redirect, admin_init, dan lainnya). Waktu di dalam filter dan di kode di antara aksi-aksi tersebut ditampilkan sebagai rentang waktu atau sebagai tidak teratribusi. Waktu dalam detik waktu nyata."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:192
+msgid "Measured on this request: how long each plugin took to load, the total of each main WordPress action, and each callback on the actions that ran after the request became slow. Times are wall-clock seconds."
+msgstr "Diukur pada permintaan ini: berapa lama setiap plugin dimuat, total setiap aksi utama WordPress, dan setiap callback pada aksi yang berjalan setelah permintaan menjadi lambat. Waktu dalam detik waktu nyata."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:195
+msgid "Measured on this request: how long each plugin took to load, and the total of each main WordPress action. Callbacks are not timed one by one on normal requests, to keep the site fast. Times are wall-clock seconds."
+msgstr "Diukur pada permintaan ini: berapa lama setiap plugin dimuat, dan total setiap aksi utama WordPress. Callback tidak diukur satu per satu pada permintaan normal agar situs tetap cepat. Waktu dalam detik waktu nyata."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:198
+msgid "Per-plugin timing is switched off on this site, so only WordPress phases are shown. Times are wall-clock seconds."
+msgstr "Pengukuran waktu per plugin dinonaktifkan di situs ini, sehingga hanya fase WordPress yang ditampilkan. Waktu dalam detik waktu nyata."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:251
+msgid "Component"
+msgstr "Komponen"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:252
+msgid "Seconds"
+msgstr "Detik"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:267
+msgid "The 404 Solution admin screen shows where the time went."
+msgstr "Layar admin 404 Solution menunjukkan ke mana waktu tersebut digunakan."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:306
+msgid "%1$s (%2$s) on the %3$s action: %4$s"
+msgstr "%1$s (%2$s) pada aksi %3$s: %4$s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:324
+msgid "Where this request's time went"
+msgstr "Ke mana waktu permintaan ini digunakan"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:327
+msgid "Where this request's time went (PHP time limit: %d s)"
+msgstr "Ke mana waktu permintaan ini digunakan (batas waktu PHP: %d detik)"
+
+#: includes/diagnostics/TimeLimitReportView.php:105
+msgid "(CPU %s)"
+msgstr "(waktu CPU %s)"
+
+#: includes/diagnostics/TimeLimitReportView.php:121
+msgid "The dark line marks PHP's %d second time limit. Depending on the server, PHP counts either CPU time or wall-clock time against it (Linux counts CPU time, so a request waiting on the network or the database can run longer than the limit in wall-clock time)."
+msgstr "Garis gelap menandai batas waktu PHP sebesar %d detik. Tergantung servernya, PHP menghitung waktu CPU atau waktu nyata terhadap batas ini (Linux menghitung waktu CPU, sehingga permintaan yang menunggu jaringan atau basis data dapat berjalan lebih lama dari batas tersebut dalam waktu nyata)."
+
+#: includes/diagnostics/TimeLimitReportView.php:122
+msgid "PHP did not report its time limit for this request."
+msgstr "PHP tidak melaporkan batas waktunya untuk permintaan ini."
+
+#: includes/diagnostics/TimeLimitReportView.php:126
+msgid "The last request PHP stopped at its time limit while 404 Solution's code was running: %1$s, %2$s"
+msgstr "Permintaan terakhir yang dihentikan PHP pada batas waktunya saat kode 404 Solution sedang berjalan: %1$s, %2$s"
+
+#: includes/diagnostics/TimeLimitReportView.php:128
+msgid "Where the request's time went, by WordPress lifecycle window"
+msgstr "Ke mana waktu permintaan digunakan, per rentang siklus hidup WordPress"
+
+#: includes/diagnostics/TimeLimitReportView.php:153
+msgid "404 Solution: PHP stopped a request on this site at its time limit while 404 Solution's code was running. 404 Solution recorded which components used that request's time."
+msgstr "404 Solution: PHP menghentikan sebuah permintaan di situs ini pada batas waktunya saat kode 404 Solution sedang berjalan. 404 Solution mencatat komponen mana yang menggunakan waktu permintaan tersebut."
+
+#: includes/diagnostics/TimeLimitReportView.php:155
+msgid "See where the time went"
+msgstr "Lihat ke mana waktu digunakan"
+
+#: includes/diagnostics/TimeLimitReportView.php:174
+msgid "Slow callbacks found while 404 Solution timed each callback"
+msgstr "Callback lambat yang ditemukan saat 404 Solution mengukur setiap callback"
+
+#: includes/diagnostics/TimeLimitReportView.php:198
+msgid "Recent time-limit deaths"
+msgstr "Penghentian terbaru karena batas waktu"
+
+#: includes/diagnostics/TimeLimitReportView.php:199
+msgid "When"
+msgstr "Waktu"
+
+#: includes/diagnostics/TimeLimitReportView.php:200
+msgid "Path"
+msgstr "Jalur"
+
+#: includes/diagnostics/TimeLimitReportView.php:201
+msgid "Wall time"
+msgstr "Waktu nyata"
+
+#: includes/diagnostics/TimeLimitReportView.php:202
+msgid "CPU time (after 404 Solution loaded)"
+msgstr "Waktu CPU (setelah 404 Solution dimuat)"
+
+#: includes/diagnostics/TimeLimitReportView.php:203
+msgid "Stopped in"
+msgstr "Berhenti di"
+
+#: includes/diagnostics/TimeLimitReportView.php:214
+msgid "Before 404 Solution loaded"
+msgstr "Sebelum 404 Solution dimuat"
+
+#: includes/diagnostics/TimeLimitReportView.php:216
+msgid "plugins_loaded to init (theme setup)"
+msgstr "Dari plugins_loaded hingga init (penyiapan tema)"
+
+#: includes/diagnostics/TimeLimitReportView.php:217
+msgid "init to wp_loaded"
+msgstr "Dari init hingga wp_loaded"
+
+#: includes/diagnostics/TimeLimitReportView.php:218
+msgid "wp_loaded to template_redirect (main query)"
+msgstr "Dari wp_loaded hingga template_redirect (kueri utama)"
+
+#: includes/diagnostics/TimeLimitReportView.php:219
+msgid "template_redirect to the end (page output)"
+msgstr "Dari template_redirect hingga akhir (keluaran halaman)"
+
+#: includes/diagnostics/TimeLimitReportView.php:220
+msgid "admin_init to the end (admin screen)"
+msgstr "Dari admin_init hingga akhir (layar admin)"
+
+#: includes/diagnostics/TimeLimitReportView.php:221
+msgid "login_init to the end (login screen)"
+msgstr "Dari login_init hingga akhir (layar login)"
+
+#: includes/view/View_Tools.php:151
+msgid "Timed-out requests"
+msgstr "Permintaan yang melebihi batas waktu"
+
+#: includes/view/ShortcodeSuggestionsPresenter.php:260
+msgid "Show suggested pages"
+msgstr "Tampilkan halaman yang disarankan"

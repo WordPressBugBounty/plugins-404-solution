@@ -107,7 +107,7 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
 
         $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getOrphanedAutoRedirects.sql");
         $query = $this->dbCore->doTableNameReplacements($query);
-        $query = $this->f->doNormalReplacements($query);
+        $query = $this->f->replaceKnownConstants($query);
 
         // Bound the SELECT with a LIMIT and loop until exhausted so the orphaned
         // match set never loads into PHP memory all at once. Each handled row is
@@ -242,30 +242,39 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
         $handleRow = function (array $outerRow) use (&$rowsDeleted): void {
             $url = $outerRow['url'];
 
+            // The url is a stored value a visitor chose (a captured 404), so it is BOUND by the
+            // executor (`query_params`) AFTER its `{wp_...}` token pass. Binding it here first
+            // would let that pass rewrite a `{wp_posts}` inside the url and match the wrong rows.
             // allow-unbounded-select: this assembled query ends in LIMIT 0,1 and returns only the chosen survivor
-            $queryr1 = $this->prepareQueryWp(
-                "select id from {wp_abj404_redirects} where url = {url} order by " .
+            $result = $this->dbCore->queryAndGetResults(
+                "select id from {wp_abj404_redirects} where url = %s order by " .
                 "case status " .
                 "when " . (int)ABJ404_STATUS_MANUAL . " then 0 " .
                 "when " . (int)ABJ404_STATUS_REGEX . " then 1 " .
                 "when " . (int)ABJ404_STATUS_AUTO . " then 2 " .
                 "when " . (int)ABJ404_STATUS_CAPTURED . " then 3 " .
                 "else 4 end asc, timestamp desc, id desc limit 0,1",
-                array("url" => $url)
+                array('query_params' => array($url))
             );
-            $result = $this->dbCore->queryAndGetResults($queryr1);
             $innerRows = is_array($result['rows']) ? $result['rows'] : array();
             if (count($innerRows) >= 1) {
                 $row = is_array($innerRows[0]) ? $innerRows[0] : array();
-                $original = isset($row['id']) ? $row['id'] : 0;
+                // Positive evidence for destruction: the delete keeps ONE row by id, so without a
+                // readable survivor id it would remove every row for this url. Skip the url instead.
+                $original = ABJ_404_Solution_ExactInteger::read($row['id'] ?? null, 1);
+                if ($original === null) {
+                    return;
+                }
 
-                $queryl = $this->prepareQueryWp(
-                    "delete from {wp_abj404_redirects} where url = {url} and id != {original}",
-                    array("url" => $url, "original" => $original)
+                $deleteResult = $this->dbCore->queryAndGetResults(
+                    "delete from {wp_abj404_redirects} where url = %s and id != %d",
+                    array('query_params' => array($url, $original))
                 );
-                $deleteResult = $this->dbCore->queryAndGetResults($queryl);
-                $affected = isset($deleteResult['rows_affected']) && is_numeric($deleteResult['rows_affected'])
-                    ? (int)$deleteResult['rows_affected'] : 1;
+                $affected = ABJ_404_Solution_ExactInteger::readOr(
+                    $deleteResult['rows_affected'] ?? null,
+                    0,
+                    1
+                );
                 $rowsDeleted += max($affected, 1);
             }
         };
@@ -307,11 +316,14 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
         global $wpdb;
         $totalTrashed = 0;
 
+        // The admin-entered patterns are bound LAST, as positional query parameters: the executor
+        // expands table names on the template and only then prepares the statement, so a pattern
+        // holding a `{wp_...}` token is matched literally instead of being rewritten.
         $likeClauses = array();
+        $likeParams = array();
         foreach ($lines as $pattern) {
-            $escaped = $wpdb->esc_like($pattern);
-            // DAO-bypass-approved: $wpdb->prepare is read-only string formatting; result goes through queryAndGetResults
-            $likeClauses[] = $wpdb->prepare("url LIKE %s", '%' . $escaped . '%');
+            $likeClauses[] = "url LIKE %s";
+            $likeParams[] = '%' . $wpdb->esc_like($pattern) . '%';
         }
 
         $wherePatterns = implode(' OR ', $likeClauses);
@@ -322,9 +334,9 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
             AND (" . $wherePatterns . ")";
         $query = $this->dbCore->doTableNameReplacements($query);
 
-        $result = $this->dbCore->queryAndGetResults($query);
+        $result = $this->dbCore->queryAndGetResults($query, array('query_params' => $likeParams));
         $affected = $result['rows_affected'] ?? 0;
-        $totalTrashed += is_numeric($affected) ? (int)$affected : 0;
+        $totalTrashed += ABJ_404_Solution_ExactInteger::readOr($affected, 0, 0);
 
         $cutoff = abj_clock()->now() - (14 * DAY_IN_SECONDS);
         $logsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_logsv2}');
@@ -343,13 +355,11 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
                 LIMIT 1
             )";
         $query = $this->f->str_replace('{logs_url_rhs}', $comparableRedirectUrl, $query);
-        // DAO-bypass-approved: $wpdb->prepare is read-only string formatting; result goes through queryAndGetResults
-        $query = $wpdb->prepare($query, $cutoff);
         $query = $this->dbCore->doTableNameReplacements($query);
 
-        $result = $this->dbCore->queryAndGetResults($query);
+        $result = $this->dbCore->queryAndGetResults($query, array('query_params' => array($cutoff)));
         $affected = $result['rows_affected'] ?? 0;
-        $totalTrashed += is_numeric($affected) ? (int)$affected : 0;
+        $totalTrashed += ABJ_404_Solution_ExactInteger::readOr($affected, 0, 0);
 
         if ($totalTrashed > 0) {
             $this->logger->infoMessage("Auto-trashed " . $totalTrashed . " junk/stale captured URLs during maintenance.");
@@ -407,29 +417,5 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
             $this->logger->infoMessage("expireOldAutoRedirects: moved {$moved} expired auto-redirect(s) to trash (threshold: {$days} days).");
         }
         return $moved;
-    }
-
-    /**
-     * Token-style wpdb prepare helper used by removeDuplicatesCron.
-     *
-     * @param string $query
-     * @param array<string, mixed> $data
-     * @return string
-     */
-    private function prepareQueryWp($query, $data) {
-        global $wpdb;
-        $orderedValues = [];
-        $preparedQuery = preg_replace_callback('/\{(\w+)\}/', function($matches) use ($data, &$orderedValues) {
-            $key = $matches[1];
-            if (!isset($data[$key])) {
-                return $matches[0];
-            }
-            $value = $data[$key];
-            $orderedValues[] = $value;
-            return is_int($value) ? '%d' : '%s';
-        }, $query);
-        $preparedQuery = $preparedQuery !== null ? $preparedQuery : $query;
-        // DAO-bypass-approved: $wpdb->prepare is read-only string formatting; callers execute the result through queryAndGetResults
-        return $wpdb->prepare($preparedQuery, $orderedValues);
     }
 }

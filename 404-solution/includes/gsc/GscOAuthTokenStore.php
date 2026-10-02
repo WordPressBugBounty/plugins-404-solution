@@ -291,7 +291,7 @@ class ABJ_404_Solution_GscOAuthTokenStore {
     /** @param array<string, mixed> $payload */
     private function payloadInt(array $payload, string $key, int $default): int {
         $value = $payload[$key] ?? null;
-        return is_numeric($value) ? (int)$value : $default;
+        return ABJ_404_Solution_ExactInteger::readOr($value, 0, $default);
     }
 
     /** @param array<string, mixed> $body */

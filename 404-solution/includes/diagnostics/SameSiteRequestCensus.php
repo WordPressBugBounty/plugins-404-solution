@@ -47,6 +47,27 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
     const ENTRY_TTL_MS = 300000;
 
     /**
+     * How long a retired request's row is kept after it finished. A retry or
+     * client beacon arrives within about 75 s; five minutes covers that with
+     * room for a slow client, without letting the retired namespace grow.
+     */
+    const RETIRED_TTL_MS = 300000;
+
+    /**
+     * The one action this class describes and retires evidence for: the
+     * table endpoint the timeout investigation is about. Deliberately a
+     * private copy rather than a reference to
+     * ABJ_404_Solution_AjaxDiagnosticRequestPolicy::INSTRUMENTED_ACTION: PHP
+     * can retain the previous release's already-loaded policy class while
+     * loading this current file from disk during an in-flight update, and
+     * that class member is not old enough to be a safe cross-file boundary.
+     * This census's own describe/retire decision has never depended on the
+     * debug-mode opt-in the policy class gates on, so it must not start
+     * depending on that class at all.
+     */
+    const TABLE_ENDPOINT_ACTION = 'ajaxUpdatePaginationLinks';
+
+    /**
      * What a reading covers, named on the reading itself so an under-count is
      * never read as a quiet site. Ordinary front-end page views are outside it
      * by design (the hot 404 path pays nothing), as are WP-CLI processes,
@@ -106,6 +127,14 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
     private static $ownPhase = '';
 
     /**
+     * @var bool Whether this request has proved nonce and admin access. The
+     *   timeline's request id, retry count and client send time are all
+     *   request-supplied, so nothing durable may be written from them until
+     *   the endpoint calls markAuthorized().
+     */
+    private static $ownAuthorized = false;
+
+    /**
      * Register this request in the census and arrange for it to leave at
      * shutdown. Safe to call more than once; only the first call registers.
      * Never throws.
@@ -120,6 +149,10 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
             }
             $channel = self::channelForThisRequest();
             $startedAt = self::nowMs();
+            if ($startedAt !== null) {
+                ABJ_404_Solution_RequestPhaseTimeline::anchorWallClock($startedAt);
+                ABJ_404_Solution_RequestPhaseTimeline::stamp('join');
+            }
             if ($channel === '' || $startedAt === null) {
                 // An entry with no start time could never be aged out, so it
                 // would become a permanent phantom request. Not registering is
@@ -128,12 +161,39 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
             }
             $action = self::actionForThisRequest();
             $pid = ABJ_404_Solution_PhpRuntimeCapabilityAdapter::processId();
+            if ($action === self::TABLE_ENDPOINT_ACTION) {
+                // Described BEFORE registration so the very first row already
+                // carries the request's identity: a request killed before its
+                // first phase transition still has its timeline attributed.
+                ABJ_404_Solution_RequestPhaseTimeline::describeRequest(array(
+                    'requestId' => $_REQUEST['requestId'] ?? '',
+                    'retryCount' => $_REQUEST['retryCount'] ?? '',
+                    'retryParentId' => $_REQUEST['retryParentId'] ?? '',
+                    'part' => $_REQUEST['part'] ?? '',
+                    'clientSentAt' => $_REQUEST['clientSentAt'] ?? '',
+                ));
+                // Deliberately no request id: the census is not debug-gated, and a
+                // durable record per table request would put a file write on the
+                // unarmed path. The empty id makes this bracket persist nothing;
+                // it exists because the diagnostics-wide guard
+                // (DecisiveRecordManifestTest) requires every hook mutation here
+                // to run inside traceBoundary().
+                (new ABJ_404_Solution_HookInstrumentationLifecycleTracer('', 'same_site_request_census'))->traceBoundary(
+                    ABJ_404_Solution_HookInstrumentationLifecycleTracer::PHASE_REGISTRATION, 'shutdown', static function (): void {
+                        add_action('shutdown',
+                            array('ABJ_404_Solution_RequestPhaseTimeline', 'stampWpShutdown'),
+                            PHP_INT_MIN);
+                    });
+            }
             $optionName = ABJ_404_Solution_SameSiteRequestRegistry::add(
-                $startedAt,
-                $channel,
-                $action,
-                $pid,
-                self::PHASE_BOOT,
+                array(
+                    'started_at_ms' => $startedAt,
+                    'channel' => $channel,
+                    'action' => $action,
+                    'pid' => $pid,
+                    'phase' => self::PHASE_BOOT,
+                    'timeline' => ABJ_404_Solution_RequestPhaseTimeline::encode(),
+                ),
                 ABJ_404_Solution_PhpRuntimeCapabilityAdapter::processToken()
             );
             if ($optionName === '') {
@@ -185,13 +245,17 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
                 return true;
             }
             $identity = self::$ownIdentity;
+            ABJ_404_Solution_RequestPhaseTimeline::stamp($phase);
             $recorded = ABJ_404_Solution_SameSiteRequestRegistry::advance(
                 self::$ownEntry,
-                $identity['started_at_ms'],
-                $identity['channel'],
-                $identity['action'],
-                $identity['pid'],
-                $phase
+                array(
+                    'started_at_ms' => $identity['started_at_ms'],
+                    'channel' => $identity['channel'],
+                    'action' => $identity['action'],
+                    'pid' => $identity['pid'],
+                    'phase' => $phase,
+                    'timeline' => ABJ_404_Solution_RequestPhaseTimeline::encode(),
+                )
             );
             if ($recorded) {
                 self::$ownPhase = $phase;
@@ -204,19 +268,72 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
     }
 
     /**
+     * Record that this request proved nonce and admin access. Call it once,
+     * right after the endpoint's authorization passes and never before: it is
+     * what lets leave() retire the row and promote the timeline into the
+     * durable ledger. Without it a finished request deletes its row like any
+     * other, because the identifiers the timeline is keyed on came from an
+     * unauthenticated client and could otherwise be forged to fill the ledger.
+     *
+     * @return void
+     */
+    public static function markAuthorized(): void {
+        if (self::$ownEntry !== '') {
+            self::$ownAuthorized = true;
+        }
+    }
+
+    /**
      * Remove this request's entry. Idempotent, and safe to call when the
      * request never joined. Never throws.
+     *
+     * A finished instrumented request that proved admin access (see
+     * markAuthorized()) is retired rather than deleted: its row
+     * is renamed into the retired namespace with its final timeline, kept
+     * for RETIRED_TTL_MS, and promoted into the durable ledger when it is
+     * noteworthy. Every other request deletes its row exactly as before.
      */
     public static function leave(): void {
         try {
-            if (self::$ownEntry === '') {
+            if (self::$ownEntry === '' || self::$ownIdentity === null) {
                 return;
             }
             $optionName = self::$ownEntry;
+            $identity = self::$ownIdentity;
+            $phase = self::$ownPhase;
+            $authorized = self::$ownAuthorized;
+            ABJ_404_Solution_RequestPhaseTimeline::stamp('leave');
+            ABJ_404_Solution_RequestPhaseTimeline::noteCpuSinceBoot();
+            $described = ABJ_404_Solution_RequestPhaseTimeline::toArray();
+            $rid = isset($described['rid']) && is_string($described['rid'])
+                ? $described['rid'] : '';
+            if ($authorized
+                    && $identity['action'] === self::TABLE_ENDPOINT_ACTION
+                    && $rid !== ''
+                    && $rid !== ABJ_404_Solution_AjaxRequestLedger::UNKNOWN_ID) {
+                ABJ_404_Solution_SameSiteRequestRegistry::retire($optionName, array(
+                    'started_at_ms' => $identity['started_at_ms'],
+                    'channel' => $identity['channel'],
+                    'action' => $identity['action'],
+                    'pid' => $identity['pid'],
+                    'phase' => $phase,
+                    'timeline' => ABJ_404_Solution_RequestPhaseTimeline::encode(),
+                ), $rid);
+                $now = self::nowMs();
+                if ($now !== null) {
+                    ABJ_404_Solution_SameSiteRequestRegistry::pruneRetired(
+                        $now - self::RETIRED_TTL_MS);
+                }
+                $now = self::nowMs();
+                ABJ_404_Solution_RequestTimelinePromoter::promoteOwnIfNoteworthy(
+                    $now === null ? null : $now - $identity['started_at_ms']);
+            } else {
+                ABJ_404_Solution_SameSiteRequestRegistry::remove(array($optionName));
+            }
             self::$ownEntry = '';
             self::$ownIdentity = null;
             self::$ownPhase = '';
-            ABJ_404_Solution_SameSiteRequestRegistry::remove(array($optionName));
+            self::$ownAuthorized = false;
         } catch (Throwable $e) {
             self::reportFailure('same-site census leave failed: ' . $e->getMessage());
         }
@@ -237,6 +354,7 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
         self::$ownEntry = '';
         self::$ownIdentity = null;
         self::$ownPhase = '';
+        self::$ownAuthorized = false;
     }
 
     /**

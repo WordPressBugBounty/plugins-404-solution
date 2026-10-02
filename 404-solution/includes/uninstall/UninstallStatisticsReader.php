@@ -110,7 +110,7 @@ class ABJ_404_Solution_UninstallStatisticsReader {
      * @return int
      */
     private static function intValue(array $values, string $key): int {
-        return isset($values[$key]) && is_numeric($values[$key]) ? (int)$values[$key] : 0;
+        return ABJ_404_Solution_ExactInteger::readOr($values[$key] ?? null, 0, 0);
     }
 
     /**

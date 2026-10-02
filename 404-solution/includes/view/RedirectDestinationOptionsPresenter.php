@@ -24,7 +24,7 @@ class ABJ_404_Solution_RedirectDestinationOptionsPresenter {
             $rowCounter++;
             /** @var object{id: int|string, post_type: string, depth?: int} $row */
             $id = is_scalar($row->id) ? (string)$row->id : '';
-            $titleId = is_numeric($id) ? (int)$id : 0;
+            $titleId = ABJ_404_Solution_ExactInteger::readOr($id, 0, 0);
             $theTitle = get_the_title($titleId);
             $thisval = $id . "|" . ABJ404_TYPE_POST;
 

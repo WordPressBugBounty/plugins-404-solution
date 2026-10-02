@@ -14,8 +14,11 @@
 
     var requestedURL = $placeholder.data('requested-url');
     var pollInterval = 1000; // 1 second
-    var maxAttempts = 45;    // 45 seconds max (server detects worker no-show at ~15s)
+    var maxAttempts = 45;    // ~45 polls; the first poll runs the computation itself
     var attempts = 0;
+    // What the most recent failed or non-complete poll looked like, so the
+    // give-up record can say why the visitor got the fallback text.
+    var lastFailure = null;
 
     // Exit if no URL provided
     if (!requestedURL) {
@@ -63,11 +66,30 @@
                     }
                 } else {
                     // Timeout, error, or malformed body - show fallback message
+                    lastFailure = {
+                        reason: 'unexpected-status',
+                        serverStatus: status,
+                        attempts: attempts
+                    };
                     showFallbackMessage();
                 }
             },
             error: function(xhr, status, error) {
-                console.error('ABJ404: Suggestion polling error:', status, error);
+                // Keep the HTTP status and a short body excerpt: textStatus
+                // alone cannot tell a WAF block from a plugin fatal. Console
+                // only; this endpoint is public and shows visitors no detail.
+                var httpStatus = (xhr && typeof xhr.status === 'number') ? xhr.status : null;
+                var excerpt = (xhr && typeof xhr.responseText === 'string')
+                    ? xhr.responseText.substring(0, 200) : '';
+                lastFailure = {
+                    reason: 'transport-error',
+                    httpStatus: httpStatus,
+                    textStatus: status,
+                    errorThrown: error,
+                    responseExcerpt: excerpt,
+                    attempts: attempts
+                };
+                console.error('ABJ404: Suggestion polling error:', status, error, lastFailure);
                 // Retry a few times on network error
                 if (attempts < 5) {
                     setTimeout(pollForSuggestions, pollInterval * 2);
@@ -82,6 +104,8 @@
      * Show fallback message when suggestions can't be loaded
      */
     function showFallbackMessage() {
+        // One record of why the visitor is seeing the no-suggestions text.
+        console.warn('ABJ404: Suggestion polling gave up', lastFailure);
         var $loading = $placeholder.find('.abj404-loading');
         if ($loading.length) {
             $loading.html('<li class="abj404-no-suggestions">' +

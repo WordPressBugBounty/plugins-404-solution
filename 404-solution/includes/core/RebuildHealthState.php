@@ -56,7 +56,7 @@ class ABJ_404_Solution_RebuildHealthState {
             return true;
         }
         $rawNext = $gate['next_allowed_at'] ?? 0;
-        $nextAllowed = is_numeric($rawNext) ? intval($rawNext) : 0;
+        $nextAllowed = ABJ_404_Solution_ExactInteger::readOr($rawNext, 0, 0);
         if ($this->trialIsActive($trial, $now)) {
             return !$this->gateHasOpenFailureWindow($gate);
         }
@@ -93,7 +93,7 @@ class ABJ_404_Solution_RebuildHealthState {
         }
         $now = $this->clock->now();
         $rawLastDaily = $state['gate']['last_daily_maintenance_attempt_ts'] ?? 0;
-        $lastDaily = is_numeric($rawLastDaily) ? intval($rawLastDaily) : 0;
+        $lastDaily = ABJ_404_Solution_ExactInteger::readOr($rawLastDaily, 0, 0);
         if ($lastDaily > 0 && ($now - $lastDaily) < self::DAILY_MAINTENANCE_RECOVERY_SECONDS) {
             return false;
         }
@@ -139,7 +139,7 @@ class ABJ_404_Solution_RebuildHealthState {
         $lockRow = new ABJ_404_Solution_ExclusiveOptionRow();
         $existing = $lockRow->valueOf(self::TRIAL_LOCK_OPTION);
         $existingExpiryPart = explode(':', $existing, 2)[0];
-        $existingExpires = is_numeric($existingExpiryPart) ? intval($existingExpiryPart) : 0;
+        $existingExpires = ABJ_404_Solution_ExactInteger::readOr($existingExpiryPart, 0, 0);
         if ($existingExpires > 0 && $existingExpires <= $now) {
             $lockRow->releaseIfValueIs(array('optionName' => self::TRIAL_LOCK_OPTION, 'value' => $existing));
         }
@@ -168,12 +168,16 @@ class ABJ_404_Solution_RebuildHealthState {
         $now = $this->clock->now();
         $this->mutateState(function (array $state) use ($msg, $class, $now): array {
             $gate = $state['gate'];
-            $fc = is_numeric($gate['failure_count'] ?? 0) ? intval($gate['failure_count']) : 0;
+            $fc = ABJ_404_Solution_ExactInteger::readOr($gate['failure_count'] ?? null, 0, 0);
             $gate['failure_count'] = $fc + 1;
             $gate['last_failure_ts'] = $now;
             $gate['last_failure_msg'] = substr($msg, 0, 500);
             $gate['last_failure_class'] = $class;
-            $cd = is_numeric($gate['cooldown_seconds'] ?? self::INITIAL_COOLDOWN_SECONDS) ? intval($gate['cooldown_seconds']) : self::INITIAL_COOLDOWN_SECONDS;
+            $cd = ABJ_404_Solution_ExactInteger::readOr(
+                $gate['cooldown_seconds'] ?? null,
+                0,
+                self::INITIAL_COOLDOWN_SECONDS
+            );
             if ($class === 'disk') {
                 $gate['cooldown_seconds'] = self::DISK_ERROR_COOLDOWN_SECONDS;
                 $gate['next_allowed_at'] = $now + self::DISK_ERROR_COOLDOWN_SECONDS;
@@ -212,13 +216,13 @@ class ABJ_404_Solution_RebuildHealthState {
         if ($state === null) { return array('failure_count' => 0, 'last_failure_msg' => 'Health state corrupt.', 'last_failure_class' => 'unknown', 'cooldown_seconds' => 0, 'next_allowed_at' => 0); }
         $gate = $state['gate'];
         $rawNext = $gate['next_allowed_at'] ?? 0;
-        $nextAllowed = is_numeric($rawNext) ? intval($rawNext) : 0;
+        $nextAllowed = ABJ_404_Solution_ExactInteger::readOr($rawNext, 0, 0);
         if ($nextAllowed <= $this->clock->now()) { return null; }
         $rawFc = $gate['failure_count'] ?? 0;
         $rawMsg = $gate['last_failure_msg'] ?? '';
         $rawCls = $gate['last_failure_class'] ?? '';
         $rawCd = $gate['cooldown_seconds'] ?? 0;
-        return array('failure_count' => is_numeric($rawFc) ? intval($rawFc) : 0, 'last_failure_msg' => is_string($rawMsg) ? $rawMsg : '', 'last_failure_class' => is_string($rawCls) ? $rawCls : '', 'cooldown_seconds' => is_numeric($rawCd) ? intval($rawCd) : 0, 'next_allowed_at' => $nextAllowed);
+        return array('failure_count' => ABJ_404_Solution_ExactInteger::readOr($rawFc, 0, 0), 'last_failure_msg' => is_string($rawMsg) ? $rawMsg : '', 'last_failure_class' => is_string($rawCls) ? $rawCls : '', 'cooldown_seconds' => ABJ_404_Solution_ExactInteger::readOr($rawCd, 0, 0), 'next_allowed_at' => $nextAllowed);
     }
 
     /** @param string $errorMessage @return string */
@@ -233,8 +237,8 @@ class ABJ_404_Solution_RebuildHealthState {
     /** @param int $idRange @return int */
     public function getHitsChunkSize(int $idRange): int {
         $state = $this->readState();
-        $current = $state !== null ? ($state['hits_chunk_size']['current'] ?? null) : null;
-        if ($current !== null && is_numeric($current)) { return max(self::MIN_CHUNK_SIZE, min(self::MAX_CHUNK_SIZE, intval($current))); }
+        $currentInt = self::storedChunkSize($state !== null ? ($state['hits_chunk_size']['current'] ?? null) : null);
+        if ($currentInt !== null) { return $currentInt; }
         $estimated = $idRange <= 0 ? self::MAX_CHUNK_SIZE : max(self::MIN_CHUNK_SIZE, min(self::MAX_CHUNK_SIZE, intval($idRange / 10)));
         $this->mutateState(function (array $state) use ($estimated): array { $state['hits_chunk_size']['current'] = $estimated; return $state; });
         return $estimated;
@@ -247,7 +251,20 @@ class ABJ_404_Solution_RebuildHealthState {
 
     /** @return void */
     public function recordHitsChunkFailure(): void {
-        $this->mutateState(function (array $state): array { $c = $state['hits_chunk_size']['current'] ?? self::MAX_CHUNK_SIZE; $state['hits_chunk_size']['current'] = intval(max(self::MIN_CHUNK_SIZE, intval(is_numeric($c) ? intval($c) : self::MAX_CHUNK_SIZE) / 2)); return $state; });
+        $this->mutateState(function (array $state): array { $c = self::storedChunkSize($state['hits_chunk_size']['current'] ?? null) ?? self::MAX_CHUNK_SIZE; $state['hits_chunk_size']['current'] = max(self::MIN_CHUNK_SIZE, intdiv($c, 2)); return $state; });
+    }
+
+    /**
+     * The persisted hits chunk size clamped into [MIN_CHUNK_SIZE, MAX_CHUNK_SIZE],
+     * or null when nothing usable is stored (missing, non-integer, or below 1).
+     * A below-floor value is clamped up rather than discarded, so a backed-off
+     * chunk never reads as "unset" and resets to a fresh, larger estimate.
+     *
+     * @param mixed $raw
+     */
+    private static function storedChunkSize($raw): ?int {
+        $read = ABJ_404_Solution_ExactInteger::read($raw, 1);
+        return $read === null ? null : max(self::MIN_CHUNK_SIZE, min(self::MAX_CHUNK_SIZE, $read));
     }
 
     /** @param int $lastChunkSize @return void */
@@ -307,13 +324,13 @@ class ABJ_404_Solution_RebuildHealthState {
      */
     private function gateHasOpenFailureWindow(array $gate): bool {
         $rawFailureCount = $gate['failure_count'] ?? 0;
-        $failureCount = is_numeric($rawFailureCount) ? intval($rawFailureCount) : 0;
+        $failureCount = ABJ_404_Solution_ExactInteger::readOr($rawFailureCount, 0, 0);
         $rawNext = $gate['next_allowed_at'] ?? 0;
-        $nextAllowed = is_numeric($rawNext) ? intval($rawNext) : 0;
+        $nextAllowed = ABJ_404_Solution_ExactInteger::readOr($rawNext, 0, 0);
         $rawLastFailure = $gate['last_failure_ts'] ?? 0;
-        $lastFailure = is_numeric($rawLastFailure) ? intval($rawLastFailure) : 0;
+        $lastFailure = ABJ_404_Solution_ExactInteger::readOr($rawLastFailure, 0, 0);
         $rawLastSuccess = $gate['last_success_ts'] ?? 0;
-        $lastSuccess = is_numeric($rawLastSuccess) ? intval($rawLastSuccess) : 0;
+        $lastSuccess = ABJ_404_Solution_ExactInteger::readOr($rawLastSuccess, 0, 0);
         return $failureCount > 0 || $nextAllowed > 0 || $lastFailure > $lastSuccess;
     }
 
@@ -326,9 +343,9 @@ class ABJ_404_Solution_RebuildHealthState {
         $rawToken = $trial['token'] ?? '';
         $trialToken = is_string($rawToken) ? $rawToken : '';
         $rawStarted = $trial['started_at'] ?? 0;
-        $trialStarted = is_numeric($rawStarted) ? intval($rawStarted) : 0;
+        $trialStarted = ABJ_404_Solution_ExactInteger::readOr($rawStarted, 0, 0);
         $rawTtl = $trial['ttl'] ?? 0;
-        $trialTtl = is_numeric($rawTtl) ? intval($rawTtl) : 0;
+        $trialTtl = ABJ_404_Solution_ExactInteger::readOr($rawTtl, 0, 0);
         return $trialToken !== '' && $trialStarted > 0 && ($now - $trialStarted) < $trialTtl;
     }
 
@@ -339,7 +356,7 @@ class ABJ_404_Solution_RebuildHealthState {
      */
     private function dailyRecoveryIsActive(array $trial, int $now): bool {
         $rawUntil = $trial['daily_recovery_until'] ?? 0;
-        $until = is_numeric($rawUntil) ? intval($rawUntil) : 0;
+        $until = ABJ_404_Solution_ExactInteger::readOr($rawUntil, 0, 0);
         return $until > $now;
     }
 

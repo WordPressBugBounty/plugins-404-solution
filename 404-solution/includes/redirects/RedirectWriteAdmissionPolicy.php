@@ -72,7 +72,7 @@ class ABJ_404_Solution_RedirectWriteAdmissionPolicy {
      * that a later request will re-validate.
      *
      * @param int $type One of the ABJ404_TYPE_* constants.
-     * @param mixed $finalDest Destination id (post, category or tag).
+     * @param mixed $finalDest Destination id (post, category or tag), or URL for an external type.
      * @return bool
      */
     public function isValidAutomaticRedirectDestination($type, $finalDest): bool {
@@ -99,7 +99,12 @@ class ABJ_404_Solution_RedirectWriteAdmissionPolicy {
             if (!function_exists('get_term')) {
                 return true;
             }
-            $taxonomy = ($type === ABJ404_TYPE_CAT) ? 'category' : 'post_tag';
+            // A category-type redirect resolves any hierarchical taxonomy's
+            // term (PermalinkResolver::fillCategory uses get_term_link, so
+            // WooCommerce product_cat works), so it is validated the same
+            // way: restricting the lookup to 'category' refused every
+            // automatic redirect to a custom taxonomy term.
+            $taxonomy = ($type === ABJ404_TYPE_CAT) ? '' : 'post_tag';
             $term = get_term($destId, $taxonomy);
             if ($term === null || is_wp_error($term)) {
                 return false;
@@ -111,6 +116,40 @@ class ABJ_404_Solution_RedirectWriteAdmissionPolicy {
             return true;
         }
 
+        if ($type === ABJ404_TYPE_EXTERNAL) {
+            return self::isLivePostTypeArchiveUrl($finalDest);
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether an automatic external-type destination is this site's own
+     * archive of a registered post type. Post type archives have no redirect
+     * type of their own, so a trashed custom post redirected to its archive
+     * (RemovedPostParentResolver) stores the archive URL. Any other URL is
+     * not something an unattended process can vouch for, so it is refused.
+     *
+     * @param mixed $finalDest
+     * @return bool
+     */
+    private static function isLivePostTypeArchiveUrl($finalDest): bool {
+        if (!is_string($finalDest) || $finalDest === '') {
+            return false;
+        }
+        if (!function_exists('get_post_types') || !function_exists('get_post_type_archive_link')) {
+            return true;
+        }
+        $postTypes = get_post_types(array('has_archive' => true), 'names');
+        if (!is_array($postTypes)) {
+            return false;
+        }
+        foreach ($postTypes as $postType) {
+            $archiveUrl = get_post_type_archive_link((string)$postType);
+            if (is_string($archiveUrl) && $archiveUrl !== '' && $archiveUrl === $finalDest) {
+                return true;
+            }
+        }
         return false;
     }
 

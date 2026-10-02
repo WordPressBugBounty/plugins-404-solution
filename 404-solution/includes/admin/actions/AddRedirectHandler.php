@@ -108,6 +108,10 @@ class ABJ_404_Solution_AddRedirectHandler implements ABJ_404_Solution_AdminActio
                 'code' => $code,
                 'disabled' => 0,
             )));
+            if ((int)$newRedirectId <= 0) {
+                $logger->errorMessage("Add redirect: the insert returned no row id. From: " . esc_html($manualURL) . ", type: " . esc_html($tdType2));
+                return __('Error: The database did not save the new redirect. The debug log has the underlying database error.', '404-solution') . "<BR/>";
+            }
             if ($autoPromoteAdd['autoPromoted']) {
                 $this->resolver->saveRegexAutoPromoteNotice((int)$newRedirectId, $originalManualURL, $manualURL, $autoPromoteAdd['urlRewritten']);
             }

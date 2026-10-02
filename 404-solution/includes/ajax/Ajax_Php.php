@@ -189,7 +189,7 @@ class ABJ_404_Solution_Ajax_Php {
 		$readRows = isset($readResult['rows']) && is_array($readResult['rows']) ? $readResult['rows'] : array();
 		$firstRow = isset($readRows[0]) && is_array($readRows[0]) ? $readRows[0] : array();
 		$rawCount = reset($firstRow);
-		$count = is_scalar($rawCount) && is_numeric($rawCount) ? (int)$rawCount : 0;
+		$count = ABJ_404_Solution_ExactInteger::readOr($rawCount, 0, 0);
 		if (!empty($readResult['last_error']) || $count <= 0) {
 			// Could not read back a valid count; don't block on an
 			// unreliable read (fail toward allowing, per Defensive Coding #8).

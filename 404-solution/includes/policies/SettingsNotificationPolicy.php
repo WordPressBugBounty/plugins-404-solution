@@ -47,8 +47,14 @@ class ABJ_404_Solution_SettingsNotificationPolicy {
         }
 
         $rawAdminNotification = is_scalar($postData['admin_notification']) ? $postData['admin_notification'] : '';
-        if (is_numeric($rawAdminNotification) && (int)$rawAdminNotification >= 0) {
-            $options['admin_notification'] = (int)$rawAdminNotification;
+        // A type=text field: the admin can type a stray space around a valid
+        // number. ExactInteger::read() deliberately does not trim, so trim here.
+        if (is_string($rawAdminNotification)) {
+            $rawAdminNotification = trim($rawAdminNotification);
+        }
+        $adminNotification = ABJ_404_Solution_ExactInteger::read($rawAdminNotification, 0);
+        if ($adminNotification !== null) {
+            $options['admin_notification'] = $adminNotification;
             return "";
         }
 

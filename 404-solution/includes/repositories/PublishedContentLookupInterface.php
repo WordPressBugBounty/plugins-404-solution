@@ -15,7 +15,10 @@ interface ABJ_404_Solution_PublishedContentLookupInterface {
      * Find published posts and pages using named query criteria.
      * Unknown keys and non-scalar values are ignored for forward compatibility.
      *
-     * @param array{slug?: string, search_term?: string, limit_results?: string, order_results?: string, extra_where_clause?: string} $criteria
+     * `extra_where_clause` is SQL text; a value it needs is a `%s` / `%d` placeholder in the
+     * text plus an entry in `extra_where_params`, in order. Values are never part of the text.
+     *
+     * @param array{slug?: string, search_term?: string, limit_results?: string, order_results?: string, extra_where_clause?: string, extra_where_params?: array<int, int|float|string>} $criteria
      * @return array<int, object>
      */
     public function getPublishedPagesAndPostsIDs(array $criteria = array());

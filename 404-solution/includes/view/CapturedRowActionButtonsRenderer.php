@@ -32,11 +32,11 @@ class ABJ_404_Solution_CapturedRowActionButtonsRenderer {
      * @param array<string,string> $vars
      */
     private function buildActionLink(string $tplName, array $vars): string {
-        $tpl = $this->tpl($tplName);
+        $replacements = array();
         foreach ($vars as $k => $v) {
-            $tpl = $this->f->str_replace('{' . $k . '}', $v, $tpl);
+            $replacements['{' . $k . '}'] = $v;
         }
-        return $tpl;
+        return $this->f->renderTemplate($this->tpl($tplName), $replacements);
     }
 
     /**

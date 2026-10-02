@@ -422,7 +422,7 @@ class ABJ_404_Solution_PluginLogicPageOrdering {
         $id = $meta[0];
         $type = isset($meta[1]) ? $meta[1] : '';
 
-        $typeInt = is_numeric($type) ? (int)$type : -1;
+        $typeInt = ABJ_404_Solution_ExactInteger::readOr($type, 0, -1);
 
         if ($idAndType == ABJ404_TYPE_404_DISPLAYED . '|' . ABJ404_TYPE_404_DISPLAYED) {
             return __('(Default 404 Page)', '404-solution');

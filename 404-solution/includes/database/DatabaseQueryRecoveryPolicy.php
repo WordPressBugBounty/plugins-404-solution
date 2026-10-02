@@ -385,7 +385,7 @@ class ABJ_404_Solution_DatabaseQueryRecoveryPolicy {
                 'timeout',
                 'timeout_log',
                 function () use ($query, $timeoutSeconds): void {
-                    $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->queryDiagnostics->extractSqlFilename($query);
+                    $sqlInfo = $this->queryDiagnostics->sqlForErrorLog($query);
                     $this->logger->warn(
                         'Query timed out after ' . $timeoutSeconds . 's. ' .
                         'Query: ' . substr(preg_replace('/\s+/', ' ', trim($sqlInfo)) ?? $sqlInfo, 0, 500)

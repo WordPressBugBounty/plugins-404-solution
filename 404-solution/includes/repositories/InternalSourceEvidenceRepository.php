@@ -382,7 +382,7 @@ class ABJ_404_Solution_InternalSourceEvidenceRepository {
 
     /** @param array<string, mixed> $row */
     private function intField(array $row, string $key): int {
-        return isset($row[$key]) && is_numeric($row[$key]) ? (int)$row[$key] : 0;
+        return ABJ_404_Solution_ExactInteger::readOr($row[$key] ?? null, 0, 0);
     }
 
     /**

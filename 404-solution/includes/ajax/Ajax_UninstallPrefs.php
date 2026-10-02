@@ -64,16 +64,17 @@ class ABJ_404_Solution_Ajax_UninstallPrefs {
             'include_diagnostics' => isset($_POST['include_diagnostics']) ? filter_var($_POST['include_diagnostics'], FILTER_VALIDATE_BOOLEAN) : false
         );
 
-        // Debug logging without dumping raw preference payloads or contact fields.
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            $logger = abj_service('logging');
-            if (is_object($logger) && method_exists($logger, 'debugMessage')) {
-                $logger->debugMessage('Uninstall preferences AJAX received: send_feedback=' .
-                    ($preferences['send_feedback'] ? 'true' : 'false') .
-                    ', include_diagnostics=' . ($preferences['include_diagnostics'] ? 'true' : 'false') .
-                    ', delete_redirects=' . ($preferences['delete_redirects'] ? 'true' : 'false') .
-                    ', delete_logs=' . ($preferences['delete_logs'] ? 'true' : 'false'));
-            }
+        // Breadcrumb without dumping raw preference payloads or contact fields
+        // (four booleans only). Not gated on WP_DEBUG: debugMessage() already
+        // writes at once in debug mode and otherwise buffers the line for the
+        // next error, and the failure this precedes is logged unconditionally.
+        $logger = abj_service('logging');
+        if (is_object($logger) && method_exists($logger, 'debugMessage')) {
+            $logger->debugMessage('Uninstall preferences AJAX received: send_feedback=' .
+                ($preferences['send_feedback'] ? 'true' : 'false') .
+                ', include_diagnostics=' . ($preferences['include_diagnostics'] ? 'true' : 'false') .
+                ', delete_redirects=' . ($preferences['delete_redirects'] ? 'true' : 'false') .
+                ', delete_logs=' . ($preferences['delete_logs'] ? 'true' : 'false'));
         }
 
         // Save preferences using site options for multisite compatibility

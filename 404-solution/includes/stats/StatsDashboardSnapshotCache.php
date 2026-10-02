@@ -81,7 +81,7 @@ class ABJ_404_Solution_StatsDashboardSnapshotCache {
             return $payload;
         } catch (Throwable $e) {
             if ($hasCachedData) {
-                $this->logger->debugMessage(__FUNCTION__ . ' failed to recompute stats snapshot; returning cached snapshot. Error: ' . $e->getMessage());
+                $this->logger->warnCaught(__FUNCTION__ . ' failed to recompute stats snapshot; returning the cached snapshot.', $e);
                 return $cached;
             }
             throw $e;

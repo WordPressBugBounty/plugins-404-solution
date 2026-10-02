@@ -171,10 +171,20 @@ jQuery(document).ready(function($) {
 					cache[term] = data;
 					response(data);
 				})
-				.fail(function() {
+				.fail(function(jqXHR, textStatus, errorThrown) {
 					// Transport / parseerror failure: dismiss the
 					// autocomplete loading indicator by handing the
-					// widget an empty result list.
+					// widget an empty result list, and keep the status and
+					// body excerpt that explain it so "no suggestions" can
+					// be told apart from "the lookup failed" (shared seam,
+					// guarded so a missing asset degrades to the empty list).
+					if (typeof abj404AdminAjaxRecordFailure === 'function') {
+						abj404AdminAjaxRecordFailure(jqXHR, {
+							source: 'redirect-to-autocomplete',
+							textStatus: textStatus,
+							errorThrown: errorThrown
+						});
+					}
 					response([]);
 				});
             },

@@ -271,20 +271,6 @@ final class ABJ_404_Solution_UserRef {
      * @param mixed $v
      */
     private static function scalarToInt($v): int {
-        if (is_int($v)) {
-            return $v < 0 ? 0 : $v;
-        }
-        if (is_float($v)) {
-            $i = (int)$v;
-            return $i < 0 ? 0 : $i;
-        }
-        if (is_string($v) && is_numeric($v)) {
-            $i = (int)$v;
-            return $i < 0 ? 0 : $i;
-        }
-        if (is_bool($v)) {
-            return $v ? 1 : 0;
-        }
-        return 0;
+        return ABJ_404_Solution_ExactInteger::readOr($v, 0, 0);
     }
 }

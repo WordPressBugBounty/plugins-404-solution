@@ -137,10 +137,6 @@ class ABJ_404_Solution_PluginLogic implements ABJ_404_Solution_PluginLogicInterf
 
     	self::$instance = new ABJ_404_Solution_PluginLogic();
 
-    	// these filters allow non-admins to have admin access to the plugin.
-    	add_filter( 'user_has_cap',
-    		'ABJ_404_Solution_PluginAdminAccessPolicy::wpUserHasCapFilter', 10, 4 );
-
     	return self::$instance;
     }
 

@@ -71,8 +71,8 @@ class ABJ_404_Solution_RollupFreshnessProbe {
         return array(
             'rollup_table_exists'      => (bool)$logsRepo->logsHitsTableExists(),
             'rollup_needs_rebuild'     => (bool)$logsRepo->hitsTableNeedsRebuild(),
-            'rollup_last_updated_at'   => is_numeric($lastUpdated) ? (int)$lastUpdated : 0,
-            'rollup_last_scheduled_at' => is_numeric($lastScheduled) ? (int)$lastScheduled : 0,
+            'rollup_last_updated_at'   => ABJ_404_Solution_ExactInteger::readOr($lastUpdated, 0, 0),
+            'rollup_last_scheduled_at' => ABJ_404_Solution_ExactInteger::readOr($lastScheduled, 0, 0),
             'rollup_stored_max_log_id' => (int)$logsRepo->getStoredMaxLogId(),
             'logsv2_max_log_id'        => (int)$logsRepo->getMaxLogId(),
         );

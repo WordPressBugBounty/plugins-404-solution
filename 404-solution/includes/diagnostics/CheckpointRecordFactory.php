@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
  */
 final class ABJ_404_Solution_CheckpointRecordFactory {
 
-    const SCHEMA_VERSION = 8;
+    const SCHEMA_VERSION = 9;
     const ENVELOPE_FULL = 'full';
     const ENVELOPE_FREQUENT = 'frequent';
     const ENVELOPE_INTENT = 'intent';
@@ -60,12 +60,14 @@ final class ABJ_404_Solution_CheckpointRecordFactory {
      * @return array<string, mixed>
      */
     public static function full(array $context): array {
+        $rusage = self::resourceUsage();
         $record = array(
             'schema_version' => self::SCHEMA_VERSION,
             'envelope' => self::ENVELOPE_FULL,
             'ts' => $context['ts'] ?? null,
             'hrtime_ns' => $context['hrtime_ns'] ?? null,
-            'rusage' => self::resourceUsage(),
+            'rusage' => $rusage,
+            'rusage_since_plugin_boot' => self::usageSincePluginBoot($rusage),
             'host_pressure' => $context['host_pressure'] ?? array(
                 'status' => 'unavailable',
                 'reason' => 'sampler_result_unavailable',
@@ -141,8 +143,8 @@ final class ABJ_404_Solution_CheckpointRecordFactory {
             'request_id' => $context['request_id'],
             'event' => $context['event'],
             'checkpoint_id' => $context['checkpoint_id'],
-            'elapsed_us' => is_numeric($phases['append'] ?? null) ? max(0, (int)$phases['append']) : 0,
-            'total_us' => is_numeric($context['total_us'] ?? null) ? max(0, (int)$context['total_us']) : 0,
+            'elapsed_us' => ABJ_404_Solution_ExactInteger::readOr($phases['append'] ?? null, 0, 0),
+            'total_us' => ABJ_404_Solution_ExactInteger::readOr($context['total_us'] ?? null, 0, 0),
             'phases_us' => $phases,
         );
         return array_merge($telemetry, self::failureDetails($write, $intent));
@@ -181,7 +183,26 @@ final class ABJ_404_Solution_CheckpointRecordFactory {
      * @return array<string, int>|null
      */
     private static function resourceUsage(): ?array {
-        $rusage = ABJ_404_Solution_PhpRuntimeCapabilityAdapter::resourceUsage();
+        return self::normalizeResourceUsage(
+            ABJ_404_Solution_PhpRuntimeCapabilityAdapter::resourceUsage()
+        );
+    }
+
+    /**
+     * Normalize a raw getrusage() array into the diagnostic subset full()
+     * carries, or null when the input is not an array.
+     *
+     * Absolute counters rather than deltas against a previous record: the
+     * excerpt that carries these is allowed to drop records it cannot afford,
+     * and a delta chain with a hole in it is unreadable, while an absolute
+     * sample stays interpretable on its own. CPU times are folded into single
+     * microsecond fields so the tv_sec/tv_usec pairs do not have to be
+     * recombined by hand at read time.
+     *
+     * @param array<string, mixed>|null $rusage
+     * @return array<string, int>|null
+     */
+    private static function normalizeResourceUsage($rusage): ?array {
         if (!is_array($rusage)) {
             return null;
         }
@@ -190,11 +211,45 @@ final class ABJ_404_Solution_CheckpointRecordFactory {
             'stime_us' => self::microseconds($rusage, 'ru_stime'),
         );
         foreach (self::RUSAGE_FIELDS as $name => $key) {
-            if (isset($rusage[$key]) && is_numeric($rusage[$key])) {
-                $usage[$name] = (int)$rusage[$key];
+            $quantity = ABJ_404_Solution_ExactInteger::read($rusage[$key] ?? null, 0);
+            if ($quantity !== null) {
+                $usage[$name] = $quantity;
             }
         }
         return $usage;
+    }
+
+    /**
+     * Normalized resource usage minus this request's plugin-boot baseline.
+     *
+     * getrusage() is process-cumulative, so on a reused worker (LiteSpeed/FPM)
+     * a raw sample includes every earlier request that worker served. This is
+     * the delta since this request's plugin boot, which is the per-request
+     * cost a stall is actually diagnosed with. maxrss is a high-water mark
+     * and cannot be subtracted, so it is omitted.
+     *
+     * @param array<string, int>|null $current
+     * @return array<string, int>|null
+     */
+    private static function usageSincePluginBoot(?array $current): ?array {
+        if ($current === null) {
+            return null;
+        }
+        $snapshot = ABJ_404_Solution_ErrorHandler::bootResourceSnapshot();
+        $boot = self::normalizeResourceUsage($snapshot['usage']);
+        if ($boot === null) {
+            return null;
+        }
+        $delta = array();
+        foreach ($current as $key => $value) {
+            if ($key === 'maxrss') {
+                continue;
+            }
+            if (array_key_exists($key, $boot)) {
+                $delta[$key] = (int)$value - (int)$boot[$key];
+            }
+        }
+        return $delta;
     }
 
     /**
@@ -203,10 +258,16 @@ final class ABJ_404_Solution_CheckpointRecordFactory {
      * @param array<string, mixed> $rusage
      */
     private static function microseconds(array $rusage, string $prefix): int {
-        $seconds = isset($rusage[$prefix . '.tv_sec']) && is_numeric($rusage[$prefix . '.tv_sec'])
-            ? (int)$rusage[$prefix . '.tv_sec'] : 0;
-        $micros = isset($rusage[$prefix . '.tv_usec']) && is_numeric($rusage[$prefix . '.tv_usec'])
-            ? (int)$rusage[$prefix . '.tv_usec'] : 0;
+        $seconds = ABJ_404_Solution_ExactInteger::readOr(
+            $rusage[$prefix . '.tv_sec'] ?? null,
+            0,
+            0
+        );
+        $micros = ABJ_404_Solution_ExactInteger::readOr(
+            $rusage[$prefix . '.tv_usec'] ?? null,
+            0,
+            0
+        );
         return ($seconds * 1000000) + $micros;
     }
 

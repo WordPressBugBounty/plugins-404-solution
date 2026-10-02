@@ -1,12 +1,19 @@
 /**
  * Privacy-bounded classification of a response body that jQuery could not parse.
  *
- * The classifier records structure and numeric boundary code units only,
- * never response strings or JSON field values.
+ * The classifier records structure and numeric boundary code units, never
+ * response strings or JSON field values.
  * That is enough to distinguish the delivery hypotheses that matter here:
  * native-valid JSON rejected by a jQuery converter, valid JSON wrapped in
  * foreign prefix/suffix bytes, an abruptly truncated document, and a body
  * that is malformed for another reason.
+ *
+ * One bounded exception (support report 521, LiteSpeed/GoDaddy, 4.3.5): a
+ * body with no trace of JSON in it keeps a short TEXT excerpt too (see
+ * excerpt()), because a host/WAF/wp_die replacement page is almost never
+ * user data and naming what it says is the whole diagnosis. Anything that
+ * is, or is shaped like, this plugin's own payload never retains text: whole,
+ * wrapped, truncated or mangled, it can carry row data.
  *
  * Globals defined: abj404ResponseBodyShape.
  */
@@ -208,5 +215,86 @@
         return shape;
     }
 
-    global.abj404ResponseBodyShape = { inspect: inspect };
+    /**
+     * Characters of body text kept at the head of an excerpt. Mirrors
+     * ABJ404_ADMIN_AJAX_EXCERPT_LIMIT in includes/js/abj404-admin-ajax.js
+     * (the console-excerpt idiom this derives from); the two scripts load
+     * on separate handles and neither can read the other's constant, so the
+     * values are declared to agree rather than shared.
+     */
+    var EXCERPT_HEAD_CHARS = 200;
+
+    /** Characters of body text kept from the end of an over-long body. */
+    var EXCERPT_TAIL_CHARS = 80;
+
+    /**
+     * Bodies at or below this length are retained whole by the head alone;
+     * longer bodies keep head and tail and drop the middle.
+     */
+    var EXCERPT_WHOLE_BODY_CHARS = EXCERPT_HEAD_CHARS + EXCERPT_TAIL_CHARS;
+
+    /**
+     * A JSON opener directly followed by something a JSON value starts with:
+     * `{"`, `{{`, `{[`, `["`, `[{`, `[[`, `[1`, `[-`. A truncated or mangled
+     * copy of this plugin's payload always contains one of these (its objects
+     * have quoted keys), wherever foreign bytes sit around it. Bare braces such
+     * as CSS `body{margin:0}` do not match, so a host error page with inline
+     * styles is still a non-JSON page.
+     */
+    var JSON_SHAPED_START = /\{\s*["{\[]|\[\s*["{\[\d-]/;
+
+    /**
+     * Whether a body could be this plugin's own payload in any form: it opens
+     * with a JSON delimiter, or carries a JSON-shaped start anywhere in it.
+     *
+     * @param {string} text Non-empty body text.
+     * @returns {boolean}
+     */
+    function mayBeOurPayload(text) {
+        var firstChar = text.charAt(firstSignificantIndex(text));
+        return firstChar === '{' || firstChar === '[' || JSON_SHAPED_START.test(text);
+    }
+
+    /**
+     * The bounded text excerpt of a body that would not parse as JSON, or
+     * null when this body's text is not for retaining.
+     *
+     * Retained only for a body classified invalid-json that also shows no
+     * sign of being our payload (see mayBeOurPayload): a host security
+     * notice, a gateway error page, a PHP warning printed before a body.
+     * Never for native-valid or wrapped-valid JSON, never for abrupt-tail
+     * (a JSON document cut short is our payload cut short), never for a body
+     * whose region looks like JSON even if it does not parse, and never for
+     * empty or whitespace-only bodies (no text worth the bytes). The server
+     * redactor strips emails, IPs and credentials but not row titles or URL
+     * paths, so the privacy line has to be drawn here.
+     *
+     * @param {string} body
+     * @param {object} shape The inspect() result for the same body, so the
+     *   classification is not computed twice; a missing or non-object shape
+     *   is derived here rather than trusted from the caller.
+     * @returns {{head: string, tail: string, truncated: boolean}|null}
+     */
+    function excerpt(body, shape) {
+        var text = typeof body === 'string' ? body : '';
+        if (text === '') {
+            return null;
+        }
+        var classification = shape && typeof shape === 'object' &&
+                typeof shape.classification === 'string'
+            ? shape.classification : inspect(text).classification;
+        if (classification !== 'invalid-json' || mayBeOurPayload(text)) {
+            return null;
+        }
+        if (text.length <= EXCERPT_WHOLE_BODY_CHARS) {
+            return { head: text, tail: '', truncated: false };
+        }
+        return {
+            head: text.slice(0, EXCERPT_HEAD_CHARS),
+            tail: text.slice(text.length - EXCERPT_TAIL_CHARS),
+            truncated: true
+        };
+    }
+
+    global.abj404ResponseBodyShape = { inspect: inspect, excerpt: excerpt };
 } /* abj404-client-module:end */));

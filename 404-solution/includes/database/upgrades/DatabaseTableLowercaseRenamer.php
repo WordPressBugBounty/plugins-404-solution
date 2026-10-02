@@ -104,13 +104,18 @@ class ABJ_404_Solution_DatabaseTableLowercaseRenamer {
             $this->logger->warn("Could not determine database name for lowercase rename.");
             return;
         }
-        $dbNameEscaped = esc_sql($dbNameRaw);
-        $dbName = is_array($dbNameEscaped) ? '' : $dbNameEscaped;
+        // Both values are bound, not spliced: the executor rewrites `{wp_...}`
+        // tokens over the statement text before it binds query_params. The
+        // LIKE pattern is bound too, so its percent signs never reach prepare()
+        // as a placeholder.
         $query = "SELECT table_name
             FROM information_schema.tables
-            WHERE table_schema = '{$dbName}'
-            AND LOWER(table_name) LIKE '%abj404%'";
-        $results = $this->dbCore->queryAndGetResults($query);
+            WHERE table_schema = %s
+            AND LOWER(table_name) LIKE %s";
+        $results = $this->dbCore->queryAndGetResults(
+            $query,
+            array('query_params' => array($dbNameRaw, '%abj404%'))
+        );
 
         if (!is_array($results['rows'])) {
             $this->logger->warn("Could not query information_schema tables for lowercase rename.");

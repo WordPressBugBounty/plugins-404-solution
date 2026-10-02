@@ -5,7 +5,7 @@ Tags: 404, redirect, 404 redirect, broken links, spell check
 Requires at least: 5.0
 Requires PHP: 7.4
 Tested up to: 7.1
-Stable tag: 4.3.5
+Stable tag: 4.3.6
 License: GPL-3.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -35,6 +35,8 @@ A 404-to-homepage redirect tells Google your broken URL is the same page as your
 
 404 Solution redirects to the *correct* destination, or returns a proper 410 Gone when content is permanently removed. Both outcomes are better for search engines and for visitors.
 
+When you trash or delete a published post, 404 Solution redirects its URL to the closest parent that still exists (its category, its parent page, or its post type archive) and falls back to the homepage only when there is none.
+
 = How It Works =
 
 1. A visitor reaches a URL that returns a 404.
@@ -54,7 +56,7 @@ The whole process adds no perceptible latency for visitors on non-404 pages. The
 * Per-engine confidence thresholds — tune aggressiveness per engine
 * Conditional engine groups — override the matching strategy for specific URL patterns
 * Slug-change auto-detection — redirects created automatically when you rename a post
-* Trash/deletion monitoring — redirect created automatically when a post is deleted
+* Trash/deletion monitoring: a trashed or deleted post's URL redirects to its closest parent (category, parent page or post type archive)
 
 **Redirect Management**
 
@@ -202,6 +204,30 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 
 == Changelog ==
 
+= Version 4.3.6 (September 29, 2026) =
+
+**Bug Fixes**
+
+* Fixed fatal "Maximum execution time exceeded" errors on sites with many pages, where suggestion matching kept working after the host's PHP time limit was nearly used up. Matching now runs against a time budget for the request and, when it runs out, serves the plain 404 the visitor was already getting instead of finishing the search.
+* Fixed automatic redirects to a WooCommerce product category, or to a term of another category-like taxonomy, never being saved. The matching engine found these terms, but the check that an automatic redirect's destination exists looked for them only among post categories, so it rejected them and every later visit to the same broken URL ran the whole matching pipeline again.
+* Fixed a fatal out-of-memory error when the debug log folder could not be created (an unwritable uploads folder, or a file sitting where the folder should be). Writing the warning about the missing folder tried to create the folder again, and so on without end.
+* Fixed the Add Redirect form and CSV import reporting success when nothing was saved. A redirect that failed to save now says so, with the cause, and CSV rows that failed are counted as invalid instead of imported. A failed save of a regex redirect is reported as a save failure rather than as an invalid pattern.
+* Fixed pages that show suggestions running the suggestion search for every 404, including scanner and bot visits that never read the result. The search now runs only when a real visitor's page asks for it, which cuts the extra WordPress requests and CPU a scanner probing many paths used to cause.
+* Fixed the suggestions link on a custom 404 page showing a permanent loading state for visitors without JavaScript. It now offers a working link. The `abj404_suggest` opt-in is also no longer carried onto suggestion links or redirect destinations.
+* Fixed the "hits" totals on the Page Redirects screen never finishing on sites where WP-Cron does not run (a blocked `wp-cron.php` or `DISABLE_WP_CRON`). The totals now complete without cron.
+* Fixed an internal lock that the database refused to release (for example after a deadlock) staying behind for days and then being logged as a "Forcibly removed synchronization" error. The release is now retried, and a lock that is reclaimed is reported once and as a recovery rather than as an error.
+* Fixed a harmless failure to store a temporary suggestions value being logged as a storage error.
+* Fixed the time-limit report bars using fixed grey colors that ignored the admin color scheme.
+* Fixed three hits-rollup notices that were not translatable.
+* Fixed the Statistics trend chart showing an empty chart, as if there were no data, when its database query failed. It now reports the failure.
+* Fixed users listed in the "Plugin Admin Users" setting being refused access to the plugin's admin pages ("Sorry, you are not allowed to access this page") unless they were already site administrators. The permission that lets them in was only switched on along a startup path normal page loads no longer take.
+
+**Improvements**
+
+* When a published post is trashed or deleted with "Create redirect when a page is trashed or deleted" enabled, its old URL now redirects to the closest parent that still exists instead of to the homepage: the post's primary category (as set in Yoast SEO or Rank Math, otherwise the category WordPress uses in its permalink), the nearest published parent page, or the post type archive, in that order. The homepage is used only when none of these exists. A mass redirect to the homepage is what Google reports as a soft 404. The category default ("Uncategorized") and archives that would be left empty are skipped, and the redirect's reason records which parent was chosen, for example "post trashed: parent category". Custom taxonomies such as WooCommerce product categories work the same way.
+* Faster admin page loads: settings are read without building the plugin's full service graph, and one unused lookup was removed from the admin theme stylesheet hook.
+* Better support reports when something goes wrong. Reports now include where a request's time went (a per-request phase timeline, including when PHP's time limit fires inside 404 Solution), CPU time and the running hook stack for fatal errors, and a short, redacted excerpt of a response that was not valid JSON, so an unexpected answer from a host or firewall can be identified. Failures in the plugin's admin screens now keep the HTTP status and the start of the response in the browser console instead of a generic message, and failures the plugin catches are recorded in its log even when debug logging is off. Nothing is sent anywhere unless you choose to send a report.
+
 = Version 4.3.5 (August 30, 2026) =
 
 **Bug Fixes**
@@ -341,46 +367,3 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 
 * Substantial internal refactor of the data-access, view-build, and admin-mutation layers for long-term maintainability. No visible behavior change is expected; the version bump from 4.1.x to 4.2.0 reflects the size of the change.
 
-= Version 4.1.19 (May 17, 2026) =
-
-**New Features**
-
-* Regex redirects are now auto-detected. When you save or import a redirect that contains regex characters (wildcards, brackets, pipes), the plugin automatically marks it as a regex redirect and applies the correct syntax. No need to manually check the "Treat as regex" box. An admin notice confirms the auto-promotion with Edit and Undo links.
-* Debug logs now automatically redact sensitive server details (database name, table prefix, filesystem paths) so logs can be shared safely without manual editing.
-
-**Bug Fixes**
-
-* Fixed the Confidence dropdown filter on admin tables only working on the initial page load. Changing the filter and then navigating pages or waiting for the background refresh would reset it to "All", showing every row.
-* Fixed invalid regex patterns in CSV imports crashing the import. Invalid patterns are now validated during import and suppressed at runtime instead of causing errors.
-* Fixed the repair-and-retry path continuing to report an error after the repair succeeded. The error is now cleared immediately after a successful repair.
-* Fixed a potential SQL ambiguity error in log queries on sites with certain JOIN configurations.
-* Fixed all 6 scheduled tasks not being removed when the plugin is deactivated. Previously some cron hooks were left behind and would trigger errors until manually cleared.
-* Fixed the "Undo" link on regex auto-promotion notices not reverting the URL on the next page load. The original URL is now correctly restored along with the Manual status.
-* Fixed a rare race on shared hosting where a dropped database connection during the admin table rebuild could let a second worker drop the rebuild's working table out from under the first, producing "Table doesn't exist" or "Can't find .frm file" errors. The rebuild now releases its database lock between each step so a dropped connection loses at most one step of progress instead of the entire 11-step run.
-
-**Improvements**
-
-* Bulk CSV and WP-CLI imports are significantly faster. A 10,000-row import that previously issued ~60,000 extra cache-invalidation queries now batches them into a single invalidation at the end.
-* The admin settings page now validates URL length and rejects negative numeric values, preventing misconfigured redirects.
-
-**Internationalization**
-
-* Added translations for 6 new strings in all 12 language files.
-
-= Version 4.1.18 (May 13, 2026) =
-
-**Bug Fixes**
-
-* Fixed the admin table cache rebuild getting stuck on the same step after a dropped database connection. The rebuild now auto-resumes from where it stopped on the next request, instead of retrying the same failing query forever.
-* Fixed admin actions that hit an expired session nonce showing a generic "security check failed" error. The session is now silently refreshed and the action retried, so the expiry is invisible to the administrator.
-* Fixed transient invalid AJAX responses on admin tables producing "undefined" errors. The admin pages now validate the response shape before reading it and surface a clear error instead.
-* Fixed the "missing database table" admin notice being cleared by the next successful query in the same request, so the admin never saw it. The generic auto-clear now skips the missing-table notice; that notice is cleared only by the dedicated repair-success path.
-
-**Improvements**
-
-* Captured 404s and Page Redirects admin tables load noticeably faster on large sites. The total log-count query is now cached on the maximum log id (avoiding a full log-table scan on every page load), log queries no longer sort by non-indexed columns, the Most Unused Redirects report reads from the pre-aggregated hits rollup instead of scanning raw logs, and the dashboard activity trend is cached between admin page loads.
-* When WordPress cron is broken and the log hits rollup falls behind, the plugin now surfaces an admin notice on its own pages explaining how to fix it, instead of silently letting the admin tables show stale numbers.
-
-**Internationalization**
-
-* Added translations for 13 admin strings that were previously displayed in English even on non-English sites.

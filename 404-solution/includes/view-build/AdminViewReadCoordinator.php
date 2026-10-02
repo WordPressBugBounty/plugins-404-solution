@@ -172,7 +172,7 @@ class ABJ_404_Solution_AdminViewReadCoordinator {
             try {
                 return $this->getRedirectsForViewCount($sub, $tableOptions);
             } catch (Throwable $e) {
-                $this->logger->debugMessage('[single-table] live-count probe for empty read failed: ' . $e->getMessage());
+                $this->logger->warnCaught('[single-table] live-count probe for empty read failed; treating the count as unknown.', $e);
                 return -1;
             }
         });
@@ -194,8 +194,11 @@ class ABJ_404_Solution_AdminViewReadCoordinator {
      * @return int Negative when the count query was incomplete or unavailable.
      */
     public function getRedirectsForViewCount(string $sub, array $tableOptions): int {
-        $queryTimeout = isset($tableOptions['_abj404_query_timeout']) && is_numeric($tableOptions['_abj404_query_timeout'])
-            ? max(1, intval($tableOptions['_abj404_query_timeout'])) : 0;
+        $queryTimeout = ABJ_404_Solution_ExactInteger::readOr(
+            $tableOptions['_abj404_query_timeout'] ?? null,
+            1,
+            0
+        );
         $throwOnQueryError = !empty($tableOptions['_abj404_throw_on_view_query_error']);
         $requestCountCacheKey = (string)$sub . '|' . md5(serialize($tableOptions));
 

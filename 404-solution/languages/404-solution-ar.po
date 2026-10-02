@@ -594,6 +594,9 @@ msgstr "خطأ: اخترت رابط خارجي لكنك لم تدخل رابطا
 msgid "Error: unable to add new redirect."
 msgstr "خطأ: تعذر إضافة إعادة توجيه جديدة."
 
+msgid "Error: The database did not save the new redirect. The debug log has the underlying database error."
+msgstr "خطأ: لم تحفظ قاعدة البيانات إعادة التوجيه الجديدة. يحتوي سجل التصحيح على خطأ قاعدة البيانات الأساسي."
+
 msgid "Error: unable to mark URL as %s"
 msgstr "خطأ: تعذر وضع علامة على الرابط كـ %s"
 
@@ -2008,8 +2011,14 @@ msgstr "تعديل"
 msgid "View Logs"
 msgstr "عرض السجلات"
 
+msgid "View Redirect Logs"
+msgstr "عرض سجلات إعادة التوجيه"
+
 msgid "Delete Permanently"
 msgstr "حذف نهائياً"
+
+msgid "Delete Redirect Permanently"
+msgstr "حذف إعادة التوجيه نهائياً"
 
 msgid "Are you sure you want to permanently delete this item?"
 msgstr "هل أنت متأكد من أنك تريد حذف هذا العنصر نهائياً؟"
@@ -2620,6 +2629,9 @@ msgstr "خطأ:"
 #: includes/ajax/ImportRedirects.php
 msgid "Ignored importing redirect because a redirect with the same from URL already exists. URL:"
 msgstr "تم تجاهل استيراد إعادة التوجيه لأن إعادة توجيه بنفس عنوان URL المصدر موجودة بالفعل. URL:"
+
+msgid "Redirect not imported: the database did not save it. URL: %1$s (repository result: %2$s)"
+msgstr "تعذر استيراد إعادة التوجيه: لم تحفظها قاعدة البيانات. URL: %1$s (نتيجة المستودع: %2$s)"
 
 #: includes/ajax/ImportRedirects.php
 msgid "Unrecognized destination type while importing file. Destination:"
@@ -4213,6 +4225,9 @@ msgstr "خطأ: تدعم وجهات التعبير النمطي النسبية �
 msgid "Error: Regex destination references $%1$d, but the source pattern defines %2$d capture group(s)."
 msgstr "خطأ: تشير وجهة التعبير النمطي إلى $%1$d، لكن النمط المصدر يعرّف %2$d من مجموعات الالتقاط."
 
+msgid "Error: Regex destination puts a capture token ($1, $2, ...) inside the scheme, host or port, so every redirect would be refused. Write the host literally and use tokens only in the path, query or fragment, for example https://example.com/$1."
+msgstr "خطأ: تضع وجهة التعبير النمطي رمز التقاط ($1 و $2 و ...) داخل البروتوكول أو المضيف أو المنفذ، لذا سيتم رفض كل عملية إعادة توجيه. اكتب المضيف حرفيًا واستخدم رموز الالتقاط في المسار أو سلسلة الاستعلام أو معرّف الجزء فقط، على سبيل المثال https://example.com/$1."
+
 msgid "Could not load chart data. Reload this page and try again."
 msgstr "تعذر تحميل بيانات الرسم البياني. أعد تحميل هذه الصفحة وحاول مرة أخرى."
 
@@ -4285,6 +4300,9 @@ msgstr "تعذر إرسال التقرير. يرجى المحاولة مرة أ�
 msgid "Could not load the migration tool configuration. Reload this page and try again."
 msgstr "تعذر تحميل إعدادات أداة الترحيل. أعد تحميل هذه الصفحة وحاول مرة أخرى."
 
+msgid "Could not load trend data."
+msgstr "تعذر تحميل بيانات الاتجاه."
+
 msgid "No suggested match was scored for this URL"
 msgstr "لم يتم تسجيل أي تطابق مقترح لهذا الرابط"
 
@@ -4336,3 +4354,239 @@ msgstr[2] "ملاحظة: لم يتم حفظ %1$s شرطين. يمكن أن تح�
 msgstr[3] "ملاحظة: لم يتم حفظ %1$s شروط. يمكن أن تحتوي إعادة التوجيه على %2$s شرط كحد أقصى."
 msgstr[4] "ملاحظة: لم يتم حفظ %1$s شرطًا. يمكن أن تحتوي إعادة التوجيه على %2$s شرط كحد أقصى."
 msgstr[5] "ملاحظة: لم يتم حفظ %1$s شرط. يمكن أن تحتوي إعادة التوجيه على %2$s شرط كحد أقصى."
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:296
+msgid "The Hits and Last Used columns on the Page Redirects screen have been out of date for at least %d hour(s). 404 Solution has not been able to finish rebuilding its hit-count summary in that time."
+msgstr "لم يتم تحديث عمودي الزيارات وآخر استخدام في شاشة إعادة توجيه الصفحات منذ %d ساعة على الأقل. ولم يتمكن 404 Solution من إكمال إعادة بناء ملخص عدد الزيارات خلال تلك الفترة."
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:322
+msgid "This site's WP-Cron is not running the plugin's scheduled rebuild. If DISABLE_WP_CRON is set in wp-config.php, either remove it or configure a system cron job that requests wp-cron.php periodically. In the meantime 404 Solution retries the rebuild in the background after an admin page has finished loading."
+msgstr "إن WP-Cron الخاص بهذا الموقع لا يقوم بتشغيل عملية إعادة البناء المجدولة للملحق. وإذا كان DISABLE_WP_CRON مضبوطا في wp-config.php، فقم بإزالته أو بإعداد مهمة cron على مستوى النظام تطلب wp-cron.php بشكل دوري. وفي هذه الأثناء يعيد 404 Solution محاولة إعادة البناء في الخلفية بعد انتهاء تحميل صفحة الإدارة."
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:326
+msgid "The scheduled rebuild is being picked up but is not completing. Enable debug logging on the 404 Solution Options screen and check the log for the reason the rebuild stopped."
+msgstr "بدأت عملية إعادة البناء المجدولة لكنها لا تكتمل. يرجى تفعيل سجل التصحيح من شاشة خيارات 404 Solution والتحقق من السجل لمعرفة سبب توقف عملية إعادة البناء."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:51
+msgid "WordPress core"
+msgstr "النواة الأساسية لـ WordPress"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:52
+msgid "Before 404 Solution loaded (WordPress start-up, drop-ins, must-use plugins)"
+msgstr "قبل أن يتم تحميل 404 Solution (بدء تشغيل WordPress، وملفات drop-in، والإضافات إلزامية الاستخدام)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:53
+msgid "Main query (WordPress core and query filters)"
+msgstr "الاستعلام الرئيسي (نواة WordPress ومرشحات الاستعلام)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:54
+msgid "Page output (templates and content filters)"
+msgstr "إخراج الصفحة (القوالب ومرشحات المحتوى)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:55
+msgid "Other components"
+msgstr "مكونات أخرى"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:56
+msgid "Unattributed"
+msgstr "غير منسوب"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:64
+msgid "Theme: %s"
+msgstr "القالب المستخدم: %s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:66
+msgid "Must-use plugin: %s"
+msgstr "إضافة إلزامية الاستخدام: %s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:68
+msgid "Drop-in: %s"
+msgstr "ملف بديل من نوع drop-in: %s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:70
+msgid "%s action (all callbacks, not timed one by one)"
+msgstr "الإجراء %s (جميع دوال رد النداء، دون قياس كل منها على حدة)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:72
+msgid "Loading plugins"
+msgstr "تحميل الإضافات"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:72
+msgid "From the %s action to the next"
+msgstr "من الإجراء %s إلى الإجراء التالي"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:74
+msgid "Other code"
+msgstr "شيفرة أخرى"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:125
+msgid "PHP stopped this request at its %1$d second time limit while it was running %2$s."
+msgstr "أوقف PHP هذا الطلب عند بلوغ حده الزمني البالغ %1$d ثانية أثناء تشغيل %2$s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:127
+msgid "PHP stopped this request at its time limit while it was running %s."
+msgstr "أوقف PHP هذا الطلب عند بلوغ حده الزمني أثناء تشغيل %s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:130
+msgid "%s had already passed before 404 Solution loaded."
+msgstr "كان قد مضى %s بالفعل قبل أن يتم تحميل 404 Solution."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:137
+msgid "404 Solution itself used %1$s of the request's %2$s."
+msgstr "استخدم 404 Solution نفسه %1$s من أصل %2$s استغرقها الطلب."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:140
+msgid "404 Solution's own measured time: %1$s of the request's %2$s (its callbacks inside the action totals are not split out)."
+msgstr "الوقت المقيس الخاص بـ 404 Solution: %1$s من أصل %2$s للطلب (لا تُفصل دوال رد النداء الخاصة به داخل مجاميع الإجراءات)."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:160
+msgid "Running when PHP stopped the request: %1$s (%2$s) on the %3$s action, %4$s so far."
+msgstr "قيد التشغيل عندما أوقف PHP الطلب: %1$s (%2$s) على الإجراء %3$s، واستغرق %4$s حتى تلك اللحظة."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:162
+msgid "Slow callback: %1$s (%2$s) on the %3$s action, %4$s."
+msgstr "دالة رد نداء بطيئة: %1$s (%2$s) على الإجراء %3$s، واستغرقت %4$s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:166
+msgid "Seen on this site in the last day, while 404 Solution timed callbacks: %1$s (%2$s) on the %3$s action took %4$s."
+msgstr "رُصد على هذا الموقع خلال اليوم الماضي، أثناء قياس 404 Solution لتوقيت دوال رد النداء: استغرقت %1$s (%2$s) على الإجراء %3$s مدة %4$s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:170
+msgid "CPU time after 404 Solution loaded: %1$s of %2$s wall-clock time."
+msgstr "وقت المعالج CPU بعد تحميل 404 Solution: %1$s من أصل %2$s من الوقت الفعلي المنقضي."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:186
+msgid "To name the slow callback, 404 Solution now times each callback on 1 in %1$d requests for the next %2$d minutes; what it finds appears on the 404 Solution admin screen."
+msgstr "لتحديد دالة رد النداء البطيئة، يقيس 404 Solution الآن توقيت كل دالة رد نداء في طلب واحد من كل %1$d طلبات خلال الدقائق الـ %2$d القادمة؛ وتظهر نتائجه في شاشة إدارة 404 Solution."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:190
+msgid "Measured on this request: how long each plugin took to load, and each callback on the main WordPress actions (plugins_loaded, init, wp_loaded, template_redirect, admin_init and others). Time in filters and in code between those actions is shown as a window or as unattributed. Times are wall-clock seconds."
+msgstr "تم القياس في هذا الطلب: مدة تحميل كل إضافة، وكل دالة رد نداء على إجراءات WordPress الرئيسية (plugins_loaded، init، wp_loaded، template_redirect، admin_init وغيرها). يُعرض الوقت المستغرق في المرشحات وفي الشيفرة الواقعة بين هذه الإجراءات كنافذة زمنية أو كوقت غير منسوب. الأوقات بالثواني الفعلية المنقضية."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:192
+msgid "Measured on this request: how long each plugin took to load, the total of each main WordPress action, and each callback on the actions that ran after the request became slow. Times are wall-clock seconds."
+msgstr "تم القياس في هذا الطلب: مدة تحميل كل إضافة، والمجموع الكلي لكل إجراء رئيسي في WordPress، وكل دالة رد نداء على الإجراءات التي جرى تشغيلها بعد أن أصبح الطلب بطيئًا. الأوقات بالثواني الفعلية المنقضية."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:195
+msgid "Measured on this request: how long each plugin took to load, and the total of each main WordPress action. Callbacks are not timed one by one on normal requests, to keep the site fast. Times are wall-clock seconds."
+msgstr "تم القياس في هذا الطلب: مدة تحميل كل إضافة، والمجموع الكلي لكل إجراء رئيسي في WordPress. لا يُقاس توقيت دوال رد النداء كلٌّ على حدة في الطلبات العادية، للحفاظ على سرعة الموقع. الأوقات بالثواني الفعلية المنقضية."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:198
+msgid "Per-plugin timing is switched off on this site, so only WordPress phases are shown. Times are wall-clock seconds."
+msgstr "قياس التوقيت لكل إضافة معطّل على هذا الموقع، لذا تُعرض مراحل WordPress فقط. الأوقات بالثواني الفعلية المنقضية."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:251
+msgid "Component"
+msgstr "المكوّن"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:252
+msgid "Seconds"
+msgstr "الثواني"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:267
+msgid "The 404 Solution admin screen shows where the time went."
+msgstr "تعرض شاشة إدارة 404 Solution أين ذهب الوقت."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:306
+msgid "%1$s (%2$s) on the %3$s action: %4$s"
+msgstr "دالة رد النداء %1$s (%2$s) على الإجراء %3$s: استغرقت %4$s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:324
+msgid "Where this request's time went"
+msgstr "أين ذهب وقت هذا الطلب"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:327
+msgid "Where this request's time went (PHP time limit: %d s)"
+msgstr "أين ذهب وقت هذا الطلب (الحد الزمني لـ PHP: %d ثانية)"
+
+#: includes/diagnostics/TimeLimitReportView.php:105
+msgid "(CPU %s)"
+msgstr "(وقت المعالج CPU: %s)"
+
+#: includes/diagnostics/TimeLimitReportView.php:121
+msgid "The dark line marks PHP's %d second time limit. Depending on the server, PHP counts either CPU time or wall-clock time against it (Linux counts CPU time, so a request waiting on the network or the database can run longer than the limit in wall-clock time)."
+msgstr "يشير الخط الداكن إلى الحد الزمني لـ PHP البالغ %d ثانية. بحسب الخادم، يحتسب PHP ضمن هذا الحد إما وقت المعالج CPU أو الوقت الفعلي المنقضي (يحتسب Linux وقت المعالج CPU، لذلك يمكن للطلب الذي ينتظر الشبكة أو قاعدة البيانات أن يستمر فعليًا مدة أطول من الحد)."
+
+#: includes/diagnostics/TimeLimitReportView.php:122
+msgid "PHP did not report its time limit for this request."
+msgstr "لم يُبلغ PHP عن حده الزمني لهذا الطلب."
+
+#: includes/diagnostics/TimeLimitReportView.php:126
+msgid "The last request PHP stopped at its time limit while 404 Solution's code was running: %1$s, %2$s"
+msgstr "آخر طلب أوقفه PHP عند حده الزمني أثناء تشغيل شيفرة 404 Solution: %1$s، %2$s"
+
+#: includes/diagnostics/TimeLimitReportView.php:128
+msgid "Where the request's time went, by WordPress lifecycle window"
+msgstr "أين ذهب وقت الطلب، مقسّمًا حسب مراحل دورة حياة WordPress"
+
+#: includes/diagnostics/TimeLimitReportView.php:153
+msgid "404 Solution: PHP stopped a request on this site at its time limit while 404 Solution's code was running. 404 Solution recorded which components used that request's time."
+msgstr "404 Solution: أوقف PHP طلبًا على هذا الموقع عند بلوغ حده الزمني أثناء تشغيل شيفرة 404 Solution. سجّل 404 Solution المكونات التي استهلكت وقت ذلك الطلب."
+
+#: includes/diagnostics/TimeLimitReportView.php:155
+msgid "See where the time went"
+msgstr "اعرض أين ذهب الوقت"
+
+#: includes/diagnostics/TimeLimitReportView.php:174
+msgid "Slow callbacks found while 404 Solution timed each callback"
+msgstr "دوال رد النداء البطيئة التي عُثر عليها أثناء قياس 404 Solution لتوقيت كل دالة رد نداء"
+
+#: includes/diagnostics/TimeLimitReportView.php:198
+msgid "Recent time-limit deaths"
+msgstr "الطلبات الأخيرة التي أُوقفت عند بلوغ الحد الزمني"
+
+#: includes/diagnostics/TimeLimitReportView.php:199
+msgid "When"
+msgstr "متى"
+
+#: includes/diagnostics/TimeLimitReportView.php:200
+msgid "Path"
+msgstr "المسار"
+
+#: includes/diagnostics/TimeLimitReportView.php:201
+msgid "Wall time"
+msgstr "الوقت الفعلي المنقضي"
+
+#: includes/diagnostics/TimeLimitReportView.php:202
+msgid "CPU time (after 404 Solution loaded)"
+msgstr "وقت المعالج CPU (بعد تحميل 404 Solution)"
+
+#: includes/diagnostics/TimeLimitReportView.php:203
+msgid "Stopped in"
+msgstr "أُوقف أثناء"
+
+#: includes/diagnostics/TimeLimitReportView.php:214
+msgid "Before 404 Solution loaded"
+msgstr "قبل أن يتم تحميل 404 Solution"
+
+#: includes/diagnostics/TimeLimitReportView.php:216
+msgid "plugins_loaded to init (theme setup)"
+msgstr "المرحلة من plugins_loaded إلى init (إعداد القالب)"
+
+#: includes/diagnostics/TimeLimitReportView.php:217
+msgid "init to wp_loaded"
+msgstr "المرحلة من الإجراء init إلى الإجراء wp_loaded"
+
+#: includes/diagnostics/TimeLimitReportView.php:218
+msgid "wp_loaded to template_redirect (main query)"
+msgstr "المرحلة من wp_loaded إلى template_redirect (الاستعلام الرئيسي)"
+
+#: includes/diagnostics/TimeLimitReportView.php:219
+msgid "template_redirect to the end (page output)"
+msgstr "المرحلة من template_redirect حتى النهاية (إخراج الصفحة)"
+
+#: includes/diagnostics/TimeLimitReportView.php:220
+msgid "admin_init to the end (admin screen)"
+msgstr "المرحلة من admin_init حتى النهاية (شاشة الإدارة)"
+
+#: includes/diagnostics/TimeLimitReportView.php:221
+msgid "login_init to the end (login screen)"
+msgstr "المرحلة من login_init حتى النهاية (شاشة تسجيل الدخول)"
+
+#: includes/view/View_Tools.php:151
+msgid "Timed-out requests"
+msgstr "الطلبات التي تجاوزت الحد الزمني"
+
+#: includes/view/ShortcodeSuggestionsPresenter.php:260
+msgid "Show suggested pages"
+msgstr "عرض الصفحات المقترحة"

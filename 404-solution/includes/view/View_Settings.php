@@ -213,8 +213,9 @@ class ABJ_404_Solution_View_Settings extends ABJ_404_Solution_ViewComponent {
         // Engine Profiles and GSC are advanced features — hidden in simple mode
         if ($settingsMode === 'advanced') {
             // Engine Profiles — outside the main form (uses its own AJAX save)
-            $epHtml = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . '/html/engineProfilesSection.html');
-            $epHtml = $this->f->doNormalReplacements($epHtml);
+            $epHtml = $this->f->renderTemplate(
+                ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . '/html/engineProfilesSection.html')
+            );
             $this->adminChrome->echoOptionsSection(new ABJ_404_Solution_OptionsSectionView('settings-engine-profiles', 'abj404-engineProfiles', __('Engine Profiles', '404-solution'), $epHtml, false, $this->adminChrome->getCardIcon('filter')));
 
             // Google Search Console — deferred via AJAX so the options page shell

@@ -256,7 +256,7 @@ class ABJ_404_Solution_NGramRebuildDrain {
                 . '; refusing to read an unreadable batch as a clean one.'
             );
         }
-        $success = isset($stats['success']) && is_numeric($stats['success']) ? (int)$stats['success'] : 0;
+        $success = ABJ_404_Solution_ExactInteger::readOr($stats['success'] ?? null, 0, 0);
         $failed = (int)$stats['failed'];
 
         return [

@@ -1,19 +1,23 @@
 var abj404_whichButtonClicked = null;
 
-jQuery(document).ready(function($) {
-	var adminOptionsPage = document.getElementById("admin-options-page");
-	if (adminOptionsPage) {
-		adminOptionsPage.addEventListener('submit', submitOptions);
+// Bound on the document when this script runs, not in a jQuery ready callback.
+// The script loads in the head; the browser paints the options form and accepts
+// a click on Save before ready fires on a heavy admin page. A handler attached
+// only at ready leaves that window open to a native POST to action="#", which
+// no server handler reads, so the admin's changes were silently discarded.
+document.addEventListener('submit', function(e) {
+	if (e.target && e.target.id === 'admin-options-page') {
+		submitOptions(e);
 	}
-	
-	var deleteDebugFileButton = document.querySelector('#deleteDebugFile');
-	if (deleteDebugFileButton) {
-		deleteDebugFileButton.addEventListener('click', function(e) {
-			abj404_whichButtonClicked = 'deleteDebugFile';
-			submitOptions(e);
-		});
+});
+
+document.addEventListener('click', function(e) {
+	var target = e.target;
+	if (target && typeof target.closest === 'function' && target.closest('#deleteDebugFile')) {
+		abj404_whichButtonClicked = 'deleteDebugFile';
+		submitOptions(e);
 	}
-})
+});
 
 function striphtml(html) {
     // A regex strip (not a real HTML parser) so this can never load a
@@ -83,7 +87,7 @@ function submitOptions(e) {
             'encodedData': encodedData
         },
         dataType :'json',
-        success: function (data) {
+        success: function (data, textStatus, jqXHR) {
             // Support both legacy payloads ({ newURL, message, error }) and WP-shaped responses
             // ({ success: true|false, data: { ... } }).
             var payload = data;
@@ -95,7 +99,10 @@ function submitOptions(e) {
                     } else if (data.data && data.data.message) {
                         serverMsg = data.data.message;
                     }
-                    showSaveError(serverMsg || "Error saving settings. Please try again.");
+                    showSaveError(serverMsg || abj404OptionsSaveFailureMessage(jqXHR, {
+                        textStatus: textStatus,
+                        errorThrown: ''
+                    }));
                     return;
                 }
                 payload = data.data;
@@ -103,7 +110,10 @@ function submitOptions(e) {
 
             // Safety: if we don't have the redirect URL, treat as failure.
             if (!payload || payload['newURL'] === undefined) {
-                showSaveError("Error saving settings. Please try again.");
+                showSaveError(abj404OptionsSaveFailureMessage(jqXHR, {
+                    textStatus: textStatus,
+                    errorThrown: ''
+                }));
                 return;
             }
 
@@ -131,17 +141,10 @@ function submitOptions(e) {
                 showSaveError('Request timed out. Please check your connection and try again.');
                 return;
             }
-            // Shared describe-and-record seam (abj404-admin-ajax.js), guarded
-            // so a missing asset degrades to a generic message instead of
-            // throwing out of the error handler and leaving the overlay stuck.
-            var errMsg = "Error saving settings. Please try again.";
-            if (typeof abj404AdminAjaxErrorMessage === 'function') {
-                errMsg = abj404AdminAjaxErrorMessage(request, {
-                    fallback: errMsg,
-                    source: 'options-save',
-                    errorThrown: errorThrown
-                });
-            }
+            var errMsg = abj404OptionsSaveFailureMessage(request, {
+                textStatus: textStatus,
+                errorThrown: errorThrown
+            });
 
             showSaveError(errMsg);
         }
@@ -149,6 +152,48 @@ function submitOptions(e) {
 
     // don't submit the form.
     return false;
+}
+
+/**
+ * Message for a settings save the server did not explain: the framing sentence
+ * plus the underlying code in parentheses, never the bare sentence. Delegates
+ * to the shared seam (abj404-admin-ajax.js), which also records the failure to
+ * the console and never throws; when that asset did not load, the same shape is
+ * composed here so the overlay keeps its cause and still clears instead of
+ * throwing out of the handler.
+ *
+ * @param {object} jqXHR
+ * @param {{textStatus: string, errorThrown: string}} failure
+ *     One object, not adjacent strings, so the two cannot be swapped silently:
+ *     jQuery's own textStatus and errorThrown. The framing sentence (fallback)
+ *     and the console-record source ('options-save') are owned here.
+ * @returns {string}
+ */
+function abj404OptionsSaveFailureMessage(jqXHR, failure) {
+    var fallback = "Error saving settings. Please try again.";
+    var textStatus = (typeof failure.textStatus === 'string') ? failure.textStatus : '';
+    var errorThrown = (typeof failure.errorThrown === 'string') ? failure.errorThrown : '';
+    if (typeof abj404AdminAjaxErrorMessage === 'function') {
+        return abj404AdminAjaxErrorMessage(jqXHR, {
+            fallback: fallback,
+            source: 'options-save',
+            textStatus: textStatus,
+            errorThrown: errorThrown
+        });
+    }
+    var status = (jqXHR && typeof jqXHR.status === 'number') ? jqXHR.status : 0;
+    var detail = 'no response from the server';
+    if (status === 0 && errorThrown && errorThrown.toLowerCase() !== 'error') {
+        detail = errorThrown;
+    } else if (status >= 200 && status < 300) {
+        detail = 'HTTP ' + status + (textStatus === 'parsererror'
+            ? ', the response was not valid JSON' : ', the server sent no message');
+    } else if (status > 0) {
+        var statusText = (typeof jqXHR.statusText === 'string') ? jqXHR.statusText : '';
+        detail = 'HTTP ' + status
+            + ((statusText !== '' && statusText.toLowerCase() !== 'error') ? ' ' + statusText : '');
+    }
+    return fallback + ' (' + detail + ')';
 }
 
 function showSaveOverlay() {

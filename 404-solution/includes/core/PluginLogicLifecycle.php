@@ -264,7 +264,8 @@ class ABJ_404_Solution_PluginLogicLifecycle {
                 'abj404_ngram_usage_stats',
                 'abj404_installed_time',
                 'abj404_user_feedback',
-                'abj404_uninstall_preferences'
+                'abj404_uninstall_preferences',
+                ABJ_404_Solution_SchemaHighWaterMark::OPTION
             );
 
             foreach ($plugin_options as $option) {

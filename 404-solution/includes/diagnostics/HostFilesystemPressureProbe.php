@@ -96,8 +96,8 @@ final class ABJ_404_Solution_HostFilesystemPressureProbe {
         return array(
             'status' => 'available',
             'path' => $path,
-            'free_bytes' => is_numeric($freeBytes) ? (int)$freeBytes : null,
-            'total_bytes' => is_numeric($totalBytes) ? (int)$totalBytes : null,
+            'free_bytes' => ABJ_404_Solution_ExactInteger::read($freeBytes, 0),
+            'total_bytes' => ABJ_404_Solution_ExactInteger::read($totalBytes, 0),
             'create_write_probe' => self::createWriteProbe($path),
         );
     }

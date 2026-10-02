@@ -330,13 +330,24 @@ class ABJ_404_Solution_Functions {
         return '';
     }
     
-    /** Replace constants and translations.
-     * @param string $text
-     * @return string
+    /**
+     * Expand the plugin's known constants (`{ABJ404_STATUS_AUTO}`, `{PLUGIN_NAME}`,
+     * `{ABJ404_VERSION}`, ...) in a TEMPLATE. Never translates anything, which makes it
+     * the token pass that is safe to run over SQL text.
+     *
+     * ORDER MATTERS: call this on the template BEFORE any user-controlled value is bound
+     * into it. The pass cannot tell template text from data, so a value that reaches it
+     * containing `{ABJ404_VERSION}` is rewritten too. For SQL, expand tokens and table
+     * names first and bind data last (`$wpdb->prepare`, or the `query_params` option of
+     * `queryAndGetResults()`, which binds after table expansion). For HTML use
+     * {@see renderTemplate()}, which does both steps in the safe order.
+     *
+     * @param string $text The template. Not data.
+     * @return string The template with every known constant token replaced.
      */
-    function doNormalReplacements($text) {
+    public function replaceKnownConstants(string $text): string {
         global $wpdb;
-        
+
         // known strings that do not exist in the translation file.
         $knownReplacements = array(
             '{ABJ404_STATUS_AUTO}' => ABJ404_STATUS_AUTO,
@@ -363,26 +374,75 @@ class ABJ_404_Solution_Functions {
             );
         
         // replace known strings that do not exist in the translation file.
-        $text = $this->str_replace(array_keys($knownReplacements), array_values($knownReplacements), $text);
-        
-        // Find the strings to replace in the content.
-        $re = '/\{(.+?)\}/x';
-        $stringsToReplace = array();
-        // TODO does this need to be $f->regexMatch?
-        preg_match_all($re, $text, $stringsToReplace, PREG_PATTERN_ORDER);
+        return $this->str_replace(array_keys($knownReplacements), array_values($knownReplacements), $text);
+    }
 
-        // Iterate through each string to replace.
-        foreach ($stringsToReplace[1] as $stringToReplace) {
-        	$regexSearchString = '{' . $stringToReplace . '}';
+    /**
+     * Render an HTML template: expand constants, translate every `{msgid}` token, and
+     * substitute the caller's values, in that order and in a single pass over the values.
+     *
+     * WHY THE ORDER IS THE CONTRACT. Constants and translations are expanded over the
+     * TEMPLATE, and `$vars` are inserted LAST with one `strtr()`. The previous shape
+     * (`str_replace(keys, values, $template)` and then a `{msgid}` pass over the finished
+     * string) ran the translation pass over user data. A visitor who requested
+     * `/a{Remove Later Status} onmouseover=alert(1) x` had that token replaced by the
+     * site's UNESCAPED translation inside the `title="..."` attribute of the admin table
+     * (a ru_RU msgstr holds a bare `"`), which breaks out of the attribute. Because
+     * `strtr()` never rescans text it has already substituted, a value that itself
+     * contains another var key, a constant token or a `{msgid}` is inserted verbatim.
+     *
+     * Translations are NOT escaped here: some msgids intentionally carry markup
+     * (`{<a>View</a> the debug file.}`, `<B>`, `&lt;ol&gt;`). The fix is ordering, not
+     * blanket escaping. Escape each VALUE for its context (`esc_html`, `esc_attr`) before
+     * putting it in `$vars`.
+     *
+     * A token whose text is exactly a key of `$vars` is a value slot: it is never handed
+     * to `translate()`, so a var key that happens to look like a msgid
+     * (`{<a>View</a> the debug file.}`) is filled with its value, not its translation.
+     * An untranslated `{x}` token renders as `x` (braces stripped), as it always did.
+     *
+     * A value that is a fragment of markup carrying its own `{msgid}` tokens (a button,
+     * a status label) must be rendered by its own renderTemplate() call first and passed
+     * in as the finished string; this method never translates values.
+     *
+     * @param string               $template Template text. Never data.
+     * @param array<string, mixed> $vars     Map of slot token (usually `'{name}'`) to value.
+     *                                       Values are cast to string; empty keys are ignored.
+     * @return string The rendered markup.
+     */
+    public function renderTemplate(string $template, array $vars = array()): string {
+        $stringVars = array();
+        foreach ($vars as $slot => $value) {
+            $slot = (string)$slot;
+            // strtr() with an empty key returns false on PHP 7.4 and ignores it on 8.x.
+            if ($slot === '') {
+                continue;
+            }
+            $stringable = is_scalar($value) || $value === null || (is_object($value) && method_exists($value, '__toString'));
+            $stringVars[$slot] = $stringable ? (string)$value : '';
+        }
+
+        $text = $this->replaceKnownConstants($template);
+
+        $translated = preg_replace_callback('/\{(.+?)\}/', static function (array $match) use ($stringVars): string {
+            if (isset($stringVars[$match[0]])) {
+                return $match[0];
+            }
             // External HTML template placeholders are extracted and checked by
             // HtmlTemplateTranslationCoverageTest because they do not live in PHP call sites.
-            $translated = function_exists('translate') ? translate($stringToReplace, '404-solution') : $stringToReplace;
-            $text = $this->str_replace($regexSearchString, $translated, $text);
+            return function_exists('translate') ? (string)translate($match[1], '404-solution') : $match[1];
+        }, $text);
+        if ($translated === null) {
+            // PCRE failure (backtrack or JIT stack limit on a huge template). Render the
+            // untranslated template rather than an empty page.
+            $this->logging()->warn('renderTemplate: the translation pass failed (preg_last_error() = '
+                . preg_last_error() . '); rendering the template untranslated.');
+            $translated = $text;
         }
-        
-        return $text;
+
+        return $stringVars === array() ? $translated : strtr($translated, $stringVars);
     }
-    
+
     
     /**
      * @param string $haystack

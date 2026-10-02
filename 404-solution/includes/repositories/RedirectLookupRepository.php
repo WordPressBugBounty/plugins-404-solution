@@ -44,10 +44,16 @@ class ABJ_404_Solution_RedirectLookupRepository {
             $query = $this->stripScheduledRedirectPredicates($query);
         }
 
-        $query = $this->prepare_query_wp($query, array("url1" => $url1, "url2" => $url2));
+        // The visitor's URL is bound LAST. Table names and constants are expanded on the
+        // TEMPLATE first, and the URL travels to the executor as a positional query
+        // parameter, so no `{token}` pass (table names, constants, translation) ever runs over
+        // bytes an anonymous visitor chose. The old order bound the URL and then ran the
+        // passes over the finished statement: `/a{Some msgid}` became a translation inside the
+        // quoted literal.
         $query = $this->dbCore->doTableNameReplacements($query);
-        $query = $this->f->doNormalReplacements($query);
-        $results = $this->dbCore->queryAndGetResults($query);
+        $query = $this->f->replaceKnownConstants($query);
+        list($preparedQuery, $orderedValues) = $this->prepare_query($query, array("url1" => $url1, "url2" => $url2));
+        $results = $this->dbCore->queryAndGetResults($preparedQuery, array('query_params' => $orderedValues));
 
         return $this->firstRedirectRow($results);
     }
@@ -67,9 +73,12 @@ class ABJ_404_Solution_RedirectLookupRepository {
         // full-scanning the redirects table on every new-URL capture (a hot path
         // under scanner-flood 404 traffic).
         // allow-unbounded-select: single-URL equality lookup on a hot capture path; returns the few rows matching one URL
-        $query = $this->prepare_query_wp('select * from {wp_abj404_redirects} where url = {url} and BINARY url = BINARY {url} ' .
-            " and disabled = 0 ", array("url" => $url));
-        $results = $this->dbCore->queryAndGetResults($query);
+        // Table names are expanded on the template and the URL is bound last, as a positional
+        // query parameter (see getActiveRedirectForNormalizedUrl).
+        $query = $this->dbCore->doTableNameReplacements('select * from {wp_abj404_redirects} where url = {url} and BINARY url = BINARY {url} ' .
+            " and disabled = 0 ");
+        list($preparedQuery, $orderedValues) = $this->prepare_query($query, array("url" => $url));
+        $results = $this->dbCore->queryAndGetResults($preparedQuery, array('query_params' => $orderedValues));
 
         return $this->firstRedirectRow($results);
     }
@@ -108,8 +117,7 @@ class ABJ_404_Solution_RedirectLookupRepository {
             if ($cached === 'present') { return false; }
         }
 
-        $tableName = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
-        $columns = $this->getRedirectsTableColumns($tableName);
+        $columns = $this->getRedirectsTableColumns();
 
         if (empty($columns)) {
             return false;
@@ -133,17 +141,17 @@ class ABJ_404_Solution_RedirectLookupRepository {
     }
 
     /**
-     * @param string $tableName
      * @return array<int, string>
      */
-    private function getRedirectsTableColumns(string $tableName): array {
+    private function getRedirectsTableColumns(): array {
         global $wpdb;
         if (!isset($wpdb)) {
             return [];
         }
-        // @utf8-audit: opt-out - getRedirectsTableColumns receives system-generated redirects table names only.
+        // The redirects table is named by the executor's own token; nothing is
+        // spliced into the statement text ahead of its `{wp_...}` pass.
         $result = $this->dbCore->queryAndGetResults(
-            "SHOW COLUMNS FROM `" . esc_sql($tableName) . "`",
+            "SHOW COLUMNS FROM `{wp_abj404_redirects}`",
             array('log_errors' => false)
         );
         $rows = isset($result['rows']) && is_array($result['rows']) ? $result['rows'] : [];
@@ -199,17 +207,5 @@ class ABJ_404_Solution_RedirectLookupRepository {
         }, $query);
 
         return [$prepared_query !== null ? $prepared_query : $query, $ordered_values];
-    }
-
-    /**
-     * @param string $query
-     * @param array<string, mixed> $data
-     * @return string
-     */
-    private function prepare_query_wp($query, $data) {
-        global $wpdb;
-        list($prepared_query, $ordered_values) = $this->prepare_query($query, $data);
-        // DAO-bypass-approved: $wpdb->prepare is read-only string formatting; callers execute the result through queryAndGetResults
-        return $wpdb->prepare($prepared_query, $ordered_values);
     }
 }

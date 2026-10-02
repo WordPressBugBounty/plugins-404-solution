@@ -123,7 +123,7 @@ class ABJ_404_Solution_GscSearchAnalyticsClient {
      */
     public function isRefreshNeeded(): bool {
         $lastFetch = get_option(ABJ_404_Solution_GscConfig::LAST_FETCH_OPTION_KEY, 0);
-        $lastFetchTime = is_numeric($lastFetch) ? (int)$lastFetch : 0;
+        $lastFetchTime = ABJ_404_Solution_ExactInteger::readOr($lastFetch, 0, 0);
         return (abj_clock()->now() - $lastFetchTime) > ABJ_404_Solution_GscConfig::STALE_THRESHOLD;
     }
 
@@ -155,7 +155,7 @@ class ABJ_404_Solution_GscSearchAnalyticsClient {
         }
         $data = $this->getSearchAnalyticsForUrls($capturedUrls, $days);
         return array_values(array_filter($data, function ($row) {
-            return isset($row['clicks']) && is_numeric($row['clicks']) && (int)$row['clicks'] > 0;
+            return ABJ_404_Solution_ExactInteger::readOr($row['clicks'] ?? null, 0, 0) > 0;
         }));
     }
 
@@ -309,7 +309,7 @@ class ABJ_404_Solution_GscSearchAnalyticsClient {
     /** @param array<mixed, mixed> $row */
     private function rowInt(array $row, string $key): int {
         $value = $row[$key] ?? 0;
-        return is_numeric($value) ? (int)$value : 0;
+        return ABJ_404_Solution_ExactInteger::readOr($value, 0, 0);
     }
 
     /** @param array<mixed, mixed> $row */

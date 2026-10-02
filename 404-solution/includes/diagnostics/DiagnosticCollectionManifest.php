@@ -66,7 +66,7 @@ final class ABJ_404_Solution_DiagnosticCollectionManifest {
      *   One entry per journal the collector actually read, carrying the
      *   candidate paths it used and the text it got back.
      * @param array{status: string, ids: array<int, string>, records: int} $clientAttempts
-     *   ABJ_404_Solution_ClientTransportReport::attemptOutcomesInDrainedBuffer().
+     *   ABJ_404_Solution_DrainedTelemetryBuffer::attemptOutcomes().
      * @param int $budgetBytes Hard ceiling for the returned string.
      * @return string
      */
@@ -325,7 +325,7 @@ final class ABJ_404_Solution_DiagnosticCollectionManifest {
     private static function outcome(array $described): string {
         foreach ($described as $channel) {
             $collectedBytes = $channel['collected_bytes'] ?? 0;
-            if (is_numeric($collectedBytes) && (int)$collectedBytes > 0) {
+            if (ABJ_404_Solution_ExactInteger::read($collectedBytes, 1) !== null) {
                 return self::OUTCOME_COLLECTED;
             }
         }

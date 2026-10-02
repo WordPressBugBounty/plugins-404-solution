@@ -55,7 +55,7 @@ class ABJ_404_Solution_PreviousRequestCookieTracker {
             }
 
         } catch (Exception $e) {
-            $this->logger->debugMessage("There was an issue setting a cookie: " . $e->getMessage());
+            $this->logger->warnCaught('There was an issue setting a cookie; falling back to the script-set cookie.', $e);
             $expireTime = date("D, d M Y H:i:s T", abj_clock()->now() + (60 * 4));
             $template = ABJ_404_Solution_FileSystemService::readFileContents(
                 dirname(__DIR__) . '/html/previousRequestCookieFallbackScript.html',

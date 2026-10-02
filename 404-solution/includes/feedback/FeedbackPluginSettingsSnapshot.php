@@ -124,7 +124,7 @@ class ABJ_404_Solution_FeedbackPluginSettingsSnapshot {
      */
     private function normalizeValue($value, string $type) {
         if ($type === self::TYPE_INT) {
-            return is_numeric($value) ? (int)$value : null;
+            return ABJ_404_Solution_ExactInteger::read($value, PHP_INT_MIN);
         }
         if ($type === self::TYPE_BOOL) {
             if (in_array($value, array(true, 1, '1', 'on', 'yes'), true)) {

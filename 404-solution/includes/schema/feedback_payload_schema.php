@@ -266,7 +266,7 @@ return (function (): array {
             ],
             'description' => 'Which admin surface launched the request. Pinned enum; mirror of Ajax_SupportRequest::ALLOWED_TRIGGER_SOURCES.',
         ],
-        'debug_log_excerpt' => ['type' => 'string', 'description' => 'Best-effort sanitized debug-log tail, plus bounded PII-safe AJAX stage-trace JSONL AND AJAX request-checkpoint JSONL AND the detach A/B verdict AND receipt-reconstructed canary interpretation for the sending session, all assembled by SupportEvidenceExcerpt::assemble(), plus the browser transport-attempt buffer drained by SupportRequest.js (timings, byte counts, readyState, protocol; no URL, user text, or identifiers). Empty string when no source is available.'],
+        'debug_log_excerpt' => ['type' => 'string', 'description' => 'Best-effort sanitized debug-log tail, plus bounded PII-safe AJAX stage-trace JSONL AND AJAX request-checkpoint JSONL AND the detach A/B verdict AND receipt-reconstructed canary interpretation for the sending session, all assembled by SupportEvidenceExcerpt::assemble(), plus the browser transport-attempt buffer drained by SupportRequest.js (timings, byte counts, readyState, protocol; no URL, user text, or identifiers, except a bounded first-200/last-80-character text excerpt retained ONLY when a response body failed to parse as JSON, redacted through PiiRedactor at both ingest boundaries). Empty string when no source is available.'],
     ];
 
     return [

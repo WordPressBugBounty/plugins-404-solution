@@ -44,9 +44,9 @@ class ABJ_404_Solution_NGramUsageTelemetry {
         /** @var array<string, mixed> $stats */
         $stats = is_array($statsRaw) ? $statsRaw : $defaultStats;
 
-        $stats['total_queries'] = (isset($stats['total_queries']) && is_numeric($stats['total_queries'])) ? (int)$stats['total_queries'] + 1 : 1;
-        $stats['total_entries_examined'] = (isset($stats['total_entries_examined']) && is_numeric($stats['total_entries_examined'])) ? (int)$stats['total_entries_examined'] + $examined : $examined;
-        $stats['total_candidates_returned'] = (isset($stats['total_candidates_returned']) && is_numeric($stats['total_candidates_returned'])) ? (int)$stats['total_candidates_returned'] + $candidates : $candidates;
+        $stats['total_queries'] = ABJ_404_Solution_ExactInteger::readOr($stats['total_queries'] ?? null, 0, 0) + 1;
+        $stats['total_entries_examined'] = ABJ_404_Solution_ExactInteger::readOr($stats['total_entries_examined'] ?? null, 0, 0) + $examined;
+        $stats['total_candidates_returned'] = ABJ_404_Solution_ExactInteger::readOr($stats['total_candidates_returned'] ?? null, 0, 0) + $candidates;
         $stats['total_duration_ms'] = (isset($stats['total_duration_ms']) && is_numeric($stats['total_duration_ms'])) ? (float)$stats['total_duration_ms'] + $duration : $duration;
 
         if ($totalInCache > 0) {
@@ -57,7 +57,7 @@ class ABJ_404_Solution_NGramUsageTelemetry {
         }
 
         $monthAgo = abj_clock()->now() - self::RESET_INTERVAL_SECONDS;
-        $lastReset = (isset($stats['last_reset']) && is_numeric($stats['last_reset'])) ? (int)$stats['last_reset'] : 0;
+        $lastReset = ABJ_404_Solution_ExactInteger::readOr($stats['last_reset'] ?? null, 0, 0);
         if ($lastReset < $monthAgo) {
             $stats = [
                 'total_queries' => 1,
@@ -90,7 +90,7 @@ class ABJ_404_Solution_NGramUsageTelemetry {
         /** @var array<string, mixed> $stats */
         $stats = is_array($statsRaw) ? $statsRaw : $defaultStats;
 
-        $totalQueries = (isset($stats['total_queries']) && is_numeric($stats['total_queries'])) ? (int)$stats['total_queries'] : 0;
+        $totalQueries = ABJ_404_Solution_ExactInteger::readOr($stats['total_queries'] ?? null, 0, 0);
         $totalExamined = (isset($stats['total_entries_examined']) && is_numeric($stats['total_entries_examined'])) ? (float)$stats['total_entries_examined'] : 0;
         $totalCandidates = (isset($stats['total_candidates_returned']) && is_numeric($stats['total_candidates_returned'])) ? (float)$stats['total_candidates_returned'] : 0;
         $totalDuration = (isset($stats['total_duration_ms']) && is_numeric($stats['total_duration_ms'])) ? (float)$stats['total_duration_ms'] : 0;

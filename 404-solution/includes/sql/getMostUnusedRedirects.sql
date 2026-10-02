@@ -41,8 +41,10 @@ from (
          left outer join {wp_abj404_logsv2} l
             on l.id = h.logsid
 
+         /* final_dest is a post id only for a post redirect (type 1); for a
+            category or tag redirect the same number names an unrelated post. */
          left outer join {wp_posts} wpp
-         on r.final_dest = wpp.ID
+         on r.final_dest = wpp.ID and r.type = 1
 
          left outer JOIN {wp_options} wpo
          ON wpo.option_name = 'permalink_structure'

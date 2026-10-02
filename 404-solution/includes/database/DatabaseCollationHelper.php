@@ -234,27 +234,23 @@ class ABJ_404_Solution_DatabaseCollationHelper {
             $sanitized = $this->sanitizeCollationIdentifier($declaredCollation);
             return $sanitized !== '' ? $sanitized : $fallback;
         }
-        global $wpdb;
-        if (isset($wpdb) && method_exists($wpdb, 'prepare')) {
-            /** @var wpdb $wpdb */
-            $sql = $wpdb->prepare(
-                "SELECT TABLE_COLLATION FROM information_schema.TABLES "
-                . "WHERE TABLE_SCHEMA = DATABASE() "
-                . "AND TABLE_NAME = %s "
-                . "LIMIT 1",
-                $tableName
-            );
-            if (is_string($sql) && $sql !== '') {
-                $result = ($this->queryRunner)($sql, array('log_errors' => false));
-                $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
-                if (!empty($rows) && is_array($rows[0])) {
-                    $row = array_change_key_case($rows[0]);
-                    $collation = $row['table_collation'] ?? '';
-                    if (is_string($collation) && $collation !== '') {
-                        $sanitized = $this->sanitizeCollationIdentifier($collation);
-                        return $sanitized !== '' ? $sanitized : $fallback;
-                    }
-                }
+        // The name is BOUND by the query runner (`query_params`), after the runner's own
+        // `{token}` pass over the template. Preparing it here first would hand the bound
+        // bytes to that pass.
+        $result = ($this->queryRunner)(
+            "SELECT TABLE_COLLATION FROM information_schema.TABLES "
+            . "WHERE TABLE_SCHEMA = DATABASE() "
+            . "AND TABLE_NAME = %s "
+            . "LIMIT 1",
+            array('query_params' => array($tableName), 'log_errors' => false)
+        );
+        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+        if (!empty($rows) && is_array($rows[0])) {
+            $row = array_change_key_case($rows[0]);
+            $collation = $row['table_collation'] ?? '';
+            if (is_string($collation) && $collation !== '') {
+                $sanitized = $this->sanitizeCollationIdentifier($collation);
+                return $sanitized !== '' ? $sanitized : $fallback;
             }
         }
         return $fallback;
@@ -274,24 +270,15 @@ class ABJ_404_Solution_DatabaseCollationHelper {
      */
     public function getColumnCollationString(string $tableName, string $columnName): string {
         $fallback = 'utf8mb4_unicode_ci';
-        global $wpdb;
-        if (!isset($wpdb) || !method_exists($wpdb, 'prepare')) {
-            return $this->getTableCollationString($tableName);
-        }
-        /** @var wpdb $wpdb */
-        $sql = $wpdb->prepare(
+        // Both names are BOUND by the query runner (`query_params`), after its `{token}` pass.
+        $result = ($this->queryRunner)(
             "SELECT COLLATION_NAME FROM information_schema.COLUMNS "
             . "WHERE TABLE_SCHEMA = DATABASE() "
             . "AND TABLE_NAME = %s "
             . "AND COLUMN_NAME = %s "
             . "LIMIT 1",
-            $tableName,
-            $columnName
+            array('query_params' => array($tableName, $columnName), 'log_errors' => false)
         );
-        if (!is_string($sql) || $sql === '') {
-            return $this->getTableCollationString($tableName);
-        }
-        $result = ($this->queryRunner)($sql, array('log_errors' => false));
         $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
         if (empty($rows) || !is_array($rows[0])) {
             return $this->getTableCollationString($tableName);

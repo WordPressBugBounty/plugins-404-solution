@@ -1,5 +1,29 @@
 # Changelog #
 
+## Version 4.3.6 (September 29, 2026) ##
+
+**Bug Fixes**
+
+* Fixed fatal "Maximum execution time exceeded" errors on sites with many pages, where suggestion matching kept working after the host's PHP time limit was nearly used up. Matching now runs against a time budget for the request and, when it runs out, serves the plain 404 the visitor was already getting instead of finishing the search.
+* Fixed automatic redirects to a WooCommerce product category, or to a term of another category-like taxonomy, never being saved. The matching engine found these terms, but the check that an automatic redirect's destination exists looked for them only among post categories, so it rejected them and every later visit to the same broken URL ran the whole matching pipeline again.
+* Fixed a fatal out-of-memory error when the debug log folder could not be created (an unwritable uploads folder, or a file sitting where the folder should be). Writing the warning about the missing folder tried to create the folder again, and so on without end.
+* Fixed the Add Redirect form and CSV import reporting success when nothing was saved. A redirect that failed to save now says so, with the cause, and CSV rows that failed are counted as invalid instead of imported. A failed save of a regex redirect is reported as a save failure rather than as an invalid pattern.
+* Fixed pages that show suggestions running the suggestion search for every 404, including scanner and bot visits that never read the result. The search now runs only when a real visitor's page asks for it, which cuts the extra WordPress requests and CPU a scanner probing many paths used to cause.
+* Fixed the suggestions link on a custom 404 page showing a permanent loading state for visitors without JavaScript. It now offers a working link. The `abj404_suggest` opt-in is also no longer carried onto suggestion links or redirect destinations.
+* Fixed the "hits" totals on the Page Redirects screen never finishing on sites where WP-Cron does not run (a blocked `wp-cron.php` or `DISABLE_WP_CRON`). The totals now complete without cron.
+* Fixed an internal lock that the database refused to release (for example after a deadlock) staying behind for days and then being logged as a "Forcibly removed synchronization" error. The release is now retried, and a lock that is reclaimed is reported once and as a recovery rather than as an error.
+* Fixed a harmless failure to store a temporary suggestions value being logged as a storage error.
+* Fixed the time-limit report bars using fixed grey colors that ignored the admin color scheme.
+* Fixed three hits-rollup notices that were not translatable.
+* Fixed the Statistics trend chart showing an empty chart, as if there were no data, when its database query failed. It now reports the failure.
+* Fixed users listed in the "Plugin Admin Users" setting being refused access to the plugin's admin pages ("Sorry, you are not allowed to access this page") unless they were already site administrators. The permission that lets them in was only switched on along a startup path normal page loads no longer take.
+
+**Improvements**
+
+* When a published post is trashed or deleted with "Create redirect when a page is trashed or deleted" enabled, its old URL now redirects to the closest parent that still exists instead of to the homepage: the post's primary category (as set in Yoast SEO or Rank Math, otherwise the category WordPress uses in its permalink), the nearest published parent page, or the post type archive, in that order. The homepage is used only when none of these exists. A mass redirect to the homepage is what Google reports as a soft 404. The category default ("Uncategorized") and archives that would be left empty are skipped, and the redirect's reason records which parent was chosen, for example "post trashed: parent category". Custom taxonomies such as WooCommerce product categories work the same way.
+* Faster admin page loads: settings are read without building the plugin's full service graph, and one unused lookup was removed from the admin theme stylesheet hook.
+* Better support reports when something goes wrong. Reports now include where a request's time went (a per-request phase timeline, including when PHP's time limit fires inside 404 Solution), CPU time and the running hook stack for fatal errors, and a short, redacted excerpt of a response that was not valid JSON, so an unexpected answer from a host or firewall can be identified. Failures in the plugin's admin screens now keep the HTTP status and the start of the response in the browser console instead of a generic message, and failures the plugin catches are recorded in its log even when debug logging is off. Nothing is sent anywhere unless you choose to send a report.
+
 ## Version 4.3.5 (August 30, 2026) ##
 
 **Bug Fixes**

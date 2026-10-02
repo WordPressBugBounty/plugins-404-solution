@@ -55,7 +55,7 @@ final class ABJ_404_Solution_SuggestionWorkerStateStore {
             }
 
             $createdAt = $current->getCreatedAt() > 0 ? $current->getCreatedAt() : $now;
-            $stored = set_transient(
+            $stored = ABJ_404_Solution_TransientStore::store(
                 $request['transientKey'],
                 ABJ_404_Solution_SuggestionTransient::pendingArray(
                     $current->getUrl(),
@@ -91,7 +91,7 @@ final class ABJ_404_Solution_SuggestionWorkerStateStore {
             ) {
                 return self::OUTCOME_STALE;
             }
-            $stored = set_transient(
+            $stored = ABJ_404_Solution_TransientStore::store(
                 $request['transientKey'],
                 ABJ_404_Solution_SuggestionTransient::completeArray(
                     $request['requestedURL'],
@@ -125,7 +125,7 @@ final class ABJ_404_Solution_SuggestionWorkerStateStore {
             ) {
                 return self::OUTCOME_STALE;
             }
-            $stored = set_transient(
+            $stored = ABJ_404_Solution_TransientStore::store(
                 $request['transientKey'],
                 ABJ_404_Solution_SuggestionTransient::errorArray($request['token']),
                 ABJ_404_Solution_SuggestionTransient::ERROR_TTL_SECONDS

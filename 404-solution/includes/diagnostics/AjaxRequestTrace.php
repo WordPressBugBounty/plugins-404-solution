@@ -144,7 +144,8 @@ final class ABJ_404_Solution_AjaxRequestTrace implements ABJ_404_Solution_Diagno
 
         return array_merge(array(
             'event' => 'request_start',
-            'client_sent_at' => is_scalar($clientSentAtRaw) ? substr((string)$clientSentAtRaw, 0, 64) : '',
+            'client_sent_at' => is_scalar($clientSentAtRaw)
+                ? ABJ_404_Solution_Utf8SafeRecord::clip((string)$clientSentAtRaw, 64) : '',
         ), $environment->capture($handlerClass, 'abj404_trace_probe_' . $this->context['request_id']));
     }
 
@@ -377,7 +378,7 @@ final class ABJ_404_Solution_AjaxRequestTrace implements ABJ_404_Solution_Diagno
     private function normalizeContext(array $context): array {
         $part = self::readScalarString($context, 'part', 'all');
         $retryCountRaw = $context['retry_count'] ?? 0;
-        $retryCount = is_numeric($retryCountRaw) ? (int)$retryCountRaw : 0;
+        $retryCount = ABJ_404_Solution_ExactInteger::readOr($retryCountRaw, 0, 0);
         return array(
             // Immutable request ledger (matrix coverage req. 1): the trace journal
             // is one of the channels a request ID must be recoverable from; the
@@ -387,14 +388,14 @@ final class ABJ_404_Solution_AjaxRequestTrace implements ABJ_404_Solution_Diagno
             // along so a retried request can be joined back to its parent attempt.
             'request_id' => self::readIdField($context, 'request_id', 'unknown00'),
             'plugin_version' => defined('ABJ404_VERSION') ? (string)ABJ404_VERSION : 'unknown',
-            'action' => substr(self::readScalarString($context, 'action'), 0, 64),
-            'subpage' => substr(self::readScalarString($context, 'subpage'), 0, 64),
-            'part' => substr($part, 0, 32),
+            'action' => ABJ_404_Solution_Utf8SafeRecord::clip(self::readScalarString($context, 'action'), 64),
+            'subpage' => ABJ_404_Solution_Utf8SafeRecord::clip(self::readScalarString($context, 'subpage'), 64),
+            'part' => ABJ_404_Solution_Utf8SafeRecord::clip($part, 32),
             'retry_count' => max(0, min(2, $retryCount)),
-            'session_id' => substr(self::readScalarString($context, 'session_id'), 0, 64),
+            'session_id' => ABJ_404_Solution_Utf8SafeRecord::clip(self::readScalarString($context, 'session_id'), 64),
             'retry_parent_id' => self::readIdField($context, 'retry_parent_id', ''),
             'header_request_id' => self::readIdField($context, 'header_request_id', ''),
-            'cf_ray' => substr(self::readScalarString($context, 'cf_ray'), 0, 64),
+            'cf_ray' => ABJ_404_Solution_Utf8SafeRecord::clip(self::readScalarString($context, 'cf_ray'), 64),
         );
     }
 

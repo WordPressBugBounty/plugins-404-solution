@@ -38,7 +38,8 @@ class ABJ_404_Solution_SpellNGramPrefilter {
 	 * @param string $requestedURLCleaned
 	 * @param ABJ_404_Solution_PublishedPostsProvider|null $publishedPostsProvider
 	 * @param bool $skipNgramGate4
-	 * @return string 'applied' if prefilter was used, 'early_return' if no matches exist, 'skipped' otherwise
+	 * @return string 'applied' if prefilter was used, 'early_return' if no matches exist,
+	 *         'budget_exhausted' if the request time budget tripped, 'skipped' otherwise
 	 */
 	public function tryApply(
 		string $rowType,
@@ -83,6 +84,12 @@ class ABJ_404_Solution_SpellNGramPrefilter {
 			self::NGRAM_PREFILTER_THRESHOLD,
 			self::NGRAM_PREFILTER_MAX_CANDIDATES
 		);
+
+		$prefilterBudget = ABJ_404_Solution_MatchingTimeBudget::current();
+		if ($similarPages === [] && $prefilterBudget !== null && $prefilterBudget->isExhausted()) {
+			$this->logger->debugMessage("N-gram prefilter: time budget exhausted, skipping Levenshtein fallback");
+			return 'budget_exhausted';
+		}
 
 		if (!empty($similarPages) && $publishedPostsProvider !== null) {
 			$candidateIds = array_keys($this->similarityByScalarId($similarPages));
@@ -131,6 +138,11 @@ class ABJ_404_Solution_SpellNGramPrefilter {
 			self::NGRAM_SECONDARY_THRESHOLD,
 			min($beforeNGramCount, self::NGRAM_SECONDARY_MAX_CANDIDATES)
 		);
+		$secondaryBudget = ABJ_404_Solution_MatchingTimeBudget::current();
+		if ($secondaryBudget !== null && $secondaryBudget->isExhausted()) {
+			$this->logger->debugMessage("N-gram filter (secondary): time budget exhausted, returning no candidates");
+			return [];
+		}
 		if (empty($similarPages)) {
 			return $this->normalizeScalarIds($candidateIds);
 		}

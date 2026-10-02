@@ -100,28 +100,126 @@ class ABJ_404_Solution_ShortCode {
         $transientKey = ABJ_404_Solution_SuggestionTransient::transientKeyForNormalizedUrl($urlForCacheKey);
         $cached = ABJ_404_Solution_SuggestionTransient::fromRaw(get_transient($transientKey));
 
-        if ($cached !== null) {
-            if ($cached->isComplete()) {
-                // Suggestions ready, use cached data
-                $content .= self::suggestionsPresenter()->renderSuggestionsHTML(
-                    $cached->getSuggestionsPacket(),
-                    $urlRequest,
-                    $options,
-                    true
-                );
-                $content .= "\n<!-- " . ABJ404_PP . " - End 404 suggestions (cached) -->\n";
-                return $content;
-
-            } elseif ($cached->isPending()) {
-                // Still computing, show loading placeholder
-                self::enqueueAsyncPollingScript($urlRequest);
-                $content .= self::renderAsyncPlaceholder($urlRequest, $options);
-                $content .= "\n<!-- " . ABJ404_PP . " - Suggestions loading -->\n";
-                return $content;
-            }
+        if ($cached !== null && $cached->isComplete()) {
+            // Suggestions ready, use cached data
+            $content .= self::suggestionsPresenter()->renderSuggestionsHTML(
+                $cached->getSuggestionsPacket(),
+                $urlRequest,
+                $options,
+                true
+            );
+            $content .= "\n<!-- " . ABJ404_PP . " - End 404 suggestions (cached) -->\n";
+            return $content;
         }
 
-        // No async data - fall back to synchronous computation
+        // A no-JS reader who clicked the placeholder's <noscript> link
+        // (t_260924_170058_682) carries an explicit opt-in on this exact
+        // request: compute synchronously here rather than opening (or
+        // waiting on) an async job that only a page script could ever poll.
+        //
+        // Checked ahead of the ordinary "$cached->isPending()" placeholder
+        // branch below on purpose: the *first* render of this URL -- the one
+        // that showed the reader the noscript link in the first place --
+        // already opened that job. A reader with no script never polls it,
+        // so without checking the opt-in first, every click of the link
+        // would just re-render the same stuck placeholder it was meant to
+        // escape. Gated by the same per-actor 'compute_suggestions' limiter
+        // the AJAX poll path uses, so a crawler that ignores the link's
+        // rel="nofollow" still cannot turn this into unbounded compute.
+        if (self::isNoscriptSuggestOptIn()) {
+            if (!self::computeRateLimitExceeded()) {
+                $content .= self::renderSynchronousSuggestions($urlRequest, $abj404logic, $abj404spellChecker, $options);
+                return $content;
+            }
+            // Rate limit refused: degrade to the ordinary placeholder (its
+            // own noscript link is retryable once the window resets)
+            // instead of computing or showing an error. Still enqueues the
+            // polling script/styles: if a job is already pending for this
+            // URL (opened by the original render), a script-capable client
+            // that ends up here can still resolve it via the normal poll.
+            self::enqueueAsyncPollingScript($urlRequest);
+            $content .= self::renderAsyncPlaceholder($urlRequest, $options);
+            $content .= "\n<!-- " . ABJ404_PP . " - Suggestions loading -->\n";
+            return $content;
+        }
+
+        if ($cached !== null && $cached->isPending()) {
+            // Still computing, show loading placeholder
+            self::enqueueAsyncPollingScript($urlRequest);
+            $content .= self::renderAsyncPlaceholder($urlRequest, $options);
+            $content .= "\n<!-- " . ABJ404_PP . " - Suggestions loading -->\n";
+            return $content;
+        }
+
+        // Nothing computed yet: open a job and let the page's own polling
+        // script run it. Compute is then paid only by a browser that executes
+        // the script and will show the result; a scanner or crawler fetching
+        // this page costs no spelling-engine run.
+        $publisher = new ABJ_404_Solution_SuggestionPublisher(abj_service('logging'));
+        if ($publisher->openPendingJob($urlRequest)) {
+            self::enqueueAsyncPollingScript($urlRequest);
+            $content .= self::renderAsyncPlaceholder($urlRequest, $options);
+            $content .= "\n<!-- " . ABJ404_PP . " - Suggestions loading -->\n";
+            return $content;
+        }
+
+        // The job could not be recorded (transient store refused the write,
+        // or another writer holds the URL's state lock): compute synchronously
+        // so the reader still gets suggestions.
+        $content .= self::renderSynchronousSuggestions($urlRequest, $abj404logic, $abj404spellChecker, $options);
+
+        return $content;
+        } finally {
+            $localeScope->restore($didSwitchLocale);
+        }
+    }
+
+    /**
+     * Whether the current request carries the placeholder's <noscript>
+     * fallback opt-in (t_260924_170058_682): a no-JS reader who clicked
+     * "Show suggested pages" re-requested this same URL with
+     * abj404_suggest=1. Read through the plugin's standard sanitized
+     * request-input path (wp_unslash then sanitize_text_field), never a raw
+     * superglobal.
+     *
+     * @return bool
+     */
+    private static function isNoscriptSuggestOptIn(): bool {
+        return ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize(
+            ABJ_404_Solution_QueryStringHelper::SUGGEST_OPT_IN_QUERY_ARG, '') === '1';
+    }
+
+    /**
+     * Whether the shared per-actor 'compute_suggestions' bucket (the same
+     * limiter Ajax_SuggestionPolling::runPendingJob() gates the AJAX poll
+     * compute behind) has been exhausted for the current actor.
+     *
+     * @return bool
+     */
+    private static function computeRateLimitExceeded(): bool {
+        return class_exists('ABJ_404_Solution_Ajax_Php') && ABJ_404_Solution_Ajax_Php::consumeRateLimit(
+            'compute_suggestions',
+            ABJ_404_Solution_Ajax_SuggestionPolling::COMPUTE_RATE_LIMIT_MAX_REQUESTS,
+            ABJ_404_Solution_Ajax_SuggestionPolling::COMPUTE_RATE_LIMIT_WINDOW_SECONDS
+        );
+    }
+
+    /**
+     * The synchronous suggestion-render path: check the permalink cache,
+     * fall back to a live spelling-engine scan on a miss, and render the
+     * result. Shared by two callers that both need suggestions computed in
+     * this exact request rather than via an async job: the explicit
+     * <noscript> opt-in above, and the pre-existing fallback used when
+     * SuggestionPublisher::openPendingJob() could not record a pending job.
+     *
+     * @param string $urlRequest
+     * @param ABJ_404_Solution_PluginLogic $abj404logic
+     * @param ABJ_404_Solution_SpellChecker $abj404spellChecker
+     * @param array<string, mixed> $options
+     * @return string
+     */
+    private static function renderSynchronousSuggestions(string $urlRequest, ABJ_404_Solution_PluginLogic $abj404logic,
+            ABJ_404_Solution_SpellChecker $abj404spellChecker, array $options): string {
         $urlSlugOnly = $abj404logic->urlNormalization()->removeHomeDirectory($urlRequest);
 
         // Try cache first (populated by processRedirect() for existing redirects)
@@ -135,19 +233,14 @@ class ABJ_404_Solution_ShortCode {
                     $suggestCatsOpt, $suggestTagsOpt);
         }
 
-        $content .= self::suggestionsPresenter()->renderSuggestionsHTML(
+        $html = self::suggestionsPresenter()->renderSuggestionsHTML(
             array_values($permalinkSuggestionsPacket),
             $urlRequest,
             $options,
             true
         );
 
-        $content .= "\n<!-- " . ABJ404_PP . " - End 404 suggestions for slug " . esc_html($urlSlugOnly) . " -->\n";
-
-        return $content;
-        } finally {
-            $localeScope->restore($didSwitchLocale);
-        }
+        return $html . "\n<!-- " . ABJ404_PP . " - End 404 suggestions for slug " . esc_html($urlSlugOnly) . " -->\n";
     }
 
     /**

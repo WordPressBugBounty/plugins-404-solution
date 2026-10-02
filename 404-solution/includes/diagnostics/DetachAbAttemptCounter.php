@@ -12,11 +12,14 @@ if (!defined('ABSPATH')) {
  * is stored. The experiment is policy; this is the data access behind it.
  *
  * The store is a transient and the read-modify-write is deliberately not
- * atomic. This is a bounded diagnostic sequence, not a security limit: two
- * tabs racing can land on the same slot, which costs one unusable pair in the
- * evidence, and that is cheaper than coupling diagnostics policy to the
- * database layer. The race is recorded here as a known property rather than
- * left for a reader to infer from the absence of a lock.
+ * atomic. This is a bounded diagnostic sequence, not a security limit, and
+ * coupling diagnostics policy to the database layer for a lock costs more than
+ * the race does. Where the store can see the race (the options table declines
+ * a write that changes no bytes), the loser is refused and answers inert. Where
+ * it cannot (a persistent object cache accepts every set), two tabs can land
+ * on the same slot, which costs one unusable pair in the evidence. The race is
+ * recorded here as a known property rather than left for a reader to infer
+ * from the absence of a lock.
  */
 final class ABJ_404_Solution_DetachAbAttemptCounter {
 
@@ -63,6 +66,10 @@ final class ABJ_404_Solution_DetachAbAttemptCounter {
             'set_transient',
             $key,
             static function () use ($key, $slot) {
+                // The raw write, not TransientStore::store(): that treats "the
+                // store already holds $slot + 1" as success, which is right for
+                // an idempotent write and wrong for a reservation. Here it means
+                // a concurrent request read the same $slot and took it first.
                 // allow-cache-empty: the locally computed attempt counter is a
                 // valid non-negative integer, never a fetched result.
                 return set_transient($key, $slot + 1, self::DEFAULT_TTL_SECONDS);

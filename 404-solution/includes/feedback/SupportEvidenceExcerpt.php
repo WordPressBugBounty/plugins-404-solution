@@ -97,7 +97,7 @@ final class ABJ_404_Solution_SupportEvidenceExcerpt {
      */
     public static function assemble(array $client): string {
         $clientTelemetry = self::clientField($client, 'telemetry');
-        $clientAttempts = ABJ_404_Solution_ClientTransportReport::attemptOutcomesInDrainedBuffer(
+        $clientAttempts = ABJ_404_Solution_DrainedTelemetryBuffer::attemptOutcomes(
             $clientTelemetry);
         $clientSessionId = self::clientField($client, 'session_id');
         $channels = self::collectChannels($clientAttempts);
@@ -203,6 +203,13 @@ final class ABJ_404_Solution_SupportEvidenceExcerpt {
             if ($healthy === false) {
                 $failingIds[(string)$requestId] = true;
             }
+        }
+        // The ledgers condemn ids neither journal names: a slow or
+        // late-starting first attempt that finished, or a retry parent whose
+        // own records never survived. Unioned here so both excerpts rank on
+        // the same index.
+        if (class_exists('ABJ_404_Solution_StrandedRequestLedger')) {
+            $failingIds += ABJ_404_Solution_StrandedRequestLedger::condemnedRequestIds();
         }
 
         $channels = array();
@@ -429,7 +436,7 @@ final class ABJ_404_Solution_SupportEvidenceExcerpt {
         if ($raw === '') {
             return $excerpt;
         }
-        $bounded = ABJ_404_Solution_ClientTransportReport::boundDrainedBuffer(
+        $bounded = ABJ_404_Solution_DrainedTelemetryBuffer::bound(
             $raw, self::MAX_CLIENT_TELEMETRY_LENGTH);
         if (!$bounded['parsed']) {
             $block = 'Client transport telemetry (unparseable, ' . $bounded['raw_length'] . ' bytes, '

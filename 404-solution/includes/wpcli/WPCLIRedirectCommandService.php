@@ -33,7 +33,9 @@ class ABJ_404_Solution_WPCLIRedirectCommandService {
 
         foreach ($rows as &$row) {
             $rawStatus = $row['status'] ?? 0;
-            $row['status'] = $this->statusIntToLabel(is_numeric($rawStatus) ? (int)$rawStatus : 0);
+            $row['status'] = $this->statusIntToLabel(
+                ABJ_404_Solution_ExactInteger::readOr($rawStatus, 0, 0)
+            );
         }
         unset($row);
 
@@ -87,7 +89,15 @@ class ABJ_404_Solution_WPCLIRedirectCommandService {
 
         $status = $regex ? (string)ABJ404_STATUS_REGEX : (string)ABJ404_STATUS_MANUAL;
         $insertedId = abj_service('redirects_repository')->setupRedirect(
-            ABJ_404_Solution_RedirectSpec::create($from, $status, $type, $dest, (string)$code, 0, 'wp-cli')
+            ABJ_404_Solution_RedirectSpec::fromArray(array(
+                'fromURL' => $from,
+                'status' => $status,
+                'type' => $type,
+                'finalDest' => $dest,
+                'code' => (string)$code,
+                'disabled' => 0,
+                'engine' => 'wp-cli',
+            ))
         );
         if (!$insertedId) {
             return $this->error('Failed to create redirect. Check that the source URL is unique.', $warnings);

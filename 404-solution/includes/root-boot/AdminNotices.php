@@ -41,7 +41,14 @@ if (!function_exists('abj404_show_plugin_db_notice')) {
 			return;
 		}
 		$guidance = isset($notice['guidance']) && is_string($notice['guidance']) ? $notice['guidance'] : '';
-		echo '<div class="notice notice-error"><p><strong>404 Solution:</strong> ' . esc_html($noticeMessage) . '</p>';
+		// Same native notice shape either way; only the left border colour
+		// differs. A condition the plugin degrades past (stale summary columns)
+		// must not wear the red an unusable plugin wears. Payloads written
+		// before this key existed carry no severity and stay errors.
+		$severity = isset($notice['severity']) && $notice['severity'] === ABJ_404_Solution_DatabaseNoticeStateHolder::SEVERITY_WARNING
+			? 'notice-warning'
+			: 'notice-error';
+		echo '<div class="notice ' . esc_attr($severity) . '"><p><strong>404 Solution:</strong> ' . esc_html($noticeMessage) . '</p>';
 		if ($guidance !== '') {
 			echo '<p>' . esc_html($guidance) . '</p>';
 		}

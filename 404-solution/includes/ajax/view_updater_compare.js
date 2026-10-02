@@ -87,6 +87,13 @@ function buildComparableTableSignature(html) {
         rowParts.sort();
         return rowParts.join('\n');
     } catch (e) {
+        // Fall back to the normalized HTML. If only one side of a comparison
+        // lands here the two signatures differ, so the fallback can only err
+        // toward offering a refresh, never toward hiding new data. Log so the
+        // resulting spurious "Refresh available" is diagnosable.
+        if (window.console && window.console.warn) {
+            window.console.warn('404 Solution: buildComparableTableSignature failed to parse the table', e);
+        }
         return normalizedHtml;
     }
 }

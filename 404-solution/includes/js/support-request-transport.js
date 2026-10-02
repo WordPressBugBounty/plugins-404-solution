@@ -104,6 +104,18 @@
                 if (json && json.success === true && json.data) {
                     return json.data;
                 }
+                // A well-formed refusal: the server's reason is the one thing
+                // that explains why the preview would not load, and the
+                // sentinel below carries none of it.
+                if (window.console && window.console.error) {
+                    window.console.error('404 Solution: support request preview was refused', {
+                        status: response.status,
+                        serverMessage: (json && json.data && typeof json.data.message === 'string')
+                            ? json.data.message
+                            : ((json && typeof json.message === 'string') ? json.message : ''),
+                        bodySnippet: rawText.slice(0, 500)
+                    });
+                }
                 throw new Error('preview failed'); // allow-raw-error: internal sentinel; view's preview expander renders t('previewError') from its own catch
             });
         }).catch(function (err) {

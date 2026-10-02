@@ -34,9 +34,10 @@ interface ABJ_404_Solution_DatabaseRuntimeStateInterface {
      * @param string $message
      * @param string $guidance
      * @param string $errorString
+     * @param string $severity One of ABJ_404_Solution_DatabaseNoticeStateHolder::SEVERITY_*.
      * @return void
      */
-    public function setPluginDbNotice(string $type, string $message, string $guidance, string $errorString = ''): void;
+    public function setPluginDbNotice(string $type, string $message, string $guidance, string $errorString = '', string $severity = ABJ_404_Solution_DatabaseNoticeStateHolder::SEVERITY_ERROR): void;
 
     /**
      * Clear the plugin DB notice only when its current type matches.

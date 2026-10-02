@@ -101,10 +101,15 @@ class ABJ_404_Solution_RequestIgnoreNormalizer {
                 $redirect = $this->redirectsRepo->getExistingRedirectForURL($fromURL);
                 $defaultRedirect = is_scalar($options['default_redirect'] ?? null) ? (string)$options['default_redirect'] : '301';
                 if (!isset($redirect['id']) || $redirect['id'] == 0) {
-                    $this->redirectsRepo->setupRedirect(ABJ_404_Solution_RedirectSpec::create(
-                        $fromURL, (string)ABJ404_STATUS_AUTO, (string)ABJ404_TYPE_POST,
-                        (string)$pageid, $defaultRedirect, 0, 'page ID'
-                    ));
+                    $this->redirectsRepo->setupRedirect(ABJ_404_Solution_RedirectSpec::fromArray(array(
+                        'fromURL' => $fromURL,
+                        'status' => (string)ABJ404_STATUS_AUTO,
+                        'type' => (string)ABJ404_TYPE_POST,
+                        'finalDest' => (string)$pageid,
+                        'code' => $defaultRedirect,
+                        'disabled' => 0,
+                        'engine' => 'page ID',
+                    )));
                 }
                 $this->logsRepo->logRedirectHit(ABJ_404_Solution_RedirectHitLogEntry::create($fromURL, $permalink, 'page ID'));
                 $this->notFoundResponse->forceRedirect($permalink, (int)$defaultRedirect);

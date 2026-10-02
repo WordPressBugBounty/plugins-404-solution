@@ -17,9 +17,11 @@ if (!defined('ABSPATH')) {
  * response-emission layer for no reason.
  *
  * The ladder interpretation matrix is computed from the BROWSER's observations
- * (it is the only side that saw every step) and journaled here. The other two
- * are computed HERE, from the durable journal, because each has two halves
- * that never meet on the client.
+ * (it is the only side that saw every step). The other two are computed HERE,
+ * from the durable journal, because each has two halves that never meet on the
+ * client. Reading those three verdicts is separate from recording them: the
+ * query can be repeated without changing the journal or active trace, and the
+ * command names both mutations explicitly.
  *
  * The detach A/B verdict: the server chose each real table request's detach
  * mode, the browser reported whether that request completed, and until this
@@ -55,6 +57,7 @@ if (!defined('ABSPATH')) {
  * unavailable payload is all scalars.
  *
  * @phpstan-type ParsedObservations array{status: 'available', observations: array<mixed>}|array{status: 'unavailable', unavailable: array{code: string, message: string, payloadBytes: int, maxBytes: int}}
+ * @phpstan-type VerdictPayload array{interpretationStatus: string, interpretation: array<string, mixed>|null, interpretationUnavailable: array<string, mixed>|null, detachAb: array<string, mixed>, bodyDelivery: array<string, mixed>}
  */
 final class ABJ_404_Solution_CanaryLadderVerdicts {
 
@@ -65,56 +68,35 @@ final class ABJ_404_Solution_CanaryLadderVerdicts {
     const INTERPRETATION_UNAVAILABLE = 'unavailable';
 
     /**
-     * Compute all three verdicts, journal each, and return the closing step's
-     * response payload.
+     * Read all three verdicts and build the closing step's response payload.
+     * Calling this query repeatedly does not append checkpoint records or
+     * mutate the active trace.
      *
-     * Called from inside the caller's already-open trace stage, so
-     * addStageMetadata() lands on `canary_interpret` rather than opening a
-     * stage of its own.
+     * Keyed rather than positional so the parsed-observation union and its
+     * associated failure fact travel as one query contract. PHP 7.4 is the
+     * floor here, so named arguments cannot make a positional signature
+     * self-describing at the call site.
      *
-     * Keyed rather than positional: `request_id` and `session_id` are both
-     * strings, so positionally they could be transposed into a perfectly typed
-     * call that scoped the journal reads to a request id and stamped the
-     * records with a session id. PHP 7.4 is the floor here, so named arguments
-     * are unavailable and a positional value object would carry the same
-     * hazard into its constructor.
-     *
-     * @param array{request_id: string, session_id: string, parsed: ParsedObservations, real_request_failed: bool} $inputs
-     * @return array<string, mixed>
+     * @param array{session_id: string, parsed: ParsedObservations, real_request_failed: bool} $inputs
+     * @return VerdictPayload
      */
-    public static function assemble(array $inputs): array {
-        $requestId = $inputs['request_id'];
+    public static function readEvidencePayload(array $inputs): array {
         $sessionId = $inputs['session_id'];
         $parsed = $inputs['parsed'];
 
-        // Resolved HERE, not inside interpretResults(): the rule stays pure and
-        // the journal read stays in the request that has a session to scope it
-        // to. Read before the matrix so a failure to join degrades to unknown
-        // facts rather than to no matrix.
+        // Resolved HERE, not inside CanaryLadderInterpretation::interpret():
+        // the rule stays pure and the journal read stays in the request that
+        // has a session to scope it to. Read before the matrix so a failure to
+        // join degrades to unknown facts rather than to no matrix.
         $bodyDelivery = ABJ_404_Solution_ResponseBodyDeliveryEvidence::forSession($sessionId);
-        ABJ_404_Solution_AjaxCheckpointLogger::record(
-            $requestId,
-            ABJ_404_Solution_ResponseBodyDeliveryEvidence::EVIDENCE_EVENT,
-            $bodyDelivery);
 
         $interpretation = null;
-        $stageMetadata = array();
         if ($parsed['status'] === self::INTERPRETATION_AVAILABLE) {
             $interpretation = ABJ_404_Solution_CanaryLadderInterpretation::interpret(
                 $parsed['observations'], $inputs['real_request_failed'], $bodyDelivery);
-            foreach ($interpretation as $key => $value) {
-                if (is_scalar($value)) {
-                    $stageMetadata[$key] = $value;
-                }
-            }
-        } else {
-            $stageMetadata = $parsed['unavailable'];
         }
-        ABJ_404_Solution_AjaxStageDiagnostics::addStageMetadata($stageMetadata);
 
         $detachAb = ABJ_404_Solution_DetachAbEvidence::verdictForSession($sessionId);
-        ABJ_404_Solution_AjaxCheckpointLogger::record(
-            $requestId, ABJ_404_Solution_DetachAbEvidence::VERDICT_EVENT, $detachAb);
 
         return array_merge(
             self::interpretationFields($parsed, $interpretation),
@@ -127,6 +109,43 @@ final class ABJ_404_Solution_CanaryLadderVerdicts {
                 'bodyDelivery' => $bodyDelivery,
             )
         );
+    }
+
+    /**
+     * Journal both server verdicts and annotate the caller's active stage.
+     *
+     * Called from inside the caller's already-open trace stage, so the
+     * metadata lands on `canary_interpret` rather than opening a stage of its
+     * own. The payload comes from readEvidencePayload(), keeping this command
+     * free of journal reads and verdict decisions.
+     *
+     * @param array{request_id: string, payload: VerdictPayload} $inputs
+     * @return void
+     */
+    public static function recordVerdictsAndAnnotateStage(array $inputs): void {
+        $requestId = $inputs['request_id'];
+        $payload = $inputs['payload'];
+
+        ABJ_404_Solution_AjaxCheckpointLogger::record(
+            $requestId,
+            ABJ_404_Solution_ResponseBodyDeliveryEvidence::EVIDENCE_EVENT,
+            $payload['bodyDelivery']);
+
+        $sourceMetadata = $payload['interpretationStatus'] === self::INTERPRETATION_AVAILABLE
+            ? ($payload['interpretation'] ?? array())
+            : ($payload['interpretationUnavailable'] ?? array());
+        $stageMetadata = array();
+        foreach ($sourceMetadata as $key => $value) {
+            if (is_scalar($value)) {
+                $stageMetadata[$key] = $value;
+            }
+        }
+        ABJ_404_Solution_AjaxStageDiagnostics::addStageMetadata($stageMetadata);
+
+        ABJ_404_Solution_AjaxCheckpointLogger::record(
+            $requestId,
+            ABJ_404_Solution_DetachAbEvidence::VERDICT_EVENT,
+            $payload['detachAb']);
     }
 
     /**

@@ -164,7 +164,7 @@ final class ABJ_404_Solution_EncodedTableResponseSize {
             $event = is_scalar($record['event'] ?? null) ? (string)$record['event'] : '';
             $requestId = is_scalar($record['request_id'] ?? null)
                 ? (string)$record['request_id'] : '';
-            $bytes = is_numeric($record['bytes'] ?? null) ? (int)$record['bytes'] : 0;
+            $bytes = ABJ_404_Solution_ExactInteger::readOr($record['bytes'] ?? null, 0, 0);
             if ($event !== 'json_encode' || !isset($requestIds[$requestId]) || $bytes <= 0) {
                 continue;
             }

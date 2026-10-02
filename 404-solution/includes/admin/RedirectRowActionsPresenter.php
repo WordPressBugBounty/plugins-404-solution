@@ -27,8 +27,7 @@ class ABJ_404_Solution_RedirectRowActionsPresenter {
      *   edit: string,
      *   logs: string,
      *   trash: string,
-     *   delete: string,
-     *   links: array{editlink: string, logslink: string, trashlink: string, ajaxTrashLink: string, trashtitle: string, deletelink: string}
+     *   delete: string
      * }
      */
     public function render(array $row, string $sub, array $tableOptions): array {
@@ -46,10 +45,9 @@ class ABJ_404_Solution_RedirectRowActionsPresenter {
 
         return array(
             'edit' => $this->editActionLink($currentFilter, $links),
-            'logs' => $this->logsActionLink($logsId),
-            'trash' => $this->trashActionLink($currentFilter),
-            'delete' => $this->deleteActionLink($currentFilter),
-            'links' => $links,
+            'logs' => $this->logsActionLink($logsId, $links),
+            'trash' => $this->trashActionLink($currentFilter, $links),
+            'delete' => $this->deleteActionLink($currentFilter, $links),
         );
     }
 
@@ -64,71 +62,80 @@ class ABJ_404_Solution_RedirectRowActionsPresenter {
         return $this->actionLink('viewRedirectsTableActionLink.html', array(
             'href' => esc_url($links['editlink']),
             'class' => 'abj404-action-link',
-            'title' => '{Edit Redirect Details}',
+            'title' => __('Edit Redirect Details', '404-solution'),
             'svg_path' => $this->tpl('viewRedirectsTableSvgEdit.html'),
-            'label' => '{Edit}',
+            'label' => __('Edit', '404-solution'),
         ));
     }
 
-    private function logsActionLink(int $logsId): string {
+    /** @param array<string, string> $links */
+    private function logsActionLink(int $logsId, array $links): string {
         if ($logsId <= 0) {
             return '';
         }
         return $this->actionLink('viewRedirectsTableActionLink.html', array(
-            'href' => '{logsLink}',
+            'href' => $links['logslink'],
             'class' => 'abj404-action-link',
-            'title' => '{View Redirect Logs}',
+            'title' => __('View Redirect Logs', '404-solution'),
             'svg_path' => $this->tpl('viewRedirectsTableSvgLogs.html'),
-            'label' => '{Logs}',
+            'label' => __('Logs', '404-solution'),
         ));
     }
 
     /**
      * @param mixed $currentFilter
+     * @param array<string, string> $links
      */
-    private function trashActionLink($currentFilter): string {
+    private function trashActionLink($currentFilter, array $links): string {
         if ($currentFilter == ABJ404_TRASH_FILTER) {
             return $this->actionLink('viewRedirectsTableActionLink.html', array(
-                'href' => '{trashLink}',
+                'href' => $links['trashlink'],
                 'class' => 'abj404-action-link',
-                'title' => '{Restore}',
+                'title' => __('Restore', '404-solution'),
                 'svg_path' => $this->tpl('viewRedirectsTableSvgRestore.html'),
-                'label' => '{Restore}',
+                'label' => __('Restore', '404-solution'),
             ));
         }
 
         return $this->actionLink('viewRedirectsTableActionLinkAjax.html', array(
-            'data_url' => '{ajaxTrashLink}',
+            'data_url' => $links['ajaxTrashLink'],
             'class' => 'abj404-action-link danger ajax-trash-link',
-            'title' => '{Trash Redirected URL}',
+            'title' => __('Trash Redirected URL', '404-solution'),
             'svg_path' => $this->tpl('viewRedirectsTableSvgTrash.html'),
-            'label' => '{Trash}',
+            'label' => __('Trash', '404-solution'),
         ));
     }
 
     /**
      * @param mixed $currentFilter
+     * @param array<string, string> $links
      */
-    private function deleteActionLink($currentFilter): string {
+    private function deleteActionLink($currentFilter, array $links): string {
         if ($currentFilter != ABJ404_TRASH_FILTER) {
             return '';
         }
         return $this->actionLink('viewRedirectsTableActionLinkSeparated.html', array(
-            'href' => '{deletelink}',
+            'href' => $links['deletelink'],
             'class' => 'abj404-action-link danger',
-            'title' => '{Delete Redirect Permanently}',
+            'title' => __('Delete Redirect Permanently', '404-solution'),
             'svg_path' => $this->tpl('viewRedirectsTableSvgTrash.html'),
-            'label' => '{Delete}',
+            'label' => __('Delete', '404-solution'),
         ));
     }
 
-    /** @param array<string, string> $vars */
+    /**
+     * Renders one fully finished action link. The href, title and label are bound as values in a
+     * single pass, so nothing in them (a URL query value included) is ever scanned for `{msgid}`
+     * tokens again.
+     *
+     * @param array<string, string> $vars
+     */
     private function actionLink(string $tplName, array $vars): string {
-        $tpl = $this->tpl($tplName);
+        $replacements = array();
         foreach ($vars as $key => $value) {
-            $tpl = $this->functions->str_replace('{' . $key . '}', $value, $tpl);
+            $replacements['{' . $key . '}'] = $value;
         }
-        return $tpl;
+        return $this->functions->renderTemplate($this->tpl($tplName), $replacements);
     }
 
     private function tpl(string $name): string {

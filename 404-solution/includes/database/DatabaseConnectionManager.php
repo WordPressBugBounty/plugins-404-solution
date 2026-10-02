@@ -113,14 +113,24 @@ class ABJ_404_Solution_DatabaseConnectionManager {
                     return true;
                 }
 
-                $this->logger->errorMessage("Failed to reconnect to database");
+                // wpdb's own error is the reason the reconnect failed; without
+                // it this ERROR says only that something is wrong.
+                $wpdbError = (isset($wpdb->last_error) && is_string($wpdb->last_error))
+                    ? $wpdb->last_error : '';
+                // A host-side cause (server gone away, read-only, access denied) is
+                // recorded by the classifier as a WARN plus the plugin-page notice
+                // state; only a cause it does not recognise is an ERROR.
+                if (!$this->core->errorClassifier()->classifyAndHandleInfrastructureError($wpdbError)) {
+                    $this->logger->errorMessage("Failed to reconnect to database"
+                        . ($wpdbError !== '' ? ' (wpdb last_error: ' . $wpdbError . ')' : ' (wpdb reported no last_error)'));
+                }
                 return false;
             }
         } catch (Exception $e) {
-            $this->logger->debugMessage("Connection check failed: " . $e->getMessage());
+            $this->logger->warnCaught('Connection check failed; assuming the connection is usable.', $e);
             return true;
         } catch (Error $e) {
-            $this->logger->debugMessage("Connection check not available: " . $e->getMessage());
+            $this->logger->warnCaught('Connection check not available; assuming the connection is usable.', $e);
             return true;
         }
 

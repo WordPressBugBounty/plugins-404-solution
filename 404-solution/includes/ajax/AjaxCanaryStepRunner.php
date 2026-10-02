@@ -314,8 +314,11 @@ final class ABJ_404_Solution_AjaxCanaryStepRunner {
      */
     private static function runStreamStep(array $stepRequest, array &$context): array {
         $requestId = $stepRequest['request_id'];
-        $obLevelBefore = isset($context['ob_level_before']) && is_numeric($context['ob_level_before'])
-            ? (int)$context['ob_level_before'] : 0;
+        $obLevelBefore = ABJ_404_Solution_ExactInteger::readOr(
+            $context['ob_level_before'] ?? null,
+            0,
+            0
+        );
         $streamSessionKey = ABJ_404_Solution_DetachAbExperiment::sessionKey(
             self::sessionIdFrom($context));
         return ABJ_404_Solution_AjaxStageDiagnostics::runStage($context, 'canary_stream',
@@ -409,9 +412,10 @@ final class ABJ_404_Solution_AjaxCanaryStepRunner {
      *
      * The verdicts themselves live in ABJ_404_Solution_CanaryLadderVerdicts,
      * which reads the durable journals and decides what both sides' records
-     * mean together. This method's share is the request boundary -- bounding
-     * and decoding the observations payload, and opening the trace stage the
-     * join reports into.
+     * mean together. This method owns the orchestration explicitly: read the
+     * closing payload, record its diagnostics once, then return it. Its other
+     * share is the request boundary -- bounding and decoding the observations
+     * payload, and opening the trace stage the command annotates.
      *
      * @param CanaryStepRequest $stepRequest
      * @param array<string, mixed> $context
@@ -433,12 +437,16 @@ final class ABJ_404_Solution_AjaxCanaryStepRunner {
 
         return ABJ_404_Solution_AjaxStageDiagnostics::runStage($context, 'canary_interpret',
             static function () use ($parsed, $realFailed, $requestId, $sessionId) {
-                return ABJ_404_Solution_CanaryLadderVerdicts::assemble(array(
-                    'request_id' => $requestId,
+                $payload = ABJ_404_Solution_CanaryLadderVerdicts::readEvidencePayload(array(
                     'session_id' => $sessionId,
                     'parsed' => $parsed,
                     'real_request_failed' => $realFailed,
                 ));
+                ABJ_404_Solution_CanaryLadderVerdicts::recordVerdictsAndAnnotateStage(array(
+                    'request_id' => $requestId,
+                    'payload' => $payload,
+                ));
+                return $payload;
             });
     }
 

@@ -9,7 +9,7 @@ if (!defined('ABSPATH')) {
  * don't go through the staged admin-list pipeline.
  *
  * Owns:
- *   - doRedirectsExport: stream the redirects table to a CSV temp file
+ *   - redirectsExportRows: stream the redirects table's export rows one at a time
  *   - getRedirectsWithRegEx: regex redirects with a static request-scoped cache
  *   - getManualRedirectsWithRegexMetachars: manual redirects whose URL
  *     contains regex metacharacters (for the matcher's wildcard fallback)
@@ -49,53 +49,48 @@ class ABJ_404_Solution_RedirectsBulkReader {
     }
 
     /**
-     * Stream the export query straight to a CSV temp file via mysqli to keep
-     * the row buffer bounded on large redirect tables.
+     * Run the export query and hand its rows back one at a time, straight from
+     * the mysqli result, so the row buffer stays bounded on large redirect
+     * tables. The rows are raw (getRedirectsExport.sql columns); deciding where
+     * each exported redirect points is Core's job
+     * (ABJ_404_Solution_RedirectExportDestination).
      *
-     * @param string $tempFile
-     * @return void
+     * The query runs here, before any row is read, so a query that cannot run
+     * (null) is distinguishable from one that ran and returned no redirects
+     * (an empty generator).
+     *
+     * @return \Generator<int, array<string, mixed>>|null Null when the query failed.
      */
-    public function doRedirectsExport(string $tempFile): void {
+    public function redirectsExportRows(): ?\Generator {
         global $wpdb;
-
-        if (file_exists($tempFile)) {
-            ABJ_404_Solution_FileSystemService::safeUnlink($tempFile);
-        }
 
         $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getRedirectsExport.sql");
         $query = $this->dbCore->doTableNameReplacements($query);
 
         $result = mysqli_query($wpdb->dbh, $query);
-        if ($result instanceof \mysqli_result) {
-            $fh = fopen($tempFile, 'w');
-            if ($fh === false) {
-                mysqli_free_result($result);
-                return;
-            }
-            // try/finally: mysqli's default error mode (MYSQLI_REPORT_ERROR |
-            // MYSQLI_REPORT_STRICT since PHP 8.1) throws mysqli_sql_exception
-            // on a dropped connection mid-fetch. Without a guaranteed close
-            // here, that exception would skip fclose($fh) and leak the file
-            // handle. Same resource-lifecycle shape as
-            // includes/import/ImportService.php::doImportFile().
-            try {
-                fputcsv($fh, array('from_url', 'status', 'type', 'to_url', 'wp_type', 'engine', 'code'), ',', '"', '\\');
+        if (!($result instanceof \mysqli_result)) {
+            return null;
+        }
+        return $this->streamExportRows($result);
+    }
 
-                while (($row = mysqli_fetch_array($result, MYSQLI_ASSOC))) {
-                    fputcsv($fh, array(
-                        $row['from_url'],
-                        $row['status'],
-                        $row['type'],
-                        $row['to_url'],
-                        $row['type_wp'],
-                        isset($row['engine']) ? $row['engine'] : '',
-                        isset($row['code']) ? $row['code'] : '301'
-                    ), ',', '"', '\\');
-                }
-            } finally {
-                fclose($fh);
-                mysqli_free_result($result);
+    /**
+     * Yield each row of an open export result, freeing the result when the
+     * stream ends, whether it finished, the consumer stopped early, or
+     * mysqli's default error mode (MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT
+     * since PHP 8.1) threw mysqli_sql_exception on a dropped connection
+     * mid-fetch.
+     *
+     * @param \mysqli_result $result
+     * @return \Generator<int, array<string, mixed>>
+     */
+    private function streamExportRows(\mysqli_result $result): \Generator {
+        try {
+            while (($row = mysqli_fetch_array($result, MYSQLI_ASSOC))) {
+                yield $row;
             }
+        } finally {
+            mysqli_free_result($result);
         }
     }
 
@@ -187,7 +182,9 @@ class ABJ_404_Solution_RedirectsBulkReader {
                 . "  {wp_abj404_redirects}.timestamp,\n {wp_posts}.id as wp_post_id\n ";
         $query .= "from {wp_abj404_redirects}\n " .
                 "  LEFT OUTER JOIN {wp_posts} \n " .
-                "    on {wp_abj404_redirects}.final_dest = {wp_posts}.id \n ";
+                "    on {wp_abj404_redirects}.final_dest = {wp_posts}.id \n " .
+                // final_dest is a post id only for a post redirect; a term id otherwise.
+                "    and {wp_abj404_redirects}.type = " . ABJ404_TYPE_POST . " \n ";
 
         $query .= "where status = " . ABJ404_STATUS_MANUAL . " \n " .
                 "     and disabled = 0 \n " .
@@ -215,9 +212,11 @@ class ABJ_404_Solution_RedirectsBulkReader {
         $postIDJoined = implode(', ', $postIDs);
 
         $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getAdditionalPostData.sql");
-        $query = $this->f->str_replace('{IDS_TO_INCLUDE}', $postIDJoined, $query);
+        // Expand table names and constants on the TEMPLATE, then bind the ids last (no token pass
+        // may run over bound data).
         $query = $this->dbCore->doTableNameReplacements($query);
-        $query = $this->f->doNormalReplacements($query);
+        $query = $this->f->replaceKnownConstants($query);
+        $query = $this->f->str_replace('{IDS_TO_INCLUDE}', $postIDJoined, $query);
 
         $results = $this->dbCore->queryAndGetResults($query);
 

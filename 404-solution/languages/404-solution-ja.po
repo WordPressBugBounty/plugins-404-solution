@@ -591,6 +591,9 @@ msgstr "エラー：外部URLを選択しましたが、URLが入力されてい
 msgid "Error: unable to add new redirect."
 msgstr "エラー：新しいリダイレクトを追加できません。"
 
+msgid "Error: The database did not save the new redirect. The debug log has the underlying database error."
+msgstr "エラー：データベースは新しいリダイレクトを保存できませんでした。デバッグログに基となるデータベースエラーが記録されています。"
+
 msgid "Error: unable to mark URL as %s"
 msgstr "エラー：URLを%sとしてマークできません"
 
@@ -1996,8 +1999,14 @@ msgstr "編集"
 msgid "View Logs"
 msgstr "ログを表示"
 
+msgid "View Redirect Logs"
+msgstr "リダイレクトのログを表示"
+
 msgid "Delete Permanently"
 msgstr "完全に削除"
+
+msgid "Delete Redirect Permanently"
+msgstr "リダイレクトを完全に削除"
 
 msgid "Are you sure you want to permanently delete this item?"
 msgstr "このアイテムを完全に削除してもよろしいですか？"
@@ -2593,6 +2602,9 @@ msgstr "エラー："
 #: includes/ajax/ImportRedirects.php
 msgid "Ignored importing redirect because a redirect with the same from URL already exists. URL:"
 msgstr "同じ元URLのリダイレクトが既に存在するため、リダイレクトのインポートをスキップしました。URL："
+
+msgid "Redirect not imported: the database did not save it. URL: %1$s (repository result: %2$s)"
+msgstr "リダイレクトをインポートできませんでした：データベースが保存しませんでした。URL：%1$s（リポジトリの結果：%2$s）"
 
 #: includes/ajax/ImportRedirects.php
 msgid "Unrecognized destination type while importing file. Destination:"
@@ -4192,6 +4204,9 @@ msgstr "エラー：相対の正規表現リダイレクト先は (...) と書�
 msgid "Error: Regex destination references $%1$d, but the source pattern defines %2$d capture group(s)."
 msgstr "エラー：正規表現のリダイレクト先が $%1$d を参照していますが、ソースパターンで定義されているキャプチャグループは %2$d 個です。"
 
+msgid "Error: Regex destination puts a capture token ($1, $2, ...) inside the scheme, host or port, so every redirect would be refused. Write the host literally and use tokens only in the path, query or fragment, for example https://example.com/$1."
+msgstr "エラー：正規表現のリダイレクト先で、キャプチャトークン ($1、$2 など) がスキーム、ホスト、またはポートの中に置かれているため、すべてのリダイレクトが拒否されます。ホストは直接記述し、トークンはパス、クエリ、フラグメントでのみ使用してください。たとえば https://example.com/$1 のように指定します。"
+
 msgid "Could not load chart data. Reload this page and try again."
 msgstr "グラフデータを読み込めませんでした。このページを再読み込みしてやり直してください。"
 
@@ -4264,6 +4279,9 @@ msgstr "レポートを送信できませんでした。しばらくしてから
 msgid "Could not load the migration tool configuration. Reload this page and try again."
 msgstr "移行ツールの設定を読み込めませんでした。このページを再読み込みしてやり直してください。"
 
+msgid "Could not load trend data."
+msgstr "トレンドデータを読み込めませんでした。"
+
 msgid "No suggested match was scored for this URL"
 msgstr "この URL に対して評価された候補はありません"
 
@@ -4305,3 +4323,239 @@ msgstr "%1$s 件のリダイレクトが選択されました。一度に編集�
 msgid "Note: %1$s condition was not saved. A redirect may have at most %2$s conditions."
 msgid_plural "Note: %1$s conditions were not saved. A redirect may have at most %2$s conditions."
 msgstr[0] "注意: %1$s 件の条件は保存されませんでした。1 つのリダイレクトに設定できる条件は最大 %2$s 件です。"
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:296
+msgid "The Hits and Last Used columns on the Page Redirects screen have been out of date for at least %d hour(s). 404 Solution has not been able to finish rebuilding its hit-count summary in that time."
+msgstr "ページリダイレクト画面のヒット数と最終使用日の列は、少なくとも%d時間以上にわたり更新されていません。この間、404 Solutionはヒット数の概要の再構築を完了できませんでした。"
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:322
+msgid "This site's WP-Cron is not running the plugin's scheduled rebuild. If DISABLE_WP_CRON is set in wp-config.php, either remove it or configure a system cron job that requests wp-cron.php periodically. In the meantime 404 Solution retries the rebuild in the background after an admin page has finished loading."
+msgstr "このサイトのWP-Cronは、プラグインのスケジュールされた再構築を実行していません。wp-config.phpでDISABLE_WP_CRONが設定されている場合は、その設定を削除するか、wp-cron.phpを定期的に要求するシステムのcronジョブを設定してください。その間、404 Solutionは管理画面のページの読み込みが完了した後に、バックグラウンドで再構築を再試行します。"
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:326
+msgid "The scheduled rebuild is being picked up but is not completing. Enable debug logging on the 404 Solution Options screen and check the log for the reason the rebuild stopped."
+msgstr "スケジュールされた再構築は開始されていますが、完了していません。404 Solutionのオプション画面でデバッグログの記録を有効にして、再構築が停止した理由をログで確認してください。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:51
+msgid "WordPress core"
+msgstr "WordPress コア本体の処理"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:52
+msgid "Before 404 Solution loaded (WordPress start-up, drop-ins, must-use plugins)"
+msgstr "404 Solution の読み込み前（WordPress の起動処理、ドロップイン、使用必須プラグイン）"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:53
+msgid "Main query (WordPress core and query filters)"
+msgstr "メインクエリ（WordPress コアとクエリフィルター）"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:54
+msgid "Page output (templates and content filters)"
+msgstr "ページ出力（テンプレートとコンテンツフィルター）"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:55
+msgid "Other components"
+msgstr "その他のコンポーネント"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:56
+msgid "Unattributed"
+msgstr "帰属先不明"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:64
+msgid "Theme: %s"
+msgstr "テーマ：%s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:66
+msgid "Must-use plugin: %s"
+msgstr "使用必須プラグイン：%s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:68
+msgid "Drop-in: %s"
+msgstr "ドロップイン：%s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:70
+msgid "%s action (all callbacks, not timed one by one)"
+msgstr "%s アクション（全コールバックの合計、個別には計測していません）"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:72
+msgid "Loading plugins"
+msgstr "プラグインの読み込み"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:72
+msgid "From the %s action to the next"
+msgstr "%s アクションから次のアクションまで"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:74
+msgid "Other code"
+msgstr "その他のコード"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:125
+msgid "PHP stopped this request at its %1$d second time limit while it was running %2$s."
+msgstr "PHP は %2$s の実行中に、%1$d 秒の制限時間に達したためこのリクエストを停止しました。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:127
+msgid "PHP stopped this request at its time limit while it was running %s."
+msgstr "PHP は %s の実行中に、制限時間に達したためこのリクエストを停止しました。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:130
+msgid "%s had already passed before 404 Solution loaded."
+msgstr "404 Solution が読み込まれる前に、すでに %s が経過していました。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:137
+msgid "404 Solution itself used %1$s of the request's %2$s."
+msgstr "404 Solution 自体の使用時間は、リクエスト全体の %2$s のうち %1$s でした。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:140
+msgid "404 Solution's own measured time: %1$s of the request's %2$s (its callbacks inside the action totals are not split out)."
+msgstr "404 Solution 自体として計測された時間：リクエスト全体の %2$s のうち %1$s（アクション合計に含まれる自身のコールバックは分けて計上していません）。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:160
+msgid "Running when PHP stopped the request: %1$s (%2$s) on the %3$s action, %4$s so far."
+msgstr "PHP がリクエストを停止した時点で実行中だった処理：%3$s アクションの %1$s（%2$s）、その時点まで %4$s。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:162
+msgid "Slow callback: %1$s (%2$s) on the %3$s action, %4$s."
+msgstr "遅いコールバック：%3$s アクションの %1$s（%2$s）、%4$s。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:166
+msgid "Seen on this site in the last day, while 404 Solution timed callbacks: %1$s (%2$s) on the %3$s action took %4$s."
+msgstr "過去1日間にこのサイトで 404 Solution がコールバックを計測した際の記録：%3$s アクションの %1$s（%2$s）に %4$s かかりました。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:170
+msgid "CPU time after 404 Solution loaded: %1$s of %2$s wall-clock time."
+msgstr "404 Solution 読み込み後の CPU 時間：実時間 %2$s のうち %1$s。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:186
+msgid "To name the slow callback, 404 Solution now times each callback on 1 in %1$d requests for the next %2$d minutes; what it finds appears on the 404 Solution admin screen."
+msgstr "遅いコールバックを特定するため、404 Solution は今後 %2$d 分間、%1$d 件に 1 件のリクエストで各コールバックを計測します。結果は 404 Solution の管理画面に表示されます。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:190
+msgid "Measured on this request: how long each plugin took to load, and each callback on the main WordPress actions (plugins_loaded, init, wp_loaded, template_redirect, admin_init and others). Time in filters and in code between those actions is shown as a window or as unattributed. Times are wall-clock seconds."
+msgstr "このリクエストで計測した内容：各プラグインの読み込みにかかった時間と、WordPress の主要アクション（plugins_loaded、init、wp_loaded、template_redirect、admin_init など）の各コールバック。フィルター内の時間や、これらのアクションの間のコードにかかった時間は、区間ごと、または帰属先不明として表示されます。時間は実時間の秒数です。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:192
+msgid "Measured on this request: how long each plugin took to load, the total of each main WordPress action, and each callback on the actions that ran after the request became slow. Times are wall-clock seconds."
+msgstr "このリクエストで計測した内容：各プラグインの読み込みにかかった時間、WordPress の主要アクションごとの合計時間、そしてリクエストが遅くなった後に実行されたアクションの各コールバック。時間は実時間の秒数です。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:195
+msgid "Measured on this request: how long each plugin took to load, and the total of each main WordPress action. Callbacks are not timed one by one on normal requests, to keep the site fast. Times are wall-clock seconds."
+msgstr "このリクエストで計測した内容：各プラグインの読み込みにかかった時間と、WordPress の主要アクションごとの合計時間。サイトの速度を保つため、通常のリクエストではコールバックを個別に計測しません。時間は実時間の秒数です。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:198
+msgid "Per-plugin timing is switched off on this site, so only WordPress phases are shown. Times are wall-clock seconds."
+msgstr "このサイトではプラグインごとの時間計測が無効になっているため、WordPress の処理段階のみを表示しています。時間は実時間の秒数です。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:251
+msgid "Component"
+msgstr "コンポーネント"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:252
+msgid "Seconds"
+msgstr "秒数"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:267
+msgid "The 404 Solution admin screen shows where the time went."
+msgstr "時間がどこで使われたかは、404 Solution の管理画面で確認できます。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:306
+msgid "%1$s (%2$s) on the %3$s action: %4$s"
+msgstr "%3$s アクションの %1$s（%2$s）：%4$s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:324
+msgid "Where this request's time went"
+msgstr "このリクエストの時間の内訳"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:327
+msgid "Where this request's time went (PHP time limit: %d s)"
+msgstr "このリクエストの時間の内訳（PHP の制限時間：%d 秒）"
+
+#: includes/diagnostics/TimeLimitReportView.php:105
+msgid "(CPU %s)"
+msgstr "（CPU 時間 %s）"
+
+#: includes/diagnostics/TimeLimitReportView.php:121
+msgid "The dark line marks PHP's %d second time limit. Depending on the server, PHP counts either CPU time or wall-clock time against it (Linux counts CPU time, so a request waiting on the network or the database can run longer than the limit in wall-clock time)."
+msgstr "濃い線は PHP の制限時間 %d 秒を示します。サーバーによって、PHP はこの制限に CPU 時間または実時間のどちらかを数えます（Linux では CPU 時間を数えるため、ネットワークやデータベースを待っているリクエストは、実時間では制限を超えて実行されることがあります）。"
+
+#: includes/diagnostics/TimeLimitReportView.php:122
+msgid "PHP did not report its time limit for this request."
+msgstr "PHP はこのリクエストの制限時間を報告しませんでした。"
+
+#: includes/diagnostics/TimeLimitReportView.php:126
+msgid "The last request PHP stopped at its time limit while 404 Solution's code was running: %1$s, %2$s"
+msgstr "404 Solution のコードの実行中に PHP が制限時間で停止した直近のリクエスト：%1$s、%2$s"
+
+#: includes/diagnostics/TimeLimitReportView.php:128
+msgid "Where the request's time went, by WordPress lifecycle window"
+msgstr "WordPress のライフサイクル区間ごとのリクエスト時間の内訳"
+
+#: includes/diagnostics/TimeLimitReportView.php:153
+msgid "404 Solution: PHP stopped a request on this site at its time limit while 404 Solution's code was running. 404 Solution recorded which components used that request's time."
+msgstr "404 Solution：404 Solution のコードの実行中に、このサイトのリクエストが PHP の制限時間に達して停止されました。404 Solution は、そのリクエストの時間をどのコンポーネントが使ったかを記録しました。"
+
+#: includes/diagnostics/TimeLimitReportView.php:155
+msgid "See where the time went"
+msgstr "時間の内訳を見る"
+
+#: includes/diagnostics/TimeLimitReportView.php:174
+msgid "Slow callbacks found while 404 Solution timed each callback"
+msgstr "404 Solution が各コールバックを計測した際に見つかった遅いコールバック"
+
+#: includes/diagnostics/TimeLimitReportView.php:198
+msgid "Recent time-limit deaths"
+msgstr "最近の制限時間による強制終了"
+
+#: includes/diagnostics/TimeLimitReportView.php:199
+msgid "When"
+msgstr "日時"
+
+#: includes/diagnostics/TimeLimitReportView.php:200
+msgid "Path"
+msgstr "パス"
+
+#: includes/diagnostics/TimeLimitReportView.php:201
+msgid "Wall time"
+msgstr "実時間"
+
+#: includes/diagnostics/TimeLimitReportView.php:202
+msgid "CPU time (after 404 Solution loaded)"
+msgstr "CPU 時間（404 Solution の読み込み後）"
+
+#: includes/diagnostics/TimeLimitReportView.php:203
+msgid "Stopped in"
+msgstr "停止箇所"
+
+#: includes/diagnostics/TimeLimitReportView.php:214
+msgid "Before 404 Solution loaded"
+msgstr "404 Solution の読み込み前"
+
+#: includes/diagnostics/TimeLimitReportView.php:216
+msgid "plugins_loaded to init (theme setup)"
+msgstr "plugins_loaded から init まで（テーマの初期設定）"
+
+#: includes/diagnostics/TimeLimitReportView.php:217
+msgid "init to wp_loaded"
+msgstr "init から wp_loaded までの区間"
+
+#: includes/diagnostics/TimeLimitReportView.php:218
+msgid "wp_loaded to template_redirect (main query)"
+msgstr "wp_loaded から template_redirect までの区間（メインクエリの処理）"
+
+#: includes/diagnostics/TimeLimitReportView.php:219
+msgid "template_redirect to the end (page output)"
+msgstr "template_redirect から最後まで（ページ出力）"
+
+#: includes/diagnostics/TimeLimitReportView.php:220
+msgid "admin_init to the end (admin screen)"
+msgstr "admin_init から最後まで（管理画面）"
+
+#: includes/diagnostics/TimeLimitReportView.php:221
+msgid "login_init to the end (login screen)"
+msgstr "login_init から最後まで（ログイン画面）"
+
+#: includes/view/View_Tools.php:151
+msgid "Timed-out requests"
+msgstr "時間切れになったリクエスト"
+
+#: includes/view/ShortcodeSuggestionsPresenter.php:260
+msgid "Show suggested pages"
+msgstr "おすすめのページを表示"

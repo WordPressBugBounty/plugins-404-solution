@@ -6,6 +6,7 @@ if (!defined('ABSPATH')) {
 
 require_once __DIR__ . '/ContentRepositoryInterface.php';
 require_once __DIR__ . '/PublishedContentRepository.php';
+require_once __DIR__ . '/PublishedTermsProvider.php';
 require_once __DIR__ . '/PermalinkCacheRepository.php';
 require_once __DIR__ . '/SpellingCacheRepository.php';
 require_once __DIR__ . '/OldSlugRepository.php';
@@ -21,6 +22,9 @@ class ABJ_404_Solution_ContentRepository implements ABJ_404_Solution_ContentRepo
 
     /** @var ABJ_404_Solution_PublishedContentRepository */
     private $publishedContentRepository;
+
+    /** @var ABJ_404_Solution_PublishedTermsProvider */
+    private $publishedTermsProvider;
 
     /** @var ABJ_404_Solution_PermalinkCacheRepository */
     private $permalinkCacheRepository;
@@ -42,6 +46,7 @@ class ABJ_404_Solution_ContentRepository implements ABJ_404_Solution_ContentRepo
      * @param ABJ_404_Solution_PermalinkCacheRepository|null $permalinkCacheRepository
      * @param ABJ_404_Solution_SpellingCacheRepository|null $spellingCacheRepository
      * @param ABJ_404_Solution_OldSlugRepository|null $oldSlugRepository
+     * @param ABJ_404_Solution_PublishedTermsProvider|null $publishedTermsProvider
      */
     public function __construct(
         ABJ_404_Solution_DatabaseCore $dbCore,
@@ -53,7 +58,8 @@ class ABJ_404_Solution_ContentRepository implements ABJ_404_Solution_ContentRepo
         $publishedContentRepository = null,
         $permalinkCacheRepository = null,
         $spellingCacheRepository = null,
-        $oldSlugRepository = null
+        $oldSlugRepository = null,
+        $publishedTermsProvider = null
     ) {
         $f = $functions !== null ? $functions : abj_service('functions');
         $logger = $logging !== null ? $logging : abj_service('logging');
@@ -69,6 +75,16 @@ class ABJ_404_Solution_ContentRepository implements ABJ_404_Solution_ContentRepo
                 $optionsProvider,
                 $resolvedErrorClassifier,
                 $resolvedCollationHelper
+            );
+        $this->publishedTermsProvider = $publishedTermsProvider !== null
+            ? $publishedTermsProvider
+            : new ABJ_404_Solution_PublishedTermsProvider(
+                $dbCore,
+                $logger,
+                $resolvedErrorClassifier,
+                null,
+                $f,
+                $optionsProvider
             );
         $this->permalinkCacheRepository = $permalinkCacheRepository !== null
             ? $permalinkCacheRepository
@@ -88,17 +104,17 @@ class ABJ_404_Solution_ContentRepository implements ABJ_404_Solution_ContentRepo
 
     /** @inheritDoc */
     public function getPublishedTags($slug = null, $limit = null) {
-        return $this->publishedContentRepository->getPublishedTags($slug, $limit);
+        return $this->publishedTermsProvider->getPublishedTags($slug, $limit);
     }
 
     /** @inheritDoc */
     public function addURLToTermsRows($rows) {
-        return $this->publishedContentRepository->addURLToTermsRows($rows);
+        return $this->publishedTermsProvider->addURLToTermsRows($rows);
     }
 
     /** @inheritDoc */
     public function getPublishedCategories($term_id = null, $slug = null, $limit = null) {
-        return $this->publishedContentRepository->getPublishedCategories($term_id, $slug, $limit);
+        return $this->publishedTermsProvider->getPublishedCategories($term_id, $slug, $limit);
     }
 
     /** @inheritDoc */

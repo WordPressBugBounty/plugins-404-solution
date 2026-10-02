@@ -23,17 +23,22 @@ class ABJ_404_Solution_FatalErrorProcessor {
     /** @var ABJ_404_Solution_AjaxFatalErrorResponder */
     private $ajaxResponder;
 
+    /** @var callable */
+    private $resourceUsageProvider;
+
     /**
      * @param ABJ_404_Solution_ErrorTypeClassifier|null $classifier
      * @param ABJ_404_Solution_ErrorDiagnosticsReporter|null $diagnostics
      * @param ABJ_404_Solution_AdminFatalErrorResponder|null $adminResponder
      * @param ABJ_404_Solution_AjaxFatalErrorResponder|null $ajaxResponder
+     * @param callable|null $resourceUsageProvider returns getrusage()-shaped array or null; injectable for tests
      */
-    public function __construct($classifier = null, $diagnostics = null, $adminResponder = null, $ajaxResponder = null) {
+    public function __construct($classifier = null, $diagnostics = null, $adminResponder = null, $ajaxResponder = null, $resourceUsageProvider = null) {
         $this->classifier = $classifier !== null ? $classifier : new ABJ_404_Solution_ErrorTypeClassifier();
         $this->diagnostics = $diagnostics !== null ? $diagnostics : new ABJ_404_Solution_ErrorDiagnosticsReporter();
         $this->adminResponder = $adminResponder !== null ? $adminResponder : new ABJ_404_Solution_AdminFatalErrorResponder();
         $this->ajaxResponder = $ajaxResponder !== null ? $ajaxResponder : new ABJ_404_Solution_AjaxFatalErrorResponder($this->diagnostics);
+        $this->resourceUsageProvider = is_callable($resourceUsageProvider) ? $resourceUsageProvider : array('ABJ_404_Solution_PhpRuntimeCapabilityAdapter', 'resourceUsage');
     }
 
     /**
@@ -57,6 +62,16 @@ class ABJ_404_Solution_FatalErrorProcessor {
         if ($this->isPluginScopeFatal($lasterror)) {
             ABJ_404_Solution_ErrorHandler::releaseReservedMemory();
             $this->captureCrashBeacon($lasterror);
+            // A PHP time-limit fatal in our files: put the per-component
+            // breakdown in the PHP error log and on the plugin's admin
+            // screen, so the component that spent the time is named where
+            // the blame lands (c305). No-op for every other fatal.
+            if (class_exists('ABJ_404_Solution_TimeLimitFatalReporter', false)) {
+                $timeLimitBreakdown = ABJ_404_Solution_TimeLimitFatalReporter::breakdownFor($lasterror);
+                if ($timeLimitBreakdown !== null) {
+                    ABJ_404_Solution_TimeLimitFatalRecorder::record($timeLimitBreakdown);
+                }
+            }
         }
 
         $isPluginAdminPage = $this->adminResponder->isPluginAdminPageRequest();
@@ -127,6 +142,12 @@ class ABJ_404_Solution_FatalErrorProcessor {
             if ($ctxDebugInfo !== '') {
                 $extraInfo = stripcslashes(wp_kses_post((string)json_encode($ctxDebugInfo)));
             }
+            $elapsedFragment = '';
+            $anchor = ABJ_404_Solution_MatchingTimeBudget::resolveAnchor();
+            if ($anchor !== null) {
+                $elapsedFragment = ', request_elapsed_s: ' . number_format(abj_clock()->nowFloat() - $anchor, 3, '.', '');
+            }
+            $resourceFragment = $this->buildResourceFragment();
             $contextPrefix = $isPluginScopeFatal
                 ? 'ABJ404-SOLUTION Fatal error handler: '
                 : 'ABJ404-SOLUTION Fatal error handler (plugin admin page, foreign scope): ';
@@ -134,7 +155,7 @@ class ABJ_404_Solution_FatalErrorProcessor {
             $errmsg = $contextPrefix .
                 stripcslashes(wp_kses_post((string)json_encode($lasterror))) .
                 ", \nAdditional info: " . $extraInfo . ", mbstring: " .
-                (extension_loaded('mbstring') ? 'true' : 'false');
+                (extension_loaded('mbstring') ? 'true' : 'false') . $elapsedFragment . $resourceFragment;
 
             $abj404logging = abj_service('logging');
             if ($abj404logging != null) {
@@ -161,6 +182,126 @@ class ABJ_404_Solution_FatalErrorProcessor {
                 'error handler itself failed (code ' . $ex->getCode() . '): ' . $ex->getMessage()
             );
         }
+    }
+
+    /**
+     * Split getrusage() output into user/sys CPU seconds, or null unless the
+     * input is an array with all four numeric utime/stime fields.
+     *
+     * @param mixed $u
+     * @return array{0: float, 1: float}|null
+     */
+    private static function cpuPair($u): ?array {
+        if (!is_array($u)
+            || !isset($u['ru_utime.tv_sec'], $u['ru_utime.tv_usec'], $u['ru_stime.tv_sec'], $u['ru_stime.tv_usec'])
+            || !is_numeric($u['ru_utime.tv_sec']) || !is_numeric($u['ru_utime.tv_usec'])
+            || !is_numeric($u['ru_stime.tv_sec']) || !is_numeric($u['ru_stime.tv_usec'])) {
+            return null;
+        }
+        $user = (float)$u['ru_utime.tv_sec'] + ((float)$u['ru_utime.tv_usec'] / 1000000.0);
+        $sys = (float)$u['ru_stime.tv_sec'] + ((float)$u['ru_stime.tv_usec'] / 1000000.0);
+        return array($user, $sys);
+    }
+
+    /**
+     * CPU usage plus the running WordPress hook stack, for fatal diagnostics.
+     * process_cpu_s is cumulative for the worker process (getrusage() counts
+     * the whole process, and one mod_php/FPM/LiteSpeed worker serves many
+     * requests); cpu_since_plugin_boot_s is this request's CPU after the
+     * plugin loaded, with page-fault and context-switch deltas and the
+     * plugin-boot offset. Any fragment may be absent (getrusage() disabled,
+     * no boot snapshot, no anchor, no hooks on the stack).
+     *
+     * @return string
+     */
+    private function buildResourceFragment(): string {
+        $fragment = '';
+        $usage = call_user_func($this->resourceUsageProvider);
+        $now = self::cpuPair($usage);
+        if ($now !== null) {
+            $fragment .= ', process_cpu_s: ' . number_format($now[0] + $now[1], 3, '.', '') . ' (user ' . number_format($now[0], 3, '.', '') . ', sys ' . number_format($now[1], 3, '.', '') . ')';
+            $snap = ABJ_404_Solution_ErrorHandler::bootResourceSnapshot();
+            $boot = self::cpuPair($snap['usage']);
+            if ($boot !== null) {
+                $du = $now[0] - $boot[0];
+                $ds = $now[1] - $boot[1];
+                $fragment .= ', cpu_since_plugin_boot_s: ' . number_format($du + $ds, 3, '.', '') . ' (user ' . number_format($du, 3, '.', '') . ', sys ' . number_format($ds, 3, '.', '') . ')';
+                foreach (array('ru_minflt', 'ru_majflt', 'ru_nivcsw', 'ru_nvcsw') as $key) {
+                    if (is_array($usage) && is_array($snap['usage']) && isset($usage[$key], $snap['usage'][$key]) && is_numeric($usage[$key]) && is_numeric($snap['usage'][$key])) {
+                        $fragment .= ', ' . substr($key, 3) . '_since_boot: ' . (string)(int)($usage[$key] - $snap['usage'][$key]);
+                    }
+                }
+            }
+        }
+        $snap = ABJ_404_Solution_ErrorHandler::bootResourceSnapshot();
+        $anchor = ABJ_404_Solution_MatchingTimeBudget::resolveAnchor();
+        if ($snap['wall'] !== null && $anchor !== null) {
+            $fragment .= ', plugin_boot_at_s: ' . number_format($snap['wall'] - $anchor, 3, '.', '');
+        }
+        if (isset($GLOBALS['wp_current_filter']) && is_array($GLOBALS['wp_current_filter'])
+            && $GLOBALS['wp_current_filter'] !== array()) {
+            $names = array();
+            foreach ($GLOBALS['wp_current_filter'] as $hook) {
+                if (is_string($hook)) {
+                    $names[] = $hook;
+                }
+            }
+            $names = array_slice($names, -10);
+            $hooks = array();
+            foreach ($names as $hook) {
+                $cleaned = preg_replace('/[^A-Za-z0-9_\-\/.:]/', '', $hook);
+                if (is_string($cleaned) && $cleaned !== '') {
+                    $hooks[] = $cleaned;
+                }
+            }
+            if ($hooks !== array()) {
+                $fragment .= ', wp_hooks: ' . implode('>', $hooks);
+            }
+        }
+        return $fragment . self::buildTimelineFragment();
+    }
+
+    /**
+     * The request's phase timeline (every stamp in the order reached, as ms
+     * since plugin boot, then the plugin's own query count and time), so a
+     * max_execution_time fatal says which window spent the time instead of
+     * only the line the timer landed on (plmcb.fr reports 505/506). Stamp
+     * names are the timeline's bounded [A-Za-z0-9_:] vocabulary. '' before
+     * plugin boot or when the timeline class is not loaded; never autoloads
+     * from inside the fatal handler.
+     */
+    private static function buildTimelineFragment(): string {
+        if (!class_exists('ABJ_404_Solution_RequestPhaseTimeline', false)
+            || ABJ_404_Solution_RequestPhaseTimeline::encode() === '') {
+            return '';
+        }
+        $timeline = ABJ_404_Solution_RequestPhaseTimeline::toArray();
+        $stamps = $timeline['t'];
+        asort($stamps);
+        $parts = array();
+        foreach ($stamps as $name => $ms) {
+            $parts[] = $name . '=' . $ms;
+        }
+        return ', phase_ms_since_boot: ' . implode('>', $parts)
+            . ', plugin_queries: ' . $timeline['db']['n'] . ' (' . $timeline['db']['ms'] . ' ms)'
+            . self::buildTimeBreakdownFragment();
+    }
+
+    /**
+     * The per-component time breakdown of a time-limit fatal (the same line
+     * the PHP error log gets), so the developer report names the component
+     * that spent the time too. '' for every other fatal, or when the
+     * reporter never loaded.
+     *
+     * @return string
+     */
+    private static function buildTimeBreakdownFragment(): string {
+        if (!class_exists('ABJ_404_Solution_TimeLimitFatalReporter', false)) {
+            return '';
+        }
+        $breakdown = ABJ_404_Solution_TimeLimitFatalReporter::breakdownFor(error_get_last());
+        return $breakdown === null ? ''
+            : ', time_breakdown: ' . ABJ_404_Solution_TimeLimitReportRenderer::logLine($breakdown);
     }
 
     /**

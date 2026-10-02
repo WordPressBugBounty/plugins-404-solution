@@ -243,6 +243,46 @@
     }
 
     /**
+     * The toast text for a row action that failed without the server saying why.
+     *
+     * Both failure paths (a transport error, and a 200 answering success:false
+     * with no readable message) come through here, so the text cannot differ
+     * between them. With the shared seam (abj404-admin-ajax.js) the message and
+     * the console record come from abj404AdminAjaxErrorMessage(). Without it
+     * (the asset failed to load) the same shape is composed locally, so the
+     * toast still carries the framing sentence and the underlying code in
+     * parentheses instead of a bare "An error occurred".
+     *
+     * @param {object} jqXHR
+     * @param {{fallback: string, source: string, textStatus: string, errorThrown: string}} failure
+     *     fallback is the framing sentence, source the call-site label for the
+     *     console record, textStatus and errorThrown jQuery's own.
+     * @returns {string}
+     */
+    function rowActionFailureMessage(jqXHR, failure) {
+        if (typeof abj404AdminAjaxErrorMessage === 'function') {
+            return abj404AdminAjaxErrorMessage(jqXHR, failure);
+        }
+        var fallback = (typeof failure.fallback === 'string') ? failure.fallback : '';
+        var textStatus = (typeof failure.textStatus === 'string') ? failure.textStatus : '';
+        var errorThrown = (typeof failure.errorThrown === 'string') ? failure.errorThrown : '';
+        var status = (jqXHR && typeof jqXHR.status === 'number') ? jqXHR.status : 0;
+        var detail = 'no response from the server';
+        if (status === 0 && errorThrown !== ''
+                && errorThrown.toLowerCase() !== 'error') {
+            detail = errorThrown;
+        } else if (status >= 200 && status < 300) {
+            detail = 'HTTP ' + status + (textStatus === 'parsererror'
+                ? ', the response was not valid JSON' : ', the server sent no message');
+        } else if (status > 0) {
+            var statusText = (typeof jqXHR.statusText === 'string') ? jqXHR.statusText : '';
+            detail = 'HTTP ' + status
+                + ((statusText !== '' && statusText.toLowerCase() !== 'error') ? ' ' + statusText : '');
+        }
+        return fallback + ' (' + detail + ')';
+    }
+
+    /**
      * Initialize row action buttons
      */
     function initRowActions() {
@@ -261,6 +301,12 @@
 
             $btn.addClass('loading').prop('disabled', true);
 
+            // Name WHICH row action failed in the console entry. Only the
+            // `action` query parameter is used: the rest of the URL carries a
+            // nonce and the row identifier.
+            var actionMatch = /[?&]action=([A-Za-z0-9_\-]+)/.exec(String(url));
+            var rowActionSource = 'table-row-action' + (actionMatch ? ':' + actionMatch[1] : '');
+
             // ajax-direct-approved: legacy row-action URL is rendered per button; response shape is validated before use below.
             $.ajax({
                 url: url,
@@ -269,7 +315,7 @@
                 // A request with no deadline never reaches the error handler that
                 // re-enables the control this call disabled, so the page stays stuck.
                 timeout: 30000,
-                success: function(response) {
+                success: function(response, textStatus, jqXHR) {
                     // Validate shape before reading fields: a malformed
                     // body (gateway HTML, plugin-conflict mangled output)
                     // previously threw on response.success or response
@@ -287,7 +333,7 @@
                         abj404ShowToast(successMsg, 'success');
                         return;
                     }
-                    var errMsg = 'Action failed';
+                    var errMsg = '';
                     if (response && typeof response === 'object' && response.data) {
                         if (typeof response.data === 'string') {
                             errMsg = response.data;
@@ -295,11 +341,27 @@
                             errMsg = response.data.message;
                         }
                     }
+                    if (errMsg === '') {
+                        // Nothing readable came back: name the status in the
+                        // toast and keep the body excerpt in the console.
+                        errMsg = rowActionFailureMessage(jqXHR, {
+                            fallback: 'Action failed',
+                            source: rowActionSource,
+                            textStatus: textStatus,
+                            errorThrown: ''
+                        });
+                    }
                     abj404ShowToast(errMsg, 'error');
                     $btn.removeClass('loading').prop('disabled', false);
                 },
-                error: function() {
-                    abj404ShowToast('An error occurred', 'error');
+                error: function(jqXHR, textStatus, errorThrown) {
+                    var errMsg = rowActionFailureMessage(jqXHR, {
+                        fallback: 'An error occurred',
+                        source: rowActionSource,
+                        textStatus: textStatus,
+                        errorThrown: errorThrown
+                    });
+                    abj404ShowToast(errMsg, 'error');
                     $btn.removeClass('loading').prop('disabled', false);
                 }
             });

@@ -133,7 +133,7 @@ class ABJ_404_Solution_ExclusiveOptionRow {
 			return false;
 		}
 
-		return is_numeric($rowsInserted) && ((int)$rowsInserted) === 1;
+		return ABJ_404_Solution_ExactInteger::readOr($rowsInserted, 0, 0) === 1;
 	}
 
 	/** The value currently recorded for $optionName, read from the table and
@@ -231,7 +231,7 @@ class ABJ_404_Solution_ExclusiveOptionRow {
 			$this->logStorageFailure('renew the options row "' . $replacement['optionName'] . '"', $wpdb);
 			return false;
 		}
-		return is_numeric($rowsUpdated) && ((int)$rowsUpdated) === 1;
+		return ABJ_404_Solution_ExactInteger::readOr($rowsUpdated, 0, 0) === 1;
 	}
 
 	/**
@@ -277,7 +277,7 @@ class ABJ_404_Solution_ExclusiveOptionRow {
 			return false;
 		}
 
-		return is_numeric($rowsDeleted) && ((int)$rowsDeleted) > 0;
+		return ABJ_404_Solution_ExactInteger::readOr($rowsDeleted, 0, 0) > 0;
 	}
 
 	/** Report a statement the database refused.

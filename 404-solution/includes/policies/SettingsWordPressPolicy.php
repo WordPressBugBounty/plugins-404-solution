@@ -98,8 +98,14 @@ class ABJ_404_Solution_SettingsWordPressPolicy {
 
         $rawDaysWait = is_scalar($postData['days_wait_before_major_update']) ?
             $postData['days_wait_before_major_update'] : '';
-        if (is_numeric($rawDaysWait) && (int)$rawDaysWait >= 0) {
-            $options['days_wait_before_major_update'] = (int)$rawDaysWait;
+        // A type=text field: the admin can type a stray space around a valid
+        // number. ExactInteger::read() deliberately does not trim, so trim here.
+        if (is_string($rawDaysWait)) {
+            $rawDaysWait = trim($rawDaysWait);
+        }
+        $daysWait = ABJ_404_Solution_ExactInteger::read($rawDaysWait, 0);
+        if ($daysWait !== null) {
+            $options['days_wait_before_major_update'] = $daysWait;
             return "";
         }
 

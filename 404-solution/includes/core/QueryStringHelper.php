@@ -12,9 +12,11 @@ if (!defined('ABSPATH')) {
  *  - sortQueryString: produce a canonical, alphabetized rebuild of a parsed
  *    URL's `query` part so identical requests with reordered parameters
  *    hash to the same storage key.
- *  - removePageIDFromQueryString: strip `p=N` from a query string so a
- *    redirect destination does not re-trigger a 404 via WordPress's
- *    page-id parameter.
+ *  - removePageIDFromQueryString: strip `p=N` (WordPress's page-id
+ *    parameter, so a redirect destination or suggestion link does not
+ *    re-trigger a 404) and any plugin-owned control arg listed in
+ *    REMOVED_QUERY_ARG_KEYS (request-scoped opt-ins that are meaningless,
+ *    or actively wrong, once carried onto a stored/outbound URL).
  *  - decodeComplicatedData: urldecode then json_decode an encoded request
  *    payload (with JSON.stringify single-quote unescape), used by the
  *    AJAX update-options path that ships form data as a single
@@ -33,6 +35,31 @@ if (!defined('ABSPATH')) {
  * decode error path.
  */
 class ABJ_404_Solution_QueryStringHelper {
+
+    /**
+     * The plugin's noscript-fallback suggestion opt-in query arg
+     * (t_260924_170058_682): a no-JS reader who clicked "Show suggested
+     * pages" re-requests the current page with this arg set to '1'.
+     * ABJ_404_Solution_ShortCode::isNoscriptSuggestOptIn() reads it from the
+     * request and ABJ_404_Solution_ShortcodeSuggestionsPresenter::
+     * noscriptSuggestUrl() writes it into the placeholder's fallback link;
+     * both reference this constant instead of repeating the literal.
+     *
+     * @var string
+     */
+    const SUGGEST_OPT_IN_QUERY_ARG = 'abj404_suggest';
+
+    /**
+     * Query-string keys that removePageIDFromQueryString() never carries onto
+     * a redirect destination or a rendered suggestion link: WordPress's own
+     * page-id parameter, and this plugin's own request-scoped opt-in args.
+     * Carrying one of these forward turns a one-request opt-in into a
+     * permanent (and wrong) part of every link built from that request; see
+     * SUGGEST_OPT_IN_QUERY_ARG's docblock for the concrete incident.
+     *
+     * @var array<int, string>
+     */
+    const REMOVED_QUERY_ARG_KEYS = array('p', self::SUGGEST_OPT_IN_QUERY_ARG);
 
     /** @var ABJ_404_Solution_Sanitizer */
     private $sanitizer;
@@ -80,7 +107,13 @@ class ABJ_404_Solution_QueryStringHelper {
     }
 
     /**
-     * We have to remove any 'p=##' because it will cause a 404 otherwise.
+     * Remove the page-ID arg ('p', which would cause a 404 on the
+     * destination otherwise) and any plugin-owned control arg in
+     * REMOVED_QUERY_ARG_KEYS from a query string. Used both for redirect
+     * destinations and for the query part appended to rendered suggestion
+     * links (getCommentPartAndQueryPartOfRequest()), so a control arg that
+     * only means something for the CURRENT request never leaks onto a
+     * stored or outbound URL.
      *
      * @param string $queryString
      * @return string
@@ -89,8 +122,10 @@ class ABJ_404_Solution_QueryStringHelper {
         $queryParts = array();
         parse_str($queryString, $queryParts);
 
-        if (array_key_exists('p', $queryParts)) {
-            unset($queryParts['p']);
+        foreach (self::REMOVED_QUERY_ARG_KEYS as $removedKey) {
+            if (array_key_exists($removedKey, $queryParts)) {
+                unset($queryParts[$removedKey]);
+            }
         }
 
         $sanitized = $this->sanitizer->sanitizeUrlComponent($queryParts);

@@ -1,5 +1,5 @@
 
-/* UNBOUNDED-OK: streamed row-at-a-time via mysqli_fetch in RedirectsBulkReader::doRedirectsExport; never accumulated into a PHP array */
+/* UNBOUNDED-OK: streamed row-at-a-time via mysqli_fetch in RedirectsBulkReader::redirectsExportRows; never accumulated into a PHP array */
 SELECT r.url as from_url,
 	   CASE
        		when r.status = 1 then 'Manual'
@@ -26,21 +26,22 @@ SELECT r.url as from_url,
        end as to_url,
        wpp.post_type as type_wp,
        COALESCE(r.engine, '') as engine,
-       r.code
-
-       /* ,
+       r.code,
+       /* read by RedirectExportDestination::csvColumns() to resolve a post,
+          category or tag destination to the URL the live redirect uses */
+       r.type as type_id,
        r.final_dest,
-       pc.url,
-       pc.meta
-       */
-       
+       pc.url as cached_url
+
 from {wp_abj404_redirects} r
 
+/* final_dest is a wp_posts.ID only for a post redirect (type 1); for a category
+   or tag redirect it is a term id, and the same number names an unrelated post. */
 left outer join {wp_abj404_permalink_cache} pc
-on r.final_dest = pc.id
+on r.final_dest = pc.id and r.type = 1
 
 left outer join {wp_posts} wpp
-on r.final_dest = wpp.ID
+on r.final_dest = wpp.ID and r.type = 1
 
 
 where r.url is not null and r.url != ''

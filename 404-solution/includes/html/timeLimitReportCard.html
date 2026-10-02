@@ -1,0 +1,17 @@
+<div class="abj404-time-limit-report">
+<p>{intro}</p>
+<div role="img" aria-label="{barLabel}" style="position:relative;display:flex;height:16px;max-width:720px;margin:16px 0 6px 0;background:var(--abj404-surface-muted);">
+{segments}<span title="{limitTitle}" style="position:absolute;top:-5px;bottom:-5px;left:{limitPercent}%;border-left:2px solid var(--abj404-text);"></span>
+</div>
+<p class="description" style="max-width:720px;margin:0 0 4px 0;">{limitCaption}</p>
+<ul style="max-width:720px;margin:0 0 16px 0;">
+{legend}</ul>
+<table class="widefat striped" style="max-width:720px;">
+<thead><tr><th scope="col">{componentHeading}</th><th scope="col" style="text-align:right;">{secondsHeading}</th></tr></thead>
+<tbody>
+{rows}</tbody>
+</table>
+<p style="max-width:720px;">{summary}</p>
+<p class="description" style="max-width:720px;">{details}</p>
+<p class="description" style="max-width:720px;">{method}</p>
+{slowSection}{recentSection}</div>

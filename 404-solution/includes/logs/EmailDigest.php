@@ -78,7 +78,9 @@ class ABJ_404_Solution_EmailDigest {
      *    cell renders an "unavailable, rebuild scheduled" message instead of
      *    "No captured 404s in this period" so the admin can distinguish the
      *    two cases.
-     * @return string HTML email body with inline CSS.
+     * @return string HTML email body with inline CSS. Runs the
+     *    `abj404_digest_sections` filter (args: array(), $dateRange) so other plugins can add
+     *    HTML sections after the top-URLs table; each passes through wp_kses_post.
      */
     public function generateDigestHTML(array $topCaptured, array $stats, string $dateRange = '', bool $rollupAvailable = true): string {
         if ($dateRange === '') {
@@ -136,6 +138,8 @@ class ABJ_404_Solution_EmailDigest {
             '{pluginVersion}'   => esc_html((string) $s['pluginVersion']),
             '{phpVersion}'      => esc_html((string) $s['phpVersion']),
             '{sentAt}'          => esc_html((string) $s['sentAt']),
+            // Last on purpose: third-party HTML must not be re-scanned for the tokens above.
+            '{extraSections}'   => $this->extensionPoints()->renderSections($dateRange),
         );
 
         return str_replace(array_keys($replacements), array_values($replacements), $template);
@@ -251,6 +255,9 @@ class ABJ_404_Solution_EmailDigest {
     /**
      * Send the digest email. Returns a description of what happened.
      *
+     * Fires the `abj404_digest_sent` action (arg: int Unix timestamp of the send) once wp_mail()
+     * has accepted the digest and the cooldown timestamp is stored; never on a skipped or failed send.
+     *
      * @return string
      */
     public function sendDigest(): string {
@@ -286,9 +293,11 @@ class ABJ_404_Solution_EmailDigest {
             return 'Digest skipped: no recipient email address configured.';
         }
 
-        $limit = isset($options['admin_notification_digest_limit']) && is_numeric($options['admin_notification_digest_limit'])
-            ? max(1, intval($options['admin_notification_digest_limit']))
-            : 10;
+        $limit = ABJ_404_Solution_ExactInteger::readOr(
+            $options['admin_notification_digest_limit'] ?? null,
+            1,
+            10
+        );
 
         // Pre-check rollup availability so the email distinguishes "rollup is
         // being rebuilt" from "no captured 404s." Without this, a missing
@@ -370,7 +379,14 @@ class ABJ_404_Solution_EmailDigest {
             update_option('admin_notification_last_sent', $lastSent);
         }
 
+        // After the writes above, so a subscriber can never skip the cooldown stamp.
+        $this->extensionPoints()->notifySent($lastSent);
+
         return 'Digest email sent to: ' . $to;
+    }
+
+    private function extensionPoints(): ABJ_404_Solution_EmailDigestExtensionPoints {
+        return new ABJ_404_Solution_EmailDigestExtensionPoints($this->logger);
     }
 
     /**

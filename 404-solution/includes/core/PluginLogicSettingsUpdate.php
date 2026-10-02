@@ -340,14 +340,6 @@ class ABJ_404_Solution_PluginLogicSettingsUpdate {
         return $this->suggestionPolicy()->applyTemplateOptions($options, $postData);
     }
 
-    /**
-     * @param array<string, mixed> $options
-     * @return bool True when any option was changed.
-     */
-    function normalizeSuggestionTemplateOptions(array &$options): bool {
-        return $this->suggestionPolicy()->normalizeTemplateOptions($options);
-    }
-
     /** @param array<string, mixed> $options @param array<string, mixed> $postData @return string */
     private function updateRegexPatternSettings(array &$options, array $postData): string {
         return $this->regexPatternPolicy->apply($options, $postData);

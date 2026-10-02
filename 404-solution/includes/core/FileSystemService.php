@@ -361,6 +361,13 @@ class ABJ_404_Solution_FileSystemService {
             $path = (string) substr($path, strlen($homepath));
         }
 
+        // The banner is embedded in SQL text that is later bound with wpdb::prepare(), which reads a
+        // percent sign followed by s, d or f (with an optional width) ANYWHERE in the statement,
+        // comments included, as a placeholder. A directory such as "100%discount" would add a phantom
+        // %d to every template that binds values and prepare() would return an empty statement. The
+        // path is decoration for the debug log, so a percent sign is shown as an underscore.
+        $filePath = str_replace('%', '_', $filePath);
+
         $supplement = array();
 
         if (!$appendExtraData) {

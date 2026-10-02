@@ -67,13 +67,10 @@ class ABJ_404_Solution_ImportProgressStore {
         if (!isset($progress[$key])) {
             return $default;
         }
-        $v = $progress[$key];
-        if (is_int($v)) {
-            return $v;
-        }
-        if (is_numeric($v)) {
-            return (int)$v;
-        }
-        return $default;
+        return ABJ_404_Solution_ExactInteger::readOr(
+            $progress[$key],
+            PHP_INT_MIN,
+            $default
+        );
     }
 }

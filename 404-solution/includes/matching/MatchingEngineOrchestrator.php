@@ -43,58 +43,78 @@ class ABJ_404_Solution_MatchingEngineOrchestrator {
      * @return ABJ_404_Solution_MatchResult|null
      */
     function run(ABJ_404_Solution_MatchRequest $request, ABJ_404_Solution_FrontendPipelineTrace $trace): ?ABJ_404_Solution_MatchResult {
-        $enginesToRun = ABJ_404_Solution_EngineProfileResolver::getInstance()
-            ->resolve($request->getRequestedURL(), $this->matchingEngines);
+        ABJ_404_Solution_RequestPhaseTimeline::stamp('abj404:engines');
+        $budget = ABJ_404_Solution_MatchingTimeBudget::fromEnvironment();
+        ABJ_404_Solution_MatchingTimeBudget::setCurrent($budget);
 
-        foreach ($enginesToRun as $engine) {
-            if (!($engine instanceof ABJ_404_Solution_MatchingEngine)) {
-                $this->logger->warn('Matching engine is not an instance of ABJ_404_Solution_MatchingEngine: ' .
-                    (is_object($engine) ? get_class($engine) : gettype($engine)));
-                continue;
+        try {
+            $enginesToRun = ABJ_404_Solution_EngineProfileResolver::getInstance()
+                ->resolve($request->getRequestedURL(), $this->matchingEngines);
+
+            foreach ($enginesToRun as $engine) {
+                if ($budget->isExhausted() || !$budget->hasTimeFor(1.0)) {
+                    $this->logger->debugMessage('Time budget exhausted (' . $budget->describe() . '), skipping remaining engines');
+                    $trace->add('Time budget', 'Exhausted', $budget->describe());
+                    break;
+                }
+
+                if (!($engine instanceof ABJ_404_Solution_MatchingEngine)) {
+                    $this->logger->warn('Matching engine is not an instance of ABJ_404_Solution_MatchingEngine: ' .
+                        (is_object($engine) ? get_class($engine) : gettype($engine)));
+                    continue;
+                }
+
+                try {
+                    if (!$engine->shouldRun($request)) {
+                        $this->logger->debugMessage('Engine skipped: ' . $engine->getName());
+                        $trace->add('Engine: ' . $engine->getName(), 'Skipped', 'not applicable');
+                        continue;
+                    }
+
+                    $result = $engine->match($request);
+
+                    if ($budget->isExhausted()) {
+                        $this->logger->debugMessage('Time budget exhausted mid-engine (' . $engine->getName() . '), discarding result');
+                        $trace->add('Engine: ' . $engine->getName(), 'Skipped', 'time budget exhausted mid-engine');
+                        continue;
+                    }
+
+                    if ($result === null) {
+                        $this->logger->debugMessage('Engine returned no match: ' . $engine->getName());
+                        $trace->add('Engine: ' . $engine->getName(), 'No match');
+                        continue;
+                    }
+
+                    if ($result->getLink() === '') {
+                        $this->logger->debugMessage('Engine returned empty link, skipping: ' . $engine->getName());
+                        $trace->add('Engine: ' . $engine->getName(), 'No match', 'empty link');
+                        continue;
+                    }
+
+                    if ($this->exclusionPolicy->isExcluded($result, $request->getOptions())) {
+                        $this->logger->debugMessage('Match excluded: ' . $engine->getName() . ' id=' . $result->getId());
+                        $trace->add('Engine: ' . $engine->getName(), 'Excluded', 'post #' . $result->getId());
+                        continue;
+                    }
+
+                    $this->logger->debugMessage('Engine matched: ' . $engine->getName());
+                    $trace->add(
+                        'Engine: ' . $engine->getName(),
+                        'Matched',
+                        'score ' . $result->getScore() . ' -> ' . $result->getLink()
+                    );
+                    return $result;
+                } catch (\Throwable $e) {
+                    $this->logger->warn('Matching engine error (' . $engine->getName() . '): ' . $e->getMessage());
+                    $trace->add('Engine: ' . $engine->getName(), 'Error', $e->getMessage());
+                    continue;
+                }
             }
 
-            try {
-                if (!$engine->shouldRun($request)) {
-                    $this->logger->debugMessage('Engine skipped: ' . $engine->getName());
-                    $trace->add('Engine: ' . $engine->getName(), 'Skipped', 'not applicable');
-                    continue;
-                }
-
-                $result = $engine->match($request);
-
-                if ($result === null) {
-                    $this->logger->debugMessage('Engine returned no match: ' . $engine->getName());
-                    $trace->add('Engine: ' . $engine->getName(), 'No match');
-                    continue;
-                }
-
-                if ($result->getLink() === '') {
-                    $this->logger->debugMessage('Engine returned empty link, skipping: ' . $engine->getName());
-                    $trace->add('Engine: ' . $engine->getName(), 'No match', 'empty link');
-                    continue;
-                }
-
-                if ($this->exclusionPolicy->isExcluded($result, $request->getOptions())) {
-                    $this->logger->debugMessage('Match excluded: ' . $engine->getName() . ' id=' . $result->getId());
-                    $trace->add('Engine: ' . $engine->getName(), 'Excluded', 'post #' . $result->getId());
-                    continue;
-                }
-
-                $this->logger->debugMessage('Engine matched: ' . $engine->getName());
-                $trace->add(
-                    'Engine: ' . $engine->getName(),
-                    'Matched',
-                    'score ' . $result->getScore() . ' -> ' . $result->getLink()
-                );
-                return $result;
-            } catch (\Throwable $e) {
-                $this->logger->warn('Matching engine error (' . $engine->getName() . '): ' . $e->getMessage());
-                $trace->add('Engine: ' . $engine->getName(), 'Error', $e->getMessage());
-                continue;
-            }
+            $trace->add('Suggestion engines', 'No match found');
+            return null;
+        } finally {
+            ABJ_404_Solution_MatchingTimeBudget::clearCurrent();
         }
-
-        $trace->add('Suggestion engines', 'No match found');
-        return null;
     }
 }

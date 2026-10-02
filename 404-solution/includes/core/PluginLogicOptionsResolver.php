@@ -6,6 +6,7 @@ if (!defined('ABSPATH')) {
 
 require_once __DIR__ . '/PluginLogicDefaults.php';
 require_once __DIR__ . '/../settings/StorageOptionContracts.php';
+require_once __DIR__ . '/../policies/SettingsSuggestionPolicy.php';
 
 /**
  * Owns the plugin's persistent settings option (`abj404_settings`):
@@ -195,18 +196,7 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
             $options = array();
         }
 
-        $defaults = ABJ_404_Solution_PluginLogicDefaults::defaults();
-        $missing = false;
-        foreach ($defaults as $key => $value) {
-            if (!isset($options[$key]) || $options[$key] === '') {
-                $options[$key] = $value;
-                $missing = true;
-            }
-        }
-
-        if ($missing) {
-            $this->updateOptions($options);
-        }
+        $options = $this->mergeDefaults($options);
 
         if ($skip_db_check == false) {
             if (!array_key_exists('DB_VERSION', $options) || $options['DB_VERSION'] != ABJ404_VERSION) {
@@ -219,16 +209,11 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
             }
         }
 
-        $pluginLogic = abj_service('plugin_logic');
-        $pluginLogicClass = 'ABJ_404_Solution_PluginLogic';
-        $settingsUpdate = is_object($pluginLogic) && method_exists($pluginLogic, 'settingsUpdate')
-            && (!(class_exists($pluginLogicClass) && is_a($pluginLogic, $pluginLogicClass))
-                || get_class($pluginLogic) === $pluginLogicClass)
-            ? $pluginLogic->settingsUpdate()
-            : null;
-        if (is_object($settingsUpdate)
-                && method_exists($settingsUpdate, 'normalizeSuggestionTemplateOptions')
-                && $settingsUpdate->normalizeSuggestionTemplateOptions($options)) {
+        // The suggestion-template repair is pure, so the read path calls it
+        // directly instead of resolving plugin_logic (which constructed
+        // PluginLogic, DataAccess, LogsRepository, ViewReadService and
+        // LogsMetricsReader on every request just to read settings).
+        if (ABJ_404_Solution_SettingsSuggestionPolicy::normalizeTemplateOptions($options)) {
             $this->updateOptions($options);
         }
 
@@ -236,6 +221,31 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
             $this->resolvedSkipDbCheck = $options;
         } else {
             $this->resolvedWithDbCheck = $options;
+        }
+
+        return $options;
+    }
+
+    /**
+     * Fill unset options from the defaults and persist when anything was
+     * added. Split out of getOptions() unchanged to keep that method under
+     * the project's cyclomatic-complexity gate.
+     *
+     * @param array<string, mixed> $options
+     * @return array<string, mixed>
+     */
+    private function mergeDefaults(array $options): array {
+        $defaults = ABJ_404_Solution_PluginLogicDefaults::defaults();
+        $missing = false;
+        foreach ($defaults as $key => $value) {
+            if (!isset($options[$key]) || $options[$key] === '') {
+                $options[$key] = $value;
+                $missing = true;
+            }
+        }
+
+        if ($missing) {
+            $this->updateOptions($options);
         }
 
         return $options;
@@ -289,10 +299,14 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
      *      method (deleted with the options migration), so method_exists() is a
      *      reliable test-subclass discriminator.
      *
+     * The class check below does not autoload, because in production nothing
+     * has loaded PluginLogic when the boot-time settings read runs, and a test
+     * that seeds the seam has necessarily loaded the class already.
+     *
      * @return array<string, mixed>|null
      */
     private function legacyPluginLogicOptionsOverride() {
-        if (!class_exists('ABJ_404_Solution_PluginLogic')) {
+        if (!class_exists('ABJ_404_Solution_PluginLogic', false)) {
             return null;
         }
         $pluginLogic = $this->readPluginLogicInstance();

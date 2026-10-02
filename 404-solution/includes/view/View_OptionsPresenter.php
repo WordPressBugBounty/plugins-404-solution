@@ -124,54 +124,50 @@ class ABJ_404_Solution_View_OptionsPresenter extends ABJ_404_Solution_ViewCompon
 			}
 		}
 
-		$customDropdown = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) .
-			"/html/addManualRedirectPageSearchDropdown.html");
-		$customDropdown = $this->f->str_replace('{redirect_to_label}', '', $customDropdown);
-		$customDropdown = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_EMPTY}',
-			__('(Type a page name or an external URL)', '404-solution'), $customDropdown);
-		$customDropdown = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_PAGE}',
-			__('(A page has been selected.)', '404-solution'), $customDropdown);
-		$customDropdown = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING}',
-			__('(A custom string has been entered.)', '404-solution'), $customDropdown);
-		$customDropdown = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_URL}',
-			__('(An external URL will be used.)', '404-solution'), $customDropdown);
-		$customDropdown = $this->f->str_replace('{REDIRECT_TO_USER_FIELD_WARNING}', $pageMissingWarning, $customDropdown);
-		$customDropdown = $this->f->str_replace('{redirectPageTitle}', esc_attr($pageTitle), $customDropdown);
-		$customDropdown = $this->f->str_replace('{pageIDAndType}', esc_attr($userSelectedDefault404Page), $customDropdown);
-		$customDropdown = $this->f->str_replace('{data-url}',
-			"admin-ajax.php?action=echoRedirectToPages&includeDefault404Page=true&includeSpecial=true&nonce=" . wp_create_nonce('abj404_ajax'), $customDropdown);
-		$customDropdown = $this->f->doNormalReplacements($customDropdown);
+		// Rendered to a finished fragment first: the page title is user data, so it must be bound
+		// into this template and never sit in a string that a later pass scans for `{msgid}` tokens.
+		$customDropdown = $this->f->renderTemplate(ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) .
+			"/html/addManualRedirectPageSearchDropdown.html"), array(
+			'{redirect_to_label}' => '',
+			'{TOOLTIP_POPUP_EXPLANATION_EMPTY}' => __('(Type a page name or an external URL)', '404-solution'),
+			'{TOOLTIP_POPUP_EXPLANATION_PAGE}' => __('(A page has been selected.)', '404-solution'),
+			'{TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING}' => __('(A custom string has been entered.)', '404-solution'),
+			'{TOOLTIP_POPUP_EXPLANATION_URL}' => __('(An external URL will be used.)', '404-solution'),
+			'{REDIRECT_TO_USER_FIELD_WARNING}' => $pageMissingWarning,
+			'{redirectPageTitle}' => esc_attr($pageTitle),
+			'{pageIDAndType}' => esc_attr($userSelectedDefault404Page),
+			'{data-url}' => "admin-ajax.php?action=echoRedirectToPages&includeDefault404Page=true&includeSpecial=true&nonce=" . wp_create_nonce('abj404_ajax'),
+		));
 
-		$html = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/behaviorTiles.html");
-
-		$behaviors = array('suggest', 'homepage', 'custom', 'theme_default');
-		foreach ($behaviors as $b) {
+		$tileVars = array(
+			'{selected_behavior}' => esc_attr($behavior),
+			'{custom_picker_display}' => $behavior === 'custom' ? '' : 'none',
+			'{customPageDropdown}' => $customDropdown,
+			'{Recommended}' => __('Recommended', '404-solution'),
+			'{Suggest similar pages}' => __('Suggest similar pages', '404-solution'),
+			'{Shows visitors a list of pages matching the URL they were looking for}' =>
+				__('Shows visitors a list of pages matching the URL they were looking for', '404-solution'),
+			'{Redirect to homepage}' => __('Redirect to homepage', '404-solution'),
+			'{Sends all 404 visitors to the site front page}' =>
+				__('Sends all 404 visitors to the site front page', '404-solution'),
+			'{Custom page}' => __('Custom page', '404-solution'),
+			'{Choose a specific page to show for all 404 errors}' =>
+				__('Choose a specific page to show for all 404 errors', '404-solution'),
+			'{Theme default}' => __('Theme default', '404-solution'),
+			'{Uses the theme built-in 404 page, no redirect}' =>
+				__('Uses the theme built-in 404 page, no redirect', '404-solution'),
+			'{Select a page}' => __('Select a page', '404-solution'),
+		);
+		foreach (array('suggest', 'homepage', 'custom', 'theme_default') as $b) {
 			$isSelected = ($behavior === $b);
-			$html = $this->f->str_replace('{tile_' . $b . '_selected}', $isSelected ? ' selected' : '', $html);
-			$html = $this->f->str_replace('{' . $b . '_aria_checked}', $isSelected ? 'true' : 'false', $html);
+			$tileVars['{tile_' . $b . '_selected}'] = $isSelected ? ' selected' : '';
+			$tileVars['{' . $b . '_aria_checked}'] = $isSelected ? 'true' : 'false';
 		}
 
-		$html = $this->f->str_replace('{selected_behavior}', esc_attr($behavior), $html);
-		$html = $this->f->str_replace('{pageIDAndType}', esc_attr($userSelectedDefault404Page), $html);
-		$html = $this->f->str_replace('{custom_picker_display}', $behavior === 'custom' ? '' : 'none', $html);
-		$html = $this->f->str_replace('{customPageDropdown}', $customDropdown, $html);
-
-		$html = $this->f->str_replace('{Recommended}', __('Recommended', '404-solution'), $html);
-		$html = $this->f->str_replace('{Suggest similar pages}', __('Suggest similar pages', '404-solution'), $html);
-		$html = $this->f->str_replace('{Shows visitors a list of pages matching the URL they were looking for}',
-			__('Shows visitors a list of pages matching the URL they were looking for', '404-solution'), $html);
-		$html = $this->f->str_replace('{Redirect to homepage}', __('Redirect to homepage', '404-solution'), $html);
-		$html = $this->f->str_replace('{Sends all 404 visitors to the site front page}',
-			__('Sends all 404 visitors to the site front page', '404-solution'), $html);
-		$html = $this->f->str_replace('{Custom page}', __('Custom page', '404-solution'), $html);
-		$html = $this->f->str_replace('{Choose a specific page to show for all 404 errors}',
-			__('Choose a specific page to show for all 404 errors', '404-solution'), $html);
-		$html = $this->f->str_replace('{Theme default}', __('Theme default', '404-solution'), $html);
-		$html = $this->f->str_replace('{Uses the theme built-in 404 page, no redirect}',
-			__('Uses the theme built-in 404 page, no redirect', '404-solution'), $html);
-		$html = $this->f->str_replace('{Select a page}', __('Select a page', '404-solution'), $html);
-
-		return $html;
+		return $this->f->renderTemplate(
+			ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/behaviorTiles.html"),
+			$tileVars
+		);
 	}
 
 	/**

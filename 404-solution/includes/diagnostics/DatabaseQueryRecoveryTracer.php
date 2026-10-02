@@ -352,9 +352,11 @@ final class ABJ_404_Solution_DatabaseQueryRecoveryTracer {
         return array(
             'result_status' => $lastError === '' ? 'success' : 'error',
             'row_count' => count($rows),
-            'rows_affected' => is_numeric($result['rows_affected'] ?? null)
-                ? max(0, (int)$result['rows_affected'])
-                : 0,
+            'rows_affected' => ABJ_404_Solution_ExactInteger::readOr(
+                $result['rows_affected'] ?? null,
+                0,
+                0
+            ),
         );
     }
 

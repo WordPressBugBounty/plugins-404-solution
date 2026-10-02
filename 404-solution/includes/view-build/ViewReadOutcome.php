@@ -91,10 +91,12 @@ class ABJ_404_Solution_ViewReadOutcome {
         if ($liveCount <= 0) {
             return false;
         }
-        $perpage = isset($tableOptions['perpage']) && is_numeric($tableOptions['perpage'])
-            ? max(1, intval($tableOptions['perpage'])) : 25;
-        $paged = isset($tableOptions['paged']) && is_numeric($tableOptions['paged'])
-            ? max(1, intval($tableOptions['paged'])) : 1;
+        $perpage = ABJ_404_Solution_ExactInteger::readOr(
+            $tableOptions['perpage'] ?? null,
+            1,
+            25
+        );
+        $paged = ABJ_404_Solution_ExactInteger::readOr($tableOptions['paged'] ?? null, 1, 1);
         return $liveCount > ($paged - 1) * $perpage;
     }
 

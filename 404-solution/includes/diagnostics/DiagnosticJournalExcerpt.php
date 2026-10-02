@@ -55,8 +55,55 @@ final class ABJ_404_Solution_DiagnosticJournalExcerpt {
      */
     const MAX_TOTAL_READ_BYTES = 17825792;
 
-    /** Bytes held back from the content budget for the accounting line and its newline. */
-    const SUMMARY_RESERVE_BYTES = 512;
+    /**
+     * Every key compose() adds to the summary on top of
+     * ABJ_404_Solution_DiagnosticEvidencePriority::SUMMARY_KEYS, in the exact
+     * order the merge in compose() adds them.
+     *
+     * summaryReserveBytes() derives its worst-case byte reserve from this
+     * list plus that one, so the reserve can never again go stale against a
+     * summary that grew a new key (commit 849e5aaf: condemned_requests and
+     * condemned_requests_included pushed the accounting line past a
+     * hand-sized 512-byte reserve, and summaryLine() silently fell back to
+     * "{"abj404_excerpt_summary":{"encoding_failed":1}}", mislabeling an
+     * oversize line as an encoding failure).
+     */
+    const COMPOSE_SUMMARY_KEYS = array(
+        'files_read',
+        'files_skipped',
+        'bytes_unread',
+        'files_dropped_by_cap',
+        'known_failure_files',
+        'server_failure_files',
+        'classification_issue_files',
+        'pinned_files',
+    );
+
+    /** @var int|null Memoized result of {@see summaryReserveBytes()}. */
+    private static $summaryReserveBytesCache = null;
+
+    /**
+     * Worst-case byte length of the accounting line plus its trailing
+     * newline, derived from the summary's actual key set rather than a
+     * hand-sized constant.
+     *
+     * Every summary value is an int, so PHP_INT_MAX in every key is the true
+     * worst case: nothing json_encode() can emit for this shape is ever
+     * longer.
+     */
+    public static function summaryReserveBytes(): int {
+        if (self::$summaryReserveBytesCache === null) {
+            $keys = array_merge(
+                ABJ_404_Solution_DiagnosticEvidencePriority::SUMMARY_KEYS,
+                self::COMPOSE_SUMMARY_KEYS
+            );
+            $worstCase = array_fill_keys($keys, PHP_INT_MAX);
+            $line = json_encode(array('abj404_excerpt_summary' => $worstCase), JSON_UNESCAPED_SLASHES);
+            // +1 for the newline that follows the summary line.
+            self::$summaryReserveBytesCache = strlen((string)$line) + 1;
+        }
+        return self::$summaryReserveBytesCache;
+    }
 
     /**
      * Compose one labeled excerpt block from the newest of the given paths.
@@ -97,7 +144,7 @@ final class ABJ_404_Solution_DiagnosticJournalExcerpt {
             if ($files === array()) {
                 return '';
             }
-            $contentBudget = $budgetBytes - strlen($header) - self::SUMMARY_RESERVE_BYTES;
+            $contentBudget = $budgetBytes - strlen($header) - self::summaryReserveBytes();
             if ($contentBudget <= 0) {
                 return '';
             }
@@ -114,17 +161,20 @@ final class ABJ_404_Solution_DiagnosticJournalExcerpt {
             if ($selected['lines'] === array()) {
                 return '';
             }
-            $summary = array_merge($selected['summary'], array(
-                'files_read' => $read['filesRead'],
-                'files_skipped' => $read['filesSkipped'],
-                'bytes_unread' => $read['bytesUnread'],
-                'files_dropped_by_cap' => self::selectionCount($selection, 'dropped_files'),
-                'known_failure_files' => self::selectionCount($selection, 'known_failure_files'),
-                'server_failure_files' => self::selectionCount($selection, 'server_failure_files'),
-                'classification_issue_files' =>
-                    self::selectionCount($selection, 'classification_issue_files'),
-                'pinned_files' => self::selectionCount($selection, 'pinned_files'),
-            ));
+            // Keys come from COMPOSE_SUMMARY_KEYS via array_combine() rather
+            // than a literal associative array, so a value added here without
+            // a matching entry in the constant fails loudly instead of
+            // silently widening the summary the reserve was derived from.
+            $summary = array_merge($selected['summary'], array_combine(self::COMPOSE_SUMMARY_KEYS, array(
+                $read['filesRead'],
+                $read['filesSkipped'],
+                $read['bytesUnread'],
+                self::selectionCount($selection, 'dropped_files'),
+                self::selectionCount($selection, 'known_failure_files'),
+                self::selectionCount($selection, 'server_failure_files'),
+                self::selectionCount($selection, 'classification_issue_files'),
+                self::selectionCount($selection, 'pinned_files'),
+            )));
             return $header . self::summaryLine($summary) . "\n" . implode("\n", $selected['lines']);
         } catch (Throwable $e) {
             self::reportFailure('Diagnostic journal excerpt failed: ' . $e->getMessage());
@@ -229,7 +279,7 @@ final class ABJ_404_Solution_DiagnosticJournalExcerpt {
     private static function selectionCount(array $selection, string $field): int {
         $manifest = isset($selection['manifest']) && is_array($selection['manifest'])
             ? $selection['manifest'] : array();
-        return is_numeric($manifest[$field] ?? null) ? (int)$manifest[$field] : 0;
+        return ABJ_404_Solution_ExactInteger::readOr($manifest[$field] ?? null, 0, 0);
     }
 
     /**
@@ -325,9 +375,21 @@ final class ABJ_404_Solution_DiagnosticJournalExcerpt {
      */
     private static function summaryLine(array $summary): string {
         $line = json_encode(array('abj404_excerpt_summary' => $summary), JSON_UNESCAPED_SLASHES);
-        // +1 for the newline that follows it, which the reserve also covers.
-        if (!is_string($line) || strlen($line) + 1 > self::SUMMARY_RESERVE_BYTES) {
+        if (!is_string($line)) {
+            self::reportFailure(
+                'Diagnostic excerpt summary could not be JSON-encoded: ' . json_last_error_msg());
             return '{"abj404_excerpt_summary":{"encoding_failed":1}}';
+        }
+        // +1 for the newline that follows it, which the reserve also covers.
+        $reserve = self::summaryReserveBytes();
+        if (strlen($line) + 1 > $reserve) {
+            // summaryReserveBytes() is a worst-case bound over every key this
+            // summary can hold, so reaching this branch means the summary
+            // grew a key the reserve was not derived from -- a real defect,
+            // not the ordinary encoding failure above.
+            self::reportFailure('Diagnostic excerpt summary exceeded its reserve: '
+                . (strlen($line) + 1) . ' bytes against a ' . $reserve . '-byte reserve.');
+            return '{"abj404_excerpt_summary":{"over_reserve":1}}';
         }
         return $line;
     }

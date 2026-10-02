@@ -206,8 +206,11 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
         $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
         $ids = array();
         foreach ($rows as $row) {
-            if (is_array($row) && isset($row['id']) && is_numeric($row['id'])) {
-                $ids[] = (int)$row['id'];
+            $id = is_array($row)
+                ? ABJ_404_Solution_ExactInteger::read($row['id'] ?? null, 1)
+                : null;
+            if ($id !== null) {
+                $ids[] = $id;
             }
         }
         return $ids;
@@ -304,8 +307,11 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
         $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
         $ids = array();
         foreach ($rows as $row) {
-            if (is_array($row) && isset($row['id']) && is_numeric($row['id'])) {
-                $ids[] = (int)$row['id'];
+            $id = is_array($row)
+                ? ABJ_404_Solution_ExactInteger::read($row['id'] ?? null, 1)
+                : null;
+            if ($id !== null) {
+                $ids[] = $id;
             }
         }
         return $ids;

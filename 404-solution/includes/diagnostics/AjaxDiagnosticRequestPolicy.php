@@ -80,6 +80,57 @@ final class ABJ_404_Solution_AjaxDiagnosticRequestPolicy {
         'ajaxRunCanaryStep' => true,
     );
 
+    /**
+     * How long a client-reported parse failure keeps a traced action's durable
+     * trace armed with the debug setting off. Support report 521 (LiteSpeed /
+     * GoDaddy, 4.3.5): two ajaxUpdatePaginationLinks attempts came back HTTP
+     * 200 with a 65-byte non-JSON body and the server side held nothing,
+     * because with debug_mode off a traced-but-not-self-arming action writes
+     * no trace and drops the client report riding the very same requests. A
+     * parse failure is the same kind of opt-in the canary ladder has (the
+     * browser only reports one after a real request already failed), but it
+     * must stay bounded: a short window after the report, never a standing
+     * per-request cost on a site that never asked for tracing.
+     */
+    const CLIENT_PARSE_FAILURE_TRACE_TTL_SECONDS = 1800;
+
+    /**
+     * Arm a traced action's durable trace for a bounded window, regardless of
+     * the debug setting, because the browser just reported a parse failure on
+     * that action.
+     *
+     * Idempotent by construction: re-arming refreshes the same transient at
+     * the same bound. Returns whether the action is (now) one this policy
+     * will trace, so the caller can journal an accurate outcome without
+     * duplicating the traced-action set.
+     */
+    public static function armTraceForClientParseFailure(string $action): bool {
+        if (!isset(self::DIAGNOSTIC_TRACE_ACTIONS[$action]) || !function_exists('set_transient')) {
+            return false;
+        }
+        set_transient(self::armedTransientKey($action), 1,
+            self::CLIENT_PARSE_FAILURE_TRACE_TTL_SECONDS);
+        // Read back rather than trusting set_transient's own return: it can
+        // report false for a value that is already set, and the caller
+        // journals this verdict as evidence. What matters is whether the
+        // window is actually open, which is the same read every traced
+        // request will make.
+        return self::traceArmedByClientParseFailure($action);
+    }
+
+    /** @param string $action */
+    private static function armedTransientKey(string $action): string {
+        return 'abj404_client_parse_failure_trace_' . $action;
+    }
+
+    /** Whether a client parse-failure report armed this action inside its window. */
+    private static function traceArmedByClientParseFailure(string $action): bool {
+        if (!function_exists('get_transient')) {
+            return false;
+        }
+        return get_transient(self::armedTransientKey($action)) !== false;
+    }
+
     /** Whether the stored debug setting explicitly enables diagnostics. */
     public static function isEnabled(): bool {
         if (!function_exists('abj404_get_settings_options')) {
@@ -116,7 +167,8 @@ final class ABJ_404_Solution_AjaxDiagnosticRequestPolicy {
             return '';
         }
         if (!isset(self::SELF_ARMING_TRACE_ACTIONS[$action])
-                && !self::isEnabled() && !self::isAuthorizedRetry($context)) {
+                && !self::isEnabled() && !self::isAuthorizedRetry($context)
+                && !self::traceArmedByClientParseFailure($action)) {
             return '';
         }
         return ABJ_404_Solution_AjaxRequestLedger::normalizeId($context['request_id'] ?? null);
@@ -146,14 +198,27 @@ final class ABJ_404_Solution_AjaxDiagnosticRequestPolicy {
      * Names only fixed action strings and one boolean read of an existing
      * setting: no request data, no site identity.
      *
+     * `client_armed_actions` exists for the same reason as the rest of this
+     * method: without it, a payload from a site with the debug setting off
+     * reports no trace could exist while a client-reported parse failure had
+     * one armed, and an empty trace channel again reads as "nothing went
+     * wrong" rather than "nothing wrote".
+     *
      * @return array{debug_mode_enabled: bool, traced_actions: array<int, string>,
-     *   self_arming_actions: array<int, string>}
+     *   self_arming_actions: array<int, string>, client_armed_actions: array<int, string>}
      */
     public static function armingState(): array {
+        $clientArmed = array();
+        foreach (array_keys(self::DIAGNOSTIC_TRACE_ACTIONS) as $action) {
+            if (self::traceArmedByClientParseFailure((string)$action)) {
+                $clientArmed[] = (string)$action;
+            }
+        }
         return array(
             'debug_mode_enabled' => self::isEnabled(),
             'traced_actions' => array_keys(self::DIAGNOSTIC_TRACE_ACTIONS),
             'self_arming_actions' => array_keys(self::SELF_ARMING_TRACE_ACTIONS),
+            'client_armed_actions' => $clientArmed,
         );
     }
 
@@ -193,9 +258,9 @@ final class ABJ_404_Solution_AjaxDiagnosticRequestPolicy {
         }
         $action = is_scalar($context['action'] ?? null) ? (string)$context['action'] : '';
         $retryCount = $context['retry_count'] ?? null;
+        $retryCountInt = ABJ_404_Solution_ExactInteger::read($retryCount, 1);
         return $action === self::INSTRUMENTED_ACTION
-            && is_numeric($retryCount)
-            && (int)$retryCount >= 1
-            && (int)$retryCount <= 2;
+            && $retryCountInt !== null
+            && $retryCountInt <= 2;
     }
 }

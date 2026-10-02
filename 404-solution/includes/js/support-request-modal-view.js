@@ -272,7 +272,16 @@
                     previewLoaded = true;
                     loadPreview(triggeredFrom, userMessageInput.value).then(function (preview) {
                         payloadPre.textContent = JSON.stringify(preview.payload, null, 2);
-                    }).catch(function () {
+                    }).catch(function (reason) {
+                        // The notice stays generic by design (the report is still
+                        // safe to send); the reason goes to the console so a
+                        // network failure, timeout and refusal are told apart.
+                        if (window.console && window.console.warn) {
+                            window.console.warn('404 Solution: support request preview did not load', {
+                                name: reason && reason.name ? String(reason.name) : '',
+                                message: reason && reason.message ? String(reason.message) : String(reason)
+                            });
+                        }
                         payloadPre.textContent = t('previewError');
                     });
                 }

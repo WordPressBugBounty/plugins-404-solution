@@ -80,7 +80,7 @@ final class ABJ_404_Solution_ClientBuildFingerprint {
                 'abj404HealthBarAttemptUrl', 'abj404HealthBarOutcome',
                 'abj404HealthBarReportNonce',
                 'abj404HealthBarRequestPlan', 'abj404BeginHealthBarRequest',
-                'abj404RenderHealthBarResult',
+                'abj404RenderHealthBarResult', 'abj404RecordHealthBarFailure',
                 'abj404HealthBarAjaxOptions', 'refreshHealthBarIfNeeded')),
         'canary_measurements' => array(
             'file' => 'ajax/view_updater_canary_measurements.js', 'functions' => null),

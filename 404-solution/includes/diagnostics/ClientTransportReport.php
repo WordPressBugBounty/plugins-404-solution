@@ -28,6 +28,10 @@ if (!defined('ABSPATH')) {
  * defect in the component under investigation must not be able to erase the
  * evidence about it. The payload is treated as untrusted text throughout: it
  * is length-bounded, parsed defensively, and never echoed back to any client.
+ *
+ * The browser's DRAINED attempt buffer (what a support request POSTs whole)
+ * is not a request parameter and has its own rules; that half lives in
+ * ABJ_404_Solution_DrainedTelemetryBuffer.
  */
 final class ABJ_404_Solution_ClientTransportReport {
 
@@ -39,25 +43,18 @@ final class ABJ_404_Solution_ClientTransportReport {
     const MAX_REPORT_BYTES = 4096;
 
     /**
-     * Hard bound on the raw drained buffer BEFORE it is parsed. Only an input
-     * guard against an absurd POST; the shipping bound is the caller's budget.
+     * The endpoint a response part belongs to, for the one question that has
+     * to be answered from the part alone: a report-only beacon always travels
+     * on the table action, so when a health bar attempt fails to parse, the
+     * part is the only field naming the endpoint whose body was not JSON.
+     * Unmapped parts (table, counts, pagination, absent, unrecognized) are
+     * the table endpoint, the action the beacon itself arrives on.
      */
-    const MAX_DRAINED_BUFFER_INPUT_BYTES = 131072;
+    const PARSE_FAILURE_ACTION_BY_PART = array(
+        'health' => 'ajaxRefreshHealthBar',
+    );
 
-    /**
-     * The only attempt outcome that means "did not fail". An allowlist, not a
-     * deny-list: 'pending' is an attempt that never finished (the hung request
-     * itself) and an unrecognised or absent outcome is an unknown, which is
-     * worth more than a known success when something has to be dropped.
-     */
-    const HEALTHY_OUTCOMES = array('success');
-
-    /**
-     * Attempt ids carried into the support-collection manifest. The browser's
-     * own ring buffer holds 16 records, so this is that ceiling plus headroom
-     * for a buffer that arrives from an older or a modified client.
-     */
-    const MAX_ATTEMPT_IDS_REPORTED = 32;
+    const PARSE_FAILURE_DEFAULT_ACTION = 'ajaxUpdatePaginationLinks';
 
     /**
      * Read, bound, and journal whatever the browser said about a previous
@@ -124,12 +121,78 @@ final class ABJ_404_Solution_ClientTransportReport {
                 return;
             }
             ABJ_404_Solution_AjaxCheckpointLogger::record(
-                $requestId, 'client_prior_attempt', array('report' => $report));
+                $requestId, 'client_prior_attempt',
+                array('report' => self::redactReportBodyExcerpt($report)));
         } catch (Throwable $e) {
             ABJ_404_Solution_AjaxCheckpointLogger::record($requestId, 'client_report_error', array(
                 'message' => substr($e->getMessage(), 0, 200),
             ));
         }
+    }
+
+    /**
+     * The action whose body a client report says failed to parse, or '' when
+     * it describes no parse failure. The verdict is jQuery's own word
+     * ('parsererror' as jq or outcome); a timeout says nothing about JSON
+     * delivery and must not arm anything. The part names the endpoint, see
+     * PARSE_FAILURE_ACTION_BY_PART. Bounded like readReport(): untrusted text.
+     */
+    public static function parseFailureActionInReport(string $raw): string {
+        $decoded = json_decode(substr($raw, 0, self::MAX_REPORT_BYTES), true);
+        if (!is_array($decoded)) {
+            return '';
+        }
+        $jq = isset($decoded['jq']) && is_scalar($decoded['jq']) ? (string)$decoded['jq'] : '';
+        $outcome = isset($decoded['outcome']) && is_scalar($decoded['outcome'])
+            ? (string)$decoded['outcome'] : '';
+        if ($jq !== 'parsererror' && $outcome !== 'parsererror') {
+            return '';
+        }
+        $part = isset($decoded['part']) && is_scalar($decoded['part']) ? (string)$decoded['part'] : '';
+        return self::PARSE_FAILURE_ACTION_BY_PART[$part] ?? self::PARSE_FAILURE_DEFAULT_ACTION;
+    }
+
+    /**
+     * Redact the bounded body excerpt inside one client record, if it has
+     * one. The excerpt is the only field of a client report that carries
+     * freeform response TEXT rather than measurements, and every route a
+     * client record leaves this class through (the checkpoint journal here,
+     * the drained support-payload buffer via
+     * ABJ_404_Solution_DrainedTelemetryBuffer) lands in debug_log_excerpt,
+     * which the payload redaction sweep skips by design. Anything that is not
+     * the {head, tail} string pair the shipped client sends is carried
+     * as-is, never mangled.
+     *
+     * @param array<mixed, mixed> $record Keys are untrusted decoded-JSON keys;
+     *   only the bodyExcerpt entry is read or written.
+     * @return array<mixed, mixed>
+     */
+    public static function redactReportBodyExcerpt(array $record): array {
+        $excerpt = $record['bodyExcerpt'] ?? null;
+        if (!is_array($excerpt)) {
+            return $record;
+        }
+        $redactor = self::piiRedactor();
+        if ($redactor === null) {
+            return $record;
+        }
+        foreach (array('head', 'tail') as $side) {
+            if (isset($excerpt[$side]) && is_string($excerpt[$side])) {
+                $excerpt[$side] = $redactor->redact($excerpt[$side]);
+            }
+        }
+        $record['bodyExcerpt'] = $excerpt;
+        return $record;
+    }
+
+    /** @return ABJ_404_Solution_PiiRedactor|null */
+    private static function piiRedactor() {
+        if (!function_exists('abj_service_optional')) {
+            return null;
+        }
+        /** @var ABJ_404_Solution_PiiRedactor|null $redactor */
+        $redactor = abj_service_optional('pii_redactor');
+        return $redactor instanceof ABJ_404_Solution_PiiRedactor ? $redactor : null;
     }
 
 
@@ -230,193 +293,5 @@ final class ABJ_404_Solution_ClientTransportReport {
         $report['decoded'] = true;
         $report['truncated_on_arrival'] = $truncated;
         return $report;
-    }
-
-    /**
-     * The attempt outcomes the browser says its drained buffer describes.
-     *
-     * The support payload is the one place both halves of the request ledger
-     * meet, so "the browser is reporting attempt X and the collected journals
-     * never mention X" is a decisive fact about the COLLECTION rather than
-     * about the request -- and it is only available if the ids the browser
-     * named are read before the buffer is bounded down to fit the payload.
-     * Parsing lives here, next to boundDrainedBuffer(), because this class
-     * already owns every rule about what that buffer is; the manifest that
-     * consumes this owns none of them.
-     *
-     * The three statuses are kept distinct on purpose: "the browser sent
-     * nothing" and "the browser sent something we could not read" are
-     * different findings, and collapsing the second into an empty id list is
-     * the same silent-empty defect this whole manifest exists to end.
-     *
-     * @param string $raw The raw POSTed buffer, already unslashed.
-     * A failure is sticky across duplicate records. Browser storage is a
-     * ring buffer and a retry can leave more than one account of an attempt;
-     * a later success must not erase an earlier timeout, and a later timeout
-     * must still override an earlier success. Only the explicit `success`
-     * outcome is healthy, matching the ranking rules used after journaling.
-     *
-     * @return array{status: string, ids: array<int, string>, records: int, outcomes: array<string, bool>}
-     *   status: `absent`, `unparseable`, or `parsed`.
-     */
-    public static function attemptOutcomesInDrainedBuffer(string $raw): array {
-        if ($raw === '') {
-            return array(
-                'status' => 'absent', 'ids' => array(), 'records' => 0, 'outcomes' => array(),
-            );
-        }
-        $boundedRaw = substr($raw, 0, self::MAX_DRAINED_BUFFER_INPUT_BYTES);
-        $decoded = json_decode($boundedRaw, true);
-        if (!is_array($decoded) || !self::isJsonArrayDocument($boundedRaw)) {
-            return array(
-                'status' => 'unparseable', 'ids' => array(), 'records' => 0, 'outcomes' => array(),
-            );
-        }
-        $ids = array();
-        $outcomes = array();
-        foreach ($decoded as $record) {
-            if (!is_array($record) || !isset($record['id']) || !is_scalar($record['id'])) {
-                continue;
-            }
-            $id = (string)$record['id'];
-            // The wire contract's own request-id shape. An id that cannot be a
-            // server request id cannot be reconciled against one, and letting
-            // arbitrary browser text into the manifest would put an unbounded
-            // string in a bounded record.
-            if (preg_match('/^[a-zA-Z0-9]{1,64}$/', $id) !== 1) {
-                continue;
-            }
-            $ids[$id] = true;
-            $outcome = isset($record['outcome']) && is_scalar($record['outcome'])
-                ? (string)$record['outcome'] : '';
-            $healthy = in_array($outcome, self::HEALTHY_OUTCOMES, true);
-            if (!array_key_exists($id, $outcomes) || !$healthy) {
-                $outcomes[$id] = $healthy;
-            }
-        }
-        return array(
-            'status' => 'parsed',
-            'ids' => array_slice(array_keys($ids), 0, self::MAX_ATTEMPT_IDS_REPORTED),
-            'records' => count($decoded),
-            'outcomes' => $outcomes,
-        );
-    }
-
-    /**
-     * Fit the browser's drained attempt buffer inside a byte budget WITHOUT
-     * destroying it.
-     *
-     * The buffer is a JSON array of per-attempt records, and it can exceed
-     * what the support payload will carry: the browser store holds up to 16
-     * records / 48 KB. Cutting the serialized array at a byte offset -- which
-     * is what both ends used to do -- leaves invalid JSON, so an overflowing
-     * buffer arrived as "unparseable" and EVERY attempt was lost rather than
-     * the least interesting one. That is the same defect the journal excerpt
-     * had, on the one channel that can describe attempts the server never saw
-     * at all.
-     *
-     * So whole records are dropped, not bytes, and the ones kept are chosen:
-     * attempts that did not succeed first (oldest first, because the first
-     * failure is the one without retry effects), then the rest newest first.
-     *
-     * @param string $raw The raw POSTed buffer.
-     * @param int $budgetBytes Ceiling for the returned JSON.
-     * @return array{json: string, parsed: bool, kept: int, dropped: int, raw_length: int, error: string}
-     */
-    public static function boundDrainedBuffer(string $raw, int $budgetBytes): array {
-        $rawLength = strlen($raw);
-        $unparseable = array(
-            'json' => '', 'parsed' => false, 'kept' => 0, 'dropped' => 0,
-            'raw_length' => $rawLength, 'error' => '',
-        );
-        if ($raw === '') {
-            return $unparseable;
-        }
-        $boundedRaw = substr($raw, 0, self::MAX_DRAINED_BUFFER_INPUT_BYTES);
-        $decoded = json_decode($boundedRaw, true);
-        if (!is_array($decoded) || !self::isJsonArrayDocument($boundedRaw)) {
-            $unparseable['error'] = is_array($decoded)
-                ? 'expected a JSON array of attempt records'
-                : json_last_error_msg();
-            return $unparseable;
-        }
-        $records = array();
-        foreach ($decoded as $record) {
-            $records[] = $record;
-        }
-        if ($rawLength <= self::MAX_DRAINED_BUFFER_INPUT_BYTES && $rawLength <= $budgetBytes) {
-            return array(
-                'json' => $raw, 'parsed' => true, 'kept' => count($records), 'dropped' => 0,
-                'raw_length' => $rawLength, 'error' => '',
-            );
-        }
-
-        $kept = self::keepWithinBudget($records, $budgetBytes);
-        $json = json_encode($kept, JSON_UNESCAPED_SLASHES);
-        if (!is_string($json) || strlen($json) > $budgetBytes) {
-            $unparseable['error'] = 'buffer could not be reduced to the support budget';
-            return $unparseable;
-        }
-        return array(
-            'json' => $json, 'parsed' => true, 'kept' => count($kept),
-            'dropped' => count($records) - count($kept), 'raw_length' => $rawLength, 'error' => '',
-        );
-    }
-
-    /**
-     * Whether decoded JSON came from the buffer's required top-level array.
-     *
-     * Associative decoding turns both JSON objects and arrays into PHP arrays,
-     * so the decoded type alone cannot enforce the wire contract. Inspecting
-     * the first non-whitespace byte keeps a valid object from being reported as
-     * a successfully parsed empty attempt list.
-     */
-    private static function isJsonArrayDocument(string $raw): bool {
-        return substr(ltrim($raw), 0, 1) === '[';
-    }
-
-    /**
-     * The records that fit, in their original order, failures first.
-     *
-     * @param array<int, mixed> $records
-     * @return array<int, mixed>
-     */
-    private static function keepWithinBudget(array $records, int $budgetBytes): array {
-        $failed = array();
-        $healthy = array();
-        foreach ($records as $position => $record) {
-            $outcome = is_array($record) && isset($record['outcome']) && is_scalar($record['outcome'])
-                ? (string)$record['outcome'] : '';
-            if (in_array($outcome, self::HEALTHY_OUTCOMES, true)) {
-                $healthy[] = $position;
-            } else {
-                $failed[] = $position;
-            }
-        }
-        $order = array_merge($failed, array_reverse($healthy));
-
-        // Two brackets and the commas between the records; charged up front so
-        // the encoded result cannot creep past the budget on the last record.
-        $used = 2;
-        $keepPositions = array();
-        foreach ($order as $position) {
-            $encoded = json_encode($records[$position], JSON_UNESCAPED_SLASHES);
-            if (!is_string($encoded)) {
-                continue;
-            }
-            $cost = strlen($encoded) + ($keepPositions === array() ? 0 : 1);
-            if ($used + $cost > $budgetBytes) {
-                continue;
-            }
-            $used += $cost;
-            $keepPositions[] = $position;
-        }
-        sort($keepPositions);
-
-        $kept = array();
-        foreach ($keepPositions as $position) {
-            $kept[] = $records[$position];
-        }
-        return $kept;
     }
 }

@@ -30,7 +30,7 @@ final class ABJ_404_Solution_AjaxCheckpointLogger {
      * from canonical source and prevents a covered code change from shipping
      * with an old marker.
      */
-    const DIAGNOSTIC_BUILD_ID = '1675af0a29435f25cc1afbaef80703108620b1f8';
+    const DIAGNOSTIC_BUILD_ID = 'd9a360884e5d34fda457b7c2767dc2702f786908';
 
     const CHECKPOINT_FILE = ABJ_404_Solution_CheckpointJournalWriter::CHECKPOINT_FILE;
     const ROTATED_FILE = ABJ_404_Solution_CheckpointJournalWriter::ROTATED_FILE;
@@ -378,7 +378,7 @@ final class ABJ_404_Solution_AjaxCheckpointLogger {
 
     /** @param mixed $value */
     private static function nonNegativeInt($value): int {
-        return is_numeric($value) ? max(0, (int)$value) : 0;
+        return ABJ_404_Solution_ExactInteger::readOr($value, 0, 0);
     }
 
     private static function monotonicNanoseconds(): int {

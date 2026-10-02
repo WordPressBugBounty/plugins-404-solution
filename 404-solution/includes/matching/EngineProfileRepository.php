@@ -173,7 +173,7 @@ final class ABJ_404_Solution_EngineProfileRepository {
     public function insertOrUpdate(array $data) {
         $table = $this->tableName();
 
-        $id = isset($data['id']) && is_numeric($data['id']) ? (int)$data['id'] : 0;
+        $id = ABJ_404_Solution_ExactInteger::readOr($data['id'] ?? null, 0, 0);
         [$name, $urlPattern, $isRegex, $enabledEngines, $priority, $status]
             = $this->normalizedColumns($data);
 
@@ -221,7 +221,10 @@ final class ABJ_404_Solution_EngineProfileRepository {
         $isRegex        = isset($data['is_regex']) ? (int)(bool)$data['is_regex'] : 0;
         $enabledEngines = isset($data['enabled_engines']) && is_string($data['enabled_engines'])
             ? $data['enabled_engines'] : '[]';
-        $priority       = isset($data['priority']) && is_numeric($data['priority']) ? (int)$data['priority'] : 0;
+        // No lower bound: `priority` is a signed column, the admin form sends
+        // negatives, and EngineProfileSaveRequest admits them. A floor here
+        // would quietly move a -5 profile behind every 0 profile.
+        $priority = ABJ_404_Solution_ExactInteger::readOr($data['priority'] ?? null, PHP_INT_MIN, 0);
         $status         = isset($data['status']) ? (int)(bool)$data['status'] : 1;
 
         // enabled_engines is stored as a JSON array; anything else becomes one.

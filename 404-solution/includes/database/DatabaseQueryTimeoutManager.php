@@ -174,10 +174,9 @@ class ABJ_404_Solution_DatabaseQueryTimeoutManager {
             // statement-timeout path quietly turns itself off on every query
             // for the rest of the request, and a silent catch here is the
             // reason nobody would ever find out. Record it and degrade.
-            $this->logger->debugMessage(
+            $this->logger->warnCaught(
                 'DB engine detection failed; assuming not-MariaDB and skipping the MariaDB '
-                . 'statement-timeout syntax. Source: ' . $source . '. '
-                . get_class($e) . ' (code ' . (string)$e->getCode() . '): ' . $e->getMessage(),
+                . 'statement-timeout syntax. Source: ' . $source . '.',
                 $e
             );
             return false;

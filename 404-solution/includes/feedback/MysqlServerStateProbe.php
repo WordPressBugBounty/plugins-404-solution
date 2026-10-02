@@ -141,8 +141,9 @@ class ABJ_404_Solution_MysqlServerStateProbe {
         ));
         $out = array();
         foreach ($raw as $name => $value) {
-            if (is_numeric($value)) {
-                $out[$name] = (int)$value;
+            $quantity = ABJ_404_Solution_ExactInteger::read($value, 0);
+            if ($quantity !== null) {
+                $out[$name] = $quantity;
             }
         }
         return $out;
@@ -294,8 +295,9 @@ class ABJ_404_Solution_MysqlServerStateProbe {
     private function coerceNumericScalars(array $raw): array {
         $out = array();
         foreach ($raw as $name => $value) {
-            if (is_numeric($value) && strpos($value, '.') === false) {
-                $out[$name] = (int)$value;
+            $integer = ABJ_404_Solution_ExactInteger::read($value, PHP_INT_MIN);
+            if ($integer !== null) {
+                $out[$name] = $integer;
             } elseif (is_numeric($value)) {
                 $out[$name] = (float)$value;
             } else {

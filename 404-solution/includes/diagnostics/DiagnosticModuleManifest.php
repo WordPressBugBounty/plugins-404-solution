@@ -31,15 +31,20 @@ if (!defined('ABSPATH')) {
  * The captured record is deliberately compact: one combined hash, per-file
  * short hashes so a drifted file can be NAMED when a payload is compared
  * against a reference build, counts for the healthy majority, and names only
- * for the anomalies (unreadable, uncached, or an OPcache timestamp that does
- * not match the file on disk). The support excerpt is the scarce resource
+ * for the anomalies (unreadable or uncached). The support excerpt is the scarce resource
  * (gap G1); a full per-file fingerprint block for thirty-odd modules would
  * cost more evidence than it produces.
  */
 final class ABJ_404_Solution_DiagnosticModuleManifest {
 
-    /** Bumped when the record's shape changes, so an old payload stays readable. */
-    const SCHEMA_VERSION = 1;
+    /**
+     * Bumped when the record's shape changes, so an old payload stays readable.
+     * 2: `opcache.stale` removed. It needed per-script timestamps, which only
+     * the host-wide script walk provides (see
+     * ABJ_404_Solution_OpcacheGenerationProbe); the compiled build marker
+     * (`precomputed_build_matches_files`) is the generation proof.
+     */
+    const SCHEMA_VERSION = 2;
 
     /** Characters of each file's md5 kept per module. Enough to name a drifted file. */
     const SHORT_HASH_CHARS = 8;
@@ -209,7 +214,6 @@ final class ABJ_404_Solution_DiagnosticModuleManifest {
         $files = array();
         $unreadable = array();
         $uncached = array();
-        $stale = array();
         $cached = 0;
         $unknown = 0;
         $parts = array(defined('ABJ404_VERSION') ? (string)ABJ404_VERSION : 'unknown');
@@ -230,22 +234,15 @@ final class ABJ_404_Solution_DiagnosticModuleManifest {
             $files[$name] = substr($hash, 0, self::SHORT_HASH_CHARS);
             $parts[] = $name . ':' . $hash . ':' . (is_int($mtime) ? $mtime : '');
 
-            // A null 'cached' is "no per-script data", which is a different
-            // finding from "this module is not cached"; and a false
-            // 'matches_file' is direct proof that the executing opcodes and
-            // the file on disk are from different generations.
-            $state = $opcache->stateFor($path, is_int($mtime) ? $mtime : null);
-            if ($state['cached'] === null) {
+            // A null answer is "no per-script data", which is a different
+            // finding from "this module is not cached".
+            $isCached = $opcache->isCached($path);
+            if ($isCached === null) {
                 $unknown++;
-                continue;
-            }
-            if ($state['cached'] === false) {
+            } elseif ($isCached) {
+                $cached++;
+            } else {
                 $uncached[] = $name;
-                continue;
-            }
-            $cached++;
-            if ($state['matches_file'] === false) {
-                $stale[] = $name;
             }
         }
 
@@ -265,7 +262,6 @@ final class ABJ_404_Solution_DiagnosticModuleManifest {
                 'cached' => $cached,
                 'unknown' => $unknown,
                 'uncached' => $uncached,
-                'stale' => $stale,
             ),
             'files' => $files,
         );

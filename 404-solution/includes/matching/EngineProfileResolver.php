@@ -51,6 +51,9 @@ class ABJ_404_Solution_EngineProfileResolver {
     /** @var int|null Blog id $cachedProfiles was resolved for. */
     private $cachedProfilesBlogId = null;
 
+    /** @var array<string, bool> Profiles already reported as unusable this request. */
+    private $reportedUnusablePatterns = array();
+
     /** @var ABJ_404_Solution_DataAccess|null Lazy DAO accessor for centralized query handling. */
     /** @var ABJ_404_Solution_EngineProfileRepository|null */
     private $repository = null;
@@ -171,6 +174,36 @@ class ABJ_404_Solution_EngineProfileResolver {
     }
 
     /**
+     * Record that a stored regex profile could not be evaluated.
+     *
+     * The profile is skipped (that is the right failure mode on a 404 hot
+     * path), but a silent skip leaves a site whose profiles "stopped working"
+     * with no trace of which one or why. One WARN per profile per request: this
+     * runs for every URL, so an unbounded record would flood the log.
+     *
+     * @param object $profile
+     * @param string $pattern The pattern as evaluated (after delimiter wrapping).
+     * @param string $pcreWarning The warning PCRE raised, if any.
+     * @return void
+     */
+    private function recordUnusableRegexOnce(object $profile, string $pattern, string $pcreWarning): void {
+        $profileId = isset($profile->id) && is_scalar($profile->id) ? (string)$profile->id : '?';
+        $key = $profileId . '|' . $pattern;
+        if (isset($this->reportedUnusablePatterns[$key])) {
+            return;
+        }
+        $this->reportedUnusablePatterns[$key] = true;
+
+        // preg_last_error_msg() is PHP 8+ only; this plugin still supports 7.4.
+        $reason = $pcreWarning !== '' ? $pcreWarning : 'preg_last_error code ' . preg_last_error();
+        $logger = abj_service('logging');
+        if (is_object($logger) && method_exists($logger, 'warn')) {
+            $logger->warn('Engine profile ' . $profileId . ' has a regex that could not be evaluated and never matches: '
+                . 'pattern "' . substr($pattern, 0, 200) . '", PCRE: ' . substr($reason, 0, 200));
+        }
+    }
+
+    /**
      * Check whether a URL matches a profile's pattern.
      *
      * @param string $url
@@ -193,10 +226,19 @@ class ABJ_404_Solution_EngineProfileResolver {
             if (!in_array(substr($pattern, 0, 1), $commonDelimiters, true)) {
                 $pattern = '#' . $pattern . '#';
             }
-            // Suppress errors to prevent site breakage from malformed patterns.
-            set_error_handler(function (int $errno, string $errstr, string $errfile = '', int $errline = 0): bool { return false; }, E_WARNING);
+            // Suppress errors to prevent site breakage from malformed patterns,
+            // but keep the warning text: it is the only place PCRE says why a
+            // pattern would not compile.
+            $pcreWarning = '';
+            set_error_handler(function (int $errno, string $errstr, string $errfile = '', int $errline = 0) use (&$pcreWarning): bool {
+                $pcreWarning = $errstr;
+                return true;
+            }, E_WARNING);
             $matched = @preg_match($pattern, $url);
             restore_error_handler();
+            if ($matched === false) {
+                $this->recordUnusableRegexOnce($profile, $pattern, $pcreWarning);
+            }
             return $matched === 1;
         }
 
@@ -338,5 +380,6 @@ class ABJ_404_Solution_EngineProfileResolver {
     public function clearCache(): void {
         $this->cachedProfiles = null;
         $this->cachedProfilesBlogId = null;
+        $this->reportedUnusablePatterns = array();
     }
 }

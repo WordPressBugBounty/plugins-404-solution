@@ -13,8 +13,9 @@ if (!defined('ABSPATH')) {
  * Owns logic previously hosted on PluginLogic (userIsPluginAdmin and
  * the static override_user_can_access_admin_page filter callback).
  * Composed through abj_service('admin_access_policy'). The static
- * `wpUserHasCapFilter` is wired into WordPress by PluginLogic during
- * bootstrap so the filter signature matches WP's expectations.
+ * `wpUserHasCapFilter` is wired into WordPress by
+ * WordPressHookRegistrar::registerAdminHooks() during bootstrap so the
+ * filter signature matches WP's expectations.
  */
 class ABJ_404_Solution_PluginAdminAccessPolicy {
 

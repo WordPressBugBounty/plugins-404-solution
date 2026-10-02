@@ -7,10 +7,20 @@ if (!defined('ABSPATH')) {
 // allow-no-test-found: covered by tests/ContentRepositoryDecompositionTest.php through ContentRepository facade entry points.
 
 require_once __DIR__ . '/../database/DatabaseCollationHelper.php';
-require_once __DIR__ . '/TermUrlEnricher.php';
 
 /**
- * Reads published posts, pages, images, tags, and categories from WordPress tables.
+ * Reads published posts, pages and images from WordPress tables. Published tags and
+ * categories live in PublishedTermsProvider.
+ *
+ * Every value that reaches these queries (a slug, a search term, a configured post type,
+ * a keyword from a caller's extra clause) is BOUND, never spliced into the SQL text. The
+ * query executor rewrites `{wp_...}` tokens across the whole statement and only then binds
+ * `query_params`, so a value placed in the text would be rewritten along with the
+ * template ("{wp_posts}" in a slug would reach the database as "wp_posts"). Each clause is
+ * therefore a SqlFragment: its text carries `%s` placeholders and its params carry the
+ * values, and SqlFragmentTemplate joins the fragments into the template in one pass.
+ *
+ * @phpstan-import-type SqlFragment from ABJ_404_Solution_DatabaseQueryBuilderInterface
  */
 class ABJ_404_Solution_PublishedContentRepository {
 
@@ -32,9 +42,6 @@ class ABJ_404_Solution_PublishedContentRepository {
     /** @var ABJ_404_Solution_DatabaseCollationHelper */
     private $collationHelper;
 
-    /** @var ABJ_404_Solution_TermUrlEnricher */
-    private $termUrlEnricher;
-
     /**
      * @param ABJ_404_Solution_DatabaseCore $dbCore
      * @param ABJ_404_Solution_Functions $functions
@@ -42,7 +49,6 @@ class ABJ_404_Solution_PublishedContentRepository {
      * @param mixed $optionsProvider Object exposing getOptions(): array.
      * @param ABJ_404_Solution_DatabaseErrorClassifier $errorClassifier
      * @param ABJ_404_Solution_DatabaseCollationHelper $collationHelper
-     * @param ABJ_404_Solution_TermUrlEnricher|null $termUrlEnricher
      */
     public function __construct(
         ABJ_404_Solution_DatabaseCore $dbCore,
@@ -50,8 +56,7 @@ class ABJ_404_Solution_PublishedContentRepository {
         $logging,
         $optionsProvider,
         $errorClassifier,
-        $collationHelper,
-        $termUrlEnricher = null
+        $collationHelper
     ) {
         $this->dbCore = $dbCore;
         $this->f = $functions;
@@ -59,7 +64,6 @@ class ABJ_404_Solution_PublishedContentRepository {
         $this->optionsProvider = $optionsProvider;
         $this->errorClassifier = $errorClassifier;
         $this->collationHelper = $collationHelper;
-        $this->termUrlEnricher = $termUrlEnricher !== null ? $termUrlEnricher : new ABJ_404_Solution_TermUrlEnricher();
     }
 
     /** @return string */
@@ -86,7 +90,11 @@ class ABJ_404_Solution_PublishedContentRepository {
      * Find published posts and pages using named query criteria.
      * Unknown keys and non-scalar values are ignored for forward compatibility.
      *
-     * @param array{slug?: string, search_term?: string, limit_results?: string, order_results?: string, extra_where_clause?: string} $criteria
+     * `extra_where_clause` is SQL text. A value it needs travels as a `%s` / `%d`
+     * placeholder in the text plus an entry in `extra_where_params`, in order. A clause
+     * with no params is fixed text: its `%` characters stay literal.
+     *
+     * @param array{slug?: string, search_term?: string, limit_results?: string, order_results?: string, extra_where_clause?: string, extra_where_params?: array<int, int|float|string>} $criteria
      * @return array<int, object>
      */
     public function getPublishedPagesAndPostsIDs(array $criteria = array()) {
@@ -98,29 +106,26 @@ class ABJ_404_Solution_PublishedContentRepository {
         $orderResults = $this->publishedCriteriaString($criteria, 'order_results');
         $extraWhereClause = $this->publishedCriteriaString($criteria, 'extra_where_clause');
 
-        $options = $this->getRuntimeOptions();
-        $recognizedPostTypes = $this->dbCore->tableNameResolver()->buildPostTypeSqlList($options);
-        if ($recognizedPostTypes === '') {
+        $recognizedPostTypes = $this->dbCore->tableNameResolver()->buildPostTypeSqlList($this->getRuntimeOptions());
+        if ($recognizedPostTypes['sql'] === '') {
             return array();
         }
 
         $slugClause = $this->buildPostSlugClause($slug, $postsTableName);
-        $queryParts = array(
+        $slots = array(
             'recognizedPostTypes' => $recognizedPostTypes,
             'specifiedSlug' => $slugClause['clause'],
             'searchTerm' => $this->buildPostSearchClause($searchTerm),
-            'extraWhereClause' => $this->buildExtraWhereClause($extraWhereClause),
-            'limitResults' => $this->buildLimitClause($limitResults),
-            'orderResults' => $this->buildOrderClause($orderResults),
+            'extraWhereClause' => $this->buildExtraWhereClause($extraWhereClause, $this->publishedCriteriaParams($criteria, 'extra_where_params')),
+            'limit-results' => $this->buildFixedClause($limitResults, "limit "),
+            'order-results' => $this->buildFixedClause($orderResults, "order by "),
         );
-        $query = $this->buildPublishedPagesQuery($queryParts);
+        $statement = $this->buildPublishedPagesQuery($slots);
 
-        $result = $this->dbCore->queryAndGetResults($query, array('result_type' => OBJECT));
-        $queryError = is_string($result['last_error'] ?? '') ? ($result['last_error'] ?? '') : '';
-        $rows = $this->objectRows($result['rows'] ?? array());
-
-        $fallback = $this->applyPublishedPagesFallbacks($query, $queryError, $rows, $slugClause, $queryParts);
-        $this->handlePublishedPagesQueryError($fallback['queryError'], $query);
+        $first = $this->readRows($statement, true);
+        $fallback = $this->applyCollationFallback($statement, $first['queryError'], $first['rows']);
+        $fallback = $this->applyInvalidDataSlugFallback($statement, $fallback['queryError'], $fallback['rows'], $slugClause['slug'], $slots);
+        $this->handlePublishedPagesQueryError($fallback['queryError'], $statement['sql']);
 
         return $fallback['rows'];
     }
@@ -136,13 +141,29 @@ class ABJ_404_Solution_PublishedContentRepository {
     }
 
     /**
+     * @param array<string, mixed> $criteria
+     * @param string $key
+     * @return array<int, int|float|string>
+     */
+    private function publishedCriteriaParams(array $criteria, string $key): array {
+        $value = $criteria[$key] ?? array();
+        $params = array();
+        foreach (is_array($value) ? $value : array() as $param) {
+            if (is_int($param) || is_float($param) || is_string($param)) {
+                $params[] = $param;
+            }
+        }
+        return $params;
+    }
+
+    /**
      * @param string $slug
      * @param string $postsTableName
-     * @return array{slug: string, clause: string}
+     * @return array{slug: string, clause: SqlFragment}
      */
     private function buildPostSlugClause($slug, string $postsTableName): array {
         if ($slug == "") {
-            return array('slug' => '', 'clause' => '');
+            return array('slug' => '', 'clause' => ABJ_404_Solution_SqlFragmentTemplate::none());
         }
 
         $cleanSlug = $this->f->sanitizeInvalidUTF8($slug);
@@ -152,25 +173,30 @@ class ABJ_404_Solution_PublishedContentRepository {
         // halves disagree and the engine rejects the read with errno 1253.
         if ($columnCollation !== null
                 && ABJ_404_Solution_DatabaseCollationHelper::isUtf8mb4Collation($columnCollation)) {
-            // Interpolated directly rather than substituted into a placeholder
-            // collation afterwards: the slug is already embedded by then, so a
-            // slug containing the placeholder's text would be rewritten too.
             // isUtf8mb4Collation() has already established this sanitizes to a
-            // non-empty utf8mb4 name, so there is no empty case left to handle.
+            // non-empty utf8mb4 name, so there is no empty case left to handle. The name is
+            // an identifier read from the schema, not visitor data, so it belongs in the text.
             $resolvedCollation = $this->collationHelper->sanitizeCollationIdentifier($columnCollation);
-            $clause = " */\n and CAST(wp_posts.post_name AS CHAR CHARACTER SET utf8mb4) COLLATE " . $resolvedCollation . " = "
-                . "'" . esc_sql($cleanSlug) . "' \n ";
+            $clause = array(
+                'sql' => " */\n and CAST(wp_posts.post_name AS CHAR CHARACTER SET utf8mb4) COLLATE " . $resolvedCollation . " = %s \n ",
+                'params' => array($cleanSlug),
+            );
             return array('slug' => $cleanSlug, 'clause' => $clause);
         }
 
         if (abj_service('sanitizer')->containsUtf8mb4Characters($cleanSlug)) {
-            return array('slug' => $cleanSlug, 'clause' => '');
+            return array('slug' => $cleanSlug, 'clause' => ABJ_404_Solution_SqlFragmentTemplate::none());
         }
 
-        return array(
-            'slug' => $cleanSlug,
-            'clause' => " */\n and wp_posts.post_name = '" . esc_sql($cleanSlug) . "' \n ",
-        );
+        return array('slug' => $cleanSlug, 'clause' => $this->plainSlugClause($cleanSlug));
+    }
+
+    /**
+     * @param string $slug
+     * @return SqlFragment
+     */
+    private function plainSlugClause(string $slug): array {
+        return array('sql' => " */\n and wp_posts.post_name = %s \n ", 'params' => array($slug));
     }
 
     /** @return string|null */
@@ -191,76 +217,85 @@ class ABJ_404_Solution_PublishedContentRepository {
         return is_scalar($first) ? (string)$first : null;
     }
 
-    /** @param string $searchTerm @return string */
-    private function buildPostSearchClause($searchTerm): string {
+    /**
+     * @param string $searchTerm
+     * @return SqlFragment
+     */
+    private function buildPostSearchClause($searchTerm): array {
         if ($searchTerm == "") {
-            return '';
+            return ABJ_404_Solution_SqlFragmentTemplate::none();
         }
 
-        // Strip control characters and validate UTF-8 before SQL escaping.
+        // Strip control characters and validate UTF-8 before the value is bound.
         // Pattern 10: defense-in-depth against invalid-UTF-8 bytes reaching MySQL.
         $sanitized = sanitize_text_field($searchTerm);
-        return " */\n and lower(wp_posts.post_title) like "
-            . "'%" . esc_sql($this->f->strtolower($sanitized)) . "%' \n ";
-    }
-
-    /** @param string $extraWhereClause @return string */
-    private function buildExtraWhereClause($extraWhereClause): string {
-        return $extraWhereClause != "" ? " */\n " . $extraWhereClause : '';
-    }
-
-    /** @param string $limitResults @return string */
-    private function buildLimitClause($limitResults): string {
-        return !empty($limitResults) ? " */\n  limit " . $limitResults : '';
-    }
-
-    /** @param string $orderResults @return string */
-    private function buildOrderClause($orderResults): string {
-        return !empty($orderResults) ? " */\n  order by " . $orderResults : '';
+        return array(
+            'sql' => " */\n and lower(wp_posts.post_title) like %s \n ",
+            'params' => array('%' . $this->f->strtolower($sanitized) . '%'),
+        );
     }
 
     /**
-     * @param array{recognizedPostTypes: string, specifiedSlug: string, searchTerm: string, extraWhereClause: string, limitResults: string, orderResults: string} $queryParts
-     * @return string
+     * @param string $extraWhereClause
+     * @param array<int, int|float|string> $params
+     * @return SqlFragment
      */
-    private function buildPublishedPagesQuery(array $queryParts): string {
+    private function buildExtraWhereClause($extraWhereClause, array $params): array {
+        if ($extraWhereClause == "") {
+            return ABJ_404_Solution_SqlFragmentTemplate::none();
+        }
+        $sql = " */\n " . $extraWhereClause;
+        return $params === array()
+            ? ABJ_404_Solution_SqlFragmentTemplate::literal($sql)
+            : array('sql' => $sql, 'params' => $params);
+    }
+
+    /**
+     * A caller's `limit` or `order by` text, which carries no values.
+     *
+     * @param string $text
+     * @param string $keyword
+     * @return SqlFragment
+     */
+    private function buildFixedClause($text, string $keyword): array {
+        if (empty($text)) {
+            return ABJ_404_Solution_SqlFragmentTemplate::none();
+        }
+        return ABJ_404_Solution_SqlFragmentTemplate::literal(" */\n  " . $keyword . $text);
+    }
+
+    /**
+     * @param array<string, SqlFragment> $slots
+     * @return SqlFragment
+     */
+    private function buildPublishedPagesQuery(array $slots): array {
         $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getPublishedPagesAndPostsIDs.sql");
         $query = $this->dbCore->doTableNameReplacements($query);
-        $query = $this->f->str_replace('{recognizedPostTypes}', $queryParts['recognizedPostTypes'], $query);
-        $query = $this->f->str_replace('{specifiedSlug}', $queryParts['specifiedSlug'], $query);
-        $query = $this->f->str_replace('{searchTerm}', $queryParts['searchTerm'], $query);
-        $query = $this->f->str_replace('{extraWhereClause}', $queryParts['extraWhereClause'], $query);
-        $query = $this->f->str_replace('{limit-results}', $queryParts['limitResults'], $query);
-        $query = $this->f->str_replace('{order-results}', $queryParts['orderResults'], $query);
-        return $query;
+        return ABJ_404_Solution_SqlFragmentTemplate::fill($query, $slots);
     }
 
     /**
-     * @param string $query
-     * @param string $queryError
-     * @param array<int, object> $rows
-     * @param array{slug: string, clause: string} $slugClause
-     * @param array{recognizedPostTypes: string, specifiedSlug: string, searchTerm: string, extraWhereClause: string, limitResults: string, orderResults: string} $queryParts
+     * @param SqlFragment $statement
+     * @param bool $logErrors
      * @return array{queryError: string, rows: array<int, object>}
      */
-    private function applyPublishedPagesFallbacks(
-        string $query,
-        string $queryError,
-        array $rows,
-        array $slugClause,
-        array $queryParts
-    ): array {
-        $fallback = $this->applyCollationFallback($query, $queryError, $rows);
-        return $this->applyInvalidDataSlugFallback($query, $fallback['queryError'], $fallback['rows'], $slugClause, $queryParts);
+    private function readRows(array $statement, bool $logErrors): array {
+        $options = array('result_type' => OBJECT, 'query_params' => $statement['params']);
+        if (!$logErrors) {
+            $options['log_errors'] = false;
+        }
+        $result = $this->dbCore->queryAndGetResults($statement['sql'], $options);
+        $queryError = is_string($result['last_error'] ?? '') ? ($result['last_error'] ?? '') : '';
+        return array('queryError' => $queryError, 'rows' => $this->objectRows($result['rows'] ?? array()));
     }
 
     /**
-     * @param string $query
+     * @param SqlFragment $statement
      * @param string $queryError
      * @param array<int, object> $rows
      * @return array{queryError: string, rows: array<int, object>}
      */
-    private function applyCollationFallback(string $query, string $queryError, array $rows): array {
+    private function applyCollationFallback(array $statement, string $queryError, array $rows): array {
         if (empty($queryError) || !$this->errorClassifier->taxonomy()->schema()->isCollationError($queryError)) {
             return array('queryError' => $queryError, 'rows' => $rows);
         }
@@ -269,60 +304,52 @@ class ABJ_404_Solution_PublishedContentRepository {
         $fallbackQuery = $fpreg->regexReplace(
             'CONVERT\(wpt\.name USING utf8mb4\) COLLATE [A-Za-z0-9_]+',
             'wpt.name',
-            $query
+            $statement['sql']
         );
         $fallbackQuery = $fpreg->regexReplace(
             'CONVERT\(usefulterms\.grouped_terms USING utf8mb4\) COLLATE [A-Za-z0-9_]+',
             'usefulterms.grouped_terms',
-            is_string($fallbackQuery) ? $fallbackQuery : $query
+            is_string($fallbackQuery) ? $fallbackQuery : $statement['sql']
         );
-        $fallbackResult = $this->dbCore->queryAndGetResults(
-            is_string($fallbackQuery) ? $fallbackQuery : $query,
-            array('result_type' => OBJECT, 'log_errors' => false)
+        $fallback = $this->readRows(
+            array('sql' => is_string($fallbackQuery) ? $fallbackQuery : $statement['sql'], 'params' => $statement['params']),
+            false
         );
-        $fallbackError = is_string($fallbackResult['last_error'] ?? '') ? ($fallbackResult['last_error'] ?? '') : '';
-        if (!empty($fallbackError)) {
-            return array('queryError' => $fallbackError, 'rows' => $rows);
+        if (!empty($fallback['queryError'])) {
+            return array('queryError' => $fallback['queryError'], 'rows' => $rows);
         }
 
-        return array('queryError' => '', 'rows' => $this->objectRows($fallbackResult['rows'] ?? array()));
+        return $fallback;
     }
 
     /**
-     * @param string $query
+     * @param SqlFragment $statement
      * @param string $queryError
      * @param array<int, object> $rows
-     * @param array{slug: string, clause: string} $slugClause
-     * @param array{recognizedPostTypes: string, specifiedSlug: string, searchTerm: string, extraWhereClause: string, limitResults: string, orderResults: string} $queryParts
+     * @param string $slug
+     * @param array<string, SqlFragment> $slots
      * @return array{queryError: string, rows: array<int, object>}
      */
     private function applyInvalidDataSlugFallback(
-        string $query,
+        array $statement,
         string $queryError,
         array $rows,
-        array $slugClause,
-        array $queryParts
+        string $slug,
+        array $slots
     ): array {
         if (empty($queryError) || !$this->errorClassifier->taxonomy()->schema()->isInvalidDataError($queryError) ||
-                $slugClause['slug'] === '' ||
-                strpos($query, 'CAST(wp_posts.post_name AS CHAR CHARACTER SET utf8mb4)') === false) {
+                $slug === '' ||
+                strpos($statement['sql'], 'CAST(wp_posts.post_name AS CHAR CHARACTER SET utf8mb4)') === false) {
             return array('queryError' => $queryError, 'rows' => $rows);
         }
 
-        $fallbackParts = $queryParts;
-        // @utf8-audit: opt-out - $slugClause['slug'] is an internal post_name string already
-        // selected from wp_posts (the same column we're comparing it against), not user input.
-        $fallbackParts['specifiedSlug'] = " */\n and wp_posts.post_name = '" . esc_sql($slugClause['slug']) . "' \n ";
-        $fallbackResult = $this->dbCore->queryAndGetResults(
-            $this->buildPublishedPagesQuery($fallbackParts),
-            array('result_type' => OBJECT, 'log_errors' => false)
-        );
-        $fallbackError = is_string($fallbackResult['last_error'] ?? '') ? ($fallbackResult['last_error'] ?? '') : '';
-        if (!empty($fallbackError)) {
+        $slots['specifiedSlug'] = $this->plainSlugClause($slug);
+        $fallback = $this->readRows($this->buildPublishedPagesQuery($slots), false);
+        if (!empty($fallback['queryError'])) {
             return array('queryError' => $queryError, 'rows' => $rows);
         }
 
-        return array('queryError' => '', 'rows' => $this->objectRows($fallbackResult['rows'] ?? array()));
+        return $fallback;
     }
 
     private function handlePublishedPagesQueryError(string $queryError, string $query): void {
@@ -357,124 +384,5 @@ class ABJ_404_Solution_PublishedContentRepository {
             }
         }
         return $objects;
-    }
-
-    /**
-     * @param string|null $slug
-     * @param int|null $limit
-     * @return array<int, object>
-     */
-    public function getPublishedTags($slug = null, $limit = null) {
-        $options = $this->getRuntimeOptions();
-        $recognizedCategories = $this->dbCore->tableNameResolver()->buildCategorySqlList($options);
-
-        if ($slug != null) {
-            $slug = $this->f->sanitizeInvalidUTF8($slug);
-            $slug = "*/ and wp_terms.slug = '" . esc_sql($slug) . "'\n";
-        }
-
-        $limitClause = '';
-        if ($limit !== null && is_numeric($limit) && $limit > 0) {
-            $limitClause = "LIMIT " . intval($limit);
-        }
-
-        $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getPublishedTags.sql");
-        $query = $this->f->str_replace('{slug}', $slug, $query);
-        $query = $this->f->str_replace('{limit}', $limitClause, $query);
-        $query = $this->dbCore->doTableNameReplacements($query);
-        $query = $this->f->str_replace('{recognizedCategories}', $recognizedCategories, $query);
-
-        $result = $this->dbCore->queryAndGetResults($query, array('result_type' => OBJECT));
-        $queryError = is_string($result['last_error'] ?? '') ? ($result['last_error'] ?? '') : '';
-        if ($queryError && !$this->errorClassifier->classifyAndHandleInfrastructureError($queryError)) {
-            $this->logger->errorMessage("Error executing query. Err: " . $queryError . ", Query: " . $query);
-        }
-        $rows = $this->objectRows($result['rows'] ?? array());
-
-        return $this->termUrlEnricher->addURLToTermsRows($rows);
-    }
-
-    /**
-     * Cheap published-tag count using the SAME taxonomy filter as
-     * getPublishedTags(), but COUNT(*) only (no rows loaded). Feeds the term
-     * n-gram coverage readiness gate.
-     *
-     * @return int
-     */
-    public function getPublishedTagCount(): int {
-        $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getPublishedTagCount.sql");
-        $query = $this->dbCore->doTableNameReplacements($query);
-        return $this->dbCore->queryScalarInt($query, array('log_errors' => false));
-    }
-
-    /**
-     * Cheap published-category count using the SAME taxonomy filter as
-     * getPublishedCategories(), but COUNT(*) only (no rows loaded). Feeds the
-     * term n-gram coverage readiness gate.
-     *
-     * @return int
-     */
-    public function getPublishedCategoryCount(): int {
-        $options = $this->getRuntimeOptions();
-        $recognizedCategories = $this->dbCore->tableNameResolver()->buildCategorySqlList($options);
-        if ($recognizedCategories === '') {
-            $recognizedCategories = "''";
-        }
-        $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getPublishedCategoryCount.sql");
-        $query = $this->f->str_replace('{recognizedCategories}', $recognizedCategories, $query);
-        $query = $this->dbCore->doTableNameReplacements($query);
-        return $this->dbCore->queryScalarInt($query, array('log_errors' => false));
-    }
-
-    /**
-     * @param array<int, object> $rows
-     * @return array<int, object>
-     */
-    public function addURLToTermsRows($rows) {
-        return $this->termUrlEnricher->addURLToTermsRows($rows);
-    }
-
-    /**
-     * @param int|null $term_id
-     * @param string|null $slug
-     * @param int|null $limit
-     * @return array<int, object>
-     */
-    public function getPublishedCategories($term_id = null, $slug = null, $limit = null) {
-        $options = $this->getRuntimeOptions();
-        $recognizedCategories = $this->dbCore->tableNameResolver()->buildCategorySqlList($options);
-        if ($recognizedCategories === '') {
-            $recognizedCategories = "''";
-        }
-
-        if ($term_id != null) {
-            $term_id = "*/ and {wp_terms}.term_id = " . intval($term_id) . "\n";
-        }
-
-        if ($slug != null) {
-            $slug = $this->f->sanitizeInvalidUTF8($slug);
-            $slug = "*/ and {wp_terms}.slug = '" . esc_sql($slug) . "'\n";
-        }
-
-        $limitClause = '';
-        if ($limit !== null && is_numeric($limit) && $limit > 0) {
-            $limitClause = "LIMIT " . intval($limit);
-        }
-
-        $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getPublishedCategories.sql");
-        $query = $this->f->str_replace('{recognizedCategories}', $recognizedCategories, $query);
-        $query = $this->f->str_replace('{term_id}', $term_id !== null ? (string)$term_id : '', $query);
-        $query = $this->f->str_replace('{slug}', $slug, $query);
-        $query = $this->f->str_replace('{limit}', $limitClause, $query);
-        $query = $this->dbCore->doTableNameReplacements($query);
-
-        $result = $this->dbCore->queryAndGetResults($query, array('result_type' => OBJECT));
-        $queryError = is_string($result['last_error'] ?? '') ? ($result['last_error'] ?? '') : '';
-        if ($queryError && !$this->errorClassifier->classifyAndHandleInfrastructureError($queryError)) {
-            $this->logger->errorMessage("Error executing query. Err: " . $queryError . ", Query: " . $query);
-        }
-        $rows = $this->objectRows($result['rows'] ?? array());
-
-        return $this->termUrlEnricher->addURLToTermsRows($rows);
     }
 }

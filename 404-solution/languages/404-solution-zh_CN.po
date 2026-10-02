@@ -594,6 +594,9 @@ msgstr "错误：您选择了外部 URL 但未输入 URL。"
 msgid "Error: unable to add new redirect."
 msgstr "错误：无法添加新重定向。"
 
+msgid "Error: The database did not save the new redirect. The debug log has the underlying database error."
+msgstr "错误：数据库未能保存新的重定向。调试日志中包含根本的数据库错误。"
+
 msgid "Error: unable to mark URL as %s"
 msgstr "错误：无法将 URL 标记为 %s"
 
@@ -2001,8 +2004,14 @@ msgstr "编辑"
 msgid "View Logs"
 msgstr "查看日志"
 
+msgid "View Redirect Logs"
+msgstr "查看重定向日志"
+
 msgid "Delete Permanently"
 msgstr "永久删除"
+
+msgid "Delete Redirect Permanently"
+msgstr "永久删除重定向"
 
 msgid "Are you sure you want to permanently delete this item?"
 msgstr "您确定要永久删除此项目吗？"
@@ -2598,6 +2607,9 @@ msgstr "错误："
 #: includes/ajax/ImportRedirects.php
 msgid "Ignored importing redirect because a redirect with the same from URL already exists. URL:"
 msgstr "已跳过导入重定向，因为具有相同来源 URL 的重定向已存在。URL："
+
+msgid "Redirect not imported: the database did not save it. URL: %1$s (repository result: %2$s)"
+msgstr "重定向导入失败：数据库未能保存该重定向。URL：%1$s（存储库结果：%2$s）"
 
 #: includes/ajax/ImportRedirects.php
 msgid "Unrecognized destination type while importing file. Destination:"
@@ -4186,6 +4198,9 @@ msgstr "错误：相对正则表达式目标支持写作 (...) 的编号捕获�
 msgid "Error: Regex destination references $%1$d, but the source pattern defines %2$d capture group(s)."
 msgstr "错误：正则表达式目标引用了 $%1$d，但源模式只定义了%2$d个捕获组。"
 
+msgid "Error: Regex destination puts a capture token ($1, $2, ...) inside the scheme, host or port, so every redirect would be refused. Write the host literally and use tokens only in the path, query or fragment, for example https://example.com/$1."
+msgstr "错误：正则表达式目标在协议、主机或端口中使用了捕获标记 ($1、$2 等)，因此所有重定向都会被拒绝。请直接写明主机，仅在路径、查询字符串或片段中使用标记（例如 https://example.com/$1）。"
+
 msgid "Could not load chart data. Reload this page and try again."
 msgstr "无法加载图表数据。请重新加载此页面后重试。"
 
@@ -4258,6 +4273,9 @@ msgstr "无法发送报告。请稍后重试。"
 msgid "Could not load the migration tool configuration. Reload this page and try again."
 msgstr "无法加载迁移工具配置。请重新加载此页面后重试。"
 
+msgid "Could not load trend data."
+msgstr "无法加载趋势数据。"
+
 msgid "No suggested match was scored for this URL"
 msgstr "没有为此 URL 评分的建议匹配项"
 
@@ -4299,3 +4317,239 @@ msgstr "您选择了 %1$s 条重定向。一次最多只能编辑 %2$s 条，因
 msgid "Note: %1$s condition was not saved. A redirect may have at most %2$s conditions."
 msgid_plural "Note: %1$s conditions were not saved. A redirect may have at most %2$s conditions."
 msgstr[0] "注意：有 %1$s 个条件未保存。一条重定向最多可以有 %2$s 个条件。"
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:296
+msgid "The Hits and Last Used columns on the Page Redirects screen have been out of date for at least %d hour(s). 404 Solution has not been able to finish rebuilding its hit-count summary in that time."
+msgstr "页面重定向屏幕上的命中次数列和最后使用列已至少有%d小时未更新。在此期间，404 Solution一直未能完成命中次数汇总的重建工作。"
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:322
+msgid "This site's WP-Cron is not running the plugin's scheduled rebuild. If DISABLE_WP_CRON is set in wp-config.php, either remove it or configure a system cron job that requests wp-cron.php periodically. In the meantime 404 Solution retries the rebuild in the background after an admin page has finished loading."
+msgstr "本站点的WP-Cron没有运行插件计划的重建任务。如果在wp-config.php中设置了DISABLE_WP_CRON，请删除该设置，或配置一个定期请求wp-cron.php的系统定时任务。在此期间，404 Solution会在管理页面加载完成后于后台重试重建操作。"
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:326
+msgid "The scheduled rebuild is being picked up but is not completing. Enable debug logging on the 404 Solution Options screen and check the log for the reason the rebuild stopped."
+msgstr "计划的重建任务已被领取，但一直未能完成。请在404 Solution选项屏幕上启用调试日志记录，并查看日志以了解重建停止的具体原因。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:51
+msgid "WordPress core"
+msgstr "WordPress 核心"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:52
+msgid "Before 404 Solution loaded (WordPress start-up, drop-ins, must-use plugins)"
+msgstr "在 404 Solution 加载之前的阶段（包括 WordPress 启动过程、各个 Drop-in 文件以及必用插件的加载）"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:53
+msgid "Main query (WordPress core and query filters)"
+msgstr "主查询（WordPress 核心和查询过滤器）"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:54
+msgid "Page output (templates and content filters)"
+msgstr "页面输出（模板和内容过滤器）"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:55
+msgid "Other components"
+msgstr "其他组件"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:56
+msgid "Unattributed"
+msgstr "未归属"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:64
+msgid "Theme: %s"
+msgstr "主题：%s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:66
+msgid "Must-use plugin: %s"
+msgstr "必用插件：%s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:68
+msgid "Drop-in: %s"
+msgstr "Drop-in 文件：%s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:70
+msgid "%s action (all callbacks, not timed one by one)"
+msgstr "%s 动作（所有回调合计，未逐个计时）"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:72
+msgid "Loading plugins"
+msgstr "加载插件"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:72
+msgid "From the %s action to the next"
+msgstr "从 %s 动作到下一个动作"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:74
+msgid "Other code"
+msgstr "其他代码"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:125
+msgid "PHP stopped this request at its %1$d second time limit while it was running %2$s."
+msgstr "PHP 在达到 %1$d 秒的时间限制时停止了此请求，当时正在运行 %2$s。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:127
+msgid "PHP stopped this request at its time limit while it was running %s."
+msgstr "PHP 在达到时间限制时停止了此请求，当时正在运行 %s。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:130
+msgid "%s had already passed before 404 Solution loaded."
+msgstr "在 404 Solution 完成加载之前，已经过去了 %s 的时间。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:137
+msgid "404 Solution itself used %1$s of the request's %2$s."
+msgstr "404 Solution 本身所用的时间为 %1$s，而该请求的总耗时为 %2$s。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:140
+msgid "404 Solution's own measured time: %1$s of the request's %2$s (its callbacks inside the action totals are not split out)."
+msgstr "404 Solution 自身的测量时间：该请求总计 %2$s 中的 %1$s（其在各动作合计中的回调未单独列出）。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:160
+msgid "Running when PHP stopped the request: %1$s (%2$s) on the %3$s action, %4$s so far."
+msgstr "PHP 停止请求时正在运行：%3$s 动作上的 %1$s（%2$s），到那时已用 %4$s。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:162
+msgid "Slow callback: %1$s (%2$s) on the %3$s action, %4$s."
+msgstr "发现慢回调：在 %3$s 动作上的回调 %1$s（所属组件 %2$s），耗时 %4$s。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:166
+msgid "Seen on this site in the last day, while 404 Solution timed callbacks: %1$s (%2$s) on the %3$s action took %4$s."
+msgstr "过去一天内在本站点上，404 Solution 对回调计时时发现：%3$s 动作上的 %1$s（%2$s）耗时 %4$s。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:170
+msgid "CPU time after 404 Solution loaded: %1$s of %2$s wall-clock time."
+msgstr "404 Solution 加载完成之后所用的 CPU 时间为 %1$s，同期的挂钟时间为 %2$s。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:186
+msgid "To name the slow callback, 404 Solution now times each callback on 1 in %1$d requests for the next %2$d minutes; what it finds appears on the 404 Solution admin screen."
+msgstr "为了找出慢回调，404 Solution 将在接下来的 %2$d 分钟内，每 %1$d 个请求中对 1 个请求的每个回调单独计时；结果将显示在 404 Solution 的管理页面上。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:190
+msgid "Measured on this request: how long each plugin took to load, and each callback on the main WordPress actions (plugins_loaded, init, wp_loaded, template_redirect, admin_init and others). Time in filters and in code between those actions is shown as a window or as unattributed. Times are wall-clock seconds."
+msgstr "在此请求中测量了：每个插件的加载耗时，以及 WordPress 主要动作（plugins_loaded、init、wp_loaded、template_redirect、admin_init 等）上每个回调的耗时。过滤器中以及这些动作之间的代码所用的时间，会显示为一个时间窗口或未归属时间。所有时间均为挂钟时间，单位为秒。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:192
+msgid "Measured on this request: how long each plugin took to load, the total of each main WordPress action, and each callback on the actions that ran after the request became slow. Times are wall-clock seconds."
+msgstr "在此请求中测量了：每个插件的加载耗时、每个 WordPress 主要动作的总耗时，以及请求变慢之后所运行的动作上每个回调的耗时。所有时间均为挂钟时间，单位为秒。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:195
+msgid "Measured on this request: how long each plugin took to load, and the total of each main WordPress action. Callbacks are not timed one by one on normal requests, to keep the site fast. Times are wall-clock seconds."
+msgstr "在此请求中测量了：每个插件的加载耗时和每个 WordPress 主要动作的总耗时。为保持网站速度，普通请求不会对回调逐个计时。所有时间均为挂钟时间，单位为秒。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:198
+msgid "Per-plugin timing is switched off on this site, so only WordPress phases are shown. Times are wall-clock seconds."
+msgstr "本站点已关闭按插件计时，因此只显示 WordPress 的各个阶段。所有时间均为挂钟时间，单位为秒。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:251
+msgid "Component"
+msgstr "组件"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:252
+msgid "Seconds"
+msgstr "秒数"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:267
+msgid "The 404 Solution admin screen shows where the time went."
+msgstr "404 Solution 的管理页面会显示时间都花在了哪里。"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:306
+msgid "%1$s (%2$s) on the %3$s action: %4$s"
+msgstr "在 %3$s 动作上运行的回调 %1$s（所属组件 %2$s），共耗时 %4$s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:324
+msgid "Where this request's time went"
+msgstr "此请求的时间花在了哪里"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:327
+msgid "Where this request's time went (PHP time limit: %d s)"
+msgstr "此请求的时间花在了哪里（PHP 时间限制：%d 秒）"
+
+#: includes/diagnostics/TimeLimitReportView.php:105
+msgid "(CPU %s)"
+msgstr "（CPU 时间 %s）"
+
+#: includes/diagnostics/TimeLimitReportView.php:121
+msgid "The dark line marks PHP's %d second time limit. Depending on the server, PHP counts either CPU time or wall-clock time against it (Linux counts CPU time, so a request waiting on the network or the database can run longer than the limit in wall-clock time)."
+msgstr "深色线条标记 PHP 的 %d 秒时间限制。根据服务器的不同，PHP 计入该限制的可能是 CPU 时间，也可能是挂钟时间。在 Linux 上计算的是 CPU 时间，因此等待网络或数据库的请求，其挂钟时间可能会超过该限制。"
+
+#: includes/diagnostics/TimeLimitReportView.php:122
+msgid "PHP did not report its time limit for this request."
+msgstr "PHP 未报告此请求的时间限制。"
+
+#: includes/diagnostics/TimeLimitReportView.php:126
+msgid "The last request PHP stopped at its time limit while 404 Solution's code was running: %1$s, %2$s"
+msgstr "在 404 Solution 的代码运行期间，被 PHP 因时间限制而停止的最近一个请求：%1$s，%2$s"
+
+#: includes/diagnostics/TimeLimitReportView.php:128
+msgid "Where the request's time went, by WordPress lifecycle window"
+msgstr "此请求的时间花在了哪里（按 WordPress 生命周期阶段划分）"
+
+#: includes/diagnostics/TimeLimitReportView.php:153
+msgid "404 Solution: PHP stopped a request on this site at its time limit while 404 Solution's code was running. 404 Solution recorded which components used that request's time."
+msgstr "404 Solution：在 404 Solution 的代码运行期间，PHP 因达到时间限制而停止了本站点上的一个请求。404 Solution 已记录下哪些组件占用了该请求的时间。"
+
+#: includes/diagnostics/TimeLimitReportView.php:155
+msgid "See where the time went"
+msgstr "查看时间花在了哪里"
+
+#: includes/diagnostics/TimeLimitReportView.php:174
+msgid "Slow callbacks found while 404 Solution timed each callback"
+msgstr "在 404 Solution 对每个回调计时期间发现的慢回调"
+
+#: includes/diagnostics/TimeLimitReportView.php:198
+msgid "Recent time-limit deaths"
+msgstr "最近因时间限制而终止的请求"
+
+#: includes/diagnostics/TimeLimitReportView.php:199
+msgid "When"
+msgstr "发生时间"
+
+#: includes/diagnostics/TimeLimitReportView.php:200
+msgid "Path"
+msgstr "路径"
+
+#: includes/diagnostics/TimeLimitReportView.php:201
+msgid "Wall time"
+msgstr "挂钟时间"
+
+#: includes/diagnostics/TimeLimitReportView.php:202
+msgid "CPU time (after 404 Solution loaded)"
+msgstr "所用的 CPU 时间（从 404 Solution 完成加载之后开始计算）"
+
+#: includes/diagnostics/TimeLimitReportView.php:203
+msgid "Stopped in"
+msgstr "停止位置"
+
+#: includes/diagnostics/TimeLimitReportView.php:214
+msgid "Before 404 Solution loaded"
+msgstr "在 404 Solution 加载之前"
+
+#: includes/diagnostics/TimeLimitReportView.php:216
+msgid "plugins_loaded to init (theme setup)"
+msgstr "从 plugins_loaded 动作到 init 动作之间的阶段（主题设置与初始化）"
+
+#: includes/diagnostics/TimeLimitReportView.php:217
+msgid "init to wp_loaded"
+msgstr "从 init 到 wp_loaded"
+
+#: includes/diagnostics/TimeLimitReportView.php:218
+msgid "wp_loaded to template_redirect (main query)"
+msgstr "从 wp_loaded 动作到 template_redirect 动作之间的阶段（执行主查询的过程）"
+
+#: includes/diagnostics/TimeLimitReportView.php:219
+msgid "template_redirect to the end (page output)"
+msgstr "从 template_redirect 动作开始直到请求结束的阶段（页面输出）"
+
+#: includes/diagnostics/TimeLimitReportView.php:220
+msgid "admin_init to the end (admin screen)"
+msgstr "从 admin_init 动作开始直到请求结束（管理页面）"
+
+#: includes/diagnostics/TimeLimitReportView.php:221
+msgid "login_init to the end (login screen)"
+msgstr "从 login_init 动作开始直到请求结束（登录页面）"
+
+#: includes/view/View_Tools.php:151
+msgid "Timed-out requests"
+msgstr "超时的请求"
+
+#: includes/view/ShortcodeSuggestionsPresenter.php:260
+msgid "Show suggested pages"
+msgstr "显示推荐页面"

@@ -7,6 +7,12 @@ if (!defined('ABSPATH')) {
 
 class ABJ_404_Solution_SlugChangeHandler {
 
+    /** Engine-label prefix for a redirect created when a published post is trashed. */
+    const EVENT_POST_TRASHED = 'post trashed';
+
+    /** Engine-label prefix for a redirect created just before a published post is deleted. */
+    const EVENT_POST_DELETED = 'post deleted';
+
     /** @var self|null */
     private static $instance = null;
 
@@ -18,6 +24,9 @@ class ABJ_404_Solution_SlugChangeHandler {
 
     /** @var ABJ_404_Solution_Logging */
     private $logger;
+
+    /** @var ABJ_404_Solution_RemovedPostParentResolver|null */
+    private $parentResolver = null;
 
     /**
      * Track post IDs already processed within the current request.
@@ -58,6 +67,14 @@ class ABJ_404_Solution_SlugChangeHandler {
         return $this->redirectsRepository !== null ? $this->redirectsRepository : abj_service('redirects_repository');
     }
 
+    /** @return ABJ_404_Solution_RemovedPostParentResolver */
+    private function getParentResolver() {
+        if ($this->parentResolver === null) {
+            $this->parentResolver = new ABJ_404_Solution_RemovedPostParentResolver();
+        }
+        return $this->parentResolver;
+    }
+
     /**
      * @param int $postId
      * @return string|null
@@ -72,21 +89,25 @@ class ABJ_404_Solution_SlugChangeHandler {
     }
 
     /**
-     * @param string $oldSlug
-     * @param string $status
-     * @param string $type
-     * @param string $finalDest
-     * @param string $redirectCode
-     * @param string $engine
+     * @param ABJ_404_Solution_RedirectSpec $spec Built from named fields, so the
+     *     source path, destination and engine label cannot be transposed.
      * @return void
      */
-    private function setupRedirect(string $oldSlug, string $status, string $type, string $finalDest, string $redirectCode, string $engine): void {
+    private function setupRedirect(ABJ_404_Solution_RedirectSpec $spec): void {
         $repository = $this->getRedirectsRepository();
         if (!is_object($repository) || !method_exists($repository, 'setupRedirect')) {
             return;
         }
-        $spec = ABJ_404_Solution_RedirectSpec::create($oldSlug, $status, $type, $finalDest, $redirectCode, 0, $engine);
         call_user_func(array($repository, 'setupRedirect'), $spec);
+    }
+
+    /**
+     * @param array<string, mixed> $options Plugin options.
+     * @return string The site's configured redirect code, 301 when unset.
+     */
+    private function defaultRedirectCode(array $options): string {
+        return (isset($options['default_redirect']) && is_scalar($options['default_redirect']))
+            ? (string)$options['default_redirect'] : '301';
     }
 
     /**
@@ -249,15 +270,23 @@ class ABJ_404_Solution_SlugChangeHandler {
         self::$processedPosts[$post_id] = true;
 
         // create a redirect from the old to the new.
-        $this->setupRedirect($oldSlug, (string)ABJ404_STATUS_AUTO, (string)ABJ404_TYPE_POST,
-                (string)$post_id, (isset($options['default_redirect']) && is_scalar($options['default_redirect'])) ? (string)$options['default_redirect'] : '301', 'slug change');
+        $this->setupRedirect(ABJ_404_Solution_RedirectSpec::fromArray(array(
+            'fromURL' => $oldSlug,
+            'status' => (string)ABJ404_STATUS_AUTO,
+            'type' => (string)ABJ404_TYPE_POST,
+            'finalDest' => (string)$post_id,
+            'code' => $this->defaultRedirectCode($options),
+            'disabled' => 0,
+            'engine' => 'slug change',
+        )));
         $abj404logging->infoMessage("Added automatic redirect after slug change from " .
             $oldURL . ' to ' . $newURL . " for post ID " . $post_id);
     }
 
     /**
      * Fires when a published post is moved to trash.
-     * Creates a redirect from the old permalink to the homepage.
+     * Creates a redirect from the old permalink to the post's closest parent
+     * (see ABJ_404_Solution_RemovedPostParentResolver).
      *
      * @param string $new_status New post status.
      * @param string $old_status Old post status.
@@ -291,45 +320,13 @@ class ABJ_404_Solution_SlugChangeHandler {
             return;
         }
 
-        $post_id = (int)$post->ID;
-
-        // Check option
-        $options = abj_service('options_repository')->getOptions();
-        if (!isset($options['auto_trash_redirect']) || $options['auto_trash_redirect'] != '1') {
-            return;
-        }
-
-        // Prevent duplicate processing within same request
-        if (isset(self::$processedPosts[$post_id])) {
-            return;
-        }
-
-        $oldURL = $this->getPermalinkFromCache($post_id);
-
-        if ($oldURL === null || $oldURL === '') {
-            return;
-        }
-
-        $oldURLParsed = parse_url($oldURL);
-        if ($oldURLParsed === false || !isset($oldURLParsed['path']) || $oldURLParsed['path'] === '') {
-            return;
-        }
-
-        $oldSlug = $oldURLParsed['path'];
-        $redirectCode = (isset($options['default_redirect']) && is_scalar($options['default_redirect'])) ? (string)$options['default_redirect'] : '301';
-
-        self::$processedPosts[$post_id] = true;
-
-        $this->setupRedirect($oldSlug, (string)ABJ404_STATUS_AUTO, (string)ABJ404_TYPE_HOME,
-            '0', $redirectCode, 'post trashed');
-
-        $this->logger->infoMessage(
-            "Added automatic redirect to homepage after post trashed. ID: " . $post_id . ", old URL: " . $oldURL);
+        $this->redirectRemovedPostToParent($post, (int)$post->ID, self::EVENT_POST_TRASHED);
     }
 
     /**
-     * Fires just before a published post is permanently deleted.
-     * Creates a redirect from the old permalink to the homepage.
+     * Fires just before a published post is permanently deleted, while its
+     * terms and parent are still attached. Creates a redirect from the old
+     * permalink to the post's closest parent.
      *
      * @param int $post_id Post ID.
      * @param \WP_Post $post Post object.
@@ -388,21 +385,38 @@ class ABJ_404_Solution_SlugChangeHandler {
             return;
         }
 
-        // Check option
+        $this->redirectRemovedPostToParent($post, (int)$post_id, self::EVENT_POST_DELETED);
+    }
+
+    /**
+     * Redirect a trashed or deleted post's old path to its closest parent
+     * (category, ancestor page, post type archive), falling back to the
+     * homepage only when none exists. The engine column records the event
+     * and the rule that picked the target, e.g. "post trashed: parent category".
+     *
+     * Owns every step the trash and delete hooks share once each has decided
+     * the post qualifies: the auto_trash_redirect option, the per-request
+     * dedup, and deriving the redirect source from the cached permalink. The
+     * source path and the log URL are derived here rather than passed in, so
+     * no caller can hand them over in the wrong order.
+     *
+     * @param object $post The post being removed; its terms and parent must still be attached.
+     * @param int $postId
+     * @param string $event self::EVENT_POST_TRASHED or self::EVENT_POST_DELETED.
+     * @return void
+     */
+    private function redirectRemovedPostToParent($post, int $postId, string $event): void {
         $options = abj_service('options_repository')->getOptions();
         if (!isset($options['auto_trash_redirect']) || $options['auto_trash_redirect'] != '1') {
             return;
         }
 
-        $post_id = (int)$post_id;
-
         // Prevent duplicate processing within same request
-        if (isset(self::$processedPosts[$post_id])) {
+        if (isset(self::$processedPosts[$postId])) {
             return;
         }
 
-        $oldURL = $this->getPermalinkFromCache($post_id);
-
+        $oldURL = $this->getPermalinkFromCache($postId);
         if ($oldURL === null || $oldURL === '') {
             return;
         }
@@ -412,15 +426,21 @@ class ABJ_404_Solution_SlugChangeHandler {
             return;
         }
 
-        $oldSlug = $oldURLParsed['path'];
-        $redirectCode = (isset($options['default_redirect']) && is_scalar($options['default_redirect'])) ? (string)$options['default_redirect'] : '301';
+        self::$processedPosts[$postId] = true;
 
-        self::$processedPosts[$post_id] = true;
+        $target = $this->getParentResolver()->resolve($post);
 
-        $this->setupRedirect($oldSlug, (string)ABJ404_STATUS_AUTO, (string)ABJ404_TYPE_HOME,
-            '0', $redirectCode, 'post deleted');
+        $this->setupRedirect(ABJ_404_Solution_RedirectSpec::fromArray(array(
+            'fromURL' => $oldURLParsed['path'],
+            'status' => (string)ABJ404_STATUS_AUTO,
+            'type' => (string)$target['type'],
+            'finalDest' => (string)$target['dest'],
+            'code' => $this->defaultRedirectCode($options),
+            'disabled' => 0,
+            'engine' => $event . ': ' . $target['reason'],
+        )));
 
-        $this->logger->infoMessage(
-            "Added automatic redirect to homepage after post deleted. ID: " . $post_id . ", old URL: " . $oldURL);
+        $this->logger->infoMessage("Added automatic redirect to " . $target['reason'] . " (" .
+            $target['dest'] . ") after " . $event . ". ID: " . $postId . ", old URL: " . $oldURL);
     }
 }

@@ -41,7 +41,7 @@ final class ABJ_404_Solution_StrandedRequestSupportSection {
      * contract -- see ABJ_404_Solution_CheckpointJournalReader::MAX_SUPPORT_EXCERPT_BYTES
      * and SupportExcerptBudgetContractTest.
      */
-    const MAX_STRANDED_DIAG_BYTES = 3072;
+    const MAX_STRANDED_DIAG_BYTES = 8192;
 
     /**
      * How long a request must have been running before it is reported here.
@@ -102,6 +102,7 @@ final class ABJ_404_Solution_StrandedRequestSupportSection {
         }
 
         $reaped = ABJ_404_Solution_StrandedRequestLedger::read();
+        $timelines = ABJ_404_Solution_StrandedRequestLedger::readTimelines();
         return array(
             'census_status' => $status,
             'census_reason' => isset($sample['reason']) && is_string($sample['reason'])
@@ -111,6 +112,7 @@ final class ABJ_404_Solution_StrandedRequestSupportSection {
             'stranded_after_ms' => self::STRANDED_AFTER_MS,
             'stranded_now' => $stranded,
             'stranded_previously' => $reaped,
+            'request_timelines' => $timelines,
             'phase_meaning' => 'the lifecycle segment the request had ENTERED when it last'
                 . ' recorded one; a request that died inside a segment never records the next',
         );
@@ -132,8 +134,7 @@ final class ABJ_404_Solution_StrandedRequestSupportSection {
      * @return array<string, mixed>|null
      */
     private static function strandedAccount(array $entry): ?array {
-        $ageMs = isset($entry['age_ms']) && is_numeric($entry['age_ms'])
-            ? (int)$entry['age_ms'] : 0;
+        $ageMs = ABJ_404_Solution_ExactInteger::readOr($entry['age_ms'] ?? null, 0, 0);
         if ($ageMs < self::STRANDED_AFTER_MS) {
             return null;
         }
@@ -142,10 +143,13 @@ final class ABJ_404_Solution_StrandedRequestSupportSection {
                 ? $entry['action'] : '',
             'channel' => isset($entry['channel']) && is_string($entry['channel'])
                 ? $entry['channel'] : '',
-            'pid' => isset($entry['pid']) && is_numeric($entry['pid']) ? (int)$entry['pid'] : 0,
+            'pid' => ABJ_404_Solution_ExactInteger::readOr($entry['pid'] ?? null, 0, 0),
             'age_ms' => $ageMs,
             'phase' => isset($entry['phase']) && is_string($entry['phase']) && $entry['phase'] !== ''
                 ? $entry['phase'] : 'unrecorded',
+            'timeline' => isset($entry['timeline']) && is_string($entry['timeline'])
+                ? ABJ_404_Solution_RequestPhaseTimeline::decode($entry['timeline'])
+                : null,
         );
     }
 
@@ -154,9 +158,10 @@ final class ABJ_404_Solution_StrandedRequestSupportSection {
      *
      * Over-budget input sheds the historical accounts first -- the reducible
      * detail, since a currently-stranded worker is contemporaneous with the
-     * click that sent the report -- then falls back to the counts and phases
-     * alone, rather than being cut at a byte offset. A record cut mid-JSON is
-     * unreadable by machine and misleading to a human.
+     * click that sent the report -- then the older promoted timelines, then
+     * falls back to the counts and phases alone, rather than being cut at a
+     * byte offset. A record cut mid-JSON is unreadable by machine and
+     * misleading to a human.
      *
      * @param array<string, mixed> $record
      */
@@ -166,6 +171,10 @@ final class ABJ_404_Solution_StrandedRequestSupportSection {
         $withoutHistory = $record;
         $withoutHistory['stranded_previously'] = 'over_budget';
 
+        $trimmedTimelines = $withoutHistory;
+        $trimmedTimelines['request_timelines'] =
+            array_slice(self::listOf($record, 'request_timelines'), -8);
+
         $minimal = array(
             'census_status' => $record['census_status'],
             'in_flight_total' => $record['in_flight_total'],
@@ -174,7 +183,7 @@ final class ABJ_404_Solution_StrandedRequestSupportSection {
             'reduced' => 'over_budget',
         );
 
-        foreach (array($record, $withoutHistory, $minimal) as $candidate) {
+        foreach (array($record, $withoutHistory, $trimmedTimelines, $minimal) as $candidate) {
             $line = json_encode(array(self::STRANDED_DIAG_KEY => $candidate));
             if (is_string($line)
                     && strlen($header) + strlen($line) <= self::MAX_STRANDED_DIAG_BYTES) {

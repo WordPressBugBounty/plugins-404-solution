@@ -208,10 +208,8 @@ final class ABJ_404_Solution_CacheMetricsProbeTracer {
      * @return array{src: string, calls: int|null, reads: null, writes: null, hits: int|null, misses: int|null, ms: null}
      */
     private static function snapshotFromCounters(object $cache): array {
-        $hits = isset($cache->cache_hits) && is_numeric($cache->cache_hits)
-            ? (int)$cache->cache_hits : null;
-        $misses = isset($cache->cache_misses) && is_numeric($cache->cache_misses)
-            ? (int)$cache->cache_misses : null;
+        $hits = ABJ_404_Solution_ExactInteger::read($cache->cache_hits ?? null, 0);
+        $misses = ABJ_404_Solution_ExactInteger::read($cache->cache_misses ?? null, 0);
         if ($hits === null && $misses === null) {
             return self::emptySnapshot('none');
         }

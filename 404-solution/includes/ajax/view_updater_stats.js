@@ -41,8 +41,14 @@ function shouldRunStatsAutoRefreshNow($config) {
         var key = getStatsAutoRefreshCacheKey($config);
         var lastTs = parseInt(localStorage.getItem(key) || '0', 10);
         var cooldownMs = 30000; // at most once every 30s for this tab
-        return !(lastTs > 0 && (Date.now() - lastTs) < cooldownMs);
+        return !(lastTs > 0 && (Date.now() - lastTs) < cooldownMs); // allow-direct-time: cooldown compares a stamp stored by an earlier page load, so it must be the wall clock; tests drive it with fake timers
     } catch (e) {
+        // An unreadable cooldown degrades open: refreshing more often than
+        // every 30s costs one request, a throttle stuck shut would hide new
+        // data. Log so a real bug here is diagnosable instead of invisible.
+        if (window.console && window.console.warn) {
+            window.console.warn('404 Solution: shouldRunStatsAutoRefreshNow failed to read localStorage', e);
+        }
         return true;
     }
 }
@@ -138,6 +144,22 @@ function triggerStatsBackgroundRefreshIfEnabled() {
                 markStatsAutoRefreshCompleted($config);
             },
             error: function(xhr, textStatus, errorThrown) {
+                // The state object below is only inspectable from a devtools
+                // console on a live page; nothing reads it. Keep the failure
+                // where a support report can find it.
+                if (typeof abj404AdminAjaxRecordFailure === 'function') {
+                    abj404AdminAjaxRecordFailure(xhr, {
+                        source: 'stats-background-refresh',
+                        textStatus: textStatus,
+                        errorThrown: errorThrown
+                    });
+                } else if (window.console && window.console.warn) {
+                    window.console.warn('404 Solution: stats-background-refresh failed', {
+                        status: xhr && typeof xhr.status === 'number' ? xhr.status : null,
+                        textStatus: textStatus,
+                        errorThrown: errorThrown
+                    });
+                }
                 if (window.abj404StatsBackgroundRefreshState) {
                     var duration = Date.now() - startMs;
                     window.abj404StatsBackgroundRefreshState.finishedAt = Date.now();
@@ -203,8 +225,14 @@ function shouldRunAutoRefreshNow($config) {
         var key = getAutoRefreshCacheKey($config);
         var lastTs = parseInt(localStorage.getItem(key) || '0', 10);
         var cooldownMs = 30000; // 30s throttle per tab/sort/filter key
-        return !(lastTs > 0 && (Date.now() - lastTs) < cooldownMs);
+        return !(lastTs > 0 && (Date.now() - lastTs) < cooldownMs); // allow-direct-time: cooldown compares a stamp stored by an earlier page load, so it must be the wall clock; tests drive it with fake timers
     } catch (e) {
+        // An unreadable cooldown degrades open: refreshing more often than
+        // every 30s costs one request, a throttle stuck shut would hide new
+        // data. Log so a real bug here is diagnosable instead of invisible.
+        if (window.console && window.console.warn) {
+            window.console.warn('404 Solution: shouldRunAutoRefreshNow failed to read localStorage', e);
+        }
         return true;
     }
 }

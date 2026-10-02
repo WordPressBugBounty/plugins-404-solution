@@ -59,6 +59,28 @@ final class ABJ_404_Solution_StrandedRequestLedger {
     const RETAINED_EARLIEST = 6;
 
     /**
+     * The option holding the promoted request timelines. Non-autoloaded; read
+     * only on demand. A second ledger beside the stranded accounts rather
+     * than a parallel store: same cap, same keep-both-ends trim, same write
+     * path.
+     */
+    const TIMELINE_OPTION_NAME = 'abj404_request_timelines';
+
+    /**
+     * How many promoted timelines are kept. Twenty finished requests is far
+     * past the point where the reader has the pattern, and the support
+     * section sheds to the newest 8 when the whole record would not fit.
+     */
+    const MAX_TIMELINE_ENTRIES = 20;
+
+    /** Promotion reasons: why a finished request's timeline was kept. */
+    const REASON_SLOW = 'slow';
+    const REASON_LATE_START = 'late_start';
+    const REASON_RETRY = 'retry';
+    const REASON_RETRY_PARENT = 'retry_parent';
+    const REASON_CLIENT_REPORTED = 'client_reported';
+
+    /**
      * Promote reaped registry rows into the ledger, newest last. Never throws:
      * a census reading must not fail because its own bookkeeping could not be
      * written.
@@ -77,7 +99,6 @@ final class ABJ_404_Solution_StrandedRequestLedger {
             return 0;
         }
         try {
-            $existing = self::read();
             $added = array();
             foreach ($entries as $entry) {
                 $account = self::account($entry);
@@ -88,8 +109,10 @@ final class ABJ_404_Solution_StrandedRequestLedger {
             if ($added === array()) {
                 return 0;
             }
-            self::write(self::trim(array_merge($existing, $added)));
-            return count($added);
+            $result = self::append(self::OPTION_NAME, static function (array $existing) use ($added): array {
+                return self::trim(array_merge($existing, $added));
+            });
+            return $result === ABJ_404_Solution_OptionRowCompareAndSwap::RESULT_SWAPPED ? count($added) : 0;
         } catch (Throwable $e) {
             abj404_logPhpFallback('stranded-request-ledger',
                 'stranded request record failed (code ' . $e->getCode() . '): ' . $e->getMessage());
@@ -105,36 +128,151 @@ final class ABJ_404_Solution_StrandedRequestLedger {
      * @return array<int, array<string, mixed>>
      */
     public static function read(): array {
+        return self::readOption(self::OPTION_NAME);
+    }
+
+    /**
+     * Every retained timeline promotion, oldest first. Same never-throws
+     * contract as read(): entries are array{reason, state, timeline}.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function readTimelines(): array {
+        return self::readOption(self::TIMELINE_OPTION_NAME);
+    }
+
+    /**
+     * Promote one request's timeline into the ledger. Deduplicated on
+     * request id plus reason, so a retry and a beacon naming the same parent
+     * for the same reason keep one entry. Never throws.
+     *
+     * @param array<string, mixed> $timeline the timeline shape, or a
+     *   v/rid stub when the named request was never seen.
+     * @param array{reason: string, state?: string} $promotion keyed because
+     *   both are strings and a swap would store the state as the reason,
+     *   which condemnedRequestIds() treats as a non-retry reason. `reason` is
+     *   one of the REASON_* constants; `state` is retired (the default),
+     *   in_flight or not_seen: where the named row was when it was promoted.
+     * @return bool whether an entry was recorded.
+     */
+    public static function recordTimeline(array $timeline, array $promotion): bool {
+        $reason = $promotion['reason'];
+        $state = $promotion['state'] ?? 'retired';
+        $rid = isset($timeline['rid']) && is_string($timeline['rid']) ? $timeline['rid'] : '';
+        if ($rid === '' || $reason === '') {
+            return false;
+        }
         try {
-            if (!function_exists('get_option')) {
-                return array();
-            }
-            $raw = get_option(self::OPTION_NAME, '');
-            if (!is_string($raw) || $raw === '') {
-                return array();
-            }
-            $decoded = json_decode($raw, true);
-            if (!is_array($decoded)) {
-                return array();
-            }
-            $entries = array();
-            foreach ($decoded as $entry) {
-                if (is_array($entry)) {
-                    $entries[] = $entry;
-                }
-            }
-            return $entries;
+            $result = self::append(self::TIMELINE_OPTION_NAME,
+                static function (array $existing) use ($rid, $reason, $state, $timeline): ?array {
+                    foreach ($existing as $entry) {
+                        if (isset($entry['dropped_middle_accounts'])) {
+                            continue;
+                        }
+                        $entryTimeline = isset($entry['timeline']) && is_array($entry['timeline'])
+                            ? $entry['timeline'] : array();
+                        $entryRid = isset($entryTimeline['rid']) && is_string($entryTimeline['rid'])
+                            ? $entryTimeline['rid'] : '';
+                        if ($entryRid === $rid && ($entry['reason'] ?? '') === $reason) {
+                            return null;
+                        }
+                    }
+                    $existing[] = array(
+                        'reason' => substr($reason, 0, 32),
+                        'state' => substr($state, 0, 16),
+                        'timeline' => $timeline,
+                    );
+                    return self::trim($existing, self::MAX_TIMELINE_ENTRIES);
+                });
+            return $result === ABJ_404_Solution_OptionRowCompareAndSwap::RESULT_SWAPPED;
         } catch (Throwable $e) {
             abj404_logPhpFallback('stranded-request-ledger',
-                'stranded request read failed (code ' . $e->getCode() . '): ' . $e->getMessage());
-            return array();
+                'stranded request timeline record failed (code ' . $e->getCode() . '): ' . $e->getMessage());
+            return false;
         }
+    }
+
+    /**
+     * Every request id condemned anywhere in either ledger: every promoted
+     * timeline except a retry-only one (a retry is routine traffic until
+     * something else condemns it), plus every stranded account whose row
+     * carried a timeline. The support excerpts union this into the failure
+     * index they rank on.
+     *
+     * @return array<string, bool>
+     */
+    public static function condemnedRequestIds(): array {
+        $ids = array();
+        try {
+            foreach (self::readTimelines() as $entry) {
+                if (!is_array($entry) || isset($entry['dropped_middle_accounts'])) {
+                    continue;
+                }
+                $reason = isset($entry['reason']) && is_string($entry['reason'])
+                    ? $entry['reason'] : '';
+                if ($reason === '' || $reason === self::REASON_RETRY) {
+                    continue;
+                }
+                $rid = self::timelineRid($entry);
+                if ($rid !== '') {
+                    $ids[$rid] = true;
+                }
+            }
+            foreach (self::read() as $account) {
+                $rid = self::timelineRid($account);
+                if ($rid !== '') {
+                    $ids[$rid] = true;
+                }
+            }
+        } catch (Throwable $e) {
+            abj404_logPhpFallback('stranded-request-ledger',
+                'stranded request condemned ids failed (code ' . $e->getCode() . '): ' . $e->getMessage());
+        }
+        return $ids;
+    }
+
+    /**
+     * The request id one ledger entry's timeline names, or '' when it names
+     * none. A gap marker carries no timeline, so it condemns nothing.
+     *
+     * @param mixed $entry
+     * @return string
+     */
+    private static function timelineRid($entry): string {
+        if (!is_array($entry)) {
+            return '';
+        }
+        $timeline = isset($entry['timeline']) && is_array($entry['timeline'])
+            ? $entry['timeline'] : array();
+        $rid = $timeline['rid'] ?? null;
+        return is_string($rid) ? $rid : '';
     }
 
     /** Forget every account. For uninstall and for tests that need a clean slate. */
     public static function clear(): void {
         if (function_exists('delete_option')) {
             delete_option(self::OPTION_NAME);
+            delete_option(self::TIMELINE_OPTION_NAME);
+        }
+    }
+
+    /**
+     * One ledger option's entries, oldest first. Never throws.
+     *
+     * @param string $optionName
+     * @return array<int, array<string, mixed>>
+     */
+    private static function readOption(string $optionName): array {
+        try {
+            if (!function_exists('get_option')) {
+                return array();
+            }
+            $raw = get_option($optionName, '');
+            return self::entriesFromRaw(is_string($raw) ? $raw : '');
+        } catch (Throwable $e) {
+            abj404_logPhpFallback('stranded-request-ledger',
+                'stranded request read failed (code ' . $e->getCode() . '): ' . $e->getMessage());
+            return array();
         }
     }
 
@@ -146,8 +284,8 @@ final class ABJ_404_Solution_StrandedRequestLedger {
      * @return array<string, mixed>|null
      */
     private static function account(array $entry): ?array {
-        $pid = isset($entry['pid']) && is_numeric($entry['pid']) ? (int)$entry['pid'] : 0;
-        $ageMs = isset($entry['age_ms']) && is_numeric($entry['age_ms']) ? (int)$entry['age_ms'] : 0;
+        $pid = ABJ_404_Solution_ExactInteger::readOr($entry['pid'] ?? null, 0, 0);
+        $ageMs = ABJ_404_Solution_ExactInteger::readOr($entry['age_ms'] ?? null, 0, 0);
         if ($pid === 0 && $ageMs === 0) {
             return null;
         }
@@ -164,9 +302,18 @@ final class ABJ_404_Solution_StrandedRequestLedger {
                 ? substr($entry['action'], 0, 64) : '',
             'pid' => $pid,
             'phase' => $phase,
-            'started_at_ms' => isset($entry['started_at_ms']) && is_numeric($entry['started_at_ms'])
-                ? (int)$entry['started_at_ms'] : 0,
+            'started_at_ms' => ABJ_404_Solution_ExactInteger::readOr(
+                $entry['started_at_ms'] ?? null,
+                0,
+                0
+            ),
             'age_ms_at_reap' => $ageMs,
+            // The row's own phase timeline, decoded: the worst strand on the
+            // site keeps its record of where it spent its time. Null when the
+            // row predates timelines or carried none.
+            'timeline' => isset($entry['timeline']) && is_string($entry['timeline'])
+                ? ABJ_404_Solution_RequestPhaseTimeline::decode($entry['timeline'])
+                : null,
         );
     }
 
@@ -174,9 +321,10 @@ final class ABJ_404_Solution_StrandedRequestLedger {
      * Keep both ends and drop the middle. See RETAINED_EARLIEST.
      *
      * @param array<int, array<string, mixed>> $entries
+     * @param int $maxEntries how many accounts survive the trim.
      * @return array<int, array<string, mixed>>
      */
-    private static function trim(array $entries): array {
+    private static function trim(array $entries, int $maxEntries = self::MAX_ENTRIES): array {
         // The gap marker is NOT an account and must never occupy a slot or be
         // re-counted. Folding prior markers back into one running total first
         // is what keeps the ledger at MAX_ENTRIES accounts with exactly one
@@ -189,16 +337,19 @@ final class ABJ_404_Solution_StrandedRequestLedger {
                 // non-numeric marker still means "accounts were dropped", so it
                 // is kept as a marker and counted as at least one rather than
                 // silently becoming zero.
-                $dropped += is_numeric($entry['dropped_middle_accounts'])
-                    ? (int)$entry['dropped_middle_accounts'] : 1;
+                $dropped += ABJ_404_Solution_ExactInteger::readOr(
+                    $entry['dropped_middle_accounts'],
+                    0,
+                    1
+                );
                 continue;
             }
             $accounts[] = $entry;
         }
 
-        if (count($accounts) > self::MAX_ENTRIES) {
+        if (count($accounts) > $maxEntries) {
             $earliest = array_slice($accounts, 0, self::RETAINED_EARLIEST);
-            $newest = array_slice($accounts, -(self::MAX_ENTRIES - self::RETAINED_EARLIEST));
+            $newest = array_slice($accounts, -($maxEntries - self::RETAINED_EARLIEST));
             $dropped += count($accounts) - count($earliest) - count($newest);
         } else {
             $earliest = array_slice($accounts, 0, self::RETAINED_EARLIEST);
@@ -216,16 +367,48 @@ final class ABJ_404_Solution_StrandedRequestLedger {
     }
 
     /**
-     * @param array<int, array<string, mixed>> $entries
+     * The entries a stored ledger value holds, oldest first; anything
+     * unreadable is an empty ledger.
+     *
+     * @param string $raw
+     * @return array<int, array<string, mixed>>
      */
-    private static function write(array $entries): void {
-        if (!function_exists('update_option')) {
-            return;
+    private static function entriesFromRaw(string $raw): array {
+        $decoded = $raw !== '' ? json_decode($raw, true) : null;
+        if (!is_array($decoded)) {
+            return array();
         }
-        $encoded = json_encode(array_values($entries));
-        if (!is_string($encoded)) {
-            return;
+        $entries = array();
+        foreach ($decoded as $entry) {
+            if (is_array($entry)) {
+                $entries[] = $entry;
+            }
         }
-        update_option(self::OPTION_NAME, $encoded, false);
+        return $entries;
+    }
+
+    /**
+     * Change one ledger option from the value the database holds NOW.
+     * Concurrent requests append to the same ledger, so this goes through
+     * compare-and-swap: a lost race repeats $next on the fresh entries rather
+     * than overwriting another request's account.
+     *
+     * @param string $optionName
+     * @param callable(array<int, array<string, mixed>>): (array<int, array<string, mixed>>|null) $next
+     *   the entries to store given the current ones, or null to store nothing.
+     * @return string an OptionRowCompareAndSwap RESULT_* constant.
+     */
+    private static function append(string $optionName, callable $next): string {
+        return ABJ_404_Solution_OptionRowCompareAndSwap::update(array(
+            'optionName' => $optionName,
+            'compute' => static function (?string $current) use ($next): ?string {
+                $entries = call_user_func($next, self::entriesFromRaw($current ?? ''));
+                if ($entries === null) {
+                    return null;
+                }
+                $encoded = ABJ_404_Solution_Utf8SafeRecord::encode(array_values($entries), 'stranded request ledger');
+                return $encoded === '' ? null : $encoded;
+            },
+        ));
     }
 }

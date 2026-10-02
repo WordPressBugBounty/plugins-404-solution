@@ -17,8 +17,13 @@ where   r.url in (BINARY '{url1}', BINARY '{url2}')
 
         /* only include the redirect if the page exists, the destination is external,
            the type is homepage (final_dest is always 0 for TYPE_HOME),
-           or the redirect code needs no destination (410 Gone, 451 Unavailable). */
-        and (p.id is not null or t.term_id is not null or r.type = {ABJ404_TYPE_EXTERNAL}
+           or the redirect code needs no destination (410 Gone, 451 Unavailable).
+           final_dest is a post id for a post redirect and a term id for a
+           category or tag redirect; the id spaces overlap, so each type is
+           checked against its own table. */
+        and ((p.id is not null and r.type = {ABJ404_TYPE_POST})
+             or (t.term_id is not null and r.type in ({ABJ404_TYPE_CAT}, {ABJ404_TYPE_TAG}))
+             or r.type = {ABJ404_TYPE_EXTERNAL}
              or r.type = {ABJ404_TYPE_HOME}
              or r.code in (410, 451))
         and (p.post_status in ('publish', 'published') or r.type != 1)

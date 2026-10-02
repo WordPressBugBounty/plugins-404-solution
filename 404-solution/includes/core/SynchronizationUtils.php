@@ -6,34 +6,17 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * The synchronizer lock protocol: mint an owner id, acquire it, break a lock
- * whose holder is gone, and release it -- including when the holder dies
- * without unwinding.
+ * The synchronizer lock protocol: mint an owner id, claim the key, and hand it
+ * back -- including when this request dies before it gets to.
  *
  * Storage of the owner records themselves belongs to
  * ABJ_404_Solution_LockOwnerStore; nothing in this class touches the options
- * table or the filesystem directly.
+ * table or the filesystem directly. Deciding that a record's holder is gone,
+ * removing it, and reporting the reclaim belongs to
+ * ABJ_404_Solution_LeakedLockReclaimer, which both this class's acquire path
+ * and its shutdown pass go through so one event class keeps one severity.
  */
 class ABJ_404_Solution_SynchronizationUtils {
-
-	/** Absolute ceiling, in seconds, on how long any lock may look legitimately
-	 * held before a later acquirer breaks it.
-	 *
-	 * The stale-lock threshold is derived from max_execution_time (a request
-	 * cannot legitimately outlive it), but that value is host-controlled and
-	 * unbounded. westcoat.kinsta.cloud reported max_execution_time=43200, which
-	 * the old "* 2" heuristic turned into a 24-hour window: a lock leaked by a
-	 * fatal on 2026-07-11 04:36 was not broken until 2026-07-12 04:40, after
-	 * 86615 seconds, and the site served a 4.2.0 schema to 4.3.1 code the whole
-	 * time. No critical section in this plugin legitimately runs for minutes, so
-	 * the derived value is capped here regardless of what the host allows.
-	 * @var int */
-	const LOCK_STALE_CEILING_SECONDS = 300;
-
-	/** Stale-lock threshold used when max_execution_time reports no limit
-	 * (0 / empty, as under CLI, WP-CLI and many cron contexts).
-	 * @var int */
-	const LOCK_STALE_FALLBACK_SECONDS = 60;
 
 	/** Locks acquired by THIS instance during THIS request that have not been
 	 * released yet, as internal key => unique ID.
@@ -55,6 +38,9 @@ class ABJ_404_Solution_SynchronizationUtils {
 
 	/** @var ABJ_404_Solution_LockOwnerStore */
 	private $ownerStore;
+
+	/** @var ABJ_404_Solution_LeakedLockReclaimer */
+	private $reclaimer;
 
 	/** @var self|null */
 	private static $instance = null;
@@ -86,6 +72,7 @@ class ABJ_404_Solution_SynchronizationUtils {
 
 	public function __construct(?ABJ_404_Solution_LockOwnerStore $ownerStore = null) {
 		$this->ownerStore = $ownerStore !== null ? $ownerStore : new ABJ_404_Solution_LockOwnerStore();
+		$this->reclaimer = new ABJ_404_Solution_LeakedLockReclaimer($this->ownerStore);
 	}
 
 	/** @return self */
@@ -135,7 +122,7 @@ class ABJ_404_Solution_SynchronizationUtils {
         $internalSynchronizedKey = $this->createInternalKey($synchronizedKeyFromUser);
 
         // don't let anyone hold the lock for too long.
-        $this->fixAnUnforeseenIssue($synchronizedKeyFromUser);
+        $this->reclaimer->breakIfLeaked($internalSynchronizedKey);
 
         if (!$this->ownerStore->claimOwner(array(
             'key' => $internalSynchronizedKey,
@@ -154,59 +141,6 @@ class ABJ_404_Solution_SynchronizationUtils {
         $this->rememberHeldLock($internalSynchronizedKey, $uniqueID);
 
         return $uniqueID;
-    }
-
-    /** Remove the lock if it's been in place for too long.
-     * @param string $synchronizedKeyFromUser
-     * @return void
-     */
-    function fixAnUnforeseenIssue($synchronizedKeyFromUser) {
-        $internalSynchronizedKey = $this->createInternalKey($synchronizedKeyFromUser);
-
-        $uniqueID = $this->ownerStore->readOwner($internalSynchronizedKey);
-
-        if (empty($uniqueID)) {
-            return;
-        }
-
-        $uniqueIDInfo = explode("_", $uniqueID);
-
-        $createTime = $uniqueIDInfo[0];
-
-        $timePassed = abj_clock()->nowFloat() - (float)$createTime;
-
-        $maxExecutionTime = $this->staleLockThresholdSeconds();
-
-        // it should have been released by now.
-        if ($timePassed > $maxExecutionTime) {
-			$this->ownerStore->deleteOwner(array(
-				'key' => $internalSynchronizedKey,
-				'owner' => $uniqueID,
-			));
-            $valueAfterDelete = $this->ownerStore->readOwner($internalSynchronizedKey);
-
-            // Options storage is only proven broken when the record that is
-            // still sitting there is the SAME one we just deleted. A different
-            // value means another request legitimately claimed the key in the
-            // meantime, which is the protocol working rather than the storage
-            // failing, and latching the whole site onto file-based records over
-            // it would be a false alarm. (deleteOwner() only removes a record
-            // whose value the caller named, so losing that race leaves the new
-            // owner's record untouched, which is exactly what should happen.)
-            if ($valueAfterDelete === $uniqueID &&
-            		!$this->ownerStore->isFileMode()) {
-            	$this->ownerStore->switchToFileSyncMode();
-            	return;
-            }
-
-            $uniqueIDForDebugging = $this->createUniqueID('DEBUG_KEY');
-            $logger = abj_service('logging');
-            $logger->errorMessage("Forcibly removed synchronization after " .
-            		$timePassed . " seconds for the " . "key " . $internalSynchronizedKey .
-            		" with value: " . $uniqueID . ', value after delete: ' . $valueAfterDelete .
-                    ", microtime: " . abj_clock()->nowFloat() . ", unique ID for debugging: " .
-                    $uniqueIDForDebugging . ", File sync mode: " . json_encode($this->ownerStore->isFileMode()));
-        }
     }
 
     // There is deliberately no blocking acquire here. synchronizerAcquireLockWithWait()
@@ -228,6 +162,23 @@ class ABJ_404_Solution_SynchronizationUtils {
     // LockAcquireApiSurfaceTest holds that line for every acquire method on this class.
 
     /** Release the lock for a synchronized block. Should be done in a finally block.
+     *
+     * The key leaves the outstanding set only once the owner record is
+     * confirmed GONE -- removed here, or no longer this request's. A release
+     * the store REFUSES leaves it outstanding on purpose, so the shutdown pass
+     * retries it, because a refused release is the one failure the caller
+     * cannot see: this method returns void, every call site is a finally block
+     * with nothing to branch on, and the request then walks away from a record
+     * only the stale-lock breaker will ever clear.
+     *
+     * That is production report 411 (agcustomgifts.com, 4.3.5, MariaDB). A
+     * frontend 404's release DELETE came back "Deadlock found when trying to
+     * get lock; try restarting transaction" -- an engine asking to be re-run --
+     * and the key had already been dropped from the outstanding set one
+     * statement earlier, so the shutdown pass had nothing to re-run. The record
+     * sat in the options table for 307155 seconds until an unrelated 404 for
+     * the same URL broke it as stale.
+     *
      * @param string $uniqueID
      * @param string $synchronizedKeyFromUser
      * @return void
@@ -238,43 +189,34 @@ class ABJ_404_Solution_SynchronizationUtils {
 
         $currentLockHolder = $this->ownerStore->readOwner($internalSynchronizedKey);
 
-        // Whatever the outcome below, this request is done with the lock, so
-        // the shutdown release must no longer consider it outstanding.
-        $this->forgetHeldLock($internalSynchronizedKey, $uniqueID);
+		if ($uniqueID != $currentLockHolder) {
+			// Not ours to give back: it was broken as stale, or another request
+			// has since taken the key. Nothing to delete and nothing for the
+			// shutdown pass to retry, so stop considering it outstanding.
+			$this->forgetHeldLock($internalSynchronizedKey, $uniqueID);
 
-		if ($uniqueID == $currentLockHolder) {
-			$this->ownerStore->deleteOwner(array(
-				'key' => $internalSynchronizedKey,
-				'owner' => $uniqueID,
-			));
-
-		} else {
 			// Fail silently instead of throwing fatal exception.
 			$logger = abj_service('logging');
 			$logger->debugMessage("Synchronization lock release mismatch. " .
 				"Synchronized key: $synchronizedKeyFromUser, current holder: $currentLockHolder, " .
 				"attempted release by: $uniqueID");
+			return;
 		}
-    }
 
-    /** How long, in seconds, an owner record may sit before a later acquirer
-     * treats it as leaked and breaks it.
-     *
-     * Derived from max_execution_time because a live request cannot outlive it,
-     * but capped at LOCK_STALE_CEILING_SECONDS because that ini value is
-     * host-controlled and unbounded. See the constant for the incident this
-     * ceiling exists to prevent.
-     *
-     * @return int
-     */
-    private function staleLockThresholdSeconds() {
-        $maxExecutionTime = ini_get('max_execution_time');
+		if ($this->ownerStore->deleteOwner(array(
+			'key' => $internalSynchronizedKey,
+			'owner' => $uniqueID,
+		))) {
+			$this->forgetHeldLock($internalSynchronizedKey, $uniqueID);
+			return;
+		}
 
-        if (empty($maxExecutionTime) || !is_numeric($maxExecutionTime) || (int)$maxExecutionTime < 1) {
-            return self::LOCK_STALE_FALLBACK_SECONDS;
-        }
-
-        return (int) min((int)$maxExecutionTime * 2, self::LOCK_STALE_CEILING_SECONDS);
+		// The conditional delete removed nothing. Either another request got
+		// there between the read above and this call -- in which case the
+		// shutdown pass re-reads, finds a holder that is not us, and drops the
+		// key -- or the store refused the statement outright. Both are handled
+		// by leaving the key outstanding: the retry can only ever remove a
+		// record still carrying this request's own unique ID.
     }
 
     /** Record that this request now owns $internalSynchronizedKey, and make
@@ -357,7 +299,8 @@ class ABJ_404_Solution_SynchronizationUtils {
      * the last one that runs. Emptying the map before the deletes would leave
      * that final pass with nothing to do and leak every lock the interrupted
      * pass had not reached yet, deferring the next database or version upgrade
-     * until the stale-lock breaker fires (up to LOCK_STALE_CEILING_SECONDS).
+     * until the stale-lock breaker fires (up to
+     * ABJ_404_Solution_LeakedLockReclaimer::LOCK_STALE_CEILING_SECONDS).
      *
      * @return void
      */
@@ -386,23 +329,35 @@ class ABJ_404_Solution_SynchronizationUtils {
                     continue;
                 }
 
-                $this->ownerStore->deleteOwner(array(
+                // Same arbitration as the stale-lock breaker: the conditional
+                // delete answers whether THIS pass removed the record. The read
+                // above is a cheap filter, not the decision -- between it and
+                // this call the stale-lock heuristic, another request, or a
+                // re-entrant pass can still get there first.
+                $removedIt = $this->ownerStore->deleteOwner(array(
                     'key' => $internalSynchronizedKey,
                     'owner' => $uniqueID,
                 ));
 
+                if (!$removedIt) {
+                    // Two different things, and the key stays outstanding for
+                    // both. Somebody else reclaimed it, and reports it -- the
+                    // read at the top of the next pass sees that and drops the
+                    // key. Or the store REFUSED the statement, which is
+                    // unfinished work, and is why this pass is wired twice
+                    // (report 411's release DELETE was refused with an InnoDB
+                    // deadlock). Dropping the key here on the strength of a
+                    // delete that did not happen is what left the later hook
+                    // with nothing to retry.
+                    continue;
+                }
+
                 // The record is gone, so this key's work is durably done. Drop
-                // it before anything else can throw: a key still in the map is
-                // a key a later pass will retry, and retrying a delete could
-                // remove a record another request has since acquired.
+                // it before the report, so a re-entrant pass suspended inside
+                // that call cannot announce the same removal a second time.
                 $this->forgetHeldLock($internalSynchronizedKey, $uniqueID);
 
-                $logger = abj_service('logging');
-                $logger->warn("Released a synchronization lock that this request " .
-                    "acquired but never released (the request ended without reaching the " .
-                    "release call, e.g. a fatal error, memory exhaustion, or a timeout " .
-                    "inside the critical section). Key: " . $internalSynchronizedKey .
-                    ", value: " . $uniqueID);
+                $this->reclaimer->reportReleasedByShutdown($internalSynchronizedKey, $uniqueID);
 
             } catch (Throwable $e) {
                 // Shutdown context: the logging service (or whatever fataled)

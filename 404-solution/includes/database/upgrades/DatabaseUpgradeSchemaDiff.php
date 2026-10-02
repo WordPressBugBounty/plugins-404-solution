@@ -6,6 +6,11 @@ if (!defined('ABSPATH')) {
 
 class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_DatabaseUpgradeComponent {
 
+    /** Lists every getTableDifferences() result carries; the sink applies nothing without all of them. */
+    private const REQUIRED_DIFFERENCE_KEYS = array('dropTheseColumns', 'updateTheseColumns',
+	'createTheseColumns', 'goalTableMatchesColumnDDL', 'existingTableMatchesColumnDDL',
+	'goalTableMatches', 'goalTableMatchesColumnNames');
+
     /**
      * @param string $tableName
      * @param string $createTableStatementGoal
@@ -44,6 +49,17 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 
 	if (count($updateCols) > 0 ||
 		count($createCols) > 0) {
+
+		if (count($createCols) === 0 && $this->isOlderBuildThanRecordedSchema()) {
+			// An older build deliberately leaves existing columns as the newer
+			// build shaped them, so their remaining differences are expected.
+			// Every MISSING column is still created, so a missing column that
+			// persists is a real failure and takes the warning branch below.
+			$this->logger->infoMessage("The " . $tableName . " table still differs from this " .
+				"older build's schema in " . count($updateCols) . " existing column(s); they " .
+				"were left unchanged on purpose because a newer plugin version shaped them.");
+			return;
+		}
 
 		// Persistent post-update diff is usually a benign DDL-normalizer mismatch
 		// (parser misreads a comment, column landed in a slightly-different form).
@@ -108,10 +124,9 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 		$this->logger->errorMessage("Goal DDL for " . $tableName .
 			" produced no column matches -- the DDL may be malformed or unparseable. " .
 			"Skipping column comparison to prevent data loss.");
-		$dropTheseColumns = [];
-		$createTheseColumns = [];
 		return array("updateTheseColumns" => [],
 			"dropTheseColumns" => [],
+			"keepTheseUnknownColumns" => [],
 			"createTheseColumns" => [],
 			"goalTableMatchesColumnDDL" => [],
 			"existingTableMatchesColumnDDL" => [],
@@ -120,9 +135,16 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 		);
 	}
 
+	// A live column this build's DDL does not declare is dropped only when this
+	// plugin deliberately retired it. Any other one is unknown -- a newer plugin
+	// version or the site owner may have added it -- so it is reported under
+	// keepTheseUnknownColumns and left alone.
+	$extraColumns = ABJ_404_Solution_RetiredColumns::partition($tableName,
+		array_diff($existingTableMatchesColumnNames, $goalTableMatchesColumnNames));
+	$dropTheseColumns = $extraColumns['retired'];
+	$keepTheseUnknownColumns = $extraColumns['unknown'];
+
 	// see if some columns need to be created.
-	$dropTheseColumns = array_diff($existingTableMatchesColumnNames,
-		$goalTableMatchesColumnNames);
 	$createTheseColumns = array_diff($goalTableMatchesColumnNames,
 		$existingTableMatchesColumnNames);
 
@@ -142,6 +164,7 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 	// wrap the results
 	$results = array("updateTheseColumns" => $updateTheseColumns,
 			"dropTheseColumns" => $dropTheseColumns,
+			"keepTheseUnknownColumns" => $keepTheseUnknownColumns,
 			"createTheseColumns" => $createTheseColumns,
 			"goalTableMatchesColumnDDL" => $goalTableMatchesColumnDDL,
 			"existingTableMatchesColumnDDL" => $existingTableMatchesColumnDDL,
@@ -178,6 +201,10 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
     }
 
     /**
+     * Apply a getTableDifferences() result. A result missing any required list
+     * is refused whole (logged at warn): without createTheseColumns, for one,
+     * every goal column would look existing and be sent down the CHANGE path.
+     *
      * @param string $tableName
      * @param array<string, mixed> $tableDifferences
      * @return void
@@ -185,52 +212,47 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
     function updateATableBasedOnDifferences($tableName, $tableDifferences) {
 	$tableName = is_scalar($tableName) ? (string)$tableName : '';
 	$tableDifferences = is_array($tableDifferences) ? $tableDifferences : [];
+	$missingKeys = array_values(array_filter(self::REQUIRED_DIFFERENCE_KEYS,
+		function ($key) use ($tableDifferences) { return !is_array($tableDifferences[$key] ?? null); }));
+	if (count($missingKeys) > 0) {
+		$this->logger->warn("Schema differences for " . $tableName . " lack " . implode(', ', $missingKeys) .
+			", so none of them were applied.");
+		return;
+	}
 
-	/** @var array<int, string> $dropTheseColumns */
-	$dropTheseColumns = is_array($tableDifferences['dropTheseColumns'])
-		? $this->stringValues($tableDifferences['dropTheseColumns'])
-		: [];
-	/** @var array<int, string> $updateTheseColumns */
-	$updateTheseColumns = is_array($tableDifferences['updateTheseColumns'])
-		? $this->stringValues($tableDifferences['updateTheseColumns'])
-		: [];
-	/** @var array<int, string> $createTheseColumns */
-	$createTheseColumns = is_array($tableDifferences['createTheseColumns'])
-		? $this->stringValues($tableDifferences['createTheseColumns'])
-		: [];
-	$goalTableMatchesColumnDDL = is_array($tableDifferences['goalTableMatchesColumnDDL'])
-		? $this->stringValues($tableDifferences['goalTableMatchesColumnDDL'])
-		: [];
-	$existingTableMatchesColumnDDL = is_array($tableDifferences['existingTableMatchesColumnDDL'])
-		? $this->stringValues($tableDifferences['existingTableMatchesColumnDDL'])
-		: [];
+	$updateTheseColumns = $this->differenceList($tableDifferences, 'updateTheseColumns');
+	$createTheseColumns = $this->differenceList($tableDifferences, 'createTheseColumns');
+	$goalTableMatchesColumnDDL = $this->differenceList($tableDifferences, 'goalTableMatchesColumnDDL');
+	$existingTableMatchesColumnDDL = $this->differenceList($tableDifferences, 'existingTableMatchesColumnDDL');
 	/** @var array<int, array<int, mixed>> $goalTableMatches */
-	$goalTableMatches = is_array($tableDifferences['goalTableMatches']) ? $tableDifferences['goalTableMatches'] : [];
-	/** @var array<int, string> $goalTableMatchesColumnNames */
-	$goalTableMatchesColumnNames = is_array($tableDifferences['goalTableMatchesColumnNames'])
-		? $this->stringValues($tableDifferences['goalTableMatchesColumnNames'])
-		: [];
+	$goalTableMatches = is_array($tableDifferences['goalTableMatches'] ?? null) ? $tableDifferences['goalTableMatches'] : [];
+	$goalTableMatchesColumnNames = $this->differenceList($tableDifferences, 'goalTableMatchesColumnNames');
 
-	// drop unnecessary columns — but never drop ALL columns (MySQL error:
-	// "You can't delete all columns with ALTER TABLE; use DROP TABLE instead").
-	// This happens when a table is completely restructured and every existing
-	// column name differs from the goal schema.
-	$existingColumnCount = count($existingTableMatchesColumnDDL);
-	if (count($dropTheseColumns) > 0 && count($dropTheseColumns) >= $existingColumnCount) {
-		$this->logger->warn("Skipping column drops on " . $tableName .
-			" because it would remove all " . $existingColumnCount .
-			" existing columns. Drops requested: " . implode(', ', $dropTheseColumns));
+	// Only columns this plugin deliberately retired may be dropped. The caller's
+	// dropTheseColumns list is re-filtered here rather than trusted, so no caller
+	// can turn an unknown column into a drop. Anything not retired is unknown (a
+	// newer plugin version or the site owner may own it) and is kept.
+	$dropColumns = ABJ_404_Solution_RetiredColumns::partition($tableName,
+		$this->differenceList($tableDifferences, 'dropTheseColumns'));
+	$this->logKeptUnknownColumns($tableName, array_merge(
+		$this->differenceList($tableDifferences, 'keepTheseUnknownColumns'),
+		$dropColumns['unknown']));
+
+	// An older build must not reshape a schema a newer build already shaped: it
+	// would drop or rewrite columns the newer build relies on. Missing columns are
+	// still created below, so the older build can still run.
+	$isOlderBuild = $this->isOlderBuildThanRecordedSchema();
+	$skippedByOlderBuildGuard = [];
+	if ($isOlderBuild) {
+		$skippedByOlderBuildGuard = array_map(
+			function ($colName) { return "drop " . $colName; }, $dropColumns['retired']);
 	} else {
-		foreach ($dropTheseColumns as $colName) {
-			$colName = (string)$colName;
-			$query = "alter table " . $tableName . " drop " . $colName;
-			$this->dbCore->queryAndGetResults($query);
-			$this->logger->infoMessage("I dropped a column (1): " . $query);
-		}
+		$this->dropRetiredColumns($tableName, $dropColumns['retired'],
+			count($existingTableMatchesColumnDDL));
 	}
 
 	// say why we're doing what we're doing.
-	if (count($updateTheseColumns) > 0) {
+	if (count($updateTheseColumns) > 0 && !$isOlderBuild) {
 		$this->logger->infoMessage($this->getUpgradeRuntimeId() . ": On " . $tableName .
 			" I'm updating various columns because we want: \n`" .
 			print_r($goalTableMatchesColumnDDL, true) . "\n but we have: \n" .
@@ -255,7 +277,11 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 			: '';
 
 		// if the column exists then update it. otherwise create it.
-		if (!in_array($colName, $createTheseColumns)) {
+		if (!in_array($colName, $createTheseColumns) && $isOlderBuild) {
+			// an older build leaves an existing column as the newer build shaped it.
+			$skippedByOlderBuildGuard[] = "change " . $colName;
+			continue;
+		} else if (!in_array($colName, $createTheseColumns)) {
 			// update the existing column.
 			// ALTER TABLE `mywp_abj404_redirects` CHANGE `status` `status` BIGINT(19) NOT NULL;
 			$updateColStatement = "alter table " . $tableName . " change " . $colName .
@@ -275,6 +301,79 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 			'colName' => $colName,
 		));
 	}
+
+	if (count($skippedByOlderBuildGuard) > 0) {
+		$this->logger->infoMessage("This plugin version (" . ABJ404_VERSION . ") is older than " .
+			"the newest version that shaped this database (" .
+			(ABJ_404_Solution_SchemaHighWaterMark::read() ?? 'an unreadable record') .
+			"), so it left the existing columns of " . $tableName . " unchanged. Skipped: " .
+			implode(', ', $skippedByOlderBuildGuard));
+	}
+    }
+
+    /**
+     * One list-valued entry of a getTableDifferences() result as strings, with
+     * non-scalar members dropped. updateATableBasedOnDifferences() has already
+     * refused a result missing a required list, so only the optional
+     * keepTheseUnknownColumns can be absent here; absent reads as empty.
+     *
+     * @param array<string, mixed> $tableDifferences
+     * @param string $key
+     * @return array<int, string>
+     */
+    private function differenceList(array $tableDifferences, $key) {
+	$list = $tableDifferences[$key] ?? null;
+	return is_array($list) ? $this->stringValues($list) : [];
+    }
+
+    /**
+     * Report each unknown column once per call. Info level: an unknown column is
+     * expected after a downgrade or when the site owner added one, not a fault.
+     *
+     * @param string $tableName
+     * @param array<int, string> $unknownColumns
+     * @return void
+     */
+    private function logKeptUnknownColumns($tableName, array $unknownColumns) {
+	foreach (array_unique($unknownColumns) as $unknownColumn) {
+		$this->logger->infoMessage("Column " . $unknownColumn . " on table " . $tableName .
+			" is not defined by this plugin version (newer version or manual addition); " .
+			"kept because only retired columns are dropped.");
+	}
+    }
+
+    /**
+     * Drop the retired columns of a table -- but never ALL of its columns (MySQL
+     * error: "You can't delete all columns with ALTER TABLE; use DROP TABLE
+     * instead"). That happens when a table is completely restructured and every
+     * existing column name differs from the goal schema.
+     *
+     * @param string $tableName
+     * @param array<int, string> $retiredColumns
+     * @param int $existingColumnCount
+     * @return void
+     */
+    private function dropRetiredColumns($tableName, array $retiredColumns, $existingColumnCount) {
+	if (count($retiredColumns) > 0 && count($retiredColumns) >= $existingColumnCount) {
+		$this->logger->warn("Skipping column drops on " . $tableName .
+			" because it would remove all " . $existingColumnCount .
+			" existing columns. Drops requested: " . implode(', ', $retiredColumns));
+		return;
+	}
+	foreach ($retiredColumns as $colName) {
+		$query = "alter table " . $tableName . " drop " . $colName;
+		$this->dbCore->queryAndGetResults($query);
+		$this->logger->infoMessage("I dropped a column (1): " . $query);
+	}
+    }
+
+    /**
+     * Whether this build is older than the newest version that shaped the schema.
+     *
+     * @return bool
+     */
+    private function isOlderBuildThanRecordedSchema() {
+	return ABJ_404_Solution_SchemaHighWaterMark::isNewerThan(ABJ404_VERSION);
     }
 
     /**

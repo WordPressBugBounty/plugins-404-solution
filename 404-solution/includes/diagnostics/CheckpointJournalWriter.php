@@ -50,8 +50,8 @@ final class ABJ_404_Solution_CheckpointJournalWriter {
         $event = is_string($record['event'] ?? null) ? $record['event'] : 'unknown';
         $requestId = is_string($record['request_id'] ?? null) ? $record['request_id'] : 'unknown00';
         $path = $directory . self::CHECKPOINT_FILE;
-        $json = json_encode($record, JSON_UNESCAPED_SLASHES);
-        if (!is_string($json)) {
+        $json = ABJ_404_Solution_Utf8SafeRecord::encode($record, 'AJAX checkpoint record', JSON_UNESCAPED_SLASHES);
+        if ($json === '') {
             self::reportFailure('AJAX checkpoint JSON encoding failed.');
             return self::result(array('status' => 'failed', 'reason' => 'json_encode_failed',
                 'request_id' => $requestId, 'event' => $event, 'started_ns' => $startedNs));
@@ -173,8 +173,8 @@ final class ABJ_404_Solution_CheckpointJournalWriter {
         $timeoutRecord['blocked_event'] = $blockedEvent;
         $timeoutRecord['lock_wait_us'] = $waitUs;
         $timeoutRecord['lock_timeout_us'] = self::LOCK_WAIT_TIMEOUT_US;
-        $json = json_encode($timeoutRecord, JSON_UNESCAPED_SLASHES);
-        if (!is_string($json)) {
+        $json = ABJ_404_Solution_Utf8SafeRecord::encode($timeoutRecord, 'AJAX checkpoint lock-timeout record', JSON_UNESCAPED_SLASHES);
+        if ($json === '') {
             self::reportFailure('AJAX checkpoint lock-timeout JSON encoding failed.');
             return;
         }

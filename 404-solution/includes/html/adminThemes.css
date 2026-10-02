@@ -76,6 +76,14 @@ body[data-theme="mono"] {
   --abj404-badge-bg: #EFF1F5;
   --abj404-badge-text: #374151;
 
+  /* Neutral series for the time-limit lifecycle bar. */
+  --abj404-chart-1: #8c8f94;
+  --abj404-chart-2: #c3c4c7;
+  --abj404-chart-3: #646970;
+  --abj404-chart-4: #dcdcde;
+  --abj404-chart-5: #a7aaad;
+  --abj404-chart-6: #50575e;
+
   /* Derived / aliased semantic vars used by 404solutionStyles.css. Aliasing
      here means a host theme that retargets the base var (e.g. --abj404-surface)
      automatically recolors everything that depends on it. */
@@ -328,6 +336,16 @@ html[data-darkmode-scheme="dark"]:not([data-theme]) body:not([data-theme]) {
   --abj404-danger-row-bg: #3A1A1B;
   --abj404-danger-row-bg-hover: #4A2122;
   --abj404-danger-row-text: #F4B8B9;
+
+  /* Time-limit lifecycle bar: six distinct mid greys, alternating light and
+     dark so neighbouring segments separate on the dark track. None matches
+     --abj404-text, the colour of the time-limit marker drawn across them. */
+  --abj404-chart-1: #8c8f94;
+  --abj404-chart-2: #50575e;
+  --abj404-chart-3: #a7aaad;
+  --abj404-chart-4: #646970;
+  --abj404-chart-5: #c3c4c7;
+  --abj404-chart-6: #787c82;
 }
 
 /* Apply the same card/header treatment to host-dark-mode that the explicit
@@ -410,6 +428,16 @@ body[data-theme="neon"] {
   --abj404-button-border: #5A6B7F;  /* Bright border for definition */
   --abj404-button-hover-bg: #4A5A6E;  /* Lighter hover state */
   --abj404-button-text: #E8EDF3;  /* Slightly brighter text for buttons */
+
+  /* Time-limit lifecycle bar: six distinct mid greys, alternating light and
+     dark so neighbouring segments separate on the dark track. None matches
+     --abj404-text, the colour of the time-limit marker drawn across them. */
+  --abj404-chart-1: #8c8f94;
+  --abj404-chart-2: #50575e;
+  --abj404-chart-3: #a7aaad;
+  --abj404-chart-4: #646970;
+  --abj404-chart-5: #c3c4c7;
+  --abj404-chart-6: #787c82;
 }
 
 /* === Obsidian Blue (Dark) === */
@@ -440,6 +468,16 @@ body[data-theme="obsidian"] {
   --abj404-button-border: #4A6085;  /* Bright border for definition */
   --abj404-button-hover-bg: #3A4F6E;  /* Lighter hover state */
   --abj404-button-text: #E8EFF7;  /* Slightly brighter text for buttons */
+
+  /* Time-limit lifecycle bar: six distinct mid greys, alternating light and
+     dark so neighbouring segments separate on the dark track. None matches
+     --abj404-text, the colour of the time-limit marker drawn across them. */
+  --abj404-chart-1: #8c8f94;
+  --abj404-chart-2: #50575e;
+  --abj404-chart-3: #a7aaad;
+  --abj404-chart-4: #646970;
+  --abj404-chart-5: #c3c4c7;
+  --abj404-chart-6: #787c82;
 }
 
 /* ===== Mode Toggle Button Overrides ===== */

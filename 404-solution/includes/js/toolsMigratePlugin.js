@@ -75,6 +75,14 @@
         }
     }
 
+    function recordPreviewFailure(details) {
+        if (typeof abj404AdminRecordFetchFailure === 'function') {
+            abj404AdminRecordFetchFailure('migrate-preview', details);
+        } else if (window.console && window.console.warn) {
+            window.console.warn('404 Solution: migration preview failed', details);
+        }
+    }
+
     function showError() {
         document.getElementById('abj404-migrate-step1').style.display = 'none';
         document.getElementById('abj404-migrate-step2').style.display = '';
@@ -121,17 +129,30 @@
                 var timeoutId = setTimeout(function () { controller.abort(); }, PREVIEW_TIMEOUT_MS);
                 // ajax-direct-approved: cross-plugin migration preview posts FormData and manages the two-step UI state locally.
                 fetch(cfg.ajaxUrl, { method: 'POST', body: fd, credentials: 'same-origin', signal: controller.signal }) // allow-direct-network: cross-plugin migration preview; no project-wide adapter exists for this AJAX surface
-                    .then(function (r) { clearTimeout(timeoutId); return r.json(); })
+                    .then(function (r) {
+                        clearTimeout(timeoutId);
+                        // Shared seam (abj404-admin-ajax.js): a non-JSON reply
+                        // keeps its status and body in the console. Guarded so a
+                        // missing asset degrades to the plain parse.
+                        return (typeof abj404AdminFetchJson === 'function')
+                            ? abj404AdminFetchJson(r, 'migrate-preview')
+                            : r.json();
+                    })
                     .then(function (resp) {
                         if (spinner) { spinner.style.display = 'none'; }
                         previewBtn.disabled = false;
                         if (resp && resp.success && resp.data) {
                             showStep2(parseInt(resp.data.count, 10) || 0, resp.data.source, resp.data.label);
                         } else {
+                            recordPreviewFailure({
+                                serverMessage: (resp && resp.data && typeof resp.data.message === 'string')
+                                    ? resp.data.message : 'unexpected response shape: ' + typeof resp
+                            });
                             showError();
                         }
                     })
-                    .catch(function () {
+                    .catch(function (reason) {
+                        recordPreviewFailure({ error: reason });
                         clearTimeout(timeoutId);
                         if (spinner) { spinner.style.display = 'none'; }
                         previewBtn.disabled = false;

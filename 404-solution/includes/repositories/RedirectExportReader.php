@@ -6,6 +6,9 @@ if (!defined('ABSPATH')) {
 
 /**
  * Reads redirects that are eligible for server-format export.
+ *
+ * Returns the rows as stored. Deciding where an exported redirect points is
+ * not a read: ABJ_404_Solution_RedirectExportDestination (Core) does it.
  */
 class ABJ_404_Solution_RedirectExportReader {
 
@@ -20,13 +23,17 @@ class ABJ_404_Solution_RedirectExportReader {
     }
 
     /**
-     * @return array<int, array{source: string, dest: string, code: int, is_regex: bool}>
+     * Manual and regex redirects that are eligible for export, in URL order.
+     *
+     * cached_url is the permalink-cache URL, joined for post redirects only
+     * (the cache is keyed by wp_posts.ID, and a category or tag redirect's
+     * final_dest is a term id); it is '' for every other row.
+     *
+     * @return array<int, array{source: string, code: int, type: int, final_dest: string, cached_url: string, is_regex: bool}>
      */
-    public function getExportableRedirects(): array {
+    public function getExportableRedirectRows(): array {
         $manualStatus = (int)ABJ404_STATUS_MANUAL;
         $regexStatus  = (int)ABJ404_STATUS_REGEX;
-        $typeExternal = (int)ABJ404_TYPE_EXTERNAL;
-        $typeHome     = (int)ABJ404_TYPE_HOME;
 
         $rows = $this->queryExportableRedirectRows($manualStatus, $regexStatus);
         if (empty($rows)) {
@@ -39,10 +46,7 @@ class ABJ_404_Solution_RedirectExportReader {
                 continue;
             }
 
-            $redirect = $this->mapExportableRedirectRow($this->exportAssocRow($row), $regexStatus, $typeExternal, $typeHome);
-            if ($redirect !== null) {
-                $result[] = $redirect;
-            }
+            $result[] = $this->mapExportableRedirectRow($this->exportAssocRow($row), $regexStatus);
         }
 
         return $result;
@@ -57,16 +61,18 @@ class ABJ_404_Solution_RedirectExportReader {
         $redirectsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
         $cacheTable     = $this->dbCore->doTableNameReplacements('{wp_abj404_permalink_cache}');
 
+        // The cache is keyed by wp_posts.ID, so it is joined for post redirects
+        // only; a category or tag redirect's final_dest is a term id.
         $queryResult = $this->dbCore->queryAndGetResults(
             "SELECT r.url, r.status, r.type, r.final_dest, r.code, r.disabled,
                     pc.url AS cached_url
              FROM {$redirectsTable} r
-             LEFT JOIN {$cacheTable} pc ON r.final_dest = pc.id
+             LEFT JOIN {$cacheTable} pc ON r.final_dest = pc.id AND r.type = %d
              WHERE r.status IN (%d, %d)
                AND (r.disabled IS NULL OR r.disabled = 0)
                AND r.url IS NOT NULL AND r.url != ''
              ORDER BY r.url",
-            array('query_params' => array($manualStatus, $regexStatus))
+            array('query_params' => array((int)ABJ404_TYPE_POST, $manualStatus, $regexStatus))
         );
 
         $rows = $queryResult['rows'] ?? array();
@@ -90,73 +96,17 @@ class ABJ_404_Solution_RedirectExportReader {
     /**
      * @param array<string, mixed> $row
      * @param int $regexStatus
-     * @param int $typeExternal
-     * @param int $typeHome
-     * @return array{source: string, dest: string, code: int, is_regex: bool}|null
+     * @return array{source: string, code: int, type: int, final_dest: string, cached_url: string, is_regex: bool}
      */
-    private function mapExportableRedirectRow(array $row, int $regexStatus, int $typeExternal, int $typeHome) {
-        $source = $this->exportRowString($row, 'url');
-        $status = $this->exportRowInt($row, 'status', 0);
-        $code = $this->exportRowInt($row, 'code', 301);
-        $type = $this->exportRowInt($row, 'type', 0);
-        $finalDest = $this->exportRowString($row, 'final_dest');
-        $cachedUrl = $this->exportRowString($row, 'cached_url');
-        $dest = $this->resolveExportDestination($source, $code, $type, $finalDest, $cachedUrl, $typeExternal, $typeHome);
-        if ($dest === null) {
-            return null;
-        }
-
+    private function mapExportableRedirectRow(array $row, int $regexStatus): array {
         return array(
-            'source'   => $source,
-            'dest'     => $dest,
-            'code'     => $code,
-            'is_regex' => ($status === $regexStatus),
+            'source'     => $this->exportRowString($row, 'url'),
+            'code'       => $this->exportRowInt($row, 'code', 301),
+            'type'       => $this->exportRowInt($row, 'type', 0),
+            'final_dest' => $this->exportRowString($row, 'final_dest'),
+            'cached_url' => $this->exportRowString($row, 'cached_url'),
+            'is_regex'   => ($this->exportRowInt($row, 'status', 0) === $regexStatus),
         );
-    }
-
-    /**
-     * @param string $source
-     * @param int $code
-     * @param int $type
-     * @param string $finalDest
-     * @param string $cachedUrl
-     * @param int $typeExternal
-     * @param int $typeHome
-     * @return string|null
-     */
-    private function resolveExportDestination(
-        string $source,
-        int $code,
-        int $type,
-        string $finalDest,
-        string $cachedUrl,
-        int $typeExternal,
-        int $typeHome
-    ) {
-        if ($code === 410 || $code === 451) {
-            return $source;
-        }
-        if ($cachedUrl !== '') {
-            return $cachedUrl;
-        }
-        if ($type === $typeExternal) {
-            return $finalDest;
-        }
-        if ($type === $typeHome) {
-            return function_exists('home_url') ? home_url('/') : '/';
-        }
-        if (is_numeric($finalDest) && (int)$finalDest > 0) {
-            if (function_exists('get_permalink')) {
-                $url = get_permalink((int)$finalDest);
-                return ($url !== false && is_string($url)) ? $url : ('/?p=' . $finalDest);
-            }
-            return '/?p=' . $finalDest;
-        }
-        if ($finalDest !== '') {
-            return $finalDest;
-        }
-
-        return null;
     }
 
     /**
@@ -187,9 +137,6 @@ class ABJ_404_Solution_RedirectExportReader {
         if (is_int($value)) {
             return $value;
         }
-        if (is_numeric($value)) {
-            return (int)$value;
-        }
-        return $default;
+        return ABJ_404_Solution_ExactInteger::readOr($value, PHP_INT_MIN, $default);
     }
 }

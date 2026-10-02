@@ -33,7 +33,7 @@ if (!defined('ABSPATH')) {
  * which callback ran there.
  *
  * The tracer is active only inside an instrumented table AJAX request
- * (AjaxDiagnosticRequestPolicy::instrumentedRequestIdFromGlobalContext() !== ''); every
+ * (AjaxRequestIdScopes::fromGlobalContext()->hasCheckpoints()); every
  * other request -- the canary ladder, the hot front-end 404 path, any other
  * AJAX action -- is a pure pass-through with no record, no registry access, and
  * behavior byte-identical to a bare apply_filters(). For an instrumented
@@ -92,8 +92,8 @@ final class ABJ_404_Solution_ResponseControlFilterTracer {
      * @return T
      */
     public static function traceDispatch(string $filterHook, callable $dispatch) {
-        $requestId = class_exists('ABJ_404_Solution_AjaxDiagnosticRequestPolicy')
-            ? ABJ_404_Solution_AjaxDiagnosticRequestPolicy::instrumentedRequestIdFromGlobalContext()
+        $requestId = class_exists('ABJ_404_Solution_AjaxRequestIdScopes')
+            ? ABJ_404_Solution_AjaxRequestIdScopes::fromGlobalContext()->checkpoint()
             : '';
         if ($requestId === '') {
             // Not the instrumented endpoint (canary ladder, front-end 404, any

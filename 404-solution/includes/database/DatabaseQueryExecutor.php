@@ -159,9 +159,11 @@ class ABJ_404_Solution_DatabaseQueryExecutor {
                 array('fields' => array('parameter_count' => count($queryParameters)))
             );
 
-            $timeoutRaw = isset($options['timeout']) && is_numeric($options['timeout'])
-                ? (int)$options['timeout']
-                : 0;
+            $timeoutRaw = ABJ_404_Solution_ExactInteger::readOr(
+                $options['timeout'] ?? null,
+                0,
+                0
+            );
             $timeoutSeconds = $timeoutRaw > 0 ? $timeoutRaw : 60;
             $query = $preflight->trace(
                 ABJ_404_Solution_DatabaseQueryPreflightTracer::TIMEOUT_POLICY,
@@ -388,7 +390,7 @@ class ABJ_404_Solution_DatabaseQueryExecutor {
             $preparedResult = call_user_func_array(array($wpdb, 'prepare'), array_merge(array($queryLiteral), $orderedParameters));
             return is_string($preparedResult) ? $preparedResult : $queryLiteral;
         } catch (Throwable $t) {
-            $this->logger->debugMessage('wpdb prepare variadic call failed; retrying with array parameters.', $t);
+            $this->logger->warnCaught('wpdb prepare variadic call failed; retrying with array parameters.', $t);
             $preparedFallback = $wpdb->prepare($queryLiteral, $orderedParameters);
             return $preparedFallback !== null ? $preparedFallback : $queryLiteral;
         }

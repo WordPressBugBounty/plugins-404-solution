@@ -104,6 +104,55 @@ class ABJ_404_Solution_DatabaseNoticeStateHolder {
     }
 
     /**
+     * Persist a flag that must outlive a TTL and an object-cache eviction.
+     *
+     * setRuntimeFlag() writes through the transient API, where "absent" cannot
+     * be told apart from "expired" or "an external object cache dropped it".
+     * That is the right storage for a cooldown, because a cooldown that is
+     * forgotten simply ends early. It is the wrong storage for the START
+     * INSTANT of a degraded state: forgetting it restarts the measurement, so a
+     * threshold longer than the gaps between observations can never be reached
+     * and the condition stays invisible for as long as it lasts.
+     *
+     * Written non-autoloaded: these flags are read only by the subsystem that
+     * owns them, never on every page load.
+     *
+     * @param string $key Flag name.
+     * @param mixed $value Value to store.
+     * @return void
+     */
+    public function setDurableFlag(string $key, $value): void {
+        if (function_exists('update_option')) {
+            update_option($key, $value, false);
+        }
+    }
+
+    /**
+     * Read a durable flag written by {@see setDurableFlag()}.
+     *
+     * @param string $key Flag name.
+     * @return mixed The stored value, or false when unset/unavailable.
+     */
+    public function getDurableFlag(string $key) {
+        if (function_exists('get_option')) {
+            return get_option($key, false);
+        }
+        return false;
+    }
+
+    /**
+     * Forget a durable flag, so the next observation starts a fresh measurement.
+     *
+     * @param string $key Flag name.
+     * @return void
+     */
+    public function deleteDurableFlag(string $key): void {
+        if (function_exists('delete_option')) {
+            delete_option($key);
+        }
+    }
+
+    /**
      * Read a runtime flag (transient, with option fallback).
      *
      * @param string $key Flag name.
@@ -119,6 +168,12 @@ class ABJ_404_Solution_DatabaseNoticeStateHolder {
         return false;
     }
 
+    /** @var string Notice severity: the plugin cannot do its job until this is resolved. */
+    const SEVERITY_ERROR = 'error';
+
+    /** @var string Notice severity: the plugin is still working, but degraded. */
+    const SEVERITY_WARNING = 'warning';
+
     /**
      * Store the plugin DB admin-notice payload as a runtime flag.
      *
@@ -126,15 +181,22 @@ class ABJ_404_Solution_DatabaseNoticeStateHolder {
      * @param string $message Already translated admin notice message.
      * @param string $guidance Already translated optional remediation guidance.
      * @param string $errorString Underlying MySQL error string (diagnostic).
+     * @param string $severity One of the SEVERITY_* constants. Defaults to
+     *   SEVERITY_ERROR, which is what every caller predating this argument
+     *   meant. A condition the plugin degrades past rather than dies on belongs
+     *   at SEVERITY_WARNING: the plugin's own rule is that the site's hosting
+     *   having a bad day is not an error, and a red banner for one is the
+     *   loudness users have complained about.
      * @return void
      */
-    public function setPluginDbNotice(string $type, string $message, string $guidance, string $errorString = ''): void {
+    public function setPluginDbNotice(string $type, string $message, string $guidance, string $errorString = '', string $severity = self::SEVERITY_ERROR): void {
         $payload = array(
             'type' => $type,
             'message' => $message,
             'guidance' => $guidance,
             'timestamp' => $this->clock()->now(),
             'error_string' => $errorString,
+            'severity' => $severity === self::SEVERITY_WARNING ? self::SEVERITY_WARNING : self::SEVERITY_ERROR,
         );
         $this->setRuntimeFlag('abj404_plugin_db_notice', $payload, self::DB_WRITE_BLOCK_COOLDOWN_SECONDS);
     }

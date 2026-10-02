@@ -174,9 +174,10 @@ class ABJ_404_Solution_NGramCacheRepository {
      * @param string|null $type When non-null, restrict the load to a single
      *        entity type ('post', 'category', 'tag', ...). Null preserves the
      *        historical all-types scan (the posts path is unaffected).
+     * @param ABJ_404_Solution_MatchingTimeBudget|null $budget Request time budget (null = unbounded).
      * @return array<int, array<string, mixed>>
      */
-    public function getAllCachedNGrams($type = null) {
+    public function getAllCachedNGrams(?string $type = null, ?ABJ_404_Solution_MatchingTimeBudget $budget = null) {
         $table = $this->dbCore->tableNameResolver()->getPrefixedTableName('abj404_ngram_cache');
 
         $count = ($type !== null)
@@ -208,7 +209,12 @@ class ABJ_404_Solution_NGramCacheRepository {
         }
 
         $output = [];
+        $decoded = 0;
         foreach ($results as $row) {
+            if ($decoded % 100 === 0 && $this->decodeBudgetTripped($decoded, $budget)) {
+                return [];
+            }
+            $decoded++;
             if (is_object($row)) {
                 $row = (array) $row;
             }
@@ -230,60 +236,56 @@ class ABJ_404_Solution_NGramCacheRepository {
      * query into below-target (DESC) and above-target (ASC), then merges
      * by proximity to target in PHP.
      *
-     * @param int $minNgramCount
-     * @param int $maxNgramCount
-     * @param int $limit
-     * @param int|null $targetNgramCount
-     * @param string|null $type When non-null, restrict to a single entity type
-     *        ('post', 'category', 'tag', ...). Null preserves the all-types scan.
+     * @param ABJ_404_Solution_NGramCountRangeQuery $query The ngram_count window,
+     *        row limit, order target and optional single entity type. A null type
+     *        preserves the all-types scan.
+     * @param ABJ_404_Solution_MatchingTimeBudget|null $budget Request time budget (null = unbounded).
      * @return array<int, array<string, mixed>>
      */
-    public function getCachedNGramsFiltered($minNgramCount, $maxNgramCount, $limit = 1000, $targetNgramCount = null, $type = null) {
+    public function getCachedNGramsFiltered(ABJ_404_Solution_NGramCountRangeQuery $query, ?ABJ_404_Solution_MatchingTimeBudget $budget = null) {
         $table = $this->dbCore->tableNameResolver()->getPrefixedTableName('abj404_ngram_cache');
-
-        $orderTarget = ($targetNgramCount !== null)
-            ? max($minNgramCount, min($maxNgramCount, (int)$targetNgramCount))
-            : (int)(($minNgramCount + $maxNgramCount) / 2);
+        $limit = $query->limit();
 
         $halfLimit = (int)ceil($limit / 2);
 
-        $resultsBelow = $this->fetchBelowTarget($table, $minNgramCount, $orderTarget, $halfLimit, 0, $type);
+        $resultsBelow = $this->fetchBelowTarget($table, $query, $halfLimit, 0);
         $belowCount = count($resultsBelow);
         $aboveLimit = $limit - $belowCount;
-        $resultsAbove = $this->fetchAboveTarget($table, $orderTarget, $maxNgramCount, $aboveLimit, 0, $type);
+        $resultsAbove = $this->fetchAboveTarget($table, $query, $aboveLimit, 0);
         $aboveCount = count($resultsAbove);
 
         $totalFetched = $belowCount + $aboveCount;
         // Balance for skewed distributions: if one side hit its cap and the
         // other has headroom, pull more from the saturated side.
         if ($totalFetched < $limit && $belowCount === $halfLimit) {
-            $extra = $this->fetchBelowTarget($table, $minNgramCount, $orderTarget, $limit - $totalFetched, $belowCount, $type);
+            $extra = $this->fetchBelowTarget($table, $query, $limit - $totalFetched, $belowCount);
             $resultsBelow = array_merge($resultsBelow, $extra);
             $totalFetched = count($resultsBelow) + $aboveCount;
         }
         if ($totalFetched < $limit && $aboveCount === $aboveLimit) {
-            $extra = $this->fetchAboveTarget($table, $orderTarget, $maxNgramCount, $limit - $totalFetched, $aboveCount, $type);
+            $extra = $this->fetchAboveTarget($table, $query, $limit - $totalFetched, $aboveCount);
             $resultsAbove = array_merge($resultsAbove, $extra);
         }
 
-        $merged = $this->similarity->mergeByProximity($resultsBelow, $resultsAbove, $orderTarget, $limit);
-        return $this->decodeNGramRows($merged);
+        $merged = $this->similarity->mergeByProximity($resultsBelow, $resultsAbove, $query->orderTarget(), $limit);
+        return $this->decodeNGramRows($merged, $budget);
     }
 
     /**
+     * Rows in [minCount, orderTarget], nearest the target first.
+     *
      * @param string $table
-     * @param int $minNgramCount
-     * @param int $orderTarget
+     * @param ABJ_404_Solution_NGramCountRangeQuery $query
      * @param int $limit
      * @param int $offset
-     * @param string|null $type Optional single-type restriction.
      * @return array<int, mixed>
      */
-    private function fetchBelowTarget($table, $minNgramCount, $orderTarget, $limit, $offset = 0, $type = null) {
+    private function fetchBelowTarget($table, ABJ_404_Solution_NGramCountRangeQuery $query, $limit, $offset) {
+        $type = $query->type();
         $typeClause = ($type !== null) ? " AND type = %s" : '';
         $params = ($type !== null)
-            ? [$minNgramCount, $orderTarget, (string)$type, $limit, $offset]
-            : [$minNgramCount, $orderTarget, $limit, $offset];
+            ? [$query->minCount(), $query->orderTarget(), $type, $limit, $offset]
+            : [$query->minCount(), $query->orderTarget(), $limit, $offset];
         $result = $this->dbCore->queryAndGetResults(
             "SELECT id, url, url_normalized, ngrams, ngram_count
              FROM {$table}
@@ -296,19 +298,20 @@ class ABJ_404_Solution_NGramCacheRepository {
     }
 
     /**
+     * Rows in (orderTarget, maxCount], nearest the target first.
+     *
      * @param string $table
-     * @param int $orderTarget
-     * @param int $maxNgramCount
+     * @param ABJ_404_Solution_NGramCountRangeQuery $query
      * @param int $limit
      * @param int $offset
-     * @param string|null $type Optional single-type restriction.
      * @return array<int, mixed>
      */
-    private function fetchAboveTarget($table, $orderTarget, $maxNgramCount, $limit, $offset = 0, $type = null) {
+    private function fetchAboveTarget($table, ABJ_404_Solution_NGramCountRangeQuery $query, $limit, $offset) {
+        $type = $query->type();
         $typeClause = ($type !== null) ? " AND type = %s" : '';
         $params = ($type !== null)
-            ? [$orderTarget, $maxNgramCount, (string)$type, $limit, $offset]
-            : [$orderTarget, $maxNgramCount, $limit, $offset];
+            ? [$query->orderTarget(), $query->maxCount(), $type, $limit, $offset]
+            : [$query->orderTarget(), $query->maxCount(), $limit, $offset];
         $result = $this->dbCore->queryAndGetResults(
             "SELECT id, url, url_normalized, ngrams, ngram_count
              FROM {$table}
@@ -320,13 +323,29 @@ class ABJ_404_Solution_NGramCacheRepository {
         return isset($result['rows']) && is_array($result['rows']) ? $result['rows'] : [];
     }
 
+    /** Shared trip check for the decode loops: a null budget never trips; true means stop and return []. */
+    private function decodeBudgetTripped(int $decoded, ?ABJ_404_Solution_MatchingTimeBudget $budget): bool {
+        if ($budget === null || (!$budget->isExhausted() && $budget->hasTimeFor(0.05))) {
+            return false;
+        }
+        $budget->markExhausted();
+        $this->logger->debugMessage("N-gram decode: time budget exhausted after {$decoded} rows, returning no candidates");
+        return true;
+    }
+
     /**
      * @param array<int, mixed> $rows
+     * @param ABJ_404_Solution_MatchingTimeBudget|null $budget Request time budget (null = unbounded).
      * @return array<int, array<string, mixed>>
      */
-    private function decodeNGramRows(array $rows) {
+    private function decodeNGramRows(array $rows, ?ABJ_404_Solution_MatchingTimeBudget $budget = null) {
         $validResults = [];
+        $rowsDecoded = 0;
         foreach ($rows as $row) {
+            if ($rowsDecoded % 100 === 0 && $this->decodeBudgetTripped($rowsDecoded, $budget)) {
+                return [];
+            }
+            $rowsDecoded++;
             if (!is_array($row)) {
                 continue;
             }

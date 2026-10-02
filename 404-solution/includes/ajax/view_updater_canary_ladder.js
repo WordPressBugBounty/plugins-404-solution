@@ -146,7 +146,10 @@
                 resolve($.extend({
                     ok: ok,
                     ms: nowMs() - started,
-                    bytes: bytes || 0
+                    bytes: bytes || 0,
+                    // 403 (security plugin), 404 (missing asset) and 500 all
+                    // settled as a bare ok:false; the status is what explains it.
+                    httpStatus: xhr && typeof xhr.status === 'number' ? xhr.status : -1
                 }, measurements().responseWireEvidence(cacheBuster, xhr || null)));
             };
             try {
@@ -206,6 +209,10 @@
                     bytes: result ? JSON.stringify(result).length : 0,
                     requestId: requestId,
                     textStatus: textStatus || '',
+                    // A 502 page and a dead connection both arrive as
+                    // textStatus 'error'; the status (0 = no response at all,
+                    // -1 = no jqXHR to read) is what tells them apart.
+                    httpStatus: jqXHR && typeof jqXHR.status === 'number' ? jqXHR.status : -1,
                     payloadVariant: String((result && result.payloadVariant)
                         || (extra && extra.payloadVariant) || ''),
                     payloadRungPercent: result && typeof result.payloadRungPercent === 'number'

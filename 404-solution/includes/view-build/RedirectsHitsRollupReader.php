@@ -15,8 +15,11 @@ if (!defined('ABSPATH')) {
  * the exact stored URL string (binary-collation semantics, matching the staged
  * S9 JOIN). Returns an empty map (degraded path) when the logs_hits table is
  * absent, so a read on a stripped-down install still renders. Capture-derived
- * URLs can carry invalid UTF-8 bytes, so they are stripped before esc_sql()
- * (Pattern 10) for the IN() prefilter.
+ * URLs can carry invalid UTF-8 bytes, so they are stripped before they are
+ * bound (Pattern 10) for the IN() prefilter. The URLs travel as bound
+ * `query_params`, never as part of the SQL text: the executor rewrites `{wp_...}`
+ * tokens over the statement text before it binds, so a URL containing a token
+ * would otherwise be looked up under a different name.
  *
  * Composed by RedirectsViewLiveResolver, which feeds the rolled-up map into the
  * per-row resolution.
@@ -27,7 +30,7 @@ class ABJ_404_Solution_RedirectsHitsRollupReader {
     private $dbCore;
 
     /** @var ABJ_404_Solution_Functions Used to strip invalid UTF-8 from
-     *  capture-derived URLs before they reach esc_sql() (Pattern 10). */
+     *  capture-derived URLs before they are bound (Pattern 10). */
     private $f;
 
     /**
@@ -66,17 +69,18 @@ class ABJ_404_Solution_RedirectsHitsRollupReader {
         if (empty($canonicals)) {
             return array();
         }
-        $quoted = array();
+        $urls = array();
         foreach (array_keys($canonicals) as $canonical) {
             // Capture-derived URLs can carry invalid UTF-8 bytes; strip them
-            // before esc_sql() so the IN() prefilter cannot break the query
+            // before they are bound so the IN() prefilter cannot break the query
             // (Pattern 10). The exact match below still uses the stored value.
-            $quoted[] = "'" . esc_sql($this->f->sanitizeInvalidUTF8($canonical)) . "'";
+            $urls[] = $this->f->sanitizeInvalidUTF8($canonical);
         }
+        $list = ABJ_404_Solution_SqlFragmentTemplate::inList($urls);
         $query = "SELECT requested_url, SUM(logshits) AS logshits, MAX(logsid) AS logsid,"
             . " MAX(last_used) AS last_used FROM {wp_abj404_logs_hits}"
-            . " WHERE requested_url IN (" . implode(',', $quoted) . ") GROUP BY requested_url";
-        $result = $this->dbCore->queryAndGetResults($query);
+            . " WHERE requested_url IN (" . $list['sql'] . ") GROUP BY requested_url";
+        $result = $this->dbCore->queryAndGetResults($query, array('query_params' => $list['params']));
         $rowsOut = is_array($result['rows'] ?? null) ? $result['rows'] : array();
 
         $map = array();
@@ -105,8 +109,8 @@ class ABJ_404_Solution_RedirectsHitsRollupReader {
         // @utf8-audit: opt-out - $logsTable is an internally resolved plugin table name (doTableNameReplacements); system-controlled, cannot contain invalid UTF-8.
         $result = $this->dbCore->queryAndGetResults(
             "/* abj404:src=RedirectsHitsRollupReader#logs_hits_table_exists */ "
-                . "SHOW TABLES LIKE '" . esc_sql($logsTable) . "'",
-            array('log_errors' => false, 'skip_repair' => true, 'timeout' => 10)
+                . "SHOW TABLES LIKE %s",
+            array('log_errors' => false, 'skip_repair' => true, 'timeout' => 10, 'query_params' => array($logsTable))
         );
         $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
         $firstRow = is_array($rows[0] ?? null) ? $rows[0] : array();
@@ -127,7 +131,7 @@ class ABJ_404_Solution_RedirectsHitsRollupReader {
      * @param array<array-key, mixed> $row @param string $key @return int|null
      */
     private function intFieldOrNull(array $row, string $key): ?int {
-        return isset($row[$key]) && is_numeric($row[$key]) ? (int)$row[$key] : null;
+        return ABJ_404_Solution_ExactInteger::read($row[$key] ?? null, 0);
     }
 
     /** @param string $url @return string */

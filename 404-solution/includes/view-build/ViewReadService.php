@@ -242,7 +242,7 @@ class ABJ_404_Solution_ViewReadService implements ABJ_404_Solution_ViewReadServi
         }
         $cursorOption = ABJ_404_Solution_RedirectsDenormColumnSql::sortKeyBackfillCursorOption($column);
         $cursorRaw = get_option($cursorOption);
-        $cursor = is_numeric($cursorRaw) ? (int) $cursorRaw : 0;
+        $cursor = ABJ_404_Solution_ExactInteger::readOr($cursorRaw, 0, 0);
         $maxId = $this->sortKeyMaxId();
         if ($maxId <= 0 || $cursor <= 0) {
             return 0;
@@ -260,7 +260,7 @@ class ABJ_404_Solution_ViewReadService implements ABJ_404_Solution_ViewReadServi
         $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
         $firstRow = is_array($rows[0] ?? null) ? $rows[0] : array();
         $raw = $firstRow['max_id'] ?? 0;
-        $this->sortKeyMaxIdMemo = is_numeric($raw) ? max(0, (int) $raw) : 0;
+        $this->sortKeyMaxIdMemo = ABJ_404_Solution_ExactInteger::readOr($raw, 0, 0);
         return $this->sortKeyMaxIdMemo;
     }
 
@@ -364,9 +364,9 @@ class ABJ_404_Solution_ViewReadService implements ABJ_404_Solution_ViewReadServi
     // Delegated: RedirectsBulkReader
     // =========================================================================
 
-    /** @param string $tempFile @return void */
-    function doRedirectsExport(string $tempFile): void {
-        $this->redirectsBulkReader->doRedirectsExport($tempFile);
+    /** @return iterable<int, array<string, mixed>>|null Null when the export query failed. */
+    function redirectsExportRows(): ?iterable {
+        return $this->redirectsBulkReader->redirectsExportRows();
     }
 
     /** @return iterable<int, array<string, mixed>> */

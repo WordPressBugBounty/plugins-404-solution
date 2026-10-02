@@ -53,7 +53,6 @@
 
     /** In-memory index of this page's attempts, for the error notice timeline. */
     var attemptsByRequestId = {};
-    var PAGE_TRANSPORT_FINGERPRINT = transportFingerprint();
 
     /** @param {string} message @param {*} error @returns {void} */
     function warn(message, error) {
@@ -169,9 +168,19 @@
             durationMs: null,
             rt: null,
             rtState: 'not-looked-up',
-            transport: PAGE_TRANSPORT_FINGERPRINT,
+            // Whether the page's transport functions are still native, a
+            // page-scoped observation the environment module owns (beside
+            // its jQuery fingerprint). Sampled per attempt rather than once
+            // per page: a transport patched after load is caught on the
+            // attempt it affected. null when the env module did not load.
+            transport: pageEnv && typeof pageEnv.transportFingerprint === 'function'
+                ? pageEnv.transportFingerprint() : null,
             env: null,
-            bodyShape: null
+            bodyShape: null,
+            // Bounded text of a body that was not JSON in any form (support
+            // report 521); stays null for every delivered or valid-JSON
+            // response, because the excerpt() classifier refuses those.
+            bodyExcerpt: null
         };
         if (pageEnv) {
             pageEnv.registerInFlight(record.id, { part: record.part, requestId: record.rid });
@@ -310,30 +319,6 @@
         return typeof value === 'number' && isFinite(value) ? value : fallback;
     }
 
-    /** @param {*} candidate @returns {string} native|wrapped|missing|unreadable */
-    function functionState(candidate) {
-        if (typeof candidate !== 'function') {
-            return 'missing';
-        }
-        try {
-            return /\[native code\]/.test(Function.prototype.toString.call(candidate))
-                ? 'native' : 'wrapped';
-        } catch (sourceError) {
-            warn('could not fingerprint a page transport function', sourceError);
-            return 'unreadable';
-        }
-    }
-
-    /** @returns {object} */
-    function transportFingerprint() {
-        var prototype = global.XMLHttpRequest && global.XMLHttpRequest.prototype;
-        return {
-            xhrOpen: functionState(prototype && prototype.open),
-            xhrSend: functionState(prototype && prototype.send),
-            fetch: functionState(global.fetch)
-        };
-    }
-
     /**
      * @param {object} record
      * @param {object} xhr
@@ -410,7 +395,14 @@
         record.bytes = Math.max(record.bytes, responseLength(transport), responseLength(jqXHR));
         if (record.jq === 'parsererror' && global.abj404ResponseBodyShape &&
                 typeof global.abj404ResponseBodyShape.inspect === 'function') {
-            record.bodyShape = global.abj404ResponseBodyShape.inspect(responseText(transport, jqXHR));
+            var bodyText = responseText(transport, jqXHR);
+            record.bodyShape = global.abj404ResponseBodyShape.inspect(bodyText);
+            // Text is retained only when the classifier says the body was not
+            // JSON in any form; excerpt() returns null for every JSON body,
+            // so a delivered response never keeps text. A stale body-shape
+            // module without excerpt() degrades to shape-only, never throws.
+            record.bodyExcerpt = typeof global.abj404ResponseBodyShape.excerpt === 'function'
+                ? global.abj404ResponseBodyShape.excerpt(bodyText, record.bodyShape) : null;
         }
         if (record.firstHeadersMs === null && record.rs >= 2) {
             captureHeaders(record, transport);

@@ -78,9 +78,11 @@ class ABJ_404_Solution_OldPermalinkStructureStore {
             }
             $seen[$structure] = true;
             $source = isset($rawItem['source']) && $rawItem['source'] === 'observed' ? 'observed' : 'observed';
-            $capturedAt = isset($rawItem['captured_at']) && is_numeric($rawItem['captured_at'])
-                ? (int)$rawItem['captured_at']
-                : 0;
+            $capturedAt = ABJ_404_Solution_ExactInteger::readOr(
+                $rawItem['captured_at'] ?? null,
+                0,
+                0
+            );
 
             $items[] = array(
                 'structure' => $structure,

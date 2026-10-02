@@ -235,9 +235,7 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
             }
             $sourceUrl = isset($row['source_url']) && is_string($row['source_url']) ? trim($row['source_url']) : '';
             $destUrl   = isset($row['dest_url'])   && is_string($row['dest_url'])   ? trim($row['dest_url'])   : '';
-            $code      = isset($row['redirect_type']) && is_numeric($row['redirect_type'])
-                             ? (int)$row['redirect_type']
-                             : 301;
+            $code = ABJ_404_Solution_ExactInteger::readOr($row['redirect_type'] ?? null, 100, 301);
             $isRegex   = !empty($row['regex_flag']) && $row['regex_flag'] != '0';
 
             if ($sourceUrl === '' || $destUrl === '') {
@@ -274,9 +272,7 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
             }
             $sourceUrl = isset($row['origin']) && is_string($row['origin']) ? trim($row['origin']) : '';
             $destUrl   = isset($row['target']) && is_string($row['target']) ? trim($row['target']) : '';
-            $code      = isset($row['redirect_type']) && is_numeric($row['redirect_type'])
-                             ? (int)$row['redirect_type']
-                             : 301;
+            $code = ABJ_404_Solution_ExactInteger::readOr($row['redirect_type'] ?? null, 100, 301);
 
             if ($sourceUrl === '' || $destUrl === '') {
                 continue;
@@ -313,7 +309,7 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
             }
             $sourceUrl = isset($row['source']) && is_string($row['source']) ? trim($row['source']) : '';
             $destUrl   = isset($row['target']) && is_string($row['target']) ? trim($row['target']) : '';
-            $code      = isset($row['type']) && is_numeric($row['type']) ? (int)$row['type'] : 301;
+            $code = ABJ_404_Solution_ExactInteger::readOr($row['type'] ?? null, 100, 301);
 
             if ($sourceUrl === '' || $destUrl === '') {
                 continue;
@@ -372,7 +368,7 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
 
                 $from = is_string($from) ? trim($from) : '';
                 $to   = is_string($to)   ? trim($to)   : '';
-                $code = is_numeric($code) ? (int)$code : 301;
+                $code = ABJ_404_Solution_ExactInteger::readOr($code, 100, 301);
 
                 if ($from === '' || $to === '') {
                     continue;
@@ -415,9 +411,11 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
             }
             $sourceUrl = isset($row['url'])         && is_string($row['url'])         ? trim($row['url'])         : '';
             $destUrl   = isset($row['action_data'])  && is_string($row['action_data'])  ? trim($row['action_data'])  : '';
-            $code      = isset($row['action_code'])  && is_numeric($row['action_code'])
-                             ? (int)$row['action_code']
-                             : 301;
+            $code = ABJ_404_Solution_ExactInteger::readOr(
+                $row['action_code'] ?? null,
+                100,
+                301
+            );
             $isRegex   = !empty($row['regex']) && $row['regex'] != '0';
 
             if ($sourceUrl === '' || $destUrl === '') {
@@ -464,7 +462,7 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
         // coding rule: case-insensitive metadata access).
         foreach ($rows[0] as $key => $value) {
             if (strcasecmp((string)$key, 'cnt') === 0) {
-                return is_numeric($value) ? (int)$value : 0;
+                return ABJ_404_Solution_ExactInteger::readOr($value, 0, 0);
             }
         }
         return 0;
@@ -492,6 +490,6 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
         if (!is_object($counts) || !isset($counts->publish)) {
             return 0;
         }
-        return is_numeric($counts->publish) ? (int)$counts->publish : 0;
+        return ABJ_404_Solution_ExactInteger::readOr($counts->publish, 0, 0);
     }
 }

@@ -34,29 +34,25 @@ final class ABJ_404_Solution_DiagnosticEvidenceBudget {
      */
     public static function allocate(array $lines, array $groups, array $ordered,
             int $prioritizedCount, int $budgetBytes): array {
-        $remaining = max(0, $budgetBytes);
-        $keptIndexes = array();
+        $grant = new ABJ_404_Solution_DiagnosticEvidenceGrant($lines, $budgetBytes);
         $notes = array();
-        $included = array();
         $elided = 0;
+
+        self::reserveAnchors($grant, $groups, array_slice($ordered, 0, $prioritizedCount));
 
         $grantedWhole = array();
         foreach ($ordered as $position => $id) {
             if ($position >= $prioritizedCount || !$groups[$id]->isMaximallyDecisive()) {
                 continue;
             }
-            $bytes = $groups[$id]->bytes();
-            if ($bytes > $remaining) {
+            $unkeptBytes = $grant->unkeptBytes($groups[$id]->indexes());
+            if ($unkeptBytes > $grant->remaining()) {
                 // Does not even fit in what is left of the whole budget;
                 // fall through to the ordinary allowance-based picking below
                 // rather than dropping it outright.
                 continue;
             }
-            foreach ($groups[$id]->indexes() as $index) {
-                $keptIndexes[$index] = true;
-            }
-            $remaining -= $bytes;
-            $included[$id] = true;
+            $grant->keep($id, $groups[$id]->indexes(), $unkeptBytes);
             $grantedWhole[$id] = true;
         }
 
@@ -72,7 +68,7 @@ final class ABJ_404_Solution_DiagnosticEvidenceBudget {
             }
             $rest[] = array('id' => $id, 'prioritized' => $isPrioritized);
         }
-        $reservePerRequest = $prioritizedLeft > 0 ? intdiv(max(0, $remaining), $prioritizedLeft) : 0;
+        $reservePerRequest = $prioritizedLeft > 0 ? intdiv($grant->remaining(), $prioritizedLeft) : 0;
 
         foreach ($rest as $entry) {
             $id = $entry['id'];
@@ -80,29 +76,35 @@ final class ABJ_404_Solution_DiagnosticEvidenceBudget {
                 $prioritizedLeft--;
             }
             $heldBack = $entry['prioritized'] ? ($prioritizedLeft * $reservePerRequest) : 0;
-            $allowance = max(0, $remaining - $heldBack);
-            if ($allowance <= 0) {
-                continue;
-            }
-            $picked = self::pickWithinAllowance($lines, $groups[$id]->indexes(), $allowance, $id);
+            $allowance = max(0, $grant->remaining() - $heldBack);
+            $unkept = $grant->unkeptIndexes($groups[$id]->indexes());
+            $picked = $allowance > 0
+                ? self::pickWithinAllowance($grant, $unkept, $allowance, $id)
+                : array('indexes' => array(), 'bytes' => 0, 'elided' => 0);
             if ($picked['indexes'] === array()) {
+                // Nothing further fit, but anchors kept above still leave
+                // this request partially shipped. Count what did not fit so
+                // the summary does not claim a trimmed request is whole.
+                // A request with nothing kept at all was never started, so
+                // it contributes nothing.
+                if ($grant->hasIncluded($id)) {
+                    $elided += count($unkept);
+                }
                 continue;
             }
-            foreach ($picked['indexes'] as $index) {
-                $keptIndexes[$index] = true;
-            }
-            $remaining -= $picked['bytes'];
-            $included[$id] = true;
+            $grant->keep($id, $picked['indexes'], $picked['bytes']);
             $elided += $picked['elided'];
             if ($picked['elided'] > 0) {
-                $notes[max($picked['indexes'])] = self::elisionNote($id, $picked['elided']);
+                $lastKept = $grant->lastKeptOf($groups[$id]->indexes());
+                if ($lastKept !== null) {
+                    $notes[$lastKept] = self::elisionNote($id, $picked['elided']);
+                }
             }
         }
 
-        ksort($keptIndexes);
         $out = array();
         $records = 0;
-        foreach (array_keys($keptIndexes) as $index) {
+        foreach ($grant->keptIndexes() as $index) {
             $out[] = $lines[$index];
             $records++;
             if (isset($notes[$index])) {
@@ -112,12 +114,29 @@ final class ABJ_404_Solution_DiagnosticEvidenceBudget {
 
         return array(
             'lines' => $out,
-            'requests' => count($included),
+            'requests' => count($grant->includedIds()),
             'records' => $records,
-            'bytes' => max(0, $budgetBytes) - $remaining,
-            'includedIds' => $included,
+            'bytes' => $grant->spent(),
+            'includedIds' => $grant->includedIds(),
             'elided' => $elided,
         );
+    }
+
+    /**
+     * Pass 0: every prioritized request reserves its anchors (its last record
+     * and its last unclosed step) before anything else is granted, so a tiny
+     * share still keeps where the request stopped.
+     *
+     * @param array<string, ABJ_404_Solution_DiagnosticRequestGroup> $groups
+     * @param array<int, string> $prioritizedIds
+     */
+    private static function reserveAnchors(ABJ_404_Solution_DiagnosticEvidenceGrant $grant,
+            array $groups, array $prioritizedIds): void {
+        foreach ($prioritizedIds as $id) {
+            foreach ($groups[$id]->anchorIndexes() as $anchor) {
+                $grant->keepIfItFits($id, $anchor);
+            }
+        }
     }
 
     /**
@@ -130,15 +149,14 @@ final class ABJ_404_Solution_DiagnosticEvidenceBudget {
      * called (see allocate()); this heuristic is backwards for one, because
      * its middle is the only account of the stall, not the least of it.
      *
-     * @param array<int, string> $lines
-     * @param array<int, int> $indexes
+     * @param array<int, int> $indexes Not-yet-granted line indexes of one request.
      * @return array{indexes: array<int, int>, bytes: int, elided: int}
      */
-    private static function pickWithinAllowance(array $lines, array $indexes, int $allowance,
-            string $requestId): array {
+    private static function pickWithinAllowance(ABJ_404_Solution_DiagnosticEvidenceGrant $grant,
+            array $indexes, int $allowance, string $requestId): array {
         $total = 0;
         foreach ($indexes as $index) {
-            $total += strlen($lines[$index]) + 1;
+            $total += $grant->lineCost($index);
         }
         if ($total <= $allowance) {
             return array('indexes' => $indexes, 'bytes' => $total, 'elided' => 0);
@@ -159,7 +177,7 @@ final class ABJ_404_Solution_DiagnosticEvidenceBudget {
         $fromHead = true;
         while ($low <= $high && $allowance > 0) {
             $index = $fromHead ? $indexes[$low] : $indexes[$high];
-            $cost = strlen($lines[$index]) + 1;
+            $cost = $grant->lineCost($index);
             if ($cost > $allowance) {
                 if (!$fromHead) {
                     break;

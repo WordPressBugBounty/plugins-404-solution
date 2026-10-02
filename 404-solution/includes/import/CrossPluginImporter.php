@@ -120,7 +120,7 @@ class ABJ_404_Solution_CrossPluginImporter {
         foreach ($this->sourceReader->readSource($source) as $row) {
             $sourceUrl = isset($row['source_url']) && is_string($row['source_url']) ? $row['source_url'] : '';
             $destUrl   = isset($row['dest_url'])   && is_string($row['dest_url'])   ? $row['dest_url']   : '';
-            $code      = isset($row['code'])        && is_numeric($row['code'])      ? (int)$row['code']  : 301;
+            $code = ABJ_404_Solution_ExactInteger::readOr($row['code'] ?? null, 100, 301);
             $isRegex   = isset($row['is_regex'])    && (bool)$row['is_regex'];
 
             if ($sourceUrl === '' || $destUrl === '') {
@@ -135,14 +135,14 @@ class ABJ_404_Solution_CrossPluginImporter {
             $destUrl = $resolved['dest'];
 
             $result = $this->redirectsRepository->setupRedirect(
-                ABJ_404_Solution_RedirectSpec::create(
-                    $sourceUrl,
-                    (string)$status,
-                    (string)$type,
-                    $destUrl,
-                    (string)$code,
-                    0
-                )
+                ABJ_404_Solution_RedirectSpec::fromArray(array(
+                    'fromURL' => $sourceUrl,
+                    'status' => (string)$status,
+                    'type' => (string)$type,
+                    'finalDest' => $destUrl,
+                    'code' => (string)$code,
+                    'disabled' => 0,
+                ))
             );
 
             if ($result !== 0 && $result !== false) {

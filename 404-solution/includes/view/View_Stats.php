@@ -65,21 +65,23 @@ class ABJ_404_Solution_View_Stats extends ABJ_404_Solution_ViewComponent {
 
         $content = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/statsRedirectsBox.html");
 
+        $redirectVars = array(
+            '{auto301}' => esc_html((string)$auto301),
+            '{auto302}' => esc_html((string)$auto302),
+            '{manual301}' => esc_html((string)$manual301),
+            '{manual302}' => esc_html((string)$manual302),
+            '{trashed}' => esc_html((string)$trashed),
+            '{total}' => esc_html((string)$total),
+        );
         // In Simple mode, replace technical "301"/"302" labels with plain language
         if (abj_service('settings_mode_preference')->getMode() === 'simple') {
-            $content = $this->f->str_replace('{Automatic 301 Redirects}', esc_html__('Automatic Permanent Redirects', '404-solution'), $content);
-            $content = $this->f->str_replace('{Automatic 302 Redirects}', esc_html__('Automatic Temporary Redirects', '404-solution'), $content);
-            $content = $this->f->str_replace('{Manual 301 Redirects}', esc_html__('Manual Permanent Redirects', '404-solution'), $content);
-            $content = $this->f->str_replace('{Manual 302 Redirects}', esc_html__('Manual Temporary Redirects', '404-solution'), $content);
+            $redirectVars['{Automatic 301 Redirects}'] = esc_html__('Automatic Permanent Redirects', '404-solution');
+            $redirectVars['{Automatic 302 Redirects}'] = esc_html__('Automatic Temporary Redirects', '404-solution');
+            $redirectVars['{Manual 301 Redirects}'] = esc_html__('Manual Permanent Redirects', '404-solution');
+            $redirectVars['{Manual 302 Redirects}'] = esc_html__('Manual Temporary Redirects', '404-solution');
         }
 
-        $content = $this->f->str_replace('{auto301}', esc_html((string)$auto301), $content);
-        $content = $this->f->str_replace('{auto302}', esc_html((string)$auto302), $content);
-        $content = $this->f->str_replace('{manual301}', esc_html((string)$manual301), $content);
-        $content = $this->f->str_replace('{manual302}', esc_html((string)$manual302), $content);
-        $content = $this->f->str_replace('{trashed}', esc_html((string)$trashed), $content);
-        $content = $this->f->str_replace('{total}', esc_html((string)$total), $content);
-        $content = $this->f->doNormalReplacements($content);
+        $content = $this->f->renderTemplate($content, $redirectVars);
         $abj404view->echoOptionsSection(new ABJ_404_Solution_OptionsSectionView('stats-redirects', 'abj404-redirectStats', __('Redirects', '404-solution'), $content, true, $abj404view->getCardIcon('chart')));
 
         // Captured URLs Statistics Card
@@ -93,11 +95,12 @@ class ABJ_404_Solution_View_Stats extends ABJ_404_Solution_ViewComponent {
         $total = $captured + $ignored + $trashed;
 
         $content = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/statsCapturedURLsBox.html");
-        $content = $this->f->str_replace('{captured}', esc_html((string)$captured), $content);
-        $content = $this->f->str_replace('{ignored}', esc_html((string)$ignored), $content);
-        $content = $this->f->str_replace('{trashed}', esc_html((string)$trashed), $content);
-        $content = $this->f->str_replace('{total}', esc_html((string)$total), $content);
-        $content = $this->f->doNormalReplacements($content);
+        $content = $this->f->renderTemplate($content, array(
+            '{captured}' => esc_html((string)$captured),
+            '{ignored}' => esc_html((string)$ignored),
+            '{trashed}' => esc_html((string)$trashed),
+            '{total}' => esc_html((string)$total),
+        ));
         $abj404view->echoOptionsSection(new ABJ_404_Solution_OptionsSectionView('stats-captured', 'abj404-capturedStats', __('Captured URLs', '404-solution'), $content, true, $abj404view->getCardIcon('warning')));
 
         // Periodic Stats Cards
@@ -127,15 +130,16 @@ class ABJ_404_Solution_View_Stats extends ABJ_404_Solution_ViewComponent {
             $distinctrefer = intval($periodStats['distinctrefer'] ?? 0);
 
             $content = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/statsPeriodicBox.html");
-            $content = $this->f->str_replace('{disp404}', esc_html((string)$disp404), $content);
-            $content = $this->f->str_replace('{distinct404}', esc_html((string)$distinct404), $content);
-            $content = $this->f->str_replace('{visitors404}', esc_html((string)$visitors404), $content);
-            $content = $this->f->str_replace('{refer404}', esc_html((string)$refer404), $content);
-            $content = $this->f->str_replace('{redirected}', esc_html((string)$redirected), $content);
-            $content = $this->f->str_replace('{distinctredirected}', esc_html((string)$distinctredirected), $content);
-            $content = $this->f->str_replace('{distinctvisitors}', esc_html((string)$distinctvisitors), $content);
-            $content = $this->f->str_replace('{distinctrefer}', esc_html((string)$distinctrefer), $content);
-            $content = $this->f->doNormalReplacements($content);
+            $content = $this->f->renderTemplate($content, array(
+                '{disp404}' => esc_html((string)$disp404),
+                '{distinct404}' => esc_html((string)$distinct404),
+                '{visitors404}' => esc_html((string)$visitors404),
+                '{refer404}' => esc_html((string)$refer404),
+                '{redirected}' => esc_html((string)$redirected),
+                '{distinctredirected}' => esc_html((string)$distinctredirected),
+                '{distinctvisitors}' => esc_html((string)$distinctvisitors),
+                '{distinctrefer}' => esc_html((string)$distinctrefer),
+            ));
             $abj404view->echoOptionsSection(new ABJ_404_Solution_OptionsSectionView('stats-periodic-' . $x, 'abj404-stats' . $x, $title, $content, ($x == 0), $abj404view->getCardIcon('clock')));
         }
 

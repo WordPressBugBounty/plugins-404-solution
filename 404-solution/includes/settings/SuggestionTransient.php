@@ -12,22 +12,24 @@ if (!defined('ABSPATH')) {
  * consumers:
  *
  *   Producers (writers):
- *     1. ABJ_404_Solution_SuggestionPublisher::triggerAsyncSuggestions
- *        (creates 'pending', started=0, with a fresh token)
+ *     1. ABJ_404_Solution_SuggestionPublisher::openPendingJob
+ *        (creates 'pending', started=0, with a fresh token, when the 404
+ *         page renders its placeholder)
  *     2. ABJ_404_Solution_SuggestionPublisher::cacheComputedSuggestionsForShortcode
  *        (creates 'complete' directly, no token, when synchronous spell-check
  *         beat the async worker)
- *     3. ABJ_404_Solution_Ajax_SuggestionCompute::computeSuggestions
- *        (transitions 'pending' to 'pending+started' on claim, then to
- *         'complete' on finish, or to 'error' on shutdown crash)
+ *     3. ABJ_404_Solution_SuggestionComputeJob::run, driven by the page's
+ *        first poll (transitions 'pending' to 'pending+started' on claim,
+ *         then to 'complete' on finish, or to 'error' on shutdown crash)
  *
  *   Consumers (readers):
  *     1. ABJ_404_Solution_Ajax_SuggestionPolling::pollSuggestions
- *        (branches on status; checks worker-stuck / dispatch-stuck windows)
- *     2. ABJ_404_Solution_ShortCode::renderSuggestionsShortcode
- *        (renders 'complete' results directly, falls back for 'pending')
- *     3. ABJ_404_Solution_Ajax_SuggestionCompute (re-reads its own transient
- *        to check the token gate and the worker-claim state)
+ *        (branches on status; runs an unclaimed job; checks the
+ *         worker-stuck window)
+ *     2. ABJ_404_Solution_ShortCode::shortcodePageSuggestions
+ *        (renders 'complete' results directly, a placeholder for 'pending')
+ *     3. ABJ_404_Solution_SuggestionWorkerStateStore (re-reads the
+ *        transient inside each claim / publish / crash critical section)
  *
  * Without this normalizer, each consumer reinvented its own inline
  * defensive parsing (`isset && is_scalar && (int)` chains, `is_array &&
@@ -70,18 +72,11 @@ final class ABJ_404_Solution_SuggestionTransient {
 
     /**
      * Worker is presumed dead after this many seconds since claim
-     * (started > 0). Matches the recovery window in
-     * Ajax_SuggestionCompute::computeSuggestions; if changed there, change
-     * here as well (the constant is the single source of truth post-VO).
+     * (started > 0). Read by SuggestionWorkerStateStore::claimWorker (a
+     * stuck claim may be re-claimed) and by the polling endpoint (a stuck
+     * claim answers 'timeout'); this constant is the single source of truth.
      */
     public const WORKER_STUCK_SECONDS = 90;
-
-    /**
-     * Dispatch is presumed dead after this many seconds since transient
-     * creation when no worker has claimed (started == 0). Mirrors the
-     * dispatch-no-show window in Ajax_SuggestionPolling.
-     */
-    public const DISPATCH_STUCK_SECONDS = 15;
 
     /**
      * Normalize a requested URL once for both storage and key derivation.
@@ -297,20 +292,6 @@ final class ABJ_404_Solution_SuggestionTransient {
     }
 
     /**
-     * True iff no worker has claimed the job and the dispatch window
-     * has expired since creation. Only meaningful for status=pending.
-     */
-    public function isDispatchStuck(int $now): bool {
-        if ($this->startedAt > 0) {
-            return false;
-        }
-        if ($this->createdAt <= 0) {
-            return false;
-        }
-        return ($now - $this->createdAt) > self::DISPATCH_STUCK_SECONDS;
-    }
-
-    /**
      * @param array<mixed, mixed> $raw
      */
     private static function coerceString(array $raw, string $key): string {
@@ -328,22 +309,9 @@ final class ABJ_404_Solution_SuggestionTransient {
         if (!isset($raw[$key])) {
             return 0;
         }
-        $v = $raw[$key];
-        if (is_int($v)) {
-            return $v < 0 ? 0 : $v;
-        }
-        // PHP's serialize/unserialize is type-preserving, but some
-        // object-cache plugins re-encode through JSON, which makes
-        // ints come back as floats or numeric strings. Accept those.
-        if (is_float($v)) {
-            $i = (int)$v;
-            return $i < 0 ? 0 : $i;
-        }
-        if (is_string($v) && is_numeric($v)) {
-            $i = (int)$v;
-            return $i < 0 ? 0 : $i;
-        }
-        return 0;
+        // JSON may decode a whole number as 1.0. ExactInteger accepts that
+        // representation but refuses a genuinely fractional value.
+        return ABJ_404_Solution_ExactInteger::readOr($raw[$key], 0, 0);
     }
 
     /**

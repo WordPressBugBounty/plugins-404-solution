@@ -113,12 +113,21 @@ final class ABJ_404_Solution_AjaxQueryTimeline {
      * The ledger ID of the request whose queries are being attributed, or ''
      * when this request is out of scope.
      *
-     * Delegated to the ledger rather than re-deriving the scope here, so the
+     * Delegated to the shared request scopes rather than re-deriving it here, so the
      * per-query channel can never drift out of step with the boundary
      * checkpoints it has to be read alongside.
      */
     public static function armedRequestId(): string {
-        return ABJ_404_Solution_AjaxDiagnosticRequestPolicy::instrumentedRequestIdFromGlobalContext();
+        try {
+            if (!class_exists('ABJ_404_Solution_AjaxRequestIdScopes')) {
+                return '';
+            }
+            return ABJ_404_Solution_AjaxRequestIdScopes::fromGlobalContext()->checkpoint();
+        } catch (Throwable $e) {
+            self::reportFailure('query timeline arming failed: ' . get_class($e)
+                . ' code ' . $e->getCode() . ': ' . $e->getMessage());
+            return '';
+        }
     }
 
     /** Whether this request records per-query attribution at all. */
@@ -369,7 +378,7 @@ final class ABJ_404_Solution_AjaxQueryTimeline {
         $shape = self::redactor()->redactSqlShape($preparedQuery);
         return array(
             'sql' => strlen($shape) > self::MAX_SHAPE_LENGTH ? substr($shape, 0, self::MAX_SHAPE_LENGTH) : $shape,
-            'sql_id' => substr(hash('sha256', $shape), 0, 12),
+            'sql_id' => self::redactor()->sqlIdForShape($shape),
             'sql_len' => strlen($shape),
         );
     }

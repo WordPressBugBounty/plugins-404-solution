@@ -222,8 +222,8 @@ class ABJ_404_Solution_QueryBudgetInstrumentation {
         if ($path === null) {
             return;
         }
-        $line = json_encode($entry, JSON_UNESCAPED_SLASHES);
-        if ($line === false) {
+        $line = ABJ_404_Solution_Utf8SafeRecord::encode($entry, 'query budget violation', JSON_UNESCAPED_SLASHES);
+        if ($line === '') {
             return;
         }
         // file_put_contents with FILE_APPEND | LOCK_EX is concurrency-safe

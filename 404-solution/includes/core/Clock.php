@@ -75,8 +75,9 @@ final class ABJ_404_Solution_SystemClock implements ABJ_404_Solution_Clock {
     public function wpNow(): int {
         if (function_exists('current_time')) {
             $value = current_time('timestamp');
-            if (is_numeric($value)) {
-                return (int)$value;
+            $timestamp = ABJ_404_Solution_ExactInteger::read($value, 0);
+            if ($timestamp !== null) {
+                return $timestamp;
             }
         }
         return time();

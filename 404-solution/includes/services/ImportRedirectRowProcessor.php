@@ -62,12 +62,31 @@ class ABJ_404_Solution_ImportRedirectRowProcessor {
             return $destination['issues'];
         }
 
-        if (!$dryRun) {
-            $this->writeRedirect($dataArray, $existingId, $overwriteExisting,
-                $fromURL, $status, $destination['type'], $destination['final_dest']);
+        if ($dryRun) {
+            return array();
         }
 
-        return array();
+        $code = $this->redirectCode($dataArray);
+        if ($existingId !== 0 && $overwriteExisting) {
+            return $this->overwriteRedirect(ABJ_404_Solution_RedirectUpdate::fromArray(array(
+                'id' => $existingId,
+                'type' => $destination['type'],
+                'fromUrl' => $fromURL,
+                'destination' => (string)$destination['final_dest'],
+                'code' => $code,
+                'statusType' => (string)$status,
+            )));
+        }
+
+        return $this->insertRedirect(ABJ_404_Solution_RedirectSpec::fromArray(array(
+            'fromURL' => $fromURL,
+            'status' => (string)$status,
+            'type' => (string)$destination['type'],
+            'finalDest' => (string)$destination['final_dest'],
+            'code' => $code,
+            'disabled' => 0,
+            'engine' => $this->redirectEngine($dataArray),
+        )));
     }
 
     /**
@@ -196,42 +215,54 @@ class ABJ_404_Solution_ImportRedirectRowProcessor {
     }
 
     /**
-     * @param array<string, mixed> $dataArray
-     * @param int $existingId
-     * @param bool $overwriteExisting
-     * @param string $fromURL
-     * @param int $status
-     * @param int $type
-     * @param string|int $finalDest
-     * @return void
+     * Overwrite the existing redirect with the imported row.
+     *
+     * @param ABJ_404_Solution_RedirectUpdate $update
+     * @return array<int, string> Empty on success, else the one row-save failure issue.
      */
-    private function writeRedirect(array $dataArray, int $existingId, bool $overwriteExisting,
-                                   string $fromURL, int $status, int $type, $finalDest): void {
-        $engine = isset($dataArray['engine']) && is_string($dataArray['engine']) && $dataArray['engine'] !== ''
-            ? $dataArray['engine'] : 'import';
-        $code = $this->redirectCode($dataArray);
-
-        if ($existingId !== 0 && $overwriteExisting) {
-            $this->redirectsRepository->updateRedirect(ABJ_404_Solution_RedirectUpdate::fromArray(array(
-                'id' => $existingId,
-                'type' => $type,
-                'fromUrl' => $fromURL,
-                'destination' => (string)$finalDest,
-                'code' => $code,
-                'statusType' => (string)$status,
-            )));
-            return;
+    private function overwriteRedirect(ABJ_404_Solution_RedirectUpdate $update): array {
+        $err = $this->redirectsRepository->updateRedirect($update);
+        if (is_scalar($err) && (string)$err !== '') {
+            return $this->rowSaveFailure($update->getFromUrl(), (string)$err);
         }
+        return array();
+    }
 
-        $this->redirectsRepository->setupRedirect(ABJ_404_Solution_RedirectSpec::fromArray(array(
-            'fromURL' => $fromURL,
-            'status' => (string)$status,
-            'type' => (string)$type,
-            'finalDest' => (string)$finalDest,
-            'code' => $code,
-            'disabled' => 0,
-            'engine' => $engine,
-        )));
+    /**
+     * Insert the imported row as a new redirect.
+     *
+     * @param ABJ_404_Solution_RedirectSpec $spec
+     * @return array<int, string> Empty on success, else the one row-save failure issue.
+     */
+    private function insertRedirect(ABJ_404_Solution_RedirectSpec $spec): array {
+        $id = $this->redirectsRepository->setupRedirect($spec);
+        if ((int)$id <= 0) {
+            return $this->rowSaveFailure($spec->getFromURL(), 'insert_returned_no_id');
+        }
+        return array();
+    }
+
+    /**
+     * The per-row issue for a row the repository did not save, logged as a
+     * warning and returned so the import summary counts the row as invalid.
+     *
+     * @param string $fromURL
+     * @param string $repositoryResult The repository's error code for the failed write.
+     * @return array<int, string>
+     */
+    private function rowSaveFailure(string $fromURL, string $repositoryResult): array {
+        $msg = sprintf(__('Redirect not imported: the database did not save it. URL: %1$s (repository result: %2$s)', '404-solution'), $fromURL, $repositoryResult);
+        $this->logger->warn($msg);
+        return array($msg);
+    }
+
+    /**
+     * @param array<string, mixed> $dataArray
+     * @return string The row's engine column, or 'import' when absent or empty.
+     */
+    private function redirectEngine(array $dataArray): string {
+        return isset($dataArray['engine']) && is_string($dataArray['engine']) && $dataArray['engine'] !== ''
+            ? $dataArray['engine'] : 'import';
     }
 
     /**
@@ -240,7 +271,7 @@ class ABJ_404_Solution_ImportRedirectRowProcessor {
      */
     private function redirectCode(array $dataArray): string {
         $rawCode = $dataArray['code'] ?? null;
-        return is_scalar($rawCode) && is_numeric($rawCode) ? (string)(int)$rawCode : '301';
+        return (string)ABJ_404_Solution_ExactInteger::readOr($rawCode, 100, 301);
     }
 
     /**
@@ -250,7 +281,7 @@ class ABJ_404_Solution_ImportRedirectRowProcessor {
      */
     private function intFromArray(array $dataArray, string $key): int {
         $value = $dataArray[$key] ?? 0;
-        return is_numeric($value) ? (int)$value : 0;
+        return ABJ_404_Solution_ExactInteger::readOr($value, 0, 0);
     }
 
     /**
@@ -260,7 +291,7 @@ class ABJ_404_Solution_ImportRedirectRowProcessor {
      */
     private function typeConstant(string $name, int $default): int {
         $value = defined($name) ? constant($name) : $default;
-        return is_numeric($value) ? (int)$value : $default;
+        return ABJ_404_Solution_ExactInteger::readOr($value, PHP_INT_MIN, $default);
     }
 
     /**
@@ -311,7 +342,8 @@ class ABJ_404_Solution_ImportRedirectRowProcessor {
             if ($raw === 'regex') {
                 return true;
             }
-            if (is_numeric($raw) && (int)$raw === (int)ABJ404_STATUS_REGEX) {
+            if (ABJ_404_Solution_ExactInteger::readOr($raw, PHP_INT_MIN, -1)
+                    === (int)ABJ404_STATUS_REGEX) {
                 return true;
             }
         }

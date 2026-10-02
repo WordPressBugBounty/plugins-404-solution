@@ -39,6 +39,15 @@ final class ABJ_404_Solution_DiagnosticRequestGroup {
     /** @var bool */
     private $failure = false;
 
+    /** @var int Records folded in that are not a checkpoint intent. */
+    private $nonIntentRecords = 0;
+
+    /** @var array<string, int> Unclosed steps by key, valued by line index. */
+    private $open = array();
+
+    /** @var int Last line index added, or -1 when the group holds no lines. */
+    private $lastIndex = -1;
+
     /** @var array<string, bool> Request ids this one recorded as its retry parent. */
     private $parents = array();
 
@@ -76,13 +85,64 @@ final class ABJ_404_Solution_DiagnosticRequestGroup {
     /**
      * Whether this request is one the investigation is about.
      *
-     * "No terminal record" counts: a request that simply stops, with no
-     * response and no teardown, IS the symptom under investigation, and it can
-     * only be recognised by that absence. Unjoinable lines are never failing --
-     * they belong to no request, so they cannot be one that failed.
+     * A condemned request (a failure finding names it) counts, and so does a
+     * suspected hang (no terminal record plus an unclosed step or at least
+     * two records). A single post-hoc record with no terminal event is
+     * neither: an uninstrumented request that wrote once and left, not a
+     * stall. Unjoinable lines are never failing -- they belong to no request,
+     * so they cannot be one that failed.
      */
     public function isFailing(): bool {
-        return $this->joinable && ($this->failure || !$this->terminal);
+        return $this->isCondemned() || $this->isSuspectedHang();
+    }
+
+    /**
+     * Whether a failure finding names this request.
+     *
+     * Failure arrives as a failure-branch event, a non-complete status, a
+     * failed selftest, a client verdict, or a cross-journal verdict. Terminal
+     * state is irrelevant: a request that failed and then finished is still
+     * the request the investigation is about.
+     */
+    public function isCondemned(): bool {
+        return $this->joinable && $this->failure;
+    }
+
+    /**
+     * Whether this request looks stalled mid-flight.
+     *
+     * No terminal record alone is not enough: a lone post-hoc size record has
+     * none either. A hang needs an unclosed start/end step or at least two
+     * records, proving the request did work and then stopped.
+     */
+    public function isSuspectedHang(): bool {
+        return $this->joinable && !$this->failure && !$this->terminal
+            && ($this->open !== array() || $this->nonIntentRecords >= 2);
+    }
+
+    /**
+     * The line indexes that must survive even a tiny budget share.
+     *
+     * The last unclosed step (where the request stopped) and the last record
+     * (the newest fact about it). Unique, non-negative, oldest first.
+     *
+     * @return array<int, int>
+     */
+    public function anchorIndexes(): array {
+        $anchors = array();
+        if ($this->open !== array()) {
+            $anchors[] = max($this->open);
+        }
+        $anchors[] = $this->lastIndex;
+        $anchors = array_unique($anchors);
+        $kept = array();
+        foreach ($anchors as $anchor) {
+            if ($anchor >= 0) {
+                $kept[] = $anchor;
+            }
+        }
+        sort($kept);
+        return $kept;
     }
 
     /**
@@ -104,10 +164,16 @@ final class ABJ_404_Solution_DiagnosticRequestGroup {
     public function addLine(int $index, int $bytes): void {
         $this->indexes[] = $index;
         $this->bytes += $bytes;
+        $this->lastIndex = $index;
     }
 
     /**
      * Fold one of this request's own records into the classification.
+     *
+     * Besides the terminal and failure facts, every record updates the
+     * hang shape: checkpoint intents open until their own record closes them,
+     * every other record counts against the lone-post-hoc floor, and
+     * start/end pairs open and close by name.
      *
      * @param array<array-key, mixed> $record
      */
@@ -133,6 +199,43 @@ final class ABJ_404_Solution_DiagnosticRequestGroup {
         if (isset($record['retry_parent_id']) && is_scalar($record['retry_parent_id'])
                 && (string)$record['retry_parent_id'] !== '') {
             $this->parents[(string)$record['retry_parent_id']] = true;
+        }
+        $this->trackHangShape($event, $record);
+    }
+
+    /**
+     * Fold one record into the hang shape: intent open/close, the
+     * lone-post-hoc count, and start/end pairs by name.
+     *
+     * @param array<array-key, mixed> $record
+     */
+    private function trackHangShape(string $event, array $record): void {
+        $currentIndex = $this->indexes === array()
+            ? -1 : $this->indexes[count($this->indexes) - 1];
+        $checkpointId = isset($record['checkpoint_id']) && is_scalar($record['checkpoint_id'])
+            ? (string)$record['checkpoint_id'] : '';
+        if ($event === 'checkpoint_intent') {
+            $this->open['intent:' . $checkpointId] = $currentIndex;
+        } else {
+            $this->nonIntentRecords++;
+            unset($this->open['intent:' . $checkpointId]);
+        }
+        if (substr($event, -6) === '_start') {
+            if ($event === 'stage_start') {
+                $stage = isset($record['stage']) && is_scalar($record['stage'])
+                    ? (string)$record['stage'] : '';
+                $this->open['stage:' . $stage] = $currentIndex;
+            } else {
+                $this->open[substr($event, 0, -6)] = $currentIndex;
+            }
+        } elseif (substr($event, -4) === '_end') {
+            if ($event === 'stage_end') {
+                $stage = isset($record['stage']) && is_scalar($record['stage'])
+                    ? (string)$record['stage'] : '';
+                unset($this->open['stage:' . $stage]);
+            } else {
+                unset($this->open[substr($event, 0, -4)]);
+            }
         }
     }
 

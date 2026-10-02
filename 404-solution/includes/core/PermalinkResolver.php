@@ -43,7 +43,7 @@ class ABJ_404_Solution_PermalinkResolver {
         $idInt = (int)$permalink['id'];
         // Use strict comparison to avoid null/false == 0 issues with type coercion
         // Cast to int for comparison since ABJ404_TYPE_* constants are integers
-        $typeInt = is_numeric($permalink['type']) ? (int)$permalink['type'] : -1;
+        $typeInt = ABJ_404_Solution_ExactInteger::readOr($permalink['type'], 0, -1);
 
         self::resolveByType($permalink, $typeInt, $idInt, $rowType, $options);
 
@@ -61,6 +61,46 @@ class ABJ_404_Solution_PermalinkResolver {
         $permalink['title'] = $sanitizer->normalizeUrlString($titleVal);
 
         return $permalink;
+    }
+
+    /**
+     * The URL an internal redirect destination (post, category or tag) points
+     * at, or '' when the type is not internal or the destination no longer
+     * resolves (a deleted post, a deleted term).
+     *
+     * Exporters use this so an exported rule points where the live redirect
+     * points. A redirect's final_dest is a wp_posts.ID for a post redirect and
+     * a wp_terms.term_id for a category or tag redirect. Those id spaces
+     * overlap, so the post-keyed permalink cache applies to post redirects
+     * only: read for a term, it names whichever post shares the number.
+     *
+     * The link is returned as WordPress built it, without the decoding
+     * permalinkInfoToArray() applies for display.
+     *
+     * @param int $type ABJ404_TYPE_* of the redirect row.
+     * @param string $finalDest The row's final_dest.
+     * @param string $cachedPostUrl Permalink-cache url joined for a post redirect, '' if none.
+     * @return string
+     */
+    public static function internalDestinationUrl(int $type, string $finalDest, string $cachedPostUrl = ''): string {
+        if ($type !== ABJ404_TYPE_POST && $type !== ABJ404_TYPE_CAT && $type !== ABJ404_TYPE_TAG) {
+            return '';
+        }
+        if ($type === ABJ404_TYPE_POST && $cachedPostUrl !== '') {
+            return $cachedPostUrl;
+        }
+        $idInt = ABJ_404_Solution_ExactInteger::read($finalDest, 1);
+        if ($idInt === null) {
+            return '';
+        }
+        $permalink = array('id' => $finalDest, 'type' => (string)$type, 'score' => 0,
+            'status' => 'unknown', 'link' => '');
+        self::resolveByType($permalink, $type, $idInt, null, null);
+        // fillTag / fillCategory mark a term that no longer exists as 'trash'.
+        if ($type !== ABJ404_TYPE_POST && $permalink['status'] !== 'published') {
+            return '';
+        }
+        return is_string($permalink['link']) ? $permalink['link'] : '';
     }
 
     /**

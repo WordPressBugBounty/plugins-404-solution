@@ -405,29 +405,6 @@
       }
     },
     {
-      "id": "ajax-suggestion-compute",
-      "description": "Background suggestion computation triggered server-side via wp_remote_post",
-      "schema": "schemas/ajax-suggestion-compute.schema.json",
-      "direction": "client-to-server",
-      "producer": {
-        "file": "includes/SpellChecker.php",
-        "test": "tests/AjaxSuggestionComputeContractTest.php"
-      },
-      "consumer": {
-        "file": "includes/ajax/Ajax_SuggestionCompute.php",
-        "test": "tests/AjaxSuggestionComputeContractTest.php"
-      },
-      "parityTest": "tests/AjaxRuntimeContractValidationTest.php",
-      "fixtures": {
-        "valid": [
-          "fixtures/ajax-suggestion-compute.valid.json"
-        ],
-        "invalid": [
-          "fixtures/ajax-suggestion-compute.invalid-missing-token.json"
-        ]
-      }
-    },
-    {
       "id": "ajax-suggestion-polling",
       "description": "Public-facing 404 page suggestion polling AJAX",
       "schema": "schemas/ajax-suggestion-polling.schema.json",

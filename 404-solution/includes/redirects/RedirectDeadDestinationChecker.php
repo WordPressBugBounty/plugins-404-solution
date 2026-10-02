@@ -159,14 +159,15 @@ class ABJ_404_Solution_RedirectDeadDestinationChecker {
                 'timeout' => 5,
             ));
         } catch (Throwable $e) {
-            $this->logger->debugMessage(__CLASS__ . '/' . __FUNCTION__
-                . ': dead-destination read failed open (' . $e->getMessage() . '); no redirect suspended.');
+            $this->logger->warnCaught(__CLASS__ . '/' . __FUNCTION__
+                . ': dead-destination read failed open; no redirect suspended.', $e);
             return null;
         }
 
         if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
-            $this->logger->debugMessage(__CLASS__ . '/' . __FUNCTION__
-                . ': dead-destination read timed out or errored; failing open, no redirect suspended.');
+            $this->logger->warn(__CLASS__ . '/' . __FUNCTION__
+                . ': dead-destination read ' . (!empty($result['timed_out']) ? 'timed out' : 'errored')
+                . '; failing open, no redirect suspended.');
             return null;
         }
 
@@ -201,8 +202,8 @@ class ABJ_404_Solution_RedirectDeadDestinationChecker {
             $ready = $this->dbCore->tableNameResolver()->tableExists($hitsTable)
                 && $this->logsHitsHasFailedHitsColumn();
         } catch (Throwable $e) {
-            $this->logger->debugMessage(__CLASS__ . '/' . __FUNCTION__
-                . ': rollup readiness probe failed open (' . $e->getMessage() . ').');
+            $this->logger->warnCaught(__CLASS__ . '/' . __FUNCTION__
+                . ': rollup readiness probe failed open.', $e);
             $ready = false;
         }
 
@@ -217,8 +218,8 @@ class ABJ_404_Solution_RedirectDeadDestinationChecker {
                     $logsRepo->scheduleHitsTableRebuild();
                 }
             } catch (Throwable $e) {
-                $this->logger->debugMessage(__CLASS__ . '/' . __FUNCTION__
-                    . ': rollup rebuild scheduling failed open (' . $e->getMessage() . ').');
+                $this->logger->warnCaught(__CLASS__ . '/' . __FUNCTION__
+                    . ': rollup rebuild scheduling failed open.', $e);
             }
         }
 

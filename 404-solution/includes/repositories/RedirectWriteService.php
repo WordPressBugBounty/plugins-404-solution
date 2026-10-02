@@ -126,8 +126,8 @@ class ABJ_404_Solution_RedirectWriteService {
         // status of -2 as ABJ404_STATUS_AUTO and then write -2, so the row that
         // passed the admission rules is not the row that lands in the table.
         // -1 keeps its existing meaning of "no rule applies to this value".
-        $statusAsInt = is_numeric($status) ? (int)$status : -1;
-        $typeAsInt = is_numeric($type) ? (int)$type : -1;
+        $statusAsInt = ABJ_404_Solution_ExactInteger::readOr($status, PHP_INT_MIN, -1);
+        $typeAsInt = ABJ_404_Solution_ExactInteger::readOr($type, PHP_INT_MIN, -1);
 
         if ($statusAsInt === ABJ404_STATUS_REGEX && !$this->admissionPolicy()->regexSourceIsValid($fromURL)) {
             return 0;

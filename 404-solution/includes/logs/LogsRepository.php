@@ -48,7 +48,7 @@ class ABJ_404_Solution_LogsRepository implements ABJ_404_Solution_LogsRepository
     const HITS_TABLE_LAST_SCHEDULED_FLAG = ABJ_404_Solution_LogsHitsRollupService::HITS_TABLE_LAST_SCHEDULED_FLAG;
     const HITS_TABLE_LAST_REFRESHED_FLAG = ABJ_404_Solution_LogsHitsRollupService::HITS_TABLE_LAST_REFRESHED_FLAG;
     const HITS_TABLE_FIRST_STALE_DETECTED_FLAG = ABJ_404_Solution_LogsHitsRollupService::HITS_TABLE_FIRST_STALE_DETECTED_FLAG;
-    const HITS_TABLE_STALE_NOTICE_TRANSIENT = ABJ_404_Solution_LogsHitsRollupService::HITS_TABLE_STALE_NOTICE_TRANSIENT;
+    const HITS_TABLE_STALE_NOTICE_TYPE = ABJ_404_Solution_LogsHitsRollupService::HITS_TABLE_STALE_NOTICE_TYPE;
     const HITS_TABLE_STALE_NOTICE_THRESHOLD_SECONDS = ABJ_404_Solution_LogsHitsRollupService::HITS_TABLE_STALE_NOTICE_THRESHOLD_SECONDS;
 
     /** @var int Max age for cached daily-activity trend data. */

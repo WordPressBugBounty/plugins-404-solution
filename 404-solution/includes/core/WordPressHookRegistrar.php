@@ -57,6 +57,11 @@ class ABJ_404_Solution_WordPressHookRegistrar {
             self::callback($callbacks, 'plugins_page_assets'), 11);
         add_action('admin_head',
             self::callback($callbacks, 'admin_theme_css'), 1);
+        // Grants delegated plugin admins (plugin_admin_users) manage_options on
+        // the plugin's own screens only. Registered here, at boot, because
+        // PluginLogic is resolved from the DI container on a normal load.
+        add_filter('user_has_cap',
+            'ABJ_404_Solution_PluginAdminAccessPolicy::wpUserHasCapFilter', 10, 4);
 
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_echoViewLogsFor', self::callback($callbacks, 'ajax_view_logs'));
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_trashLink', self::callback($callbacks, 'ajax_trash_link'));
@@ -87,8 +92,6 @@ class ABJ_404_Solution_WordPressHookRegistrar {
      * @return void
      */
     private static function registerAsyncSuggestionHooks(array $callbacks): void {
-        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404_compute_suggestions', self::callback($callbacks, 'ajax_compute_suggestions'));
-        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_nopriv_abj404_compute_suggestions', self::callback($callbacks, 'ajax_compute_suggestions'));
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404_poll_suggestions', self::callback($callbacks, 'ajax_poll_suggestions'));
         ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_nopriv_abj404_poll_suggestions', self::callback($callbacks, 'ajax_poll_suggestions'));
     }

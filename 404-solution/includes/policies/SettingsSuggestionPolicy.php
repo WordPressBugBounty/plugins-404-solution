@@ -66,21 +66,25 @@ class ABJ_404_Solution_SettingsSuggestionPolicy {
             }
         }
 
-        $this->normalizeTemplateOptions($options);
+        self::normalizeTemplateOptions($options);
         return "";
     }
 
     /**
      * Repair malformed suggestion template options.
      *
+     * Pure and static on purpose: it never uses $this, so the settings read
+     * path calls it directly without constructing the policy (and its logger
+     * / content-repo dependencies).
+     *
      * @param array<string, mixed> $options
      * @return bool True when any option was changed.
      */
-    public function normalizeTemplateOptions(array &$options): bool {
+    public static function normalizeTemplateOptions(array &$options): bool {
         $changed = false;
         $defaults = ABJ_404_Solution_PluginLogicDefaults::defaults();
 
-        if ($this->repairTemplateOption(
+        if (self::repairTemplateOption(
             $options,
             $defaults,
             'suggest_title',
@@ -89,7 +93,7 @@ class ABJ_404_Solution_SettingsSuggestionPolicy {
         )) {
             $changed = true;
         }
-        if ($this->repairTemplateOption(
+        if (self::repairTemplateOption(
             $options,
             $defaults,
             'suggest_noresults',
@@ -158,7 +162,7 @@ class ABJ_404_Solution_SettingsSuggestionPolicy {
      * @param array<string, mixed> $options
      * @param array<string, mixed> $defaults
      */
-    private function repairTemplateOption(
+    private static function repairTemplateOption(
         array &$options,
         array $defaults,
         string $optionName,

@@ -160,9 +160,9 @@ class ABJ_404_Solution_LogsHitsRebuildLock {
     /** One liveness rule shared by observation and stale-holder eviction. */
     private function isStaleValue(string $lockValue): bool {
         $timestampPart = explode(':', $lockValue, 2)[0];
-        return !is_numeric($timestampPart)
-            || (int)$timestampPart <= 0
-            || (abj_clock()->now() - (int)$timestampPart) > self::TTL_SECONDS;
+        $timestamp = ABJ_404_Solution_ExactInteger::read($timestampPart, 1);
+        return $timestamp === null
+            || (abj_clock()->now() - $timestamp) > self::TTL_SECONDS;
     }
 
     /** The option row that holds the lock. Stateless, so a fresh instance

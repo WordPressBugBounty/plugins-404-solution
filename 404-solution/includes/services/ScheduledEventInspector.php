@@ -84,7 +84,10 @@ class ABJ_404_Solution_ScheduledEventInspector {
             if ($event === false) {
                 return null;
             }
-            if (!is_object($event) || !isset($event->timestamp) || !is_numeric($event->timestamp)) {
+            $eventTimestamp = is_object($event)
+                ? ABJ_404_Solution_ExactInteger::read($event->timestamp ?? null, 0)
+                : null;
+            if ($eventTimestamp === null) {
                 throw new UnexpectedValueException(
                     'wp_get_scheduled_event returned a malformed event for cron hook ' . $hook
                     . ': expected an object with a numeric timestamp.'
@@ -93,7 +96,7 @@ class ABJ_404_Solution_ScheduledEventInspector {
             $recurrence = isset($event->schedule) && is_string($event->schedule) && $event->schedule !== ''
                 ? $event->schedule
                 : null;
-            return array('timestamp' => (int)$event->timestamp, 'recurrence' => $recurrence);
+            return array('timestamp' => $eventTimestamp, 'recurrence' => $recurrence);
         }
 
         $timestamp = $this->nextScheduledTimestamp($hook, $args);

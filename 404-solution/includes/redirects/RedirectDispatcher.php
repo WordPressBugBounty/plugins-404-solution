@@ -50,9 +50,6 @@ class ABJ_404_Solution_RedirectDispatcher {
     /** @var mixed */
     private $logsRepository;
 
-    /** @var ABJ_404_Solution_FrontendAsyncSuggestionTrigger */
-    private $asyncSuggestionTrigger;
-
     /**
      * @param ABJ_404_Solution_PluginLogic $logic
      * @param ABJ_404_Solution_RedirectsRepository $redirectsRepository
@@ -63,10 +60,9 @@ class ABJ_404_Solution_RedirectDispatcher {
      * @param ABJ_404_Solution_PreviousRequestCookieTracker $previousRequestCookieTracker
      * @param ABJ_404_Solution_FrontendPipelineTelemetry $telemetry
      * @param mixed $logsRepository Object with logRedirectHit(); duck-typed.
-     * @param ABJ_404_Solution_FrontendAsyncSuggestionTrigger|null $asyncSuggestionTrigger
      */
     function __construct($logic, $redirectsRepository, $logger, $functions, $spellChecker,
-            $notFoundResponse, $previousRequestCookieTracker, $telemetry, $logsRepository, $asyncSuggestionTrigger = null) {
+            $notFoundResponse, $previousRequestCookieTracker, $telemetry, $logsRepository) {
         $this->logic = $logic;
         $this->redirectsRepository = $redirectsRepository;
         $this->logger = $logger;
@@ -76,9 +72,6 @@ class ABJ_404_Solution_RedirectDispatcher {
         $this->previousRequestCookieTracker = $previousRequestCookieTracker;
         $this->telemetry = $telemetry;
         $this->logsRepository = $logsRepository;
-        $this->asyncSuggestionTrigger = $asyncSuggestionTrigger !== null
-            ? $asyncSuggestionTrigger
-            : new ABJ_404_Solution_FrontendAsyncSuggestionTrigger($spellChecker);
     }
 
     /**
@@ -118,7 +111,6 @@ class ABJ_404_Solution_RedirectDispatcher {
         if ($redirect['type'] == ABJ404_TYPE_404_DISPLAYED) {
             $trace->add('Result', 'Showed 404 page', $redirectUrl);
             $this->writeHit($redirectUrl, '404', $matchReason, null, $trace->getSteps());
-            $this->asyncSuggestionTrigger->triggerIfNeeded($requestedURL);
             $this->telemetry->emitBenchmarkHeadersIfEnabled();
             $this->notFoundResponse->sendTo404Page($requestedURL, $matchReason);
             return true;
@@ -153,17 +145,10 @@ class ABJ_404_Solution_RedirectDispatcher {
         if ($isRedirectToCustom404Page) {
             $this->previousRequestCookieTracker->setCookieWithPreviousRequest();
             setcookie(ABJ404_PP . '_STATUS_404', 'true', abj_clock()->now() + 20, '/');
-
-            $urlSlugOnly = $this->logic->urlNormalization()->removeHomeDirectory($requestedURL);
-            $spellChecker = abj_service('spell_checker');
-            $options = $this->getOptions();
-            $suggestOpts = ABJ_404_Solution_SuggestionDisplayOptions::fromOptionsArray($options);
-            $spellChecker->findMatchingPosts(
-                $urlSlugOnly,
-                $suggestOpts->getSuggestCatsString(),
-                $suggestOpts->getSuggestTagsString()
-            );
-            $spellChecker->triggerAndCleanupOnFailure($requestedURL);
+            // Suggestions are not computed here: the destination page opens a
+            // job when it renders, and the page's own polling script runs it.
+            // Computing in this request would charge every client that hits
+            // the redirect, including ones that never follow it or render it.
         }
 
         if ($redirect['type'] == ABJ404_TYPE_EXTERNAL) {
@@ -179,7 +164,6 @@ class ABJ_404_Solution_RedirectDispatcher {
             $this->logger->warn('Redirect destination missing. Sending request to 404 page instead. Redirect ID: ' . $redirectId);
             $trace->add('Result', 'Showed 404 page - redirect destination missing', 'rule #' . $redirectId);
             $this->writeHit($redirectUrl, '404', $matchReason . ' (missing destination)', null, $trace->getSteps());
-            $this->asyncSuggestionTrigger->triggerIfNeeded($requestedURL);
             $this->telemetry->emitBenchmarkHeadersIfEnabled();
             $this->notFoundResponse->sendTo404Page($requestedURL, 'missing redirect destination');
             return true;
@@ -195,7 +179,6 @@ class ABJ_404_Solution_RedirectDispatcher {
             $this->logger->warn('Resolved permalink is empty/invalid. Sending request to 404 page instead. Redirect ID: ' . $redirectId);
             $trace->add('Result', 'Showed 404 page - redirect destination invalid', 'rule #' . $redirectId);
             $this->writeHit($redirectUrl, '404', $matchReason . ' (invalid destination)', null, $trace->getSteps());
-            $this->asyncSuggestionTrigger->triggerIfNeeded($requestedURL);
             $this->telemetry->emitBenchmarkHeadersIfEnabled();
             $this->notFoundResponse->sendTo404Page($requestedURL, 'invalid redirect destination');
             return true;
@@ -244,8 +227,11 @@ class ABJ_404_Solution_RedirectDispatcher {
             $regexAction = isset($regexPermalink['link']) && is_string($regexPermalink['link']) ? $regexPermalink['link'] : '';
             $regexType = isset($regexPermalink['type']) && (is_int($regexPermalink['type']) || is_string($regexPermalink['type'])) ? $regexPermalink['type'] : -1;
             $regexDefaultRedirect = isset($options['default_redirect']) && is_scalar($options['default_redirect']) ? (int)$options['default_redirect'] : 0;
-            $regexCode = isset($regexPermalink['code']) && is_numeric($regexPermalink['code']) && (int)$regexPermalink['code'] > 0
-                ? (int)$regexPermalink['code'] : $regexDefaultRedirect;
+            $regexCode = ABJ_404_Solution_ExactInteger::readOr(
+                $regexPermalink['code'] ?? null,
+                1,
+                $regexDefaultRedirect
+            );
             $trace->add('Regex rules', 'Matched', $regexMatchingUrl . ' -> ' . $regexLink);
             $this->writeHit($regexMatchingUrl, $regexAction, 'regex match', $requestedURL, $trace->getSteps());
             $sentTo404Page = $this->notFoundResponse->forceRedirect(
@@ -317,9 +303,15 @@ class ABJ_404_Solution_RedirectDispatcher {
                     $spFinalDest = isset($permalink['id']) && is_scalar($permalink['id']) ? (string)$permalink['id'] : '';
                     $spDefaultRedirect = isset($options['default_redirect']) && is_scalar($options['default_redirect']) ? (string)$options['default_redirect'] : '';
                     // Legacy audit marker for source-inspection tests: this->dao->setupRedirect(esc_url($requestedURL)
-                    $this->redirectsRepository->setupRedirect(ABJ_404_Solution_RedirectSpec::create(
-                        esc_url($requestedURL), (string)ABJ404_STATUS_AUTO, (string)$this->typePost(), $spFinalDest, $spDefaultRedirect, 0, 'single page'
-                    ));
+                    $this->redirectsRepository->setupRedirect(ABJ_404_Solution_RedirectSpec::fromArray(array(
+                        'fromURL' => esc_url($requestedURL),
+                        'status' => (string)ABJ404_STATUS_AUTO,
+                        'type' => (string)$this->typePost(),
+                        'finalDest' => $spFinalDest,
+                        'code' => $spDefaultRedirect,
+                        'disabled' => 0,
+                        'engine' => 'single page',
+                    )));
                     $spLink = isset($permalink['link']) && is_string($permalink['link']) ? $permalink['link'] : '';
                     // Legacy audit marker for source-inspection tests: this->dao->logRedirectHit($requestedURL, $spLink, 'single page'
                     $this->writeHit($requestedURL, $spLink, 'single page', null, $trace->getSteps());

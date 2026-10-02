@@ -381,7 +381,9 @@ class ABJ_404_Solution_AjaxAdminEndpointSupport {
             return '';
         }
 
-        $checkpointRequestId = ABJ_404_Solution_AjaxDiagnosticRequestPolicy::instrumentedRequestIdFromGlobalContext();
+        $checkpointRequestId = class_exists('ABJ_404_Solution_AjaxRequestIdScopes')
+            ? ABJ_404_Solution_AjaxRequestIdScopes::fromGlobalContext()->checkpoint()
+            : '';
         $out = '';
         if (ob_get_level() > 0) {
             if ($checkpointRequestId === '') {

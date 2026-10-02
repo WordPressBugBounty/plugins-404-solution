@@ -60,12 +60,8 @@ class ABJ_404_Solution_AdminStatusFallbackResolver {
             // swallowing it turns an admin-access outage into "the page shows
             // less" with nothing linking the two.
             $logger = abj_service('logging');
-            if (is_object($logger) && method_exists($logger, 'debugMessage')) {
-                $logger->debugMessage(
-                    'Admin-status re-check threw; failing closed to non-admin. '
-                    . get_class($e) . ' (code ' . (string)$e->getCode() . '): ' . $e->getMessage(),
-                    $e
-                );
+            if (is_object($logger) && method_exists($logger, 'warnCaught')) {
+                $logger->warnCaught('Admin-status re-check threw; failing closed to non-admin.', $e);
             }
             return false;
         }

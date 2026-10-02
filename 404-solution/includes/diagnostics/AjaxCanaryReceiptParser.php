@@ -92,8 +92,8 @@ final class ABJ_404_Solution_AjaxCanaryReceiptParser {
             ),
             'step_request_id' => $requestId,
             'ok' => !empty($entry['ok']),
-            'ms' => isset($entry['ms']) && is_numeric($entry['ms']) ? (int)$entry['ms'] : null,
-            'bytes' => isset($entry['bytes']) && is_numeric($entry['bytes']) ? (int)$entry['bytes'] : null,
+            'ms' => ABJ_404_Solution_ExactInteger::read($entry['ms'] ?? null, 0),
+            'bytes' => ABJ_404_Solution_ExactInteger::read($entry['bytes'] ?? null, 0),
             'text_status' => substr(
                 $status,
                 0,
@@ -114,6 +114,7 @@ final class ABJ_404_Solution_AjaxCanaryReceiptParser {
         $timingState = isset($entry['resourceTimingState']) && is_scalar($entry['resourceTimingState'])
             ? (string)$entry['resourceTimingState'] : '';
         return array(
+            'http_status' => self::httpStatusOrUnreported($entry['httpStatus'] ?? null),
             'content_encoding' => substr(
                 $contentEncoding,
                 0,
@@ -146,15 +147,33 @@ final class ABJ_404_Solution_AjaxCanaryReceiptParser {
         return array(
             'payload_variant' => $variant,
             'payload_rung_percent' => isset($entry['payloadRungPercent'])
-                && is_numeric($entry['payloadRungPercent'])
-                ? max(-1, min(100, (int)$entry['payloadRungPercent'])) : -1,
+                ? min(100, ABJ_404_Solution_ExactInteger::readOr(
+                    $entry['payloadRungPercent'],
+                    -1,
+                    -1
+                )) : -1,
             'target_bytes' => self::nonnegativeOrUnavailable($entry['targetBytes'] ?? null),
             'target_bytes_source' => $targetSource,
         );
     }
 
+    /**
+     * The HTTP status the browser saw, or -1 when it did not say.
+     *
+     * 0 is a real answer (the request got no HTTP response at all: a cut
+     * connection or a timeout) and stays distinct from -1 (an older client that
+     * sends no status). Anything that is not a whole number in 0..599 is not a
+     * status and is reported as unreported rather than trusted.
+     *
+     * @param mixed $value
+     */
+    private static function httpStatusOrUnreported($value): int {
+        $status = ABJ_404_Solution_ExactInteger::readOr($value, -1, -1);
+        return ($status >= 0 && $status <= 599) ? $status : -1;
+    }
+
     /** @param mixed $value */
     private static function nonnegativeOrUnavailable($value): int {
-        return is_numeric($value) ? max(-1, (int)$value) : -1;
+        return ABJ_404_Solution_ExactInteger::readOr($value, -1, -1);
     }
 }

@@ -12,6 +12,8 @@ if (!defined('ABSPATH')) {
  *          child segment finds posts within it via title keyword matching.
  * Phase 2: Category/tag name keyword matching — match URL keywords against
  *          category/tag names (similar to TitleMatchingEngine for post titles).
+ *
+ * @phpstan-import-type SqlFragment from ABJ_404_Solution_DatabaseQueryBuilderInterface
  */
 class ABJ_404_Solution_CategoryTagMatchingEngine implements ABJ_404_Solution_MatchingEngine {
 
@@ -187,7 +189,8 @@ class ABJ_404_Solution_CategoryTagMatchingEngine implements ABJ_404_Solution_Mat
             $extraWhere = $this->buildCategoryPostWhereClause($termId, $keywords);
             $rows = $this->contentRepo->getPublishedPagesAndPostsIDs(array(
                 'limit_results' => '0,' . self::QUERY_LIMIT,
-                'extra_where_clause' => $extraWhere,
+                'extra_where_clause' => $extraWhere['sql'],
+                'extra_where_params' => $extraWhere['params'],
             ));
 
             if (empty($rows)) {
@@ -303,13 +306,7 @@ class ABJ_404_Solution_CategoryTagMatchingEngine implements ABJ_404_Solution_Mat
         if ($bestTerm === null || $bestType === null || $bestScore < $minScore) {
             $this->logger->debugMessage("Category/tag engine Phase 2: no match above threshold " .
                 $minScore . " (best score: " . $bestScore . ")");
-            // Sibling of the spelling near miss (SpellChecker::getPermalinkUsingSpelling):
-            // the best candidate lost only on the threshold, and that score is
-            // what tells the admin why the URL was captured instead of
-            // redirected. Record it before the reject branch discards it.
-            abj_service('near_miss_recorder')->record(array(
-                'requestedURL' => $request->getRequestedURL(), 'score' => (float)$bestScore,
-                'engineName' => $this->getName()));
+            $this->recordNearMissIfBudgetAllows($request, $bestScore);
             return null;
         }
 
@@ -323,6 +320,29 @@ class ABJ_404_Solution_CategoryTagMatchingEngine implements ABJ_404_Solution_Mat
         return new ABJ_404_Solution_MatchResult(
             $termId, $bestType, $termUrl, $termName, $bestScore, $this->getName()
         );
+    }
+
+    /**
+     * Sibling of the spelling near miss (SpellChecker::getPermalinkUsingSpelling):
+     * the best candidate lost only on the threshold, and that score is what
+     * tells the admin why the URL was captured instead of redirected. Record
+     * it before the reject branch discards it -- unless the request time
+     * budget tripped, in which case the score is a partial-corpus best that
+     * must not masquerade as the corpus best: skip the record.
+     *
+     * @param ABJ_404_Solution_MatchRequest $request
+     * @param float $bestScore
+     * @return void
+     */
+    private function recordNearMissIfBudgetAllows(ABJ_404_Solution_MatchRequest $request, float $bestScore): void {
+        $nearMissBudget = ABJ_404_Solution_MatchingTimeBudget::current();
+        if ($nearMissBudget !== null && $nearMissBudget->isExhausted()) {
+            $this->logger->debugMessage("Category/tag engine Phase 2: time budget exhausted, skipping near-miss record");
+            return;
+        }
+        abj_service('near_miss_recorder')->record(array(
+            'requestedURL' => $request->getRequestedURL(), 'score' => (float)$bestScore,
+            'engineName' => $this->getName()));
     }
 
     /**
@@ -426,47 +446,52 @@ class ABJ_404_Solution_CategoryTagMatchingEngine implements ABJ_404_Solution_Mat
 
     /**
      * Build a SQL WHERE clause that filters posts in a specific category
-     * and matches keywords in post titles.
+     * and matches keywords in post titles. The term id and the keywords are bound values,
+     * not SQL text: the query executor rewrites `{wp_...}` tokens across the statement
+     * before it binds parameters, so a value spliced into the text would be rewritten with it.
      *
      * @param int $termId
      * @param array<int, string> $keywords
-     * @return string
+     * @return SqlFragment Text with `%d` / `%s` placeholders and the values for them, in order.
      */
-    private function buildCategoryPostWhereClause(int $termId, array $keywords): string {
+    private function buildCategoryPostWhereClause(int $termId, array $keywords): array {
         global $wpdb;
         $prefix = isset($wpdb->prefix) ? $wpdb->prefix : 'wp_';
 
         $trTable = $prefix . 'term_relationships';
         $ttTable = $prefix . 'term_taxonomy';
 
-        $clause = ' and wp_posts.ID IN ('
-            . 'SELECT wtr.object_id FROM ' . $trTable . ' wtr '
-            . 'INNER JOIN ' . $ttTable . ' wtt ON wtt.term_taxonomy_id = wtr.term_taxonomy_id '
-            . 'WHERE wtt.term_id = ' . $termId
-            . ')';
+        $categoryFilter = array(
+            'sql' => ' and wp_posts.ID IN ('
+                . 'SELECT wtr.object_id FROM ' . $trTable . ' wtr '
+                . 'INNER JOIN ' . $ttTable . ' wtt ON wtt.term_taxonomy_id = wtr.term_taxonomy_id '
+                . 'WHERE wtt.term_id = %d'
+                . ')',
+            'params' => array($termId),
+        );
 
-        $titleConditions = $this->buildTitleWhereClause($keywords);
-
-        return $clause . $titleConditions;
+        return ABJ_404_Solution_SqlFragmentTemplate::concat(array(
+            $categoryFilter,
+            array('sql' => ' and ', 'params' => array()),
+            $this->buildTitleWhereClause($keywords),
+        ));
     }
 
     /**
      * Build a SQL WHERE clause that matches any keyword in the post title.
      *
      * @param array<int, string> $keywords
-     * @return string
+     * @return SqlFragment `(lower(wp_posts.post_title) LIKE %s OR ...)` plus the `%keyword%` patterns.
      */
-    private function buildTitleWhereClause(array $keywords): string {
-        $conditions = [];
+    private function buildTitleWhereClause(array $keywords): array {
+        $needles = [];
         foreach ($keywords as $kw) {
-            // Strip invalid UTF-8 before SQL — keywords originate from
+            // Strip invalid UTF-8 before SQL. Keywords originate from
             // rawurldecode'd URL slugs and can carry scanner-attack bytes
-            // (Pattern 10 — esc_sql does not validate UTF-8).
-            $cleanKw = $this->f->sanitizeInvalidUTF8($this->f->strtolower($kw));
-            $escaped = esc_sql($cleanKw);
-            $conditions[] = "lower(wp_posts.post_title) LIKE '%" . $escaped . "%'";
+            // (Pattern 10: binding a value does not validate its UTF-8).
+            $needles[] = $this->f->sanitizeInvalidUTF8($this->f->strtolower($kw));
         }
 
-        return ' and (' . implode(' OR ', $conditions) . ')';
+        return ABJ_404_Solution_SqlFragmentTemplate::anyLike('lower(wp_posts.post_title)', $needles);
     }
 }

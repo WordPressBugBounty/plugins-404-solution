@@ -136,14 +136,19 @@ final class ABJ_404_Solution_AjaxResponseEmitter {
         } catch (Throwable $t) {
             $encoded = self::lastResortEnvelope($t);
         }
+        // The encode boundary on the always-on timeline, armed or not: with
+        // debug off this stamp is the only record that encoding finished.
+        ABJ_404_Solution_RequestPhaseTimeline::stamp('encoded');
         // record() is a no-op for '', so an endpoint with no armed trace
         // behaves exactly as it did before this scope existed.
         ABJ_404_Solution_AjaxCheckpointLogger::record(
             $scopes->measured(), 'json_encode', $encoded->diagnosticFields());
         self::reportDegradedEncode($encoded);
         $json = $encoded->json();
+        ABJ_404_Solution_RequestPhaseTimeline::noteResponseBytes(strlen($json));
         if (!$scopes->hasCheckpoints()) {
             echo $json;
+            ABJ_404_Solution_RequestPhaseTimeline::stamp('echoed');
             return;
         }
         ABJ_404_Solution_AjaxCheckpointLogger::around(
@@ -154,6 +159,7 @@ final class ABJ_404_Solution_AjaxResponseEmitter {
             },
             array('bytes' => strlen($json))
         );
+        ABJ_404_Solution_RequestPhaseTimeline::stamp('echoed');
     }
 
     /**
@@ -269,12 +275,12 @@ final class ABJ_404_Solution_AjaxResponseEmitter {
             ABJ_404_Solution_SameSiteRequestCensus::PHASE_DETACH);
         $hasFastcgiFinish = function_exists('fastcgi_finish_request');
         $hasLitespeedFinish = function_exists('litespeed_finish_request');
-        $finishFunction = 'none';
-        if ($hasFastcgiFinish) {
-            $finishFunction = 'fastcgi_finish_request';
-        } else if ($hasLitespeedFinish) {
-            $finishFunction = 'litespeed_finish_request';
-        }
+        // Which function to prefer is decided in one place
+        // (ABJ_404_Solution_ResponseDetach), because a second copy of that
+        // order drifts and fails silently on exactly the SAPI it protects. The
+        // call itself stays here, wrapped in the checkpoint journaling and the
+        // diagnostic A/B skip below that the adapter has no business knowing.
+        $finishFunction = ABJ_404_Solution_ResponseDetach::availableFunction();
 
         // Bruno timeout cause matrix, gap G9 (c434): within a bounded,
         // opt-in-twice diagnostic session (DetachAbExperiment::assignNextAttempt()),
@@ -314,6 +320,9 @@ final class ABJ_404_Solution_AjaxResponseEmitter {
                 $result = litespeed_finish_request();
             }
         }
+        // In memory only: the "first operation after the SAPI call" rule
+        // below still holds for journal records, since a stamp cannot stall.
+        ABJ_404_Solution_RequestPhaseTimeline::stamp('detached');
         $obLevelAfterCall = ABJ_404_Solution_OutputBufferDrain::currentLevel();
         if ($checkpointRequestId !== '') {
             // This MUST be the first operation after the SAPI call. Moving the

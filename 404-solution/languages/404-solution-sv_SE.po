@@ -592,6 +592,9 @@ msgstr "Fel: Du valde extern URL men angav ingen URL."
 msgid "Error: unable to add new redirect."
 msgstr "Fel: kan inte lägga till ny omdirigering."
 
+msgid "Error: The database did not save the new redirect. The debug log has the underlying database error."
+msgstr "Fel: Databasen sparade inte den nya omdirigeringen. Felsökningsloggen innehåller det underliggande databasfelet."
+
 msgid "Error: unable to mark URL as %s"
 msgstr "Fel: kan inte markera URL som %s"
 
@@ -1995,8 +1998,14 @@ msgstr "Redigera"
 msgid "View Logs"
 msgstr "Visa loggar"
 
+msgid "View Redirect Logs"
+msgstr "Visa omdirigeringsloggar"
+
 msgid "Delete Permanently"
 msgstr "Ta bort permanent"
+
+msgid "Delete Redirect Permanently"
+msgstr "Ta bort omdirigering permanent"
 
 msgid "Are you sure you want to permanently delete this item?"
 msgstr "Är du säker på att du vill permanent ta bort detta objekt?"
@@ -2596,6 +2605,9 @@ msgstr "Fel:"
 #: includes/ImportExport.php
 msgid "Ignored importing redirect because a redirect with the same from URL already exists. URL:"
 msgstr "Ignorerade import av omdirigering eftersom en omdirigering med samma käll-URL redan finns. URL:"
+
+msgid "Redirect not imported: the database did not save it. URL: %1$s (repository result: %2$s)"
+msgstr "Omdirigering importerades inte: databasen sparade den inte. URL: %1$s (resultat från databasen: %2$s)"
 
 #: includes/ImportExport.php
 msgid "Unrecognized destination type while importing file. Destination:"
@@ -4189,6 +4201,9 @@ msgstr "Fel: Relativa regex-destinationer stöder numrerade fångstgrupper skriv
 msgid "Error: Regex destination references $%1$d, but the source pattern defines %2$d capture group(s)."
 msgstr "Fel: Regex-destinationen refererar till $%1$d, men källmönstret definierar %2$d fångstgrupp(er)."
 
+msgid "Error: Regex destination puts a capture token ($1, $2, ...) inside the scheme, host or port, so every redirect would be refused. Write the host literally and use tokens only in the path, query or fragment, for example https://example.com/$1."
+msgstr "Fel: Regex-destinationen placerar en fångstmarkör ($1, $2, ...) i schemat, värdnamnet eller porten, så varje omdirigering skulle avvisas. Skriv värdnamnet bokstavligen och använd markörer bara i sökvägen, frågesträngen eller fragmentet, till exempel https://example.com/$1."
+
 msgid "Could not load chart data. Reload this page and try again."
 msgstr "Det gick inte att ladda diagramdata. Ladda om sidan och försök igen."
 
@@ -4261,6 +4276,9 @@ msgstr "Det gick inte att skicka rapporten. Försök igen senare."
 msgid "Could not load the migration tool configuration. Reload this page and try again."
 msgstr "Det gick inte att ladda konfigurationen för migreringsverktyget. Ladda om sidan och försök igen."
 
+msgid "Could not load trend data."
+msgstr "Kunde inte ladda trenddata."
+
 msgid "No suggested match was scored for this URL"
 msgstr "Ingen föreslagen träff poängsattes för den här URL:en"
 
@@ -4304,3 +4322,239 @@ msgid "Note: %1$s condition was not saved. A redirect may have at most %2$s cond
 msgid_plural "Note: %1$s conditions were not saved. A redirect may have at most %2$s conditions."
 msgstr[0] "Obs: %1$s villkor sparades inte. En omdirigering får ha högst %2$s villkor."
 msgstr[1] "Obs: %1$s villkor sparades inte. En omdirigering får ha högst %2$s villkor."
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:296
+msgid "The Hits and Last Used columns on the Page Redirects screen have been out of date for at least %d hour(s). 404 Solution has not been able to finish rebuilding its hit-count summary in that time."
+msgstr "Kolumnerna Träffar och Senast använd på skärmen Sidomdirigeringar har varit inaktuella i minst %d timme/timmar. 404 Solution har inte kunnat slutföra återuppbyggnaden av sin träffsammanfattning under den tiden."
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:322
+msgid "This site's WP-Cron is not running the plugin's scheduled rebuild. If DISABLE_WP_CRON is set in wp-config.php, either remove it or configure a system cron job that requests wp-cron.php periodically. In the meantime 404 Solution retries the rebuild in the background after an admin page has finished loading."
+msgstr "Den här webbplatsens WP-Cron kör inte pluginets schemalagda återuppbyggnad. Om DISABLE_WP_CRON är inställt i wp-config.php, ta antingen bort det eller konfigurera ett systemcronjobb som begär wp-cron.php regelbundet. Under tiden försöker 404 Solution bygga upp på nytt i bakgrunden efter att en adminsida har laddats färdigt."
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:326
+msgid "The scheduled rebuild is being picked up but is not completing. Enable debug logging on the 404 Solution Options screen and check the log for the reason the rebuild stopped."
+msgstr "Den schemalagda återuppbyggnaden plockas upp men slutförs inte. Aktivera felsökningsloggning på 404 Solutions inställningsskärm och kontrollera loggen för att ta reda på varför återuppbyggnaden stoppades."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:51
+msgid "WordPress core"
+msgstr "WordPress-kärnan"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:52
+msgid "Before 404 Solution loaded (WordPress start-up, drop-ins, must-use plugins)"
+msgstr "Innan 404 Solution laddades (WordPress-uppstart, drop-in-filer, obligatoriska plugins)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:53
+msgid "Main query (WordPress core and query filters)"
+msgstr "Huvudfrågan (WordPress-kärnan och frågefilter)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:54
+msgid "Page output (templates and content filters)"
+msgstr "Sidutdata (mallar och innehållsfilter)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:55
+msgid "Other components"
+msgstr "Övriga komponenter"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:56
+msgid "Unattributed"
+msgstr "Ej tillskrivet"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:64
+msgid "Theme: %s"
+msgstr "Tema: %s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:66
+msgid "Must-use plugin: %s"
+msgstr "Obligatoriskt plugin: %s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:68
+msgid "Drop-in: %s"
+msgstr "Drop-in-fil: %s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:70
+msgid "%s action (all callbacks, not timed one by one)"
+msgstr "Åtgärden %s (alla callbacks tillsammans, inte tidtagna var för sig)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:72
+msgid "Loading plugins"
+msgstr "Laddar plugins"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:72
+msgid "From the %s action to the next"
+msgstr "Från åtgärden %s till nästa"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:74
+msgid "Other code"
+msgstr "Övrig kod"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:125
+msgid "PHP stopped this request at its %1$d second time limit while it was running %2$s."
+msgstr "PHP stoppade den här förfrågan vid tidsgränsen på %1$d sekunder medan den körde %2$s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:127
+msgid "PHP stopped this request at its time limit while it was running %s."
+msgstr "PHP stoppade den här förfrågan vid tidsgränsen medan den körde %s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:130
+msgid "%s had already passed before 404 Solution loaded."
+msgstr "%s hade redan gått innan 404 Solution laddades."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:137
+msgid "404 Solution itself used %1$s of the request's %2$s."
+msgstr "404 Solution använde själv %1$s av förfrågans %2$s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:140
+msgid "404 Solution's own measured time: %1$s of the request's %2$s (its callbacks inside the action totals are not split out)."
+msgstr "404 Solutions egen uppmätta tid: %1$s av förfrågans %2$s (dess callbacks inom åtgärdernas summor redovisas inte separat)."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:160
+msgid "Running when PHP stopped the request: %1$s (%2$s) on the %3$s action, %4$s so far."
+msgstr "Kördes när PHP stoppade förfrågan: %1$s (%2$s) på åtgärden %3$s, %4$s hittills."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:162
+msgid "Slow callback: %1$s (%2$s) on the %3$s action, %4$s."
+msgstr "Långsam callback: %1$s (%2$s) på åtgärden %3$s, %4$s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:166
+msgid "Seen on this site in the last day, while 404 Solution timed callbacks: %1$s (%2$s) on the %3$s action took %4$s."
+msgstr "Sett på den här webbplatsen under det senaste dygnet, medan 404 Solution tog tid på callbacks: %1$s (%2$s) på åtgärden %3$s tog %4$s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:170
+msgid "CPU time after 404 Solution loaded: %1$s of %2$s wall-clock time."
+msgstr "CPU-tid efter att 404 Solution laddades: %1$s av %2$s verklig tid."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:186
+msgid "To name the slow callback, 404 Solution now times each callback on 1 in %1$d requests for the next %2$d minutes; what it finds appears on the 404 Solution admin screen."
+msgstr "För att hitta den långsamma callbacken tar 404 Solution nu tid på varje callback i 1 av %1$d förfrågningar under de kommande %2$d minuterna; resultatet visas på administrationssidan för 404 Solution."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:190
+msgid "Measured on this request: how long each plugin took to load, and each callback on the main WordPress actions (plugins_loaded, init, wp_loaded, template_redirect, admin_init and others). Time in filters and in code between those actions is shown as a window or as unattributed. Times are wall-clock seconds."
+msgstr "Uppmätt för den här förfrågan: hur lång tid varje plugin tog att ladda, och varje callback på de viktigaste WordPress-åtgärderna (plugins_loaded, init, wp_loaded, template_redirect, admin_init med flera). Tid i filter och i kod mellan dessa åtgärder visas som ett intervall eller som ej tillskriven. Tiderna anges i sekunder verklig tid."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:192
+msgid "Measured on this request: how long each plugin took to load, the total of each main WordPress action, and each callback on the actions that ran after the request became slow. Times are wall-clock seconds."
+msgstr "Uppmätt för den här förfrågan: hur lång tid varje plugin tog att ladda, summan för varje viktig WordPress-åtgärd och varje callback på de åtgärder som kördes efter att förfrågan blev långsam. Tiderna anges i sekunder verklig tid."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:195
+msgid "Measured on this request: how long each plugin took to load, and the total of each main WordPress action. Callbacks are not timed one by one on normal requests, to keep the site fast. Times are wall-clock seconds."
+msgstr "Uppmätt för den här förfrågan: hur lång tid varje plugin tog att ladda och summan för varje viktig WordPress-åtgärd. Callbacks tidtas inte var för sig vid vanliga förfrågningar, för att hålla webbplatsen snabb. Tiderna anges i sekunder verklig tid."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:198
+msgid "Per-plugin timing is switched off on this site, so only WordPress phases are shown. Times are wall-clock seconds."
+msgstr "Tidtagning per plugin är avstängd på den här webbplatsen, så endast WordPress-faser visas. Tiderna anges i sekunder verklig tid."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:251
+msgid "Component"
+msgstr "Komponent"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:252
+msgid "Seconds"
+msgstr "Sekunder"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:267
+msgid "The 404 Solution admin screen shows where the time went."
+msgstr "Administrationssidan för 404 Solution visar vart tiden tog vägen."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:306
+msgid "%1$s (%2$s) on the %3$s action: %4$s"
+msgstr "%1$s (%2$s) på åtgärden %3$s: %4$s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:324
+msgid "Where this request's time went"
+msgstr "Vart den här förfrågans tid tog vägen"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:327
+msgid "Where this request's time went (PHP time limit: %d s)"
+msgstr "Vart den här förfrågans tid tog vägen (PHP-tidsgräns: %d s)"
+
+#: includes/diagnostics/TimeLimitReportView.php:105
+msgid "(CPU %s)"
+msgstr "(CPU-tid: %s)"
+
+#: includes/diagnostics/TimeLimitReportView.php:121
+msgid "The dark line marks PHP's %d second time limit. Depending on the server, PHP counts either CPU time or wall-clock time against it (Linux counts CPU time, so a request waiting on the network or the database can run longer than the limit in wall-clock time)."
+msgstr "Den mörka linjen markerar PHP:s tidsgräns på %d sekunder. Beroende på servern räknar PHP antingen CPU-tid eller verklig tid mot den (Linux räknar CPU-tid, så en förfrågan som väntar på nätverket eller databasen kan pågå längre än gränsen i verklig tid)."
+
+#: includes/diagnostics/TimeLimitReportView.php:122
+msgid "PHP did not report its time limit for this request."
+msgstr "PHP rapporterade inte sin tidsgräns för den här förfrågan."
+
+#: includes/diagnostics/TimeLimitReportView.php:126
+msgid "The last request PHP stopped at its time limit while 404 Solution's code was running: %1$s, %2$s"
+msgstr "Den senaste förfrågan som PHP stoppade vid tidsgränsen medan 404 Solutions kod kördes: %1$s, %2$s"
+
+#: includes/diagnostics/TimeLimitReportView.php:128
+msgid "Where the request's time went, by WordPress lifecycle window"
+msgstr "Vart förfrågans tid tog vägen, per fönster i WordPress livscykel"
+
+#: includes/diagnostics/TimeLimitReportView.php:153
+msgid "404 Solution: PHP stopped a request on this site at its time limit while 404 Solution's code was running. 404 Solution recorded which components used that request's time."
+msgstr "404 Solution: PHP stoppade en förfrågan på den här webbplatsen vid tidsgränsen medan 404 Solutions kod kördes. 404 Solution registrerade vilka komponenter som använde förfrågans tid."
+
+#: includes/diagnostics/TimeLimitReportView.php:155
+msgid "See where the time went"
+msgstr "Se vart tiden tog vägen"
+
+#: includes/diagnostics/TimeLimitReportView.php:174
+msgid "Slow callbacks found while 404 Solution timed each callback"
+msgstr "Långsamma callbacks som hittades när 404 Solution tog tid på varje callback"
+
+#: includes/diagnostics/TimeLimitReportView.php:198
+msgid "Recent time-limit deaths"
+msgstr "Senaste avbrott vid tidsgränsen"
+
+#: includes/diagnostics/TimeLimitReportView.php:199
+msgid "When"
+msgstr "När"
+
+#: includes/diagnostics/TimeLimitReportView.php:200
+msgid "Path"
+msgstr "Sökväg"
+
+#: includes/diagnostics/TimeLimitReportView.php:201
+msgid "Wall time"
+msgstr "Verklig tid"
+
+#: includes/diagnostics/TimeLimitReportView.php:202
+msgid "CPU time (after 404 Solution loaded)"
+msgstr "CPU-tid (efter att 404 Solution laddades)"
+
+#: includes/diagnostics/TimeLimitReportView.php:203
+msgid "Stopped in"
+msgstr "Stoppades i"
+
+#: includes/diagnostics/TimeLimitReportView.php:214
+msgid "Before 404 Solution loaded"
+msgstr "Innan 404 Solution laddades"
+
+#: includes/diagnostics/TimeLimitReportView.php:216
+msgid "plugins_loaded to init (theme setup)"
+msgstr "Från plugins_loaded till init (temainställning)"
+
+#: includes/diagnostics/TimeLimitReportView.php:217
+msgid "init to wp_loaded"
+msgstr "Från init till wp_loaded"
+
+#: includes/diagnostics/TimeLimitReportView.php:218
+msgid "wp_loaded to template_redirect (main query)"
+msgstr "Från wp_loaded till template_redirect (huvudfråga)"
+
+#: includes/diagnostics/TimeLimitReportView.php:219
+msgid "template_redirect to the end (page output)"
+msgstr "Från template_redirect till slutet (sidutdata)"
+
+#: includes/diagnostics/TimeLimitReportView.php:220
+msgid "admin_init to the end (admin screen)"
+msgstr "Från admin_init till slutet (administrationssida)"
+
+#: includes/diagnostics/TimeLimitReportView.php:221
+msgid "login_init to the end (login screen)"
+msgstr "Från login_init till slutet (inloggningssida)"
+
+#: includes/view/View_Tools.php:151
+msgid "Timed-out requests"
+msgstr "Förfrågningar som överskred tidsgränsen"
+
+#: includes/view/ShortcodeSuggestionsPresenter.php:260
+msgid "Show suggested pages"
+msgstr "Visa föreslagna sidor"

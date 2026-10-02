@@ -105,15 +105,16 @@ class ABJ_404_Solution_AdminLogsPageShell {
         $searchBox = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . '/../html/viewLogsForSearchBox.html');
         $redirectPageTitle = $this->shared->viewGetPostOrGetSanitize('redirect_to_data_field_title');
         $pageIDAndType = $this->shared->viewGetPostOrGetSanitize('redirect_to_data_field_id');
-        $searchBox = $this->f->str_replace('{redirect_to_label}', __('View logs for', '404-solution'), $searchBox);
-        $searchBox = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_EMPTY}', __('(Begin typing a URL)', '404-solution'), $searchBox);
-        $searchBox = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_PAGE}', __('(A page has been selected.)', '404-solution'), $searchBox);
-        $searchBox = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING}', __('(A custom string has been entered.)', '404-solution'), $searchBox);
-        $searchBox = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_URL}', __('(Please choose from the dropdown list instead of typing your own URL.)', '404-solution'), $searchBox);
-        $searchBox = $this->f->str_replace('{pageIDAndType}', esc_attr($pageIDAndType), $searchBox);
-        $searchBox = $this->f->str_replace('{redirectPageTitle}', esc_attr($redirectPageTitle), $searchBox);
-        $searchBox = $this->f->str_replace('{data-url}', 'admin-ajax.php?action=echoViewLogsFor&nonce=' . wp_create_nonce('abj404_ajax'), $searchBox);
-        $searchBox = $this->f->doNormalReplacements($searchBox);
+        $searchBox = $this->f->renderTemplate($searchBox, array(
+            '{redirect_to_label}' => __('View logs for', '404-solution'),
+            '{TOOLTIP_POPUP_EXPLANATION_EMPTY}' => __('(Begin typing a URL)', '404-solution'),
+            '{TOOLTIP_POPUP_EXPLANATION_PAGE}' => __('(A page has been selected.)', '404-solution'),
+            '{TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING}' => __('(A custom string has been entered.)', '404-solution'),
+            '{TOOLTIP_POPUP_EXPLANATION_URL}' => __('(Please choose from the dropdown list instead of typing your own URL.)', '404-solution'),
+            '{pageIDAndType}' => esc_attr($pageIDAndType),
+            '{redirectPageTitle}' => esc_attr($redirectPageTitle),
+            '{data-url}' => 'admin-ajax.php?action=echoViewLogsFor&nonce=' . wp_create_nonce('abj404_ajax'),
+        ));
 
         return $this->f->str_replace(
             array('{page_constant}', '{search_dropdown}'),

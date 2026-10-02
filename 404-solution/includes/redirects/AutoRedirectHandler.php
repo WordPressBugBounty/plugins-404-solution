@@ -54,16 +54,16 @@ class ABJ_404_Solution_AutoRedirectHandler {
         }
 
         $defaultRedirect = isset($options['default_redirect']) && is_scalar($options['default_redirect']) ? (string)$options['default_redirect'] : '';
-        $this->redirectsRepository->setupRedirect(ABJ_404_Solution_RedirectSpec::create(
-            $requestedURL,
-            (string)ABJ404_STATUS_AUTO,
-            $matchResult->getType(),
-            $matchResult->getId(),
-            $defaultRedirect,
-            0,
-            $matchResult->getEngineName(),
-            $matchResult->getScore()
-        ));
+        $this->redirectsRepository->setupRedirect(ABJ_404_Solution_RedirectSpec::fromArray(array(
+            'fromURL' => $requestedURL,
+            'status' => (string)ABJ404_STATUS_AUTO,
+            'type' => $matchResult->getType(),
+            'finalDest' => $matchResult->getId(),
+            'code' => $defaultRedirect,
+            'disabled' => 0,
+            'engine' => $matchResult->getEngineName(),
+            'score' => $matchResult->getScore(),
+        )));
 
         $resolvedLink = $this->resolveMatchLink($matchResult);
         $this->hitRecorder->record($requestedURL, $resolvedLink, $matchResult->getEngineName(), null, $trace->getSteps());

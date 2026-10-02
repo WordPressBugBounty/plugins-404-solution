@@ -32,22 +32,17 @@ class ABJ_404_Solution_RedirectEditFormPresenter {
      * @return string
      */
     public function buildRedirectToDropdownHtml(string $pageTitle, string $pageIDAndType): string {
-        $html = $this->readTemplate('addManualRedirectPageSearchDropdown.html');
-        $html = $this->functions->str_replace('{redirect_to_label}', __('Redirect to', '404-solution'), $html);
-        $html = $this->functions->str_replace('{TOOLTIP_POPUP_EXPLANATION_EMPTY}',
-                __('(Type a page name or an external URL)', '404-solution'), $html);
-        $html = $this->functions->str_replace('{TOOLTIP_POPUP_EXPLANATION_PAGE}',
-                __('(A page has been selected.)', '404-solution'), $html);
-        $html = $this->functions->str_replace('{TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING}',
-                __('(A custom string has been entered.)', '404-solution'), $html);
-        $html = $this->functions->str_replace('{TOOLTIP_POPUP_EXPLANATION_URL}',
-                __('(An external URL will be used.)', '404-solution'), $html);
-        $html = $this->functions->str_replace('{REDIRECT_TO_USER_FIELD_WARNING}', '', $html);
-        $html = $this->functions->str_replace('{redirectPageTitle}', esc_attr($pageTitle), $html);
-        $html = $this->functions->str_replace('{pageIDAndType}', esc_attr($pageIDAndType), $html);
-        $html = $this->functions->str_replace('{data-url}',
-                "admin-ajax.php?action=echoRedirectToPages&includeDefault404Page=true&includeSpecial=true&nonce=" . wp_create_nonce('abj404_ajax'), $html);
-        return $this->functions->doNormalReplacements($html);
+        return $this->functions->renderTemplate($this->readTemplate('addManualRedirectPageSearchDropdown.html'), array(
+            '{redirect_to_label}' => __('Redirect to', '404-solution'),
+            '{TOOLTIP_POPUP_EXPLANATION_EMPTY}' => __('(Type a page name or an external URL)', '404-solution'),
+            '{TOOLTIP_POPUP_EXPLANATION_PAGE}' => __('(A page has been selected.)', '404-solution'),
+            '{TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING}' => __('(A custom string has been entered.)', '404-solution'),
+            '{TOOLTIP_POPUP_EXPLANATION_URL}' => __('(An external URL will be used.)', '404-solution'),
+            '{REDIRECT_TO_USER_FIELD_WARNING}' => '',
+            '{redirectPageTitle}' => esc_attr($pageTitle),
+            '{pageIDAndType}' => esc_attr($pageIDAndType),
+            '{data-url}' => "admin-ajax.php?action=echoRedirectToPages&includeDefault404Page=true&includeSpecial=true&nonce=" . wp_create_nonce('abj404_ajax'),
+        ));
     }
 
     /**

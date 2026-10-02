@@ -90,7 +90,7 @@ class ABJ_404_Solution_RedirectsViewLiveResolver {
      * @param array<array-key, mixed> $row @param string $key @return int|null
      */
     private function intFieldOrNull(array $row, string $key): ?int {
-        return isset($row[$key]) && is_numeric($row[$key]) ? (int)$row[$key] : null;
+        return ABJ_404_Solution_ExactInteger::read($row[$key] ?? null, 0);
     }
 
     /**
@@ -335,17 +335,27 @@ class ABJ_404_Solution_RedirectsViewLiveResolver {
         // so the write-back of the other columns still succeeds (schema drift).
         $writeDestSortKey = $this->schemaReadiness->destSortKeyColumnPresent();
 
+        // The two string columns are bound, never spliced: the executor rewrites
+        // `{wp_...}` tokens across the statement text before it binds
+        // `query_params`, and dest_for_view is a post title, which can carry a
+        // token. Placeholders appear in statement order (every dest_for_view
+        // CASE, then every dest_sort_key CASE), so the values are collected in
+        // that order. The integer columns are (int)-cast and stay inline.
         $ids = array();
         $destCases = '';
         $destSortCases = '';
         $publishedCases = '';
         $logshitsCases = '';
         $lastUsedCases = '';
+        $destValues = array();
+        $destSortValues = array();
         foreach ($writeBacks as $wb) {
             $id = (int)$wb['id'];
             $ids[] = $id;
-            $destCases .= ' WHEN ' . $id . " THEN '" . esc_sql($wb['dest_for_view']) . "'";
-            $destSortCases .= ' WHEN ' . $id . " THEN '" . esc_sql($wb['dest_sort_key']) . "'";
+            $destCases .= ' WHEN ' . $id . ' THEN %s';
+            $destValues[] = $wb['dest_for_view'];
+            $destSortCases .= ' WHEN ' . $id . ' THEN %s';
+            $destSortValues[] = $wb['dest_sort_key'];
             $publishedCases .= ' WHEN ' . $id . ' THEN ' . (int)$wb['published_status'];
             $logshitsCases .= ' WHEN ' . $id . ' THEN ' . (int)$wb['logshits'];
             $lastUsedCases .= ' WHEN ' . $id . ' THEN '
@@ -360,11 +370,12 @@ class ABJ_404_Solution_RedirectsViewLiveResolver {
             . " logshits = CASE id" . $logshitsCases . " END,"
             . " last_used = CASE id" . $lastUsedCases . " END"
             . " WHERE id IN (" . $idList . ")";
+        $params = $writeDestSortKey ? array_merge($destValues, $destSortValues) : $destValues;
         // queryAndGetResults is the centralized error handler: a write failure on
         // a read-only/disk-full host is logged there as a warning and never
         // surfaced. The resolved values were already rendered, so a skipped
         // persist only costs a re-resolve on the next read.
-        $this->dbCore->queryAndGetResults($query);
+        $this->dbCore->queryAndGetResults($query, array('query_params' => $params));
     }
 
     /**
@@ -399,8 +410,12 @@ class ABJ_404_Solution_RedirectsViewLiveResolver {
         $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
         $map = array();
         foreach ($rows as $row) {
-            if (is_array($row) && isset($row[$keyColumn]) && is_numeric($row[$keyColumn])) {
-                $map[(int)$row[$keyColumn]] = $row;
+            if (!is_array($row)) {
+                continue;
+            }
+            $key = ABJ_404_Solution_ExactInteger::read($row[$keyColumn] ?? null, 0);
+            if ($key !== null) {
+                $map[$key] = $row;
             }
         }
         return $map;

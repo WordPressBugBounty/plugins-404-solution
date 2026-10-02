@@ -52,15 +52,17 @@ class ABJ_404_Solution_DatabaseUpgradeMultiSite extends ABJ_404_Solution_Databas
         $allSites = array();
         if (is_array($allSitesRaw)) {
             foreach ($allSitesRaw as $siteId) {
-                if (is_numeric($siteId)) {
-                    $allSites[] = (int)$siteId;
+                $siteIdInt = ABJ_404_Solution_ExactInteger::read($siteId, 1);
+                if ($siteIdInt !== null) {
+                    $allSites[] = $siteIdInt;
                 }
             }
         }
         $processedBlogIds = array();
         foreach ($processedBlogs as $blogId) {
-            if (is_numeric($blogId)) {
-                $processedBlogIds[] = (int)$blogId;
+            $blogIdInt = ABJ_404_Solution_ExactInteger::read($blogId, 1);
+            if ($blogIdInt !== null) {
+                $processedBlogIds[] = $blogIdInt;
             }
         }
         $remainingSites = array_diff($allSites, $processedBlogIds);

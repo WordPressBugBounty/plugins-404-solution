@@ -12,7 +12,7 @@ require_once dirname(__DIR__) . '/feedback/SupportLogExcerpt.php';
 class ABJ_404_Solution_Logging {
 
     /** If an error happens then we will also output these.
-     * @var array<int, string>
+     * @var array<int, string|callable(): string>
      */
     private static $storedDebugMessages = array();
 
@@ -182,7 +182,7 @@ class ABJ_404_Solution_Logging {
     private function getDeveloperLogMailer(): ABJ_404_Solution_DeveloperLogMailer {
         if ($this->developerLogMailer === null) {
             $this->developerLogMailer = new ABJ_404_Solution_DeveloperLogMailer(
-                $this->getBodyFormatter(),
+                new ABJ_404_Solution_ErrorEmailBodyFormatter(),
                 $this->getDebugLogArchiveBuilder(),
                 array($this, 'debugMessage'),
                 array($this, 'errorMessage')
@@ -258,6 +258,12 @@ class ABJ_404_Solution_Logging {
         $this->getMessageWriter()->debugMessage($message, $e);
     }
 
+    /** Debug breadcrumb that is expensive to build; see LoggingMessageWriter::debugMessageLazy().
+     * @param callable(): string $build Returns the message text. */
+    function debugMessageLazy(callable $build): void {
+        $this->getMessageWriter()->debugMessageLazy($build);
+    }
+
     /** Send a message to the log.
      * This goes to a file and is used by every other class so it goes here.
      * @param string $message
@@ -273,6 +279,13 @@ class ABJ_404_Solution_Logging {
      */
     function warn(string $message): void {
         $this->getMessageWriter()->warn($message);
+    }
+
+    /** Durable WARN for a catch that degrades and carries on. See LoggingMessageWriter::describeCaught().
+     * @param string $context What was attempted and what the code did instead.
+     * @param \Throwable $e The caught failure. */
+    function warnCaught(string $context, \Throwable $e): void {
+        $this->warn(ABJ_404_Solution_LoggingMessageWriter::describeCaught($context, $e));
     }
 
     /** Always send a message to the error_log.
@@ -341,22 +354,6 @@ class ABJ_404_Solution_Logging {
     function drainCrashBeaconIfNecessary(): bool {
         return $this->getFeedbackDispatcher()->drainCrashBeaconIfNecessary();
     }
-
-    /**
-     * Lazily-constructed body-formatter collaborator. Pure presentation, no
-     * dependencies, kept as a field only so it isn't reallocated every send.
-     *
-     * @return ABJ_404_Solution_ErrorEmailBodyFormatter
-     */
-    private function getBodyFormatter(): ABJ_404_Solution_ErrorEmailBodyFormatter {
-        if ($this->bodyFormatter === null) {
-            $this->bodyFormatter = new ABJ_404_Solution_ErrorEmailBodyFormatter();
-        }
-        return $this->bodyFormatter;
-    }
-
-    /** @var ABJ_404_Solution_ErrorEmailBodyFormatter|null */
-    private $bodyFormatter = null;
 
     /**
      * Send the weekly status heartbeat when its deterministic cadence is due.

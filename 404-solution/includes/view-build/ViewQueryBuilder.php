@@ -13,6 +13,13 @@ if (!defined('ABSPATH')) {
  * that used to live here was removed when the denorm chain dropped the
  * wp_abj404_view_done table (Step 3e-D / i467); admin reads now serve straight
  * off the redirects row.
+ *
+ * The single-table read and count are SqlFragments: the search text and the
+ * post-type slugs it matches are BOUND (`%s` placeholders plus params), never
+ * spliced into the SQL text, because the query executor rewrites `{wp_...}` tokens
+ * across the whole statement before it binds `query_params`.
+ *
+ * @phpstan-import-type SqlFragment from ABJ_404_Solution_DatabaseQueryBuilderInterface
  */
 class ABJ_404_Solution_ViewQueryBuilder {
 
@@ -78,6 +85,8 @@ class ABJ_404_Solution_ViewQueryBuilder {
             . "from {wp_abj404_redirects}\n "
             . "  LEFT OUTER JOIN {wp_posts} \n "
             . "    on {wp_abj404_redirects}.final_dest = {wp_posts}.id \n "
+            // final_dest is a post id only for a post redirect; a term id otherwise.
+            . "    and {wp_abj404_redirects}.type = " . ABJ404_TYPE_POST . " \n "
             . "where status in (" . ABJ404_STATUS_REGEX . ") \n "
             . "     and disabled = 0\n"
             . "     and {wp_abj404_redirects}.id > " . $afterId . "\n"
@@ -130,7 +139,10 @@ class ABJ_404_Solution_ViewQueryBuilder {
      */
     public function readRedirectsSingleTable(string $sub, array $tableOptions, bool $derivedPresent = true): array {
         $query = $this->buildRedirectsSingleTableReadQuery($sub, $tableOptions, $derivedPresent);
-        $result = $this->dbCore->queryAndGetResults($query, $this->resolveReadTimeoutOptions($tableOptions));
+        $result = $this->dbCore->queryAndGetResults(
+            $query['sql'],
+            array_merge($this->resolveReadTimeoutOptions($tableOptions), array('query_params' => $query['params']))
+        );
         $lastErrorRaw = $result['last_error'] ?? '';
         $lastError = is_scalar($lastErrorRaw) ? trim((string)$lastErrorRaw) : '';
         if (!empty($result['timed_out']) || $lastError !== '') {
@@ -149,7 +161,7 @@ class ABJ_404_Solution_ViewQueryBuilder {
      * the optional per-request timeout, with a level-9-safe numeric guard.
      *
      * @param array<string, mixed> $tableOptions
-     * @return array<string, int>
+     * @return array<string, mixed>
      */
     private function resolveReadTimeoutOptions(array $tableOptions): array {
         $raw = $tableOptions['_abj404_query_timeout'] ?? null;
@@ -171,7 +183,10 @@ class ABJ_404_Solution_ViewQueryBuilder {
      */
     public function countRedirectsSingleTable(string $sub, array $tableOptions, bool $derivedPresent = true): int {
         $query = $this->buildRedirectsSingleTableCountQuery($sub, $tableOptions, $derivedPresent);
-        $result = $this->dbCore->queryAndGetResults($query, $this->resolveReadTimeoutOptions($tableOptions));
+        $result = $this->dbCore->queryAndGetResults(
+            $query['sql'],
+            array_merge($this->resolveReadTimeoutOptions($tableOptions), array('query_params' => $query['params']))
+        );
         $lastErrorRaw = $result['last_error'] ?? '';
         $lastError = is_scalar($lastErrorRaw) ? trim((string)$lastErrorRaw) : '';
         if (!empty($result['timed_out']) || $lastError !== '') {
@@ -199,9 +214,9 @@ class ABJ_404_Solution_ViewQueryBuilder {
      * @param string $sub
      * @param array<string, mixed> $tableOptions
      * @param bool $derivedPresent
-     * @return string
+     * @return SqlFragment The statement text and the values to bind, in placeholder order.
      */
-    public function buildRedirectsSingleTableReadQuery(string $sub, array $tableOptions, bool $derivedPresent = true): string {
+    public function buildRedirectsSingleTableReadQuery(string $sub, array $tableOptions, bool $derivedPresent = true): array {
         $effectiveSort = $this->resolveEffectiveSort($tableOptions, $derivedPresent);
         $orderBy = $effectiveSort['orderby'];
         $order = $effectiveSort['order'];
@@ -228,24 +243,32 @@ class ABJ_404_Solution_ViewQueryBuilder {
         // instead of sorting the whole active-redirect set. See
         // RedirectsDerivedSortExplainPlanTest. id is unique, so the ordering is
         // still fully deterministic for pagination.
-        return "SELECT id, url, status, type, final_dest, code, timestamp, engine, score"
-            . $derivedProjection . "\n"
-            . "FROM {wp_abj404_redirects}\n"
-            . $this->buildSingleTableWhere($sub, $tableOptions, $derivedPresent)
-            . "ORDER BY " . $orderBy . " " . $order . ", id " . $order . "\n"
-            . "LIMIT " . $limitStart . ", " . $perpage;
+        $where = $this->buildSingleTableWhere($sub, $tableOptions, $derivedPresent);
+        return array(
+            'sql' => "SELECT id, url, status, type, final_dest, code, timestamp, engine, score"
+                . $derivedProjection . "\n"
+                . "FROM {wp_abj404_redirects}\n"
+                . $where['sql']
+                . "ORDER BY " . $orderBy . " " . $order . ", id " . $order . "\n"
+                . "LIMIT " . $limitStart . ", " . $perpage,
+            'params' => $where['params'],
+        );
     }
 
     /**
      * @param string $sub
      * @param array<string, mixed> $tableOptions
      * @param bool $derivedPresent
-     * @return string
+     * @return SqlFragment The statement text and the values to bind, in placeholder order.
      */
-    public function buildRedirectsSingleTableCountQuery(string $sub, array $tableOptions, bool $derivedPresent = true): string {
-        return "SELECT COUNT(*) AS cnt\n"
-            . "FROM {wp_abj404_redirects}\n"
-            . $this->buildSingleTableWhere($sub, $tableOptions, $derivedPresent);
+    public function buildRedirectsSingleTableCountQuery(string $sub, array $tableOptions, bool $derivedPresent = true): array {
+        $where = $this->buildSingleTableWhere($sub, $tableOptions, $derivedPresent);
+        return array(
+            'sql' => "SELECT COUNT(*) AS cnt\n"
+                . "FROM {wp_abj404_redirects}\n"
+                . $where['sql'],
+            'params' => $where['params'],
+        );
     }
 
     /**
@@ -259,18 +282,21 @@ class ABJ_404_Solution_ViewQueryBuilder {
      * @param string $sub
      * @param array<string, mixed> $tableOptions
      * @param bool $derivedPresent
-     * @return string
+     * @return SqlFragment
      */
-    private function buildSingleTableWhere(string $sub, array $tableOptions, bool $derivedPresent = true): string {
+    private function buildSingleTableWhere(string $sub, array $tableOptions, bool $derivedPresent = true): array {
         $statusTypes = $this->policy->resolveStatusTypeList($sub, $tableOptions);
         $trashClause = 'AND disabled = ' . intval($this->policy->resolveTrashValue($tableOptions));
         $scoreRangeClause = $this->policy->buildScoreRangeClause($tableOptions, '');
         $filterTextClause = $this->policy->buildFilterTextClause($sub, $tableOptions, true, $derivedPresent);
 
-        return "WHERE status IN (" . $statusTypes . ")\n"
-            . " " . $trashClause . "\n"
-            . " " . $scoreRangeClause . "\n"
-            . " " . $filterTextClause . "\n";
+        return array(
+            'sql' => "WHERE status IN (" . $statusTypes . ")\n"
+                . " " . $trashClause . "\n"
+                . " " . $scoreRangeClause . "\n"
+                . " " . $filterTextClause['sql'] . "\n",
+            'params' => $filterTextClause['params'],
+        );
     }
 
     /**

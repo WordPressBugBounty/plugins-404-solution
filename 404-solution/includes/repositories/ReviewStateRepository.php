@@ -117,7 +117,7 @@ class ABJ_404_Solution_ReviewStateRepository {
      */
     public function getReminderTimestamp(): int {
         $remindLater = get_user_meta(get_current_user_id(), self::META_REMIND_LATER, true);
-        return is_numeric($remindLater) ? (int) $remindLater : 0;
+        return ABJ_404_Solution_ExactInteger::readOr($remindLater, 0, 0);
     }
 
     /**
@@ -133,7 +133,7 @@ class ABJ_404_Solution_ReviewStateRepository {
      */
     public function getInstalledTime(): int {
         $installedTimeRaw = get_option(self::OPTION_INSTALLED_TIME);
-        return is_numeric($installedTimeRaw) ? (int) $installedTimeRaw : 0;
+        return ABJ_404_Solution_ExactInteger::readOr($installedTimeRaw, 0, 0);
     }
 
     /**

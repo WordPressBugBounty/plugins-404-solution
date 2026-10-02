@@ -100,7 +100,7 @@ class ABJ_404_Solution_Ajax_SearchFeedback {
         $callback = is_object($service) ? array($service, 'strlen') : null;
         if (is_callable($callback)) {
             $result = call_user_func($callback, $value);
-            return is_numeric($result) ? intval($result) : strlen($value);
+            return ABJ_404_Solution_ExactInteger::readOr($result, 0, strlen($value));
         }
         return strlen($value);
     }

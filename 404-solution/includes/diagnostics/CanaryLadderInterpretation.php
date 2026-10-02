@@ -103,7 +103,7 @@ final class ABJ_404_Solution_CanaryLadderInterpretation {
         $compressOn = $entry($observations, ABJ_404_Solution_CanaryLadderStep::COMPRESS_ON);
         $compressOff = $entry($observations, ABJ_404_Solution_CanaryLadderStep::COMPRESS_OFF);
         $stream = $entry($observations, ABJ_404_Solution_CanaryLadderStep::STREAM);
-        $streamGapMs = isset($stream['gapMs']) && is_numeric($stream['gapMs']) ? (int)$stream['gapMs'] : 0;
+        $streamGapMs = ABJ_404_Solution_ExactInteger::readOr($stream['gapMs'] ?? null, 0, 0);
         $concurrent = $entry($observations, ABJ_404_Solution_CanaryLadderStep::CONCURRENT_CONTROL);
         $controlEvidence = self::samePhaseControlEvidence($concurrent, $realRequestFailed);
         $samePhaseControlFailed = $controlEvidence === self::CONTROL_EVIDENCE_FAILED;
@@ -254,8 +254,8 @@ final class ABJ_404_Solution_CanaryLadderInterpretation {
             if (!empty($baseline['ok'])) {
                 $okCount++;
             }
-            if (isset($baseline['ms']) && is_numeric($baseline['ms'])) {
-                $ms = (int)$baseline['ms'];
+            $ms = ABJ_404_Solution_ExactInteger::read($baseline['ms'] ?? null, 0);
+            if ($ms !== null) {
                 if ($firstMs === null) {
                     $firstMs = $ms;
                 }

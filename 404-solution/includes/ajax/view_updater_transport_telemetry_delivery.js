@@ -49,9 +49,10 @@
      * detail and response headers before the event timeline itself, which is
      * dropped last of the optional fields. Identity/outcome fields (id, rid,
      * part, attempt, subpage, outcome, durationMs, rs, status, bytes) and the
-     * bounded parsererror body shape are never in this list -- which attempt
-     * this was and how it ended matter more than any detail field, per the
-     * docstring on serializeBounded().
+     * bounded parsererror body shape and text excerpt are never in this list
+     * -- which attempt this was, how it ended, and what a non-JSON body
+     * actually said matter more than any detail field, per the docstring on
+     * serializeBounded().
      */
     var TRIM_FIELD_ORDER = [
         ['assets'],
@@ -106,8 +107,8 @@
 
     /**
      * Last-resort record: the scalar identity/outcome fields plus the bounded
-     * parsererror body shape. Reached only if dropping every field in
-     * TRIM_FIELD_ORDER still left the record over budget.
+     * parsererror body shape and its text excerpt. Reached only if dropping
+     * every field in TRIM_FIELD_ORDER still left the record over budget.
      *
      * @param {object} record
      * @returns {string}
@@ -127,6 +128,7 @@
             status: record.status,
             bytes: record.bytes,
             bodyShape: record.bodyShape,
+            bodyExcerpt: record.bodyExcerpt,
             fieldsDropped: 'all-but-identity'
         });
     }

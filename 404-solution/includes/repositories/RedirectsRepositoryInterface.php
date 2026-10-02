@@ -25,11 +25,12 @@ interface ABJ_404_Solution_RedirectsRepositoryInterface {
 
     /**
      * Fetch manual and regex redirects that are eligible for server-format
-     * export, with destination URLs resolved into the serialized read shape.
+     * export, as stored. Where each one points is decided by
+     * ABJ_404_Solution_RedirectExportDestination, not here.
      *
-     * @return array<int, array{source: string, dest: string, code: int, is_regex: bool}>
+     * @return array<int, array{source: string, code: int, type: int, final_dest: string, cached_url: string, is_regex: bool}>
      */
-    public function getExportableRedirects(): array;
+    public function getExportableRedirectRows(): array;
 
     /**
      * Store a redirect for future use.

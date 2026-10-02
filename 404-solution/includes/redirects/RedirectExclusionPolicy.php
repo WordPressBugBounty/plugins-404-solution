@@ -29,7 +29,7 @@ class ABJ_404_Solution_RedirectExclusionPolicy {
         $type = $result->getType();
         $id = $result->getId();
 
-        $typeInt = is_numeric($type) ? (int)$type : 0;
+        $typeInt = ABJ_404_Solution_ExactInteger::readOr($type, 0, 0);
         $typePost = (int)ABJ404_TYPE_POST;
         $typeCat = (int)ABJ404_TYPE_CAT;
         $typeTag = (int)ABJ404_TYPE_TAG;

@@ -128,7 +128,8 @@ class ABJ_404_Solution_LogsWriter {
                 $this->requestedUrlColumnMetadata->warnLogsCharsetMismatchOnce($logTableName, $requestedUrlCharset);
             }
         } catch (Exception $e) {
-            $this->logger->debugMessage(__FUNCTION__ . " error. Issue getting character set for table: " . $logTableName . ", column: requested_url. Error message: " . $e->getMessage());
+            $this->logger->warnCaught(__FUNCTION__ . ' could not read the character set for table ' . $logTableName
+                . ', column requested_url; logging the URL as-is.', $e);
         }
 
         $options = abj_service('options_repository')->getOptions(true);

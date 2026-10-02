@@ -24,15 +24,19 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 		}
 		// @utf8-audit: opt-out — $wpdb->dbname is set by WordPress at
 		// bootstrap from wp-config.php; never user input.
-		$dbNameEscaped = esc_sql($dbNameRaw);
-		$dbName = is_array($dbNameEscaped) ? '' : $dbNameEscaped;
 
-		// Find all abj404 tables in the database, grouped by prefix.
+		// Find all abj404 tables in the database, grouped by prefix. Both values
+		// are bound, not spliced: the executor rewrites `{wp_...}` tokens over
+		// the statement text before it binds query_params. The pattern's
+		// backslash keeps the underscore literal in LIKE.
 		$query = "SELECT table_name
 			FROM information_schema.tables
-			WHERE table_schema = '{$dbName}'
-			AND LOWER(table_name) LIKE '%abj404\\_%'";
-		$results = $this->dbCore->queryAndGetResults($query);
+			WHERE table_schema = %s
+			AND LOWER(table_name) LIKE %s";
+		$results = $this->dbCore->queryAndGetResults(
+			$query,
+			array('query_params' => array($dbNameRaw, '%abj404\\_%'))
+		);
 
 		if (!is_array($results['rows']) || empty($results['rows'])) {
 			return;
@@ -175,7 +179,7 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 			if (is_array($result['rows']) && !empty($result['rows'])) {
 				$row = $result['rows'][0];
 				$countValue = is_array($row) ? ($row['cnt'] ?? $row['CNT'] ?? 0) : 0;
-				$cnt = is_numeric($countValue) ? (int)$countValue : 0;
+				$cnt = ABJ_404_Solution_ExactInteger::readOr($countValue, 0, 0);
 				$total += $cnt;
 			}
 		}
@@ -243,8 +247,8 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 		$matches = 0;
 		foreach ($row as $key => $value) {
 			$lk = strtolower((string)$key);
-			if ($lk === 'total' && is_numeric($value)) { $total = (int)$value; }
-			if ($lk === 'matches' && is_numeric($value)) { $matches = (int)$value; }
+			if ($lk === 'total') { $total = ABJ_404_Solution_ExactInteger::readOr($value, 0, 0); }
+			if ($lk === 'matches') { $matches = ABJ_404_Solution_ExactInteger::readOr($value, 0, 0); }
 		}
 
 		if ($total === 0) {
@@ -272,13 +276,21 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 		global $wpdb;
 		$redirectsTable = $oldPrefix . 'abj404_redirects';
 		$postsTable = ($wpdb->prefix ?? 'wp_') . 'posts';
+		$termsTable = ($wpdb->prefix ?? 'wp_') . 'terms';
 
+		// final_dest is a wp_posts.ID for a post redirect (type 1) and a
+		// wp_terms.term_id for a category or tag redirect (types 2, 3). The id
+		// spaces overlap, so each type is checked against its own table.
 		$query = "SELECT COUNT(*) AS total,
-				SUM(CASE WHEN p.ID IS NOT NULL THEN 1 ELSE 0 END) AS matches
+				SUM(CASE WHEN p.ID IS NOT NULL OR t.term_id IS NOT NULL THEN 1 ELSE 0 END) AS matches
 			FROM `{$redirectsTable}` r
 			LEFT JOIN `{$postsTable}` p
-				ON p.ID = CAST(r.final_dest AS UNSIGNED)
+				ON r.type = 1
+				AND p.ID = CAST(r.final_dest AS UNSIGNED)
 				AND p.post_status IN ('publish', 'draft', 'private')
+			LEFT JOIN `{$termsTable}` t
+				ON r.type IN (2, 3)
+				AND t.term_id = CAST(r.final_dest AS UNSIGNED)
 			WHERE r.type IN (1, 2, 3)";
 
 		$result = $this->dbCore->queryAndGetResults($query,
@@ -293,8 +305,8 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 		$matches = 0;
 		foreach ($row as $key => $value) {
 			$lk = strtolower((string)$key);
-			if ($lk === 'total' && is_numeric($value)) { $total = (int)$value; }
-			if ($lk === 'matches' && is_numeric($value)) { $matches = (int)$value; }
+			if ($lk === 'total') { $total = ABJ_404_Solution_ExactInteger::readOr($value, 0, 0); }
+			if ($lk === 'matches') { $matches = ABJ_404_Solution_ExactInteger::readOr($value, 0, 0); }
 		}
 
 		if ($total === 0) {
@@ -304,7 +316,7 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 		$matchPct = ($matches / max(1, $total)) * 100;
 		$this->logger->infoMessage(
 			"Redirects fallback ownership verification for prefix '{$oldPrefix}': "
-			. "{$matches}/{$total} type 1/2/3 redirects point to existing posts ({$matchPct}%)"
+			. "{$matches}/{$total} type 1/2/3 redirects point to existing posts or terms ({$matchPct}%)"
 		);
 
 		return $matchPct >= 80;
@@ -343,7 +355,7 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 			}
 			$row = $countResult['rows'][0];
 			$countValue = is_array($row) ? ($row['cnt'] ?? $row['CNT'] ?? 0) : 0;
-			$oldCount = is_numeric($countValue) ? (int)$countValue : 0;
+			$oldCount = ABJ_404_Solution_ExactInteger::readOr($countValue, 0, 0);
 			if ($oldCount === 0) {
 				continue;
 			}
@@ -379,7 +391,7 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 			$affectedRows = 0;
 			if (is_array($insertResult) && isset($insertResult['rows_affected'])) {
 				$rawAffected = $insertResult['rows_affected'];
-				$affectedRows = is_numeric($rawAffected) ? (int)$rawAffected : 0;
+				$affectedRows = ABJ_404_Solution_ExactInteger::readOr($rawAffected, 0, 0);
 			}
 
 			if ($affectedRows > 0) {

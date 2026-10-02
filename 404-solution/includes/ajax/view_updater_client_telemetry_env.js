@@ -132,6 +132,42 @@
                 ajaxTransportsObserved: -1, registrationScope: 'unavailable' };
     }
 
+    /**
+     * @param {*} candidate @returns {string} native|wrapped|missing|unreadable
+     */
+    function functionState(candidate) {
+        if (typeof candidate !== 'function') {
+            return 'missing';
+        }
+        try {
+            return /\[native code\]/.test(Function.prototype.toString.call(candidate))
+                ? 'native' : 'wrapped';
+        } catch (sourceError) {
+            warn('could not fingerprint a page transport function', sourceError);
+            return 'unreadable';
+        }
+    }
+
+    /**
+     * Whether the page's own transport functions are still native. A page-scoped
+     * observation beside the jQuery fingerprint: a patched
+     * XMLHttpRequest.prototype.send or window.fetch rewrites every response the
+     * browser decodes, which is a different suspect than anything per-request.
+     * Moved here from the attempt-record module, whose job is one request, not
+     * the page; the record samples it per attempt so a transport patched after
+     * load is caught on the attempt it affected.
+     *
+     * @returns {{xhrOpen: string, xhrSend: string, fetch: string}}
+     */
+    function transportFingerprint() {
+        var prototype = global.XMLHttpRequest && global.XMLHttpRequest.prototype;
+        return {
+            xhrOpen: functionState(prototype && prototype.open),
+            xhrSend: functionState(prototype && prototype.send),
+            fetch: functionState(global.fetch)
+        };
+    }
+
 
     /**
      * Main-thread and page-lifecycle observation, from the module that owns
@@ -349,6 +385,7 @@
         openTabCount: openTabCount,
         scriptVersions: scriptVersions,
         snapshot: snapshot,
+        transportFingerprint: transportFingerprint,
         fnv1a32: fnv1a32
     };
 } /* abj404-client-module:end */));

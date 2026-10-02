@@ -139,8 +139,13 @@ class ABJ_404_Solution_LogsHitsTableRebuilder {
             $comment = $elapsedTime . '|' . $maxLogId;
             $this->renewLeaseOrThrow();
             // @utf8-audit: opt-out - rebuild table comment is synthesized from numeric timing and ID values.
-            $comment = substr(esc_sql($comment), 0, 2048);
-            $this->dbCore->queryAndGetResults(sprintf("ALTER TABLE %s COMMENT '%s'", $tempDestTable, $comment));
+            // Bound, not spliced: the comment is data, and the executor rewrites
+            // `{wp_...}` tokens over the statement text before it binds query_params.
+            $comment = substr($comment, 0, 2048);
+            $this->dbCore->queryAndGetResults(
+                "ALTER TABLE " . $tempDestTable . " COMMENT %s",
+                array('query_params' => array($comment))
+            );
             $this->renewLeaseOrThrow();
             $statements = array("drop table if exists " . $finalDestTable, "rename table " . $tempDestTable . ' to ' . $finalDestTable);
             $this->dbCore->executeAsTransaction($statements);

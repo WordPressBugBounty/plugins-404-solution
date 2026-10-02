@@ -176,7 +176,6 @@ class ABJ_404_Solution_DataServiceRegistration {
         $container->set('published_terms_provider', function($c) {
             return new ABJ_404_Solution_PublishedTermsProvider(
                 $c->get('db_core'),
-                $c->get('functions'),
                 $c->get('logging')
             );
         });

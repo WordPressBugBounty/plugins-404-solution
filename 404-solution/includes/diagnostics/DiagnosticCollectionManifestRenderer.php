@@ -180,7 +180,7 @@ final class ABJ_404_Solution_DiagnosticCollectionManifestRenderer {
      * @param mixed $value
      */
     private static function intOf($value): int {
-        return is_numeric($value) ? (int)$value : 0;
+        return ABJ_404_Solution_ExactInteger::readOr($value, 0, 0);
     }
 
     /** @param mixed $value */

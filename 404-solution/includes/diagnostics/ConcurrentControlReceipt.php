@@ -143,10 +143,10 @@ final class ABJ_404_Solution_ConcurrentControlReceipt {
         $receipt = is_array($report['receipt'] ?? null) ? $report['receipt'] : array();
         $overlap = is_array($report['overlap'] ?? null) ? $report['overlap'] : array();
         $overlapState = $overlap['state'] ?? '';
+        $durationMs = ABJ_404_Solution_ExactInteger::read($overlap['durationMs'] ?? null, 0);
         $validOverlap = $overlapState === self::OVERLAP_UNAVAILABLE
             || ($overlapState === self::OVERLAP_COMPUTED
-                && is_numeric($overlap['durationMs'] ?? null)
-                && (int)$overlap['durationMs'] >= 0);
+                && $durationMs !== null);
         return self::isBrowserReceipt($report)
             && $validOverlap
             && is_string($receipt['resourceTimingState'] ?? null)

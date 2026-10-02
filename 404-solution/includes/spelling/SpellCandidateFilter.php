@@ -16,6 +16,9 @@ class ABJ_404_Solution_SpellCandidateFilter {
 	/** @var ABJ_404_Solution_Functions */
 	private $f;
 
+	/** @var ABJ_404_Solution_Logging */
+	private $logger;
+
 	/** @var ABJ_404_Solution_ContentRepository */
 	private $contentRepository;
 
@@ -55,6 +58,7 @@ class ABJ_404_Solution_SpellCandidateFilter {
 		$custom404PageID, array $separatingCharacters, array $separatingCharactersForImages
 	) {
 		$this->f = $functions;
+		$this->logger = $logger;
 		$this->contentRepository = $contentRepository;
 		$this->urlMatcher = $urlMatcher;
 		$this->levenshteinEngine = $levenshteinEngine;
@@ -113,6 +117,12 @@ class ABJ_404_Solution_SpellCandidateFilter {
 	 */
 	function findMatchingPosts(string $requestedURLRaw, string $includeCats = '1', string $includeTags = '1') {
 
+		$entryBudget = ABJ_404_Solution_MatchingTimeBudget::current();
+		if ($entryBudget !== null && $entryBudget->isExhausted()) {
+			$this->logger->debugMessage("Spell candidates: time budget already exhausted, returning no candidates");
+			return array(array(), 'pages');
+		}
+
 		$options = abj_service('options_repository')->getOptions();
 		$excludePagesCount = 0;
 		$excludePagesRaw = isset($options['excludePages[]']) && is_string($options['excludePages[]']) ? $options['excludePages[]'] : '';
@@ -160,6 +170,11 @@ class ABJ_404_Solution_SpellCandidateFilter {
 		$permalinks = array_splice($permalinks, 0, $maxCacheCount);
 
 		$returnValue = array($permalinks,$rowType);
+		$storeBudget = ABJ_404_Solution_MatchingTimeBudget::current();
+		if ($storeBudget !== null && $storeBudget->isExhausted()) {
+			$this->logger->debugMessage("Spell candidates: time budget exhausted mid-merge, discarding partial packet");
+			return array(array(), 'pages');
+		}
 		$this->contentRepository->storeSpellingPermalinksToCache($requestedURLRaw, $returnValue);
 		$ctx = abj_service('request_context');
 		$ctx->permalinks_found = (string)json_encode($returnValue);

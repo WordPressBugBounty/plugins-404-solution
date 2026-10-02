@@ -157,8 +157,25 @@ class ABJ_404_Solution_LockOwnerStore {
 	 * to options mode, the orphan carries an old acquisition timestamp and is
 	 * broken by the stale-lock check.
 	 *
+	 * The latch is recorded here rather than by whoever decided to throw it,
+	 * because moving every lock on the site to a different store is one event
+	 * however many callers can trigger it, and it used to happen in complete
+	 * silence: the mode files persist, so a site could sit on file-based locks
+	 * for good with nothing anywhere saying when or why it moved.
+	 *
+	 * Warning level, not error: the plugin keeps taking locks, just from disk,
+	 * and the thing that has to be fixed (an options table that will not delete
+	 * a row -- a read-only replica, a full disk, a broken table) is the site
+	 * owner's server, not the plugin. ABJ_404_Solution_DebugLogReader keys on
+	 * the "(ERROR)" token to decide what gets phoned home, and this is not a
+	 * plugin crash to mail the maintainer. It still has to be readable in a
+	 * support log, which is what warning level gives it.
+	 *
+	 * @param string $reason what proved the current storage unusable, in the
+	 *   words of whoever found out. Empty when a caller has nothing to add.
 	 * @return void */
-	function switchToFileSyncMode() {
+	function switchToFileSyncMode($reason = '') {
+		$alreadyInFileMode = self::$usingFileMode === true;
 		self::$usingFileMode = true;
 		self::$usingFileModeBlogId = function_exists('get_current_blog_id') ? (int)get_current_blog_id() : 0;
 		$optionsModePath = $this->getOptionsModePath();
@@ -167,6 +184,17 @@ class ABJ_404_Solution_LockOwnerStore {
 		$fileModePath = $this->getFileModePath();
 		ABJ_404_Solution_FileSystemService::createDirectoryWithErrorMessages(dirname($fileModePath));
 		touch($fileModePath);
+
+		if ($alreadyInFileMode || !function_exists('abj_service')) {
+			return;
+		}
+		$logger = abj_service('logging');
+		if (!is_object($logger) || !method_exists($logger, 'warn')) {
+			return;
+		}
+		$logger->warn('Switched synchronization to file-based owner records'
+			. ($reason === '' ? '' : ': ' . $reason)
+			. '. Recovery: locks are taken from the uploads directory from now on.');
 	}
 
     /**
@@ -228,11 +256,10 @@ class ABJ_404_Solution_LockOwnerStore {
     			// critical section. Record it so the corruption that may follow
     			// has something pointing back here.
     			$logger = abj_service('logging');
-    			if (is_object($logger) && method_exists($logger, 'debugMessage')) {
-    				$logger->debugMessage(
+    			if (is_object($logger) && method_exists($logger, 'warnCaught')) {
+    				$logger->warnCaught(
     					'Lock owner file for key "' . $key . '" exists but could not be read; '
-    					. 'proceeding as if unowned. ' . get_class($e) . ' (code '
-    					. (string)$e->getCode() . '): ' . $e->getMessage(),
+    					. 'proceeding as if unowned.',
     					$e
     				);
     			}

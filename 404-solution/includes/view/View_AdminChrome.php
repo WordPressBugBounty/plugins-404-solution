@@ -36,10 +36,7 @@ class ABJ_404_Solution_View_AdminChrome extends ABJ_404_Solution_ViewComponent {
     /** @return void */
     function echoAdminFooter(): void {
         $html = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/adminFooter.html");
-        $html = $this->f->str_replace('{JAPANESE_FLASHCARDS_URL}', ABJ404_FC_URL, $html);
-
-        $html = $this->f->doNormalReplacements($html);
-        echo $html;
+        echo $this->f->renderTemplate($html, array('{JAPANESE_FLASHCARDS_URL}' => ABJ404_FC_URL));
     }
 
     function outputAdminHeaderTabs(string $sub = 'list', string $message = ''): void {

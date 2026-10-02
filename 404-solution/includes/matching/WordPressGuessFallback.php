@@ -119,10 +119,15 @@ class ABJ_404_Solution_WordPressGuessFallback {
         }
 
         $trace->add('WordPress URL guess', 'Matched: redirecting', $wpGuess);
-        $this->redirectsRepository->setupRedirect(ABJ_404_Solution_RedirectSpec::create(
-            $requestedURL, (string)ABJ404_STATUS_AUTO,
-            $wpGuessType, $wpGuessPostId, $defaultRedirect, 0, $wpGuessEngineName
-        ));
+        $this->redirectsRepository->setupRedirect(ABJ_404_Solution_RedirectSpec::fromArray(array(
+            'fromURL' => $requestedURL,
+            'status' => (string)ABJ404_STATUS_AUTO,
+            'type' => $wpGuessType,
+            'finalDest' => $wpGuessPostId,
+            'code' => $defaultRedirect,
+            'disabled' => 0,
+            'engine' => $wpGuessEngineName,
+        )));
         $this->writeHit($requestedURL, $wpGuess, $wpGuessEngineName, null, $trace->getSteps());
         $redirectSent = $this->notFoundResponse->forceRedirect(esc_url($wpGuess), (int)$defaultRedirect);
         if ($redirectSent !== false) {

@@ -71,6 +71,21 @@ class ABJ_404_Solution_AjaxFailureLogger {
     }
 
     /**
+     * The 12-hex identity (`sql_id`) of a shape returned by redactSqlShape().
+     *
+     * The only definition of it. AjaxQueryTimeline records it and query error
+     * log lines carry it, and a reader joins the two on it, so both take it
+     * from here: a second copy of the hash could drift and the join would
+     * silently stop matching.
+     *
+     * @param string $shape
+     * @return string
+     */
+    public function sqlIdForShape(string $shape): string {
+        return substr(hash('sha256', $shape), 0, 12);
+    }
+
+    /**
      * @param string $summary
      * @param mixed $details
      * @param \Throwable|null $throwable

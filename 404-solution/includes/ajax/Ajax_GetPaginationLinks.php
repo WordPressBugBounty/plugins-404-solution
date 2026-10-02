@@ -112,6 +112,8 @@ class ABJ_404_Solution_Ajax_GetPaginationLinks {
                 return;
             }
             $isPluginAdmin = true;
+            ABJ_404_Solution_RequestPhaseTimeline::stamp('auth');
+            ABJ_404_Solution_SameSiteRequestCensus::markAuthorized();
 
             // The first attempt stays on the zero-write fast path. A browser
             // retry means the user already observed a transient failure, so
@@ -122,6 +124,7 @@ class ABJ_404_Solution_Ajax_GetPaginationLinks {
                     armAuthorizedRetryDiagnostics($context);
                 $checkpointRequestId = ABJ_404_Solution_AjaxDiagnosticRequestPolicy::
                     instrumentedRequestId($context);
+                self::promoteNamedRetryParent($context);
             }
 
             // Rate limiting to prevent abuse. High ceilings: this endpoint is hit by first-paint
@@ -235,6 +238,27 @@ class ABJ_404_Solution_Ajax_GetPaginationLinks {
     }
 
     /**
+     * Promote the named parent attempt's timeline into the durable ledger.
+     * The retry names the attempt it follows up on; the parent finished (or
+     * vanished) before this request started, and its own record is the only
+     * account of what the browser observed. A retry that names no parent
+     * promotes nothing.
+     *
+     * @param array<string, mixed> $context
+     * @return void
+     */
+    private static function promoteNamedRetryParent(array $context): void {
+        $parentId = $context['retry_parent_id'] ?? '';
+        if (!is_scalar($parentId) || (string)$parentId === '') {
+            return;
+        }
+        ABJ_404_Solution_RequestTimelinePromoter::promoteNamed(array(
+            'request_id' => (string)$parentId,
+            'reason' => ABJ_404_Solution_StrandedRequestLedger::REASON_RETRY_PARENT,
+        ));
+    }
+
+    /**
      * @param array<string, mixed> $context
      */
     private static function checkRateLimitOrRespond(int $maxRequestsPerMinute, array $context): bool {
@@ -328,8 +352,10 @@ class ABJ_404_Solution_Ajax_GetPaginationLinks {
         $responseRequestId = $context['request_id'] ?? null;
         $responseRetryCount = $context['retry_count'] ?? null;
         $payload['requestId'] = is_string($responseRequestId) ? $responseRequestId : 'unknown00';
-        $payload['retryCount'] = is_numeric($responseRetryCount)
-            ? max(0, min(2, (int)$responseRetryCount)) : 0;
+        $payload['retryCount'] = min(
+            2,
+            ABJ_404_Solution_ExactInteger::readOr($responseRetryCount, 0, 0)
+        );
         ABJ_404_Solution_AjaxResponseEmitter::sendJsonResponseAndExit($payload, 500);
     }
 }

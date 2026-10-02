@@ -11,102 +11,107 @@ if (!defined('ABSPATH')) {
  * Disk hashes prove what the filesystem holds. They cannot prove which opcodes
  * PHP actually ran: an opcode cache with `validate_timestamps` off, or one
  * that recompiled some files and not others across a deploy, will happily run
- * last release's bytecode for a file whose disk contents are current. A
- * differing POSITIVE OPcache timestamp is the direct evidence of that split,
- * and it is the only evidence available from inside the request.
+ * last release's bytecode for a file whose disk contents are current. The
+ * exact proof is the compiled build marker: ABJ404_DIAGNOSTIC_BUILD_ID is
+ * compiled into the boundary modules, and DiagnosticModuleManifest compares
+ * it with the build ID derived from the files on disk
+ * (`precomputed_build_matches_files`). This probe adds the per-file "is it
+ * cached at all" answer and the cache-wide restart history.
  *
- * One read per request, shared by every caller. `opcache_get_status(true)`
- * walks every cached script on the host, which makes it the most expensive
- * probe in the diagnostic path; calling it once here and passing this object
- * around is why ABJ_404_Solution_RequestEnvironmentFingerprint (two detailed
- * file fingerprints) and ABJ_404_Solution_DiagnosticModuleManifest (the whole
- * diagnostic module set) can both reconcile against it without paying twice.
+ * Constant cost per request, by design. The only per-script timestamp source
+ * is `opcache_get_status(true)`, which walks every script cached on the HOST,
+ * every site and plugin in the pool, not just this one. On a shared host with
+ * 3466 cached scripts and a saturated CPU that walk took 31 to 38 seconds,
+ * and the self-arming table canary paid it on every Redirects-tab load. The
+ * timestamp comparison it bought was worth little: with validate_timestamps
+ * off the cache reports no timestamp, and with it on the cache recompiles a
+ * changed file within revalidate_freq seconds, so a mismatch was visible only
+ * inside that window. So the cache-wide summary comes from
+ * `opcache_get_status(false)` and each per-file answer from one
+ * `opcache_is_script_cached()` lookup.
  *
- * Three-valued throughout: "cached and matching", "cached and stale", and
- * "unknown" are different findings, and an unavailable status API must never
- * collapse into "not cached" -- that would read as a fresh deploy on every
- * request of every host with `opcache.restrict_api` set.
+ * Three-valued throughout: "cached", "not cached", and "unknown" are
+ * different findings, and an unavailable status API must never collapse into
+ * "not cached" -- that would read as a fresh deploy on every request of every
+ * host with `opcache.restrict_api` set.
  */
 final class ABJ_404_Solution_OpcacheGenerationProbe {
 
-    /** @var array<string, mixed>|null Per-script metadata, or null when unavailable. */
-    private $scripts;
+    /** @var (callable(string): ?bool)|null Per-path cache lookup, or null when unavailable. */
+    private $cachedLookup;
 
     /** @var array<string, mixed> */
     private $summary;
 
     /**
-     * @param array<string, mixed>|null $scripts
+     * @param (callable(string): ?bool)|null $cachedLookup
      * @param array<string, mixed> $summary
      */
-    private function __construct(?array $scripts, array $summary) {
-        $this->scripts = $scripts;
+    private function __construct(?callable $cachedLookup, array $summary) {
+        $this->cachedLookup = $cachedLookup;
         $this->summary = $summary;
     }
 
     /** Read the opcode cache's state for this request. */
     public static function read(): self {
         $summary = self::unavailableSummary();
-        $restrictApi = ini_get('opcache.restrict_api');
-        $apiRestricted = function_exists('abj404_opcache_api_is_restricted')
-            ? abj404_opcache_api_is_restricted($restrictApi, __FILE__)
-            : (is_string($restrictApi) && trim($restrictApi) !== '');
-        if ($apiRestricted) {
+        if (self::apiRestricted()) {
             $summary['reason'] = 'opcache-api-restricted';
             return new self(null, $summary);
         }
-        if (!ABJ_404_Solution_PhpRuntimeCapabilityAdapter::isFunctionAvailable('opcache_get_status')) {
-            return new self(null, $summary);
-        }
 
-        $status = ABJ_404_Solution_OpcacheAdapter::status(true);
+        $status = ABJ_404_Solution_OpcacheAdapter::status(false);
         if (!is_array($status) || (array_key_exists('opcache_enabled', $status) && !$status['opcache_enabled'])) {
             return new self(null, $summary);
         }
-        return new self(self::stringKeyed($status['scripts'] ?? null),
+        return new self(
+            static function (string $path): ?bool {
+                return ABJ_404_Solution_OpcacheAdapter::isScriptCached($path);
+            },
             self::summaryFromStatus($summary, $status));
     }
 
     /**
-     * Build a probe over a known per-script map. The named constructor the
-     * real read() delegates to, and the seam a test uses to drive a specific
-     * mixed-generation scenario without needing a host whose opcode cache is
-     * in that state.
+     * Build a probe over a known set of cached paths. The seam a test uses to
+     * drive a specific cache state without needing a host whose opcode cache
+     * is in that state; null means "no per-script data".
      *
-     * @param array<string, mixed>|null $scripts
+     * @param array<int, string>|null $cachedPaths
      */
-    public static function forScripts(?array $scripts): self {
+    public static function forCachedPaths(?array $cachedPaths): self {
         $summary = self::unavailableSummary();
-        if ($scripts !== null) {
-            $summary['reason'] = 'available';
+        if ($cachedPaths === null) {
+            return new self(null, $summary);
         }
-        return new self($scripts === null ? null : self::stringKeyed($scripts), $summary);
+        $summary['reason'] = 'available';
+        $cached = array_fill_keys(array_map('strval', $cachedPaths), true);
+        return new self(
+            static function (string $path) use ($cached): bool {
+                return isset($cached[$path]);
+            },
+            $summary);
     }
 
     /**
      * Constant-cost OPcache evidence for one boundary module.
      *
-     * The full request_start probe walks the host's complete script map.
-     * Early boot checkpoints cannot pay that unbounded cost, so they record
-     * only whether this one module is cached plus the timestamp-validation
-     * policy that controls its freshness. The compiled build marker beside
-     * this snapshot provides the exact generation comparison.
+     * Early boot checkpoints record only whether this one module is cached
+     * plus the timestamp-validation policy that controls its freshness. The
+     * compiled build marker beside this snapshot provides the exact
+     * generation comparison.
      *
-    * @return array<string, bool|int|string|null>
+     * @return array<string, bool|int|string|null>
      */
     public static function boundarySnapshot(string $path): array {
         $reason = 'opcache-unavailable';
-        $restrictApi = ini_get('opcache.restrict_api');
-        $apiRestricted = function_exists('abj404_opcache_api_is_restricted')
-            ? abj404_opcache_api_is_restricted($restrictApi, __FILE__)
-            : (is_string($restrictApi) && trim($restrictApi) !== '');
-        if ($apiRestricted) {
-            $reason = 'opcache-api-restricted';
-        }
         $cached = null;
-        if (!$apiRestricted && function_exists('opcache_is_script_cached')) {
-            $cached = @opcache_is_script_cached($path);
-            $reason = 'available';
+        if (self::apiRestricted()) {
+            $reason = 'opcache-api-restricted';
+        } else {
+            $cached = ABJ_404_Solution_OpcacheAdapter::isScriptCached($path);
+            if ($cached !== null) {
+                $reason = 'available';
+            }
         }
         return array(
             'reason' => $reason,
@@ -114,26 +119,6 @@ final class ABJ_404_Solution_OpcacheGenerationProbe {
             'validate_timestamps' => self::iniBoolean(ini_get('opcache.validate_timestamps')),
             'revalidate_freq' => self::numericInteger(ini_get('opcache.revalidate_freq')),
         );
-    }
-
-    /**
-     * The per-script map with its keys made string-typed. Array keys are int
-     * or string, and a file path that looks numeric ("/8080.php" cannot, but a
-     * relative "8080" key from a filtered value can) would otherwise arrive as
-     * an int and never match a path lookup.
-     *
-     * @param mixed $scripts
-     * @return array<string, mixed>|null
-     */
-    private static function stringKeyed($scripts): ?array {
-        if (!is_array($scripts)) {
-            return null;
-        }
-        $keyed = array();
-        foreach ($scripts as $path => $metadata) {
-            $keyed[(string)$path] = $metadata;
-        }
-        return $keyed;
     }
 
     /**
@@ -147,56 +132,46 @@ final class ABJ_404_Solution_OpcacheGenerationProbe {
 
     /** Whether per-script state is available at all. False means every answer is "unknown". */
     public function hasPerScriptData(): bool {
-        return $this->scripts !== null;
+        return $this->cachedLookup !== null;
     }
 
     /**
-     * This file's opcode-cache state.
-     *
-     * `cached` is null (not false) when there is no per-script data, so an
-     * unavailable status API is never reported as an uncached file.
-     * `matches_file` is null when the cache reports a zero or absent timestamp
-     * (validate_timestamps off, so there is nothing to compare) rather than
-     * false, which would fire on every request of every production host.
-     *
-     * @return array{cached: bool|null, timestamp: int|null, matches_file: bool|null}
+     * Whether OPcache holds this file. Null (not false) when there is no
+     * per-script data, so an unavailable status API is never reported as an
+     * uncached file.
      */
-    public function stateFor(string $path, ?int $mtime): array {
-        if ($this->scripts === null) {
-            return array('cached' => null, 'timestamp' => null, 'matches_file' => null);
+    public function isCached(string $path): ?bool {
+        if ($this->cachedLookup === null) {
+            return null;
         }
-        $metadata = $path !== '' ? ($this->scripts[$path] ?? null) : null;
-        if (!is_array($metadata)) {
-            return array('cached' => false, 'timestamp' => null, 'matches_file' => null);
-        }
-        $timestamp = isset($metadata['timestamp']) && is_numeric($metadata['timestamp'])
-            ? (int)$metadata['timestamp'] : null;
-        return array(
-            'cached' => true,
-            'timestamp' => $timestamp,
-            'matches_file' => ($timestamp !== null && $timestamp > 0 && $mtime !== null)
-                ? ($timestamp === $mtime) : null,
-        );
+        return $path !== '' ? ($this->cachedLookup)($path) : false;
     }
 
     /**
      * Annotate loaded-file fingerprints with their opcode-cache state, keyed
-     * by the `path` and `mtime` each entry already carries.
+     * by the `path` each entry already carries.
      *
      * @param array<int, array<string, mixed>> $files
      * @return array<int, array<string, mixed>>
      */
     public function annotate(array $files): array {
         foreach ($files as &$file) {
-            $state = $this->stateFor(
-                is_string($file['path'] ?? null) ? $file['path'] : '',
-                is_numeric($file['mtime'] ?? null) ? (int)$file['mtime'] : null);
-            $file['opcache_cached'] = $state['cached'];
-            $file['opcache_timestamp'] = $state['timestamp'];
-            $file['opcache_timestamp_matches_file'] = $state['matches_file'];
+            $file['opcache_cached'] = $this->isCached(is_string($file['path'] ?? null) ? $file['path'] : '');
         }
         unset($file);
         return $files;
+    }
+
+    /**
+     * Whether opcache.restrict_api bars this plugin from the status API.
+     * Checked before any call because a restricted call answers false with a
+     * warning, which would read as "not cached".
+     */
+    private static function apiRestricted(): bool {
+        $restrictApi = ini_get('opcache.restrict_api');
+        return function_exists('abj404_opcache_api_is_restricted')
+            ? abj404_opcache_api_is_restricted($restrictApi, __FILE__)
+            : (is_string($restrictApi) && trim($restrictApi) !== '');
     }
 
     /** @return array<string, mixed> */
@@ -243,6 +218,6 @@ final class ABJ_404_Solution_OpcacheGenerationProbe {
 
     /** @param mixed $value */
     private static function numericInteger($value): ?int {
-        return is_numeric($value) ? (int)$value : null;
+        return ABJ_404_Solution_ExactInteger::read($value, PHP_INT_MIN);
     }
 }

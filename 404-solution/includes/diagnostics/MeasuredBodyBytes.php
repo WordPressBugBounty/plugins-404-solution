@@ -59,6 +59,6 @@ final class ABJ_404_Solution_MeasuredBodyBytes {
      * @param mixed $value Whatever the journal record carried.
      */
     public static function disclosed($value): ?int {
-        return is_numeric($value) && (int)$value > 0 ? (int)$value : null;
+        return ABJ_404_Solution_ExactInteger::read($value, 1);
     }
 }

@@ -73,7 +73,29 @@
         container.appendChild(notice);
     }
 
-    function responseMessage(jqXHR) {
+    /**
+     * Notice text for a failed request.
+     *
+     * @param {object} jqXHR
+     * @param {{textStatus: string, errorThrown: string}} failure
+     *     One object, not adjacent strings, so the two cannot be swapped
+     *     silently: jQuery's own textStatus and errorThrown. The framing
+     *     sentence and console-record source are owned here.
+     * @returns {string}
+     */
+    function responseMessage(jqXHR, failure) {
+        // Shared describe-and-record seam (abj404-admin-ajax.js): a non-JSON
+        // failure (gateway page, plain-text fatal) keeps its status and body
+        // excerpt in the console and names the status in the notice. Guarded
+        // so a missing asset degrades to the branches below.
+        if (typeof window.abj404AdminAjaxErrorMessage === 'function') {
+            return window.abj404AdminAjaxErrorMessage(jqXHR, {
+                fallback: text('genericFailure'),
+                source: 'diagnostic-data-card',
+                textStatus: (typeof failure.textStatus === 'string') ? failure.textStatus : '',
+                errorThrown: (typeof failure.errorThrown === 'string') ? failure.errorThrown : ''
+            });
+        }
         var body = jqXHR && jqXHR.responseJSON ? jqXHR.responseJSON : null;
         if (body && body.data && typeof body.data.message === 'string') {
             return body.data.message;
@@ -82,6 +104,42 @@
             return body.message;
         }
         return text('genericFailure');
+    }
+
+    /**
+     * Notice text for a 200 response that was not the expected shape. When the
+     * body carries the server's own explanation, that is shown unchanged;
+     * otherwise the notice names the HTTP status next to the "unexpected"
+     * sentence and the seam keeps the status and body excerpt in the console.
+     * (The card sends its requests through the seam wrapper, so the seam is
+     * always present here; the guard only keeps a hostile page from turning a
+     * notice into a thrown error.)
+     *
+     * @param {*} response
+     * @param {object} jqXHR
+     * @param {{textStatus: string, source: string}} failure
+     *     One object, not adjacent strings, so the two cannot be swapped
+     *     silently: jQuery's textStatus and the call-site label for the
+     *     console record. The framing sentence is owned here.
+     * @returns {string}
+     */
+    function unexpectedMessage(response, jqXHR, failure) {
+        if (response && typeof response === 'object' && response.data) {
+            if (typeof response.data === 'string' && response.data !== '') {
+                return response.data;
+            }
+            if (typeof response.data.message === 'string' && response.data.message !== '') {
+                return response.data.message;
+            }
+        }
+        if (typeof window.abj404AdminAjaxErrorMessage === 'function') {
+            return window.abj404AdminAjaxErrorMessage(jqXHR, {
+                fallback: text('unexpected'),
+                source: failure.source,
+                textStatus: failure.textStatus
+            });
+        }
+        return text('unexpected');
     }
 
     function setButton(button, disabled, label) {
@@ -136,18 +194,25 @@
                         action: 'abj404_privacy_export',
                         nonce: downloadButton.getAttribute('data-nonce') || card.getAttribute('data-export-nonce') || ''
                     },
-                    success: function (response) {
+                    success: function (response, textStatus, jqXHR) {
                         var data = response && response.success === true ? response.data : null;
                         var rowCount = countRows(data);
                         if (rowCount === null) {
-                            showNotice(noticeContainer, 'error', text('unexpected'));
+                            showNotice(noticeContainer, 'error',
+                                unexpectedMessage(response, jqXHR, {
+                                    textStatus: textStatus,
+                                    source: 'diagnostic-data-export-unexpected'
+                                }));
                             return;
                         }
                         createDownload(data, card.getAttribute('data-download-date') || '');
                         showNotice(noticeContainer, 'success', text('downloaded').replace('{count}', String(rowCount)));
                     },
-                    error: function (jqXHR) {
-                        showNotice(noticeContainer, 'error', responseMessage(jqXHR));
+                    error: function (jqXHR, textStatus, errorThrown) {
+                        showNotice(noticeContainer, 'error', responseMessage(jqXHR, {
+                            textStatus: textStatus,
+                            errorThrown: errorThrown
+                        }));
                     },
                     complete: function () {
                         setButton(downloadButton, false, text('download'));
@@ -249,18 +314,25 @@
                         nonce: deleteButton ? (deleteButton.getAttribute('data-nonce') || card.getAttribute('data-delete-nonce') || '') : '',
                         confirm: '1'
                     },
-                    success: function (response) {
+                    success: function (response, textStatus, jqXHR) {
                         var data = response && response.success === true ? response.data : null;
                         var count = deleteCount(data);
                         if (count === null) {
-                            showNotice(modalNotice, 'error', text('unexpected'));
+                            showNotice(modalNotice, 'error',
+                                unexpectedMessage(response, jqXHR, {
+                                    textStatus: textStatus,
+                                    source: 'diagnostic-data-delete-unexpected'
+                                }));
                             setModalLoading(false, text('tryAgain'));
                             return;
                         }
                         markDeleted(count);
                     },
-                    error: function (jqXHR) {
-                        showNotice(modalNotice, 'error', responseMessage(jqXHR));
+                    error: function (jqXHR, textStatus, errorThrown) {
+                        showNotice(modalNotice, 'error', responseMessage(jqXHR, {
+                            textStatus: textStatus,
+                            errorThrown: errorThrown
+                        }));
                         setModalLoading(false, text('tryAgain'));
                     }
                 });

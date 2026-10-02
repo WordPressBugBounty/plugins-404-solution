@@ -60,8 +60,7 @@ class ABJ_404_Solution_RedirectRowPresenter {
      *     edit: string,
      *     logs: string,
      *     trash: string,
-     *     delete: string,
-     *     links: array{editlink: string, logslink: string, trashlink: string, ajaxTrashLink: string, trashtitle: string, deletelink: string}
+     *     delete: string
      *   },
      *   warning: array{exists: string, notExists: string, text: string, destForView: string},
      *   rowEngine: string
@@ -117,8 +116,7 @@ class ABJ_404_Solution_RedirectRowPresenter {
      *     edit: string,
      *     logs: string,
      *     trash: string,
-     *     delete: string,
-     *     links: array{editlink: string, logslink: string, trashlink: string, ajaxTrashLink: string, trashtitle: string, deletelink: string}
+     *     delete: string
      *   },
      *   warning: array{exists: string, notExists: string, text: string, destForView: string},
      *   rowEngine: string
@@ -138,7 +136,6 @@ class ABJ_404_Solution_RedirectRowPresenter {
         $actions = $state['actions'];
         $warning = $state['warning'];
         $destLink = $state['destLink'];
-        $links = $actions['links'];
 
         return array(
             '{rowid}' => $rowId,
@@ -168,11 +165,6 @@ class ABJ_404_Solution_RedirectRowPresenter {
             '{type}' => esc_html($this->typeLabel($row)),
             '{rowCode}' => esc_html($this->codeDisplay($rowCode)),
             '{hits}' => esc_html((string)(is_scalar($row['logshits'] ?? 0) ? (int)($row['logshits'] ?? 0) : 0)),
-            '{logsLink}' => $links['logslink'],
-            '{trashLink}' => $links['trashlink'],
-            '{ajaxTrashLink}' => $links['ajaxTrashLink'],
-            '{trashtitle}' => $links['trashtitle'],
-            '{deletelink}' => $links['deletelink'],
             '{created_date}' => esc_html(ABJ_404_Solution_SiteLocalTimestamp::format(
                 'Y/m/d h:i:s A',
                 abs(is_scalar($row['timestamp'] ?? 0) ? intval($row['timestamp'] ?? 0) : 0)
@@ -233,12 +225,14 @@ class ABJ_404_Solution_RedirectRowPresenter {
     }
 
     /**
+     * Renders the row template. The template's own `{msgid}` tokens are translated first and every
+     * replacement (the visitor-controlled URL included) is bound last in one pass, so no value can
+     * itself be treated as a token.
+     *
      * @param array<string, string> $replacements
      */
     public function fillRedirectRowTemplate(array $replacements): string {
-        $html = $this->tpl('tableRowPageRedirects.html');
-        $html = $this->functions->str_replace(array_keys($replacements), array_values($replacements), $html);
-        return $this->functions->doNormalReplacements($html);
+        return $this->functions->renderTemplate($this->tpl('tableRowPageRedirects.html'), $replacements);
     }
 
     /**
@@ -250,18 +244,15 @@ class ABJ_404_Solution_RedirectRowPresenter {
         if ($rawScore !== null && $rawScore !== '') {
             $scoreNum = (float)(is_numeric($rawScore) ? $rawScore : 0);
             $scorePct = number_format($scoreNum, 0);
-            return $this->functions->str_replace(
-                array('{badge_class}', '{score_pct}'),
-                array($this->scoreBadgeClass($scoreNum), esc_html($scorePct)),
-                $this->tpl('viewRedirectsTableScoreBadge.html')
-            );
+            return $this->functions->renderTemplate($this->tpl('viewRedirectsTableScoreBadge.html'), array(
+                '{badge_class}' => $this->scoreBadgeClass($scoreNum),
+                '{score_pct}' => esc_html($scorePct),
+            ));
         }
 
-        return $this->functions->str_replace(
-            '{title_attr}',
-            esc_attr($this->noScoreTitle($rowEngine, $rowStatus)),
-            $this->tpl('viewRedirectsTableScoreManual.html')
-        );
+        return $this->functions->renderTemplate($this->tpl('viewRedirectsTableScoreManual.html'), array(
+            '{title_attr}' => esc_attr($this->noScoreTitle($rowEngine, $rowStatus)),
+        ));
     }
 
     /**
@@ -438,10 +429,9 @@ class ABJ_404_Solution_RedirectRowPresenter {
         if ($rowEngine === '') {
             return '';
         }
-        return $this->functions->str_replace(
-            '{engine}',
-            esc_html($rowEngine),
-            $this->tpl('viewRedirectsTableEngineLabel.html')
+        return $this->functions->renderTemplate(
+            $this->tpl('viewRedirectsTableEngineLabel.html'),
+            array('{engine}' => esc_html($rowEngine))
         );
     }
 

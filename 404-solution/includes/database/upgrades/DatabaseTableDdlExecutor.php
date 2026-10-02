@@ -323,8 +323,12 @@ class ABJ_404_Solution_DatabaseTableDdlExecutor {
         }
         // @utf8-audit: opt-out - $tableName is a fully-qualified plugin table
         // name from doTableNameReplacements / $wpdb->prefix; never user input.
+        // Bound, not spliced: the executor rewrites `{wp_...}` tokens over the
+        // statement text before it binds query_params, so a name spliced into
+        // the text would be rewritten along with the template.
         $result = $this->dbCore->queryAndGetResults(
-            "SHOW TABLES LIKE '" . esc_sql($tableName) . "'"
+            "SHOW TABLES LIKE %s",
+            array('query_params' => array($tableName))
         );
         if (!isset($result['rows']) || !is_array($result['rows']) || !isset($result['rows'][0])) {
             return false;

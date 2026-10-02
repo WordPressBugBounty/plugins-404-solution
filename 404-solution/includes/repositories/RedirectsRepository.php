@@ -193,8 +193,8 @@ class ABJ_404_Solution_RedirectsRepository implements ABJ_404_Solution_Redirects
     }
 
     /** @inheritDoc */
-    public function getExportableRedirects(): array {
-        return $this->exportReader->getExportableRedirects();
+    public function getExportableRedirectRows(): array {
+        return $this->exportReader->getExportableRedirectRows();
     }
 
     /** @inheritDoc */

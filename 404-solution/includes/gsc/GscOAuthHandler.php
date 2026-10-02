@@ -168,13 +168,7 @@ class ABJ_404_Solution_GscOAuthHandler {
      */
     private static function payloadInt(array $payload, string $key, int $default): int {
         $value = $payload[$key] ?? null;
-        if (is_int($value)) {
-            return $value;
-        }
-        if (is_string($value) && is_numeric($value)) {
-            return (int)$value;
-        }
-        return $default;
+        return ABJ_404_Solution_ExactInteger::readOr($value, 0, $default);
     }
 
     /**

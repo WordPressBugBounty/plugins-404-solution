@@ -65,7 +65,6 @@ class ABJ_404_Solution_AdminThemeManager {
                 return;
             }
 
-            $logic = abj_service('plugin_logic');
             $options = abj_service('options_repository')->getOptions();
             $theme = (isset($options['admin_theme']) && is_string($options['admin_theme'])) ? $options['admin_theme'] : 'default';
 

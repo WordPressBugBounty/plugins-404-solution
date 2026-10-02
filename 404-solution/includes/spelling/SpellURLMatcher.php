@@ -31,6 +31,9 @@ class ABJ_404_Solution_SpellURLMatcher {
 	/** @var array<string, string> */
 	private array $preparedRegexPatternCache = array();
 
+	/** @var ABJ_404_Solution_RegexDestinationSubstitutor */
+	private $destinationSubstitutor;
+
 	/**
 	 * @param ABJ_404_Solution_Functions $functions
 	 * @param ABJ_404_Solution_Logging $logger
@@ -44,6 +47,7 @@ class ABJ_404_Solution_SpellURLMatcher {
 		$this->contentRepository = $contentRepository;
 		$this->viewReadService = $viewReadService;
 		$this->custom404PageID = $custom404PageID;
+		$this->destinationSubstitutor = new ABJ_404_Solution_RegexDestinationSubstitutor();
 	}
 
     /** @return iterable<int, array<string, mixed>> */
@@ -92,30 +96,10 @@ class ABJ_404_Solution_SpellURLMatcher {
 		}
 		$isDebug = $this->logger->isDebug();
 
-		$regexURLsRows = $this->getRedirectsWithRegEx();
-
-		$manualWithMetachars = $this->getManualRedirectsWithRegexMetachars();
-		$filtered = array();
-		if (!empty($manualWithMetachars)) {
-			foreach ($manualWithMetachars as $manualRow) {
-				$manualUrl = isset($manualRow['url']) && is_string($manualRow['url']) ? $manualRow['url'] : '';
-				if (!ABJ_404_Solution_RegexAutoPromote::looksLikeUnambiguousRegex($manualUrl)) {
-					continue;
-				}
-				$glob = ABJ_404_Solution_RegexAutoPromote::applyGlobFixup($manualUrl);
-				$manualRow['url'] = $glob['url'];
-				$filtered[] = $manualRow;
-			}
-			if (!empty($filtered)) {
-				if ($isDebug) {
-					$this->logger->debugMessage(
-						"Runtime regex fallback: trying " . count($filtered) .
-						" MANUAL row(s) with regex metachars against URL: " . $requestedURL
-					);
-				}
-			}
-		}
-		$regexURLsRows = $this->appendRegexFallbackRows($regexURLsRows, $filtered);
+		$regexURLsRows = $this->appendRegexFallbackRows(
+			$this->getRedirectsWithRegEx(),
+			$this->collectRuntimeRegexFallbackRows($requestedURL, $isDebug)
+		);
 
 		foreach ($regexURLsRows as $row) {
 			$regexURL = $row['url'];
@@ -149,15 +133,9 @@ class ABJ_404_Solution_SpellURLMatcher {
 				$permalink['code'] = isset($row['code']) && is_scalar($row['code']) ? (int)$row['code'] : 0;
 				$originalPermalink = $isDebug ? $permalink : null;
 
-				$permLinkStr = isset($permalink['link']) && is_string($permalink['link']) ? $permalink['link'] : '';
-				$hasCaptureGroup = ($this->f->strpos($regexURLStr, '(') !== false);
-				$hasReplacementToken = ($this->f->strpos($permLinkStr, '$') !== false);
-				if ($hasCaptureGroup && $hasReplacementToken) {
-					$results = array();
-					@$this->f->regexMatch($regexURLStr, $requestedURL, $results);
-					$results = is_array($results) ? $results : array();
-
-					$permalink['link'] = $this->substituteRegexDestination($permLinkStr, $results);
+				$permalink = $this->applyCapturedGroupsToDestination($permalink, $regexURLStr, $requestedURL, $isDebug);
+				if ($permalink === null) {
+					continue;
 				}
 
 				if ($isDebug) {
@@ -178,6 +156,87 @@ class ABJ_404_Solution_SpellURLMatcher {
 	}
 
 	/**
+	 * MANUAL rows whose URL is unambiguously a regex, offered to the matcher as extra
+	 * candidates after the real regex rows.
+	 *
+	 * @param string $requestedURL
+	 * @param bool $isDebug
+	 * @return array<int, array<string, mixed>>
+	 */
+	private function collectRuntimeRegexFallbackRows(string $requestedURL, bool $isDebug): array {
+		$filtered = array();
+		foreach ($this->getManualRedirectsWithRegexMetachars() as $manualRow) {
+			$manualUrl = isset($manualRow['url']) && is_string($manualRow['url']) ? $manualRow['url'] : '';
+			if (!ABJ_404_Solution_RegexAutoPromote::looksLikeUnambiguousRegex($manualUrl)) {
+				continue;
+			}
+			$glob = ABJ_404_Solution_RegexAutoPromote::applyGlobFixup($manualUrl);
+			$manualRow['url'] = $glob['url'];
+			$filtered[] = $manualRow;
+		}
+		if (!empty($filtered)) {
+			// The line is not gated on isDebug(): debugMessage() already
+			// writes at once in debug mode and otherwise buffers it for the
+			// next error, and "did the regex fallback run at all" is the
+			// first question a "why did this not redirect" report asks. The
+			// requested URL stays debug-only (the process404 breadcrumb
+			// already names it).
+			$this->logger->debugMessage(
+				"Runtime regex fallback: trying " . count($filtered) .
+				" MANUAL row(s) with regex metachars" .
+				($isDebug ? " against URL: " . $requestedURL : '')
+			);
+		}
+		return $filtered;
+	}
+
+	/**
+	 * Fill a matched regex rule's `$N` destination with the groups captured from the
+	 * requested URL. Null means captured text would have chosen the redirect's origin
+	 * (scheme, userinfo, host or port), so the rule must be treated as not matching.
+	 *
+	 * @param array<string, mixed> $permalink The matched rule's permalink array.
+	 * @param string $regexURLStr The rule's regex, used for the capture groups.
+	 * @param string $requestedURL
+	 * @param bool $isDebug
+	 * @return array<string, mixed>|null The permalink with its link filled in, or null when the rule is skipped.
+	 */
+	private function applyCapturedGroupsToDestination(
+		array $permalink, string $regexURLStr, string $requestedURL, bool $isDebug
+	): ?array {
+		$permLinkStr = isset($permalink['link']) && is_string($permalink['link']) ? $permalink['link'] : '';
+		$hasCaptureGroup = ($this->f->strpos($regexURLStr, '(') !== false);
+		$hasReplacementToken = ($this->f->strpos($permLinkStr, '$') !== false);
+		if (!($hasCaptureGroup && $hasReplacementToken)) {
+			return $permalink;
+		}
+
+		$captures = array();
+		@$this->f->regexMatch($regexURLStr, $requestedURL, $captures);
+		$captures = is_array($captures) ? $captures : array();
+
+		$substitutedLink = $this->destinationSubstitutor->substitute($permLinkStr, $captures);
+		if ($substitutedLink === null) {
+			// A rule saved before the save-time check can put $N inside the origin;
+			// then ordinary captures are refused, and the line names the fix.
+			$reason = $this->destinationSubstitutor->keepsTokensOutsideTheOrigin($permLinkStr)
+				? 'captured text would change the redirect origin (scheme, userinfo, host or port)'
+				: 'its destination "' . $permLinkStr . '" puts a capture token inside the scheme, ' .
+					'userinfo, host or port, so captured text is refused. Edit the rule to write the ' .
+					'host literally and use $N only in the path, query or fragment';
+			// Keep the requested URL debug-only like the other matcher lines.
+			$this->logger->debugMessage(
+				'Regex redirect rule skipped: the substituted destination of regex "' .
+				$regexURLStr . '" was rejected because ' . $reason .
+				($isDebug ? '. Requested URL: ' . $requestedURL : '')
+			);
+			return null;
+		}
+		$permalink['link'] = $substitutedLink;
+		return $permalink;
+	}
+
+	/**
 	 * @param iterable<int, array<string, mixed>> $regexRows
 	 * @param array<int, array<string, mixed>> $fallbackRows
 	 * @return iterable<int, array<string, mixed>>
@@ -189,23 +248,6 @@ class ABJ_404_Solution_SpellURLMatcher {
 		foreach ($fallbackRows as $row) {
 			yield $row;
 		}
-	}
-
-	/**
-	 * @param array<int|string, string> $results
-	 */
-	private function substituteRegexDestination(string $template, array $results): string {
-		$substituted = preg_replace_callback(
-			'/\\$([1-9][0-9]*)/',
-			static function(array $tokenMatch) use ($results): string {
-				$groupNumber = (int)$tokenMatch[1];
-				return array_key_exists($groupNumber, $results)
-					? (string)$results[$groupNumber]
-					: '';
-			},
-			$template
-		);
-		return is_string($substituted) ? $substituted : $template;
 	}
 
 	/**

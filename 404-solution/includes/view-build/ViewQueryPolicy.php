@@ -5,12 +5,21 @@ if (!defined('ABSPATH')) {
 }
 
 require_once __DIR__ . '/../database/DatabaseCollationHelper.php';
+require_once __DIR__ . '/../database/SqlFragmentTemplate.php';
 
 /**
  * Query policy for admin redirect and captured-url table reads.
  *
  * Owns safe status-filter resolution, score-range fragments, text-search
  * fragments, order-by allowlists, collation selection, and view-build labels.
+ *
+ * The text-search clause is a SqlFragment: the visitor's search text and the
+ * post-type slugs it matches are BOUND (`%s` placeholders plus params), never
+ * spliced into the SQL text. The query executor rewrites `{wp_...}` tokens across
+ * the whole statement and only then binds `query_params`, so a value placed in the
+ * text would be rewritten along with the template.
+ *
+ * @phpstan-import-type SqlFragment from ABJ_404_Solution_DatabaseQueryBuilderInterface
  */
 class ABJ_404_Solution_ViewQueryPolicy {
 
@@ -141,30 +150,42 @@ class ABJ_404_Solution_ViewQueryPolicy {
      *   drops the dest_for_view column from the search expression (schema-drift
      *   tolerance: an old redirects table may lack it). The search then matches
      *   url/code/labels only.
-     * @return string
+     * @return SqlFragment An `AND ...` clause, or an empty fragment when there is no
+     *   search text. Its params are in placeholder order: post-type slugs first, the
+     *   search needle last.
      */
-    public function buildFilterTextClause(string $sub, array $tableOptions, bool $singleTable = false, bool $destColumnAvailable = true): string {
+    public function buildFilterTextClause(string $sub, array $tableOptions, bool $singleTable = false, bool $destColumnAvailable = true): array {
         $rawFilterText = $tableOptions['filterText'] ?? '';
         $rawFilterText = is_string($rawFilterText) ? $rawFilterText : '';
         if ($rawFilterText === '') {
-            return '';
+            return ABJ_404_Solution_SqlFragmentTemplate::none();
         }
 
         $filterText = $this->sanitizeFilterText($rawFilterText);
         $collation = $this->resolveCollation($tableOptions);
-        $needle = $this->normalizedSearchExpression("'%" . $filterText . "%'", $collation);
+        $needleSql = $this->normalizedSearchExpression('%s', $collation);
+        $needleParams = array('%' . $filterText . '%');
         if ($sub === 'abj404_redirects') {
             $predicates = $this->labelPredicatesForFilterText($filterText, $singleTable);
             $searchConcat = $destColumnAvailable
                 ? "CONCAT(url, '////', dest_for_view, '////', code)"
                 : "CONCAT(url, '////', code)";
-            $predicates[] = $this->normalizedSearchExpression($searchConcat, $collation) . " LIKE " . $needle;
-            return 'AND (' . implode(' OR ', $predicates) . ')';
+            $predicates[] = array(
+                'sql' => $this->normalizedSearchExpression($searchConcat, $collation) . " LIKE " . $needleSql,
+                'params' => $needleParams,
+            );
+            return ABJ_404_Solution_SqlFragmentTemplate::fill(
+                'AND ({predicates})',
+                array('predicates' => ABJ_404_Solution_SqlFragmentTemplate::join(' OR ', $predicates))
+            );
         }
         if ($sub === 'abj404_captured') {
-            return "AND " . $this->normalizedSearchExpression('url', $collation) . " LIKE " . $needle;
+            return array(
+                'sql' => "AND " . $this->normalizedSearchExpression('url', $collation) . " LIKE " . $needleSql,
+                'params' => $needleParams,
+            );
         }
-        return 'AND 0 = 1';
+        return array('sql' => 'AND 0 = 1', 'params' => array());
     }
 
     /**
@@ -178,6 +199,11 @@ class ABJ_404_Solution_ViewQueryPolicy {
     }
 
     /**
+     * Strip the characters the search never matches on and escape the LIKE
+     * wildcards. The result is a LIKE operand, NOT SQL text: it is not quote-escaped,
+     * because it is bound as a query parameter (quoting is the binder's job, and a
+     * second quote-escape here would be applied on top of it).
+     *
      * @param string $rawFilterText
      * @return string
      */
@@ -190,7 +216,7 @@ class ABJ_404_Solution_ViewQueryPolicy {
         } else {
             $sanitized = addcslashes($sanitized, '_%\\');
         }
-        return esc_sql($sanitized);
+        return $sanitized;
     }
 
     /**
@@ -219,7 +245,7 @@ class ABJ_404_Solution_ViewQueryPolicy {
     /**
      * @param string $filterText
      * @param bool $singleTable
-     * @return array<int, string>
+     * @return array<int, SqlFragment>
      */
     private function labelPredicatesForFilterText(string $filterText, bool $singleTable = false): array {
         $normalized = $this->normalizeSearchLabel($filterText);
@@ -231,10 +257,10 @@ class ABJ_404_Solution_ViewQueryPolicy {
         $typeMatches = $this->matchingLabelCodes($normalized, $this->typeSearchLabels());
         $predicates = array();
         if (count($statusMatches) > 0) {
-            $predicates[] = 'status IN (' . implode(', ', $statusMatches) . ')';
+            $predicates[] = array('sql' => 'status IN (' . implode(', ', $statusMatches) . ')', 'params' => array());
         }
         if (count($typeMatches) > 0) {
-            $predicates[] = 'type IN (' . implode(', ', $typeMatches) . ')';
+            $predicates[] = array('sql' => 'type IN (' . implode(', ', $typeMatches) . ')', 'params' => array());
         }
         $predicates = array_merge($predicates, $this->postTypeLabelPredicates($normalized, $singleTable));
         return $predicates;
@@ -282,7 +308,7 @@ class ABJ_404_Solution_ViewQueryPolicy {
      * @param bool $singleTable When true, match the destination post type via a
      *   {wp_posts} subquery on final_dest instead of the denormalized
      *   wp_post_type column (which the single-table redirects read lacks).
-     * @return array<int, string>
+     * @return array<int, SqlFragment> Slugs are bound (`%s`), never spliced.
      */
     private function postTypeLabelPredicates(string $normalized, bool $singleTable = false): array {
         $matchingSlugs = $this->matchingPostTypeSlugs($normalized);
@@ -290,21 +316,22 @@ class ABJ_404_Solution_ViewQueryPolicy {
             return array();
         }
 
-        $quotedSlugs = array();
+        $safeSlugs = array();
         foreach ($matchingSlugs as $slug) {
             // Post-type slugs are validated by register_post_type() to be
             // lowercase ASCII word/dash characters. Strip anything outside
-            // that whitelist defensively before esc_sql() so a misregistered
-            // (or scanner-injected) slug with invalid UTF-8 cannot reach SQL.
+            // that whitelist defensively so a misregistered (or
+            // scanner-injected) slug with invalid UTF-8 cannot reach SQL.
             $safeSlug = preg_replace('/[^a-zA-Z0-9_-]/', '', $slug);
             if ($safeSlug === null || $safeSlug === '') {
                 continue;
             }
-            $quotedSlugs[] = "'" . esc_sql($safeSlug) . "'";
+            $safeSlugs[] = $safeSlug;
         }
-        if (count($quotedSlugs) === 0) {
+        if (count($safeSlugs) === 0) {
             return array();
         }
+        $slugList = ABJ_404_Solution_SqlFragmentTemplate::inList($safeSlugs);
         if ($singleTable) {
             // No wp_post_type column on wp_abj404_redirects: resolve the matching
             // destination posts by id. final_dest holds the numeric post id as a
@@ -312,11 +339,17 @@ class ABJ_404_Solution_ViewQueryPolicy {
             // post-type-label search, so it never affects the no-filter
             // single-table EXPLAIN plan asserted by the scale test.
             // allow-unbounded-select: wp_posts SELECT is a subquery consumed DB-side inside a final_dest IN (...) predicate; never read into PHP
-            return array('(type = ' . (int)ABJ404_TYPE_POST
-                . ' AND final_dest IN (SELECT ID FROM {wp_posts} WHERE post_type IN ('
-                . implode(', ', $quotedSlugs) . ')))');
+            return array(array(
+                'sql' => '(type = ' . (int)ABJ404_TYPE_POST
+                    . ' AND final_dest IN (SELECT ID FROM {wp_posts} WHERE post_type IN ('
+                    . $slugList['sql'] . ')))',
+                'params' => $slugList['params'],
+            ));
         }
-        return array('(type = ' . (int)ABJ404_TYPE_POST . ' AND wp_post_type IN (' . implode(', ', $quotedSlugs) . '))');
+        return array(array(
+            'sql' => '(type = ' . (int)ABJ404_TYPE_POST . ' AND wp_post_type IN (' . $slugList['sql'] . '))',
+            'params' => $slugList['params'],
+        ));
     }
 
     /** @return array<int, string> */

@@ -174,6 +174,8 @@ class ABJ_404_Solution_PluginLogicVersionUpgrader {
 
         $options['DB_VERSION'] = ABJ404_VERSION;
 
+        ABJ_404_Solution_SchemaHighWaterMark::raiseTo(ABJ404_VERSION);
+
         abj_service('options_repository')->updateOptions($options);
 
         return $options;
@@ -291,9 +293,11 @@ class ABJ_404_Solution_PluginLogicVersionUpgrader {
         $query = $dbCore->doTableNameReplacements($query);
         $result = $dbCore->queryAndGetResults($query);
 
-        $rowsAffected = isset($result['rows_affected']) && is_numeric($result['rows_affected'])
-            ? (int)$result['rows_affected']
-            : 0;
+        $rowsAffected = ABJ_404_Solution_ExactInteger::readOr(
+            $result['rows_affected'] ?? null,
+            0,
+            0
+        );
         // The early-return at the top of this function ensures
         // $currentDBVersion < '1.8.0' here, so the version gate that previously
         // wrapped this block has been removed (PHPStan smaller.alwaysTrue).

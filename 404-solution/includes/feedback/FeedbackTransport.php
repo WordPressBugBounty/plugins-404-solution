@@ -11,6 +11,7 @@ require_once __DIR__ . '/FeedbackPayloadBuilder.php';
 require_once __DIR__ . '/FeedbackPayloadSchemaGuard.php';
 require_once __DIR__ . '/ReportPayloadJsonSchemaValidator.php';
 require_once __DIR__ . '/../diagnostics/CrashBeaconReporter.php';
+require_once __DIR__ . '/../core/TransientStore.php';
 
 /**
  * Orchestrates feedback report sends. Owns the queue/cron lifecycle and the
@@ -113,7 +114,7 @@ class ABJ_404_Solution_FeedbackTransport {
             'type' => $type,
         );
         // allow-cache-empty: feedback envelope is generated locally and may contain an intentionally empty payload.
-        $stored = set_transient(self::TRANSIENT_PREFIX . $uuid, $envelope, self::TRANSIENT_TTL);
+        $stored = ABJ_404_Solution_TransientStore::store(self::TRANSIENT_PREFIX . $uuid, $envelope, self::TRANSIENT_TTL);
         if (!$stored) {
             // The cron handler's whole job is to load THIS uuid's envelope and
             // send it. Scheduling it against a store that just refused the

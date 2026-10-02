@@ -14,8 +14,11 @@ if (!defined('ABSPATH')) {
  * five numeric/string fields with overlapping semantics, making call sites
  * trivially transposable at the wrong end of the list.
  *
- * Construct via {@see self::fromArray()} at new call sites and read via the
- * typed getters. Instances are immutable; there are no setters.
+ * {@see self::fromArray()} is the only factory. Its named keys cannot be
+ * transposed the way adjacent same-typed positional strings (fromURL,
+ * finalDest, engine) could be; the former positional create() was removed for
+ * that reason. Read via the typed getters. Instances are immutable; there are
+ * no setters.
  *
  * Field semantics match the legacy positional parameters exactly:
  *   - fromURL: source URL the redirect matches (string).
@@ -77,34 +80,13 @@ final class ABJ_404_Solution_RedirectSpec {
     }
 
     /**
-     * Legacy positional factory. Prefer {@see self::fromArray()} at new call
-     * sites so same-type fields are spelled out before construction.
+     * Build a redirect-create request from named fields (the only factory).
      *
-     * @param string $fromURL
-     * @param int|string $status
-     * @param int|string $type
-     * @param string $finalDest
-     * @param int|string $code
-     * @param int $disabled
-     * @param string|null $engine
-     * @param float|null $score
-     * @return self
-     */
-    public static function create(
-        $fromURL,
-        $status,
-        $type,
-        $finalDest,
-        $code,
-        $disabled = 0,
-        $engine = null,
-        $score = null
-    ): self {
-        return new self($fromURL, $status, $type, $finalDest, $code, $disabled, $engine, $score);
-    }
-
-    /**
-     * Build a redirect-create request from named fields.
+     * Required keys: fromURL, status, type, finalDest, code (int|string each).
+     * Optional keys: disabled (int or numeric string, default 0), engine
+     * (string|null), score (numeric|null). A missing required key or a value
+     * of any other type throws InvalidArgumentException, so callers holding a
+     * loosely typed value cast it before the call.
      *
      * @param array<string, mixed> $fields
      * @return self

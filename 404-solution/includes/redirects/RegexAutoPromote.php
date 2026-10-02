@@ -164,8 +164,8 @@ class ABJ_404_Solution_RegexAutoPromote {
         if (!is_array($data) || !isset($data['redirect_id'])) {
             return null;
         }
-        $redirectId = isset($data['redirect_id']) && is_numeric($data['redirect_id']) ? (int)$data['redirect_id'] : 0;
-        $createdAt = isset($data['created_at']) && is_numeric($data['created_at']) ? (int)$data['created_at'] : 0;
+        $redirectId = ABJ_404_Solution_ExactInteger::readOr($data['redirect_id'] ?? null, 0, 0);
+        $createdAt = ABJ_404_Solution_ExactInteger::readOr($data['created_at'] ?? null, 0, 0);
         return array(
             'redirect_id' => $redirectId,
             'original_url' => isset($data['original_url']) && is_string($data['original_url']) ? $data['original_url'] : '',

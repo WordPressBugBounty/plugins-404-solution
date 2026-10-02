@@ -84,8 +84,11 @@ class ABJ_404_Solution_DatabaseUpgradeCanonicalUrlBackfill extends ABJ_404_Solut
                 return $totalUpdated;
             }
 
-            $rowsAffected = isset($result['rows_affected']) && is_numeric($result['rows_affected'])
-                ? (int)$result['rows_affected'] : 0;
+            $rowsAffected = ABJ_404_Solution_ExactInteger::readOr(
+                $result['rows_affected'] ?? null,
+                0,
+                0
+            );
             $totalUpdated += $rowsAffected;
             if ($rowsAffected < $chunkSize) {
                 break;
@@ -205,8 +208,11 @@ class ABJ_404_Solution_DatabaseUpgradeCanonicalUrlBackfill extends ABJ_404_Solut
                 return $totalUpdated;
             }
 
-            $rowsAffected = isset($result['rows_affected']) && is_numeric($result['rows_affected'])
-                ? (int)$result['rows_affected'] : 0;
+            $rowsAffected = ABJ_404_Solution_ExactInteger::readOr(
+                $result['rows_affected'] ?? null,
+                0,
+                0
+            );
             $totalUpdated += $rowsAffected;
             if ($rowsAffected < $chunkSize) {
                 break;

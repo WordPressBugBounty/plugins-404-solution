@@ -113,40 +113,56 @@ class ABJ_404_Solution_View_Tools extends ABJ_404_Solution_ViewComponent {
         echo $header;
 
         $link = wp_nonce_url("?page=" . ABJ404_PP . "&subpage=abj404_tools", "abj404_exportRedirects");
-        $html = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/toolsExportForm.html");
-        $html = $this->f->str_replace('{toolsExportRedirectsLink}', $link, $html);
-        $html = $this->f->doNormalReplacements($html);
+        $html = $this->f->renderTemplate(
+            ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/toolsExportForm.html"),
+            array('{toolsExportRedirectsLink}' => $link)
+        );
         $view->echoOptionsSection(new ABJ_404_Solution_OptionsSectionView('tools-export', 'abj404-exportRedirects', __('Export', '404-solution'), $html, true, $view->getCardIcon('download')));
 
         $link = wp_nonce_url("?page=" . ABJ404_PP . "&subpage=abj404_tools", "abj404_importRedirectsFile");
-        $html = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/toolsImportForm.html");
-        $html = $this->f->str_replace('{toolsImportRedirectsLink}', $link, $html);
-        $html = $this->f->doNormalReplacements($html);
+        $html = $this->f->renderTemplate(
+            ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/toolsImportForm.html"),
+            array('{toolsImportRedirectsLink}' => $link)
+        );
         $view->echoOptionsSection(new ABJ_404_Solution_OptionsSectionView('tools-import', 'abj404-importRedirects', __('Import', '404-solution'), $html, false, $view->getCardIcon('upload')));
 
         $url = "?page=" . ABJ404_PP . "&subpage=abj404_tools";
         $link = wp_nonce_url($url, "abj404_purgeRedirects");
-        $html = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/toolsPurgeForm.html");
-        $html = $this->f->str_replace('{toolsPurgeFormActionLink}', $link, $html);
-        $html = $this->f->doNormalReplacements($html);
+        $html = $this->f->renderTemplate(
+            ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/toolsPurgeForm.html"),
+            array('{toolsPurgeFormActionLink}' => $link)
+        );
         $view->echoOptionsSection(new ABJ_404_Solution_OptionsSectionView('tools-purge', 'abj404-purgeRedirects', __('Purge Options', '404-solution'), $html, false, $view->getCardIcon('trash')));
 
         $ngramLink = wp_nonce_url("?page=" . ABJ404_PP . "&subpage=abj404_tools", "abj404_rebuildNgramCache");
         $spellingLink = wp_nonce_url("?page=" . ABJ404_PP . "&subpage=abj404_tools", "abj404_clearSpellingCache");
-        $html = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/toolsCacheForm.html");
-        $html = $this->f->str_replace('{toolsNgramCacheFormActionLink}', $ngramLink, $html);
-        $html = $this->f->str_replace('{toolsSpellingCacheFormActionLink}', $spellingLink, $html);
-        $html = $this->f->doNormalReplacements($html);
+        $html = $this->f->renderTemplate(
+            ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/toolsCacheForm.html"),
+            array(
+                '{toolsNgramCacheFormActionLink}' => $ngramLink,
+                '{toolsSpellingCacheFormActionLink}' => $spellingLink,
+            )
+        );
         $view->echoOptionsSection(new ABJ_404_Solution_OptionsSectionView('tools-cache', 'abj404-cacheTools', __('Cache Management', '404-solution'), $html, false, $view->getCardIcon('database')));
 
         $html = $this->getToolsDiagnosticsMarkup();
         $view->echoOptionsSection(new ABJ_404_Solution_OptionsSectionView('tools-diagnostics', 'abj404-diagnosticsTools', __('Diagnostics', '404-solution'), $html, false, $view->getCardIcon('warning')));
 
+        // Requests PHP's time limit killed inside our code, with where their
+        // time went. The card exists only when there is such a record, and
+        // opens expanded while it holds one the admin has not seen (c305).
+        $timeLimitCard = ABJ_404_Solution_TimeLimitAdminReport::toolsCard(abj_clock()->now());
+        if ($timeLimitCard !== null) {
+            $view->echoOptionsSection(new ABJ_404_Solution_OptionsSectionView('tools-time-limits', ABJ_404_Solution_TimeLimitReportView::ANCHOR,
+                __('Timed-out requests', '404-solution'), $timeLimitCard['html'], $timeLimitCard['unseen'], $view->getCardIcon('clock')));
+        }
+
         $link = wp_nonce_url("?page=" . ABJ404_PP . "&subpage=abj404_tools", "abj404_runMaintenance");
         $link .= '&manually_fired=true';
-        $html = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/toolsEtcForm.html");
-        $html = $this->f->str_replace('{toolsMaintenanceFormActionLink}', $link, $html);
-        $html = $this->f->doNormalReplacements($html);
+        $html = $this->f->renderTemplate(
+            ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/toolsEtcForm.html"),
+            array('{toolsMaintenanceFormActionLink}' => $link)
+        );
         $view->echoOptionsSection(new ABJ_404_Solution_OptionsSectionView('tools-etc', 'abj404-etcTools', __('Etcetera', '404-solution'), $html, false, $view->getCardIcon('cog')));
 
         $html = $this->getMigrateFromPluginMarkup();

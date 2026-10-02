@@ -16,12 +16,15 @@ if (!defined('ABSPATH')) {
  * to lose, and a row whose request died is simply an old row -- something a
  * reader can recognise and delete, which a corrupted integer is not.
  *
- * This class owns the row and nothing else: how its name is minted, how its
- * value is encoded and decoded, and the statements that write, read and remove
- * it. What counts as "old", which requests are allowed to register, and what a
+ * This class owns the row's names and the statements that write, read and
+ * remove it; the layout of its stored value belongs to
+ * ABJ_404_Solution_SameSiteRequestRowCodec. What counts as "old", which requests are allowed to register, and what a
  * reading reports belong to ABJ_404_Solution_SameSiteRequestCensus. The same
  * split this subsystem already uses for
  * ABJ_404_Solution_AjaxCheckpointLogger and its journal writer.
+ *
+ * @phpstan-import-type Row from ABJ_404_Solution_SameSiteRequestRowCodec
+ * @phpstan-import-type Entry from ABJ_404_Solution_SameSiteRequestRowCodec
  */
 final class ABJ_404_Solution_SameSiteRequestRegistry {
 
@@ -44,21 +47,40 @@ final class ABJ_404_Solution_SameSiteRequestRegistry {
     const MAX_REMOVED_PER_CALL = 50;
 
     /**
+     * Option-name prefix for a retired request: a finished instrumented
+     * request renamed out of the in-flight namespace so a retry or beacon
+     * arriving later can still find its timeline. Alphanumeric for the same
+     * LIKE reason as OPTION_PREFIX, and disjoint from it so a reading of
+     * live requests never counts a retired one.
+     */
+    const RETIRED_PREFIX = 'abj404reqdone';
+
+    /** Retired rows removed per prune call. Repeated prunes converge. */
+    const MAX_PRUNED_PER_CALL = 50;
+
+    /**
      * Register one in-flight request.
      *
      * INSERT IGNORE rather than an upsert: this row belongs to this request
      * alone and nothing else may ever write it, which is the property that
      * makes the whole registry race-free.
      *
-     * @param string $phase the segment the request is in at registration. The
-     *   caller names it: which segments exist, and what they mean, belongs to
-     *   ABJ_404_Solution_SameSiteRequestCensus. Written with the row rather
-     *   than by a follow-up update so registration still costs one query.
+     * The row is keyed, not positional: channel, action, phase and timeline are
+     * all strings, so a swapped pair would type-check and store one under the
+     * other's name.
+     *
+     * @param Row $row the request's identity. `phase` is the segment it is in
+     *   at registration: the caller names it (which segments exist, and what
+     *   they mean, belongs to ABJ_404_Solution_SameSiteRequestCensus) and it is
+     *   written with the row rather than by a follow-up update so registration
+     *   still costs one query. `timeline` is the request's encoded phase
+     *   timeline, carried on this write rather than as an extra statement.
+     * @param string $processToken names the row when the PID is unavailable.
      * @return string the option name the request was registered under, or ''
      *   when it could not be registered at all.
      */
-    public static function add(int $startedAtMs, string $channel, string $action, ?int $pid,
-            string $phase = '', string $processToken = ''): string {
+    public static function add(array $row, string $processToken = ''): string {
+        $pid = $row['pid'];
         $dbCore = self::dbCore();
         if ($dbCore === null) {
             return '';
@@ -74,7 +96,7 @@ final class ABJ_404_Solution_SameSiteRequestRegistry {
             "INSERT IGNORE INTO {wp_options} (option_name, option_value, autoload) "
             . "VALUES (%s, %s, 'no')",
             array('query_params' => array($optionName,
-                self::encode($startedAtMs, $channel, $action, $pid, $phase)))
+                ABJ_404_Solution_SameSiteRequestRowCodec::encode($row)))
         );
         if (!empty($result['last_error'])) {
             // queryAndGetResults already logged it (CLAUDE.md: it is the
@@ -101,18 +123,18 @@ final class ABJ_404_Solution_SameSiteRequestRegistry {
      * phase names the segment the worker was inside when it stopped -- which
      * is the entire question a stranded worker poses.
      *
+     * @param string $optionName the row this request registered under.
+     * @param Row $row the request's identity with its new `phase` and timeline.
      * @return bool whether the row was updated.
      */
-    public static function advance(string $optionName, int $startedAtMs, string $channel,
-            string $action, ?int $pid, string $phase): bool {
+    public static function advance(string $optionName, array $row): bool {
         $dbCore = self::dbCore();
         if ($dbCore === null || $optionName === '') {
             return false;
         }
         $result = $dbCore->queryAndGetResults(
             "UPDATE {wp_options} SET option_value = %s WHERE option_name = %s",
-            array('query_params' => array(
-                self::encode($startedAtMs, $channel, $action, $pid, $phase), $optionName))
+            array('query_params' => array(ABJ_404_Solution_SameSiteRequestRowCodec::encode($row), $optionName))
         );
         // queryAndGetResults is the centralized error handler (CLAUDE.md #11).
         // A phase that cannot be recorded is a coarser reading, never a reason
@@ -127,7 +149,7 @@ final class ABJ_404_Solution_SameSiteRequestRegistry {
      * bounded reading from a complete one instead of quietly believing the
      * smaller number.
      *
-     * @return array{status: string, reason: string, entries: array<int, array{option_name: string, started_at_ms: int, channel: string, action: string, pid: int|null, phase: string}>, truncated: bool}
+     * @return array{status: string, reason: string, entries: array<int, Entry>, truncated: bool}
      */
     public static function readAll(): array {
         $dbCore = self::dbCore();
@@ -149,7 +171,7 @@ final class ABJ_404_Solution_SameSiteRequestRegistry {
         }
         $entries = array();
         foreach ($rows as $row) {
-            $entry = self::decode($row);
+            $entry = ABJ_404_Solution_SameSiteRequestRowCodec::decodeRow($row);
             if ($entry !== null) {
                 $entries[] = $entry;
             }
@@ -180,71 +202,154 @@ final class ABJ_404_Solution_SameSiteRequestRegistry {
         if (!empty($result['last_error'])) {
             return 0;
         }
-        return isset($result['rows_affected']) && is_numeric($result['rows_affected'])
-            ? (int)$result['rows_affected'] : count($optionNames);
-    }
-
-    /**
-     * The stored value: start time, channel, WordPress action, PID, phase.
-     *
-     * A flat delimited string rather than JSON because every field is a
-     * bounded scalar and the row is written on a path whose cost is being
-     * measured; the decoder below is the only reader.
-     *
-     * Phase is last so a row written by an older build -- four fields, no
-     * trailing delimiter -- still decodes completely, with an empty phase
-     * rather than a rejected row. The delimiter is stripped from the phase
-     * for the same reason the decoder bounds every field: a value that could
-     * introduce a sixth part would shift the meaning of the parts after it.
-     */
-    private static function encode(int $startedAtMs, string $channel, string $action, ?int $pid,
-            string $phase = ''): string {
-        return $startedAtMs . '|' . $channel . '|' . $action . '|'
-            . ($pid !== null ? (string)$pid : '')
-            . '|' . str_replace('|', '', $phase);
-    }
-
-    /**
-     * One row as a structured entry, or null when the row is not one this
-     * class wrote in a format it understands.
-     *
-     * @param mixed $row
-     * @return array{option_name: string, started_at_ms: int, channel: string, action: string, pid: int|null, phase: string}|null
-     */
-    private static function decode($row): ?array {
-        if (!is_array($row)) {
-            return null;
-        }
-        // Case-insensitive: MySQL drivers vary the case of returned column
-        // names, and a registry that silently reads nothing is the failure
-        // mode the whole census exists to avoid.
-        $row = array_change_key_case($row, CASE_LOWER);
-        $name = isset($row['option_name']) && is_scalar($row['option_name'])
-            ? (string)$row['option_name'] : '';
-        $raw = isset($row['option_value']) && is_scalar($row['option_value'])
-            ? (string)$row['option_value'] : '';
-        if ($name === '' || $raw === '') {
-            return null;
-        }
-        $parts = explode('|', $raw, 5);
-        if (!isset($parts[0]) || !ctype_digit($parts[0])) {
-            return null;
-        }
-        return array(
-            'option_name' => $name,
-            'started_at_ms' => (int)$parts[0],
-            'channel' => isset($parts[1]) ? substr($parts[1], 0, 16) : '',
-            'action' => isset($parts[2]) ? substr($parts[2], 0, 64) : '',
-            'pid' => isset($parts[3]) && ctype_digit($parts[3]) ? (int)$parts[3] : null,
-            // A row from a build that predates phases has four parts. Reported
-            // as an empty phase, which the census names explicitly, rather than
-            // being confused with a request that reached no phase at all.
-            'phase' => isset($parts[4]) ? substr($parts[4], 0, 32) : '',
+        return ABJ_404_Solution_ExactInteger::readOr(
+            $result['rows_affected'] ?? null,
+            0,
+            count($optionNames)
         );
     }
 
     /**
-     * @return array{status: string, reason: string, entries: array<int, array{option_name: string, started_at_ms: int, channel: string, action: string, pid: int|null, phase: string}>, truncated: bool}
+     * Retire one owned row: rename it into the retired namespace and rewrite
+     * its value, in one UPDATE by primary key. The single-writer property is
+     * what makes this safe, exactly as for advance(): the row belongs to the
+     * retiring request alone.
+     *
+     * Retiring replaces the shutdown DELETE for the instrumented endpoint, at
+     * the same statement count. The retired name carries the request's start
+     * timestamp so pruning is an index-range DELETE rather than a scan.
+     *
+     * The retired name is built here, from the row's start time and the
+     * request id, so the layout pruneRetired() ranges over and findTimeline()
+     * matches on has exactly one writer.
+     *
+     * @param string $optionName the in-flight row this request owns.
+     * @param Row $row the row's final identity, phase and timeline.
+     * @param string $requestId the request's ledger id.
+     * @return bool whether the row was retired.
+     */
+    public static function retire(string $optionName, array $row, string $requestId): bool {
+        $dbCore = self::dbCore();
+        if ($dbCore === null || $optionName === '' || $requestId === '') {
+            return false;
+        }
+        $result = $dbCore->queryAndGetResults(
+            "UPDATE {wp_options} SET option_name = %s, option_value = %s WHERE option_name = %s",
+            array('query_params' => array(
+                self::retiredNameFor($row['started_at_ms'], $requestId), ABJ_404_Solution_SameSiteRequestRowCodec::encode($row), $optionName))
+        );
+        return empty($result['last_error']);
+    }
+
+    /**
+     * Delete retired rows whose start timestamp predates the cutoff, bounded
+     * per call. The retired name sorts by start time under the shared prefix,
+     * so this is one DELETE over the unique index range, never a scan.
+     *
+     * @param int $cutoffMs epoch ms; rows started before this are pruned.
+     * @return int how many rows the delete claimed.
+     */
+    public static function pruneRetired(int $cutoffMs): int {
+        $dbCore = self::dbCore();
+        if ($dbCore === null) {
+            return 0;
+        }
+        $result = $dbCore->queryAndGetResults(
+            "DELETE FROM {wp_options} WHERE option_name >= %s AND option_name < %s "
+            . "LIMIT " . self::MAX_PRUNED_PER_CALL,
+            array('query_params' => array(
+                self::RETIRED_PREFIX,
+                self::retiredNameFor($cutoffMs, '')))
+        );
+        if (!empty($result['last_error'])) {
+            return 0;
+        }
+        return ABJ_404_Solution_ExactInteger::readOr(
+            $result['rows_affected'] ?? null,
+            0,
+            0
+        );
+    }
+
+    /**
+     * The retired-namespace name: prefix, 13-digit zero-padded start ms (so
+     * names sort by start time and pruning is an index range), then the
+     * request id. With an empty id it is the range bound for a cutoff.
+     */
+    private static function retiredNameFor(int $startedAtMs, string $requestId): string {
+        return self::RETIRED_PREFIX . sprintf('%013d', $startedAtMs) . $requestId;
+    }
+
+    /**
+     * Find one request's timeline row by its ledger id: first a retired row
+     * carrying that id in its name, then a live row carrying it in its
+     * timeline. A retry or client beacon arriving after its parent finished
+     * (or while it is still running) is how the parent's timeline gets
+     * promoted into the durable ledger.
+     *
+     * @param string $requestId
+     * @return array{state: string, value: string} state is retired, in_flight
+     *   or not_seen; value is the row's stored value, or '' when not seen.
+     */
+    public static function findTimeline(string $requestId): array {
+        $missing = array('state' => 'not_seen', 'value' => '');
+        if ($requestId === '') {
+            return $missing;
+        }
+        $dbCore = self::dbCore();
+        if ($dbCore === null) {
+            return $missing;
+        }
+        $retired = $dbCore->queryAndGetResults(
+            "SELECT option_value FROM {wp_options} WHERE option_name LIKE %s LIMIT 1",
+            array('query_params' => array(self::RETIRED_PREFIX . '%' . $requestId))
+        );
+        $value = self::firstOptionValue($retired);
+        if ($value !== null) {
+            return array('state' => 'retired', 'value' => $value);
+        }
+        // A live in-flight row's own name carries no rid: it is minted from
+        // the registering process's identity (see add()), before a request's
+        // evidence is known to be worth keying on. The rid can only be
+        // matched inside option_value's timeline field. Rather than a
+        // `option_value LIKE '%rid%'` sweep -- unseekable on any column, and
+        // doubly so on a value column with no index at all -- the in-flight
+        // set is read the same bounded, sargable way readAll() already reads
+        // it (option_name LIKE the literal, non-wildcard OPTION_PREFIX), and
+        // matched by rid in PHP.
+        $needle = '"rid":"' . $requestId . '"';
+        foreach (self::readAll()['entries'] as $entry) {
+            if (strpos($entry['timeline'], $needle) === false) {
+                continue;
+            }
+            return array('state' => 'in_flight', 'value' => ABJ_404_Solution_SameSiteRequestRowCodec::encode($entry));
+        }
+        return $missing;
+    }
+
+    /**
+     * The first row's option value from a single-value SELECT, or null when
+     * the read failed or matched nothing. Case-insensitive on the column
+     * name: MySQL drivers vary the case of returned column names.
+     *
+     * @param array<string, mixed> $result
+     * @return string|null
+     */
+    private static function firstOptionValue(array $result): ?string {
+        if (!empty($result['last_error'])) {
+            return null;
+        }
+        $rows = isset($result['rows']) && is_array($result['rows']) ? $result['rows'] : array();
+        if ($rows === array() || !is_array($rows[0])) {
+            return null;
+        }
+        $row = array_change_key_case($rows[0], CASE_LOWER);
+        $value = $row['option_value'] ?? null;
+        return is_scalar($value) ? (string)$value : null;
+    }
+
+    /**
+     * @return array{status: string, reason: string, entries: array<int, Entry>, truncated: bool}
      */
     private static function unreadable(string $reason): array {
         return array('status' => 'unavailable', 'reason' => $reason, 'entries' => array(),

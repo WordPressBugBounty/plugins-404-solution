@@ -165,7 +165,6 @@ class ABJ_404_Solution_WordPress_Connector {
             'ajax_cross_plugin_preview' => 'ABJ_404_Solution_Ajax_CrossPluginImporter::handlePreview',
             'ajax_gsc_oauth_callback' => 'ABJ_404_Solution_GscOAuthHandler::handleCallback',
             'ajax_gsc_revoke' => 'ABJ_404_Solution_GscOAuthHandler::handleRevoke',
-            'ajax_compute_suggestions' => 'ABJ_404_Solution_Ajax_SuggestionCompute::computeSuggestions',
             'ajax_poll_suggestions' => 'ABJ_404_Solution_Ajax_SuggestionPolling::pollSuggestions',
         );
     }

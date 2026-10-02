@@ -138,12 +138,12 @@ class ABJ_404_Solution_View_CapturedURLsTable extends ABJ_404_Solution_ViewCompo
         $btns = $this->capturedActionButtons($sub, $tableOptions, $row);
         $vars = $this->capturedRowTemplateVars($row, $hits, $lastUsed, $status, $btns, $sourceEvidenceByUrl);
 
-        $tempHtml = $this->f->str_replace(
-            array_keys($vars),
-            array_values($vars),
-            ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/tableRowCapturedURLs.html")
+        // The row's own `{msgid}` tokens (e.g. {Visit URL}) are translated on the TEMPLATE; the
+        // visitor-controlled URL and every finished fragment are bound last, in one pass.
+        return $this->f->renderTemplate(
+            ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/tableRowCapturedURLs.html"),
+            $vars
         );
-        return $this->f->doNormalReplacements($tempHtml);
     }
 
     /**

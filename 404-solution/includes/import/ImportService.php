@@ -84,9 +84,11 @@ class ABJ_404_Solution_ImportService {
     function doImportFile(): string {
         $uploadFile = $_FILES['import_file'] ?? null;
         if (!is_array($uploadFile) ||
-                !isset($uploadFile['error']) ||
-                !is_numeric($uploadFile['error']) ||
-                (int)$uploadFile['error'] !== UPLOAD_ERR_OK) {
+                ABJ_404_Solution_ExactInteger::readOr(
+                    $uploadFile['error'] ?? null,
+                    0,
+                    -1
+                ) !== UPLOAD_ERR_OK) {
             return __('File upload error.', '404-solution');
         }
 
@@ -317,7 +319,8 @@ class ABJ_404_Solution_ImportService {
             return false;
         }
         $existing = $this->redirectsRepository->getExistingRedirectForURL($dataArray['from_url']);
-        return is_array($existing) && isset($existing['id']) && is_numeric($existing['id']) && (int)$existing['id'] !== 0;
+        return is_array($existing)
+            && ABJ_404_Solution_ExactInteger::readOr($existing['id'] ?? null, 1, 0) !== 0;
     }
 
     /**
@@ -424,7 +427,7 @@ class ABJ_404_Solution_ImportService {
      */
     private function stateInt(array $state, string $key): int {
         $value = $state[$key] ?? 0;
-        return is_numeric($value) ? (int)$value : 0;
+        return ABJ_404_Solution_ExactInteger::readOr($value, 0, 0);
     }
 
     /**

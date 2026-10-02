@@ -28,6 +28,20 @@ class ABJ_404_Solution_ErrorHandler {
      */
     private static $reservedMemory = null;
 
+    /**
+     * Process resource usage snapshot taken when the plugin boots.
+     *
+     * @var array<string,mixed>|null
+     */
+    private static $bootResourceUsage = null;
+
+    /**
+     * Wall-clock time (epoch seconds) when the plugin booted.
+     *
+     * @var float|null
+     */
+    private static $bootWallTime = null;
+
     /** Setup.
      * @return void
      */
@@ -43,6 +57,13 @@ class ABJ_404_Solution_ErrorHandler {
             self::$reservedMemory = str_repeat('R', 262144);
         }
         self::precomputeCrashBeaconPath();
+        if (self::$bootWallTime === null) {
+            try {
+                self::recordBootResourceSnapshot(ABJ_404_Solution_PhpRuntimeCapabilityAdapter::resourceUsage(), abj_clock()->nowFloat());
+            } catch (\Throwable $e) {
+                abj404_logPhpFallback('boot-resource-snapshot', 'boot resource snapshot failed (code ' . $e->getCode() . '): ' . $e->getMessage());
+            }
+        }
         register_shutdown_function('ABJ_404_Solution_ErrorHandler::FatalErrorHandler');
     }
 
@@ -149,7 +170,7 @@ class ABJ_404_Solution_ErrorHandler {
             // Last-resort breadcrumb: the inner logging path itself failed,
             // so we can't go through $abj404logging. Match the pattern used
             // by AdminRuntimeErrorNotice::reportAdminRuntimeError() and
-            // Ajax_SuggestionCompute::handleShutdown(). Widening from
+            // SuggestionComputeJob::handleComputationCrash(). Widening from
             // Exception to Throwable is intentional because Error types are
             // exactly the case the outer handler exists for.
             abj404_logPhpFallback(
@@ -181,6 +202,29 @@ class ABJ_404_Solution_ErrorHandler {
      */
     public static function releaseReservedMemory(): void {
         self::$reservedMemory = null;
+    }
+
+    /**
+     * Record a snapshot of process resource usage and wall time taken when the
+     * plugin boots, so fatal diagnostics can report per-request deltas on
+     * long-lived workers. Passing null clears the snapshot (tests).
+     *
+     * @param array<string,mixed>|null $usage
+     * @param float|null $wallTime
+     * @return void
+     */
+    public static function recordBootResourceSnapshot(?array $usage, ?float $wallTime): void {
+        self::$bootResourceUsage = $usage;
+        self::$bootWallTime = $wallTime;
+    }
+
+    /**
+     * The boot-time resource snapshot recorded by recordBootResourceSnapshot().
+     *
+     * @return array{usage: array<string,mixed>|null, wall: float|null}
+     */
+    public static function bootResourceSnapshot(): array {
+        return array('usage' => self::$bootResourceUsage, 'wall' => self::$bootWallTime);
     }
 
     /**

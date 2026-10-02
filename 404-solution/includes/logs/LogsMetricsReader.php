@@ -59,8 +59,9 @@ class ABJ_404_Solution_LogsMetricsReader {
         $cacheKey = $this->logsCountCacheKey($logID);
         if ($cacheKey !== null) {
             $cached = get_transient($cacheKey);
-            if (is_numeric($cached)) {
-                return (int)$cached;
+            $cachedCount = ABJ_404_Solution_ExactInteger::read($cached, 0);
+            if ($cachedCount !== null) {
+                return $cachedCount;
             }
         }
 
@@ -160,8 +161,7 @@ class ABJ_404_Solution_LogsMetricsReader {
         try {
             return max(0, intval($this->logsRepo->getMaxLogId()));
         } catch (Throwable $e) {
-            $this->logger->debugMessage(__FUNCTION__ . ' getMaxLogId() failed: '
-                . $e->getMessage() . '. Falling back to maxLogId=0.');
+            $this->logger->warnCaught(__FUNCTION__ . ' getMaxLogId() failed; falling back to maxLogId=0.', $e);
             return 0;
         }
     }

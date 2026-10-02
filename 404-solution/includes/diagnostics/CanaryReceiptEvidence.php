@@ -285,7 +285,7 @@ final class ABJ_404_Solution_CanaryReceiptEvidence {
             $seen[$identity] = true;
             $projected = array(
                 'ok' => ($receipt['ok'] ?? null) === true,
-                'ms' => is_numeric($receipt['ms'] ?? null) ? (int)$receipt['ms'] : -1,
+                'ms' => ABJ_404_Solution_ExactInteger::readOr($receipt['ms'] ?? null, 0, -1),
             );
             if ($step === ABJ_404_Solution_CanaryLadderStep::BASELINE_CONTROL) {
                 $baselines[] = $projected;
@@ -358,8 +358,10 @@ final class ABJ_404_Solution_CanaryReceiptEvidence {
             'receipt' => array('ok' => ($receipt['ok'] ?? null) === true),
             'overlap' => array(
                 'state' => self::scalarField($overlap, 'state'),
-                'durationMs' => is_numeric($overlap['durationMs'] ?? null)
-                    ? (int)$overlap['durationMs'] : null,
+                'durationMs' => ABJ_404_Solution_ExactInteger::read(
+                    $overlap['durationMs'] ?? null,
+                    0
+                ),
             ),
         );
     }

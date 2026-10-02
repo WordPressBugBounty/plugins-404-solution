@@ -26,9 +26,13 @@ class ABJ_404_Solution_CapturedSourceEvidenceRenderer {
         return rtrim((string)$raw, "\n");
     }
 
-    /** @param array<string,string> $vars */
+    /**
+     * Single-pass render: a page title or URL bound into one slot is never rescanned by a later key.
+     *
+     * @param array<string,string> $vars
+     */
     private function fillTpl(string $name, array $vars): string {
-        return (string)$this->f->str_replace(array_keys($vars), array_values($vars), $this->tpl($name));
+        return $this->f->renderTemplate($this->tpl($name), $vars);
     }
 
     /**
@@ -74,8 +78,11 @@ class ABJ_404_Solution_CapturedSourceEvidenceRenderer {
      * @return array{trigger:string,panel:string}
      */
     public function htmlFor(string $rowId, array $evidence): array {
-        $sourceCount = isset($evidence['source_count']) && is_numeric($evidence['source_count'])
-            ? (int)$evidence['source_count'] : 0;
+        $sourceCount = ABJ_404_Solution_ExactInteger::readOr(
+            $evidence['source_count'] ?? null,
+            0,
+            0
+        );
         $sources = isset($evidence['sources']) && is_array($evidence['sources']) ? $evidence['sources'] : array();
         if ($sourceCount <= 0 || empty($sources)) {
             return array('trigger' => '', 'panel' => '');
@@ -99,8 +106,11 @@ class ABJ_404_Solution_CapturedSourceEvidenceRenderer {
             return array('trigger' => '', 'panel' => '');
         }
 
-        $displayedCount = isset($evidence['displayed_source_count']) && is_numeric($evidence['displayed_source_count'])
-            ? (int)$evidence['displayed_source_count'] : count($sources);
+        $displayedCount = ABJ_404_Solution_ExactInteger::readOr(
+            $evidence['displayed_source_count'] ?? null,
+            0,
+            count($sources)
+        );
         $truncation = '';
         if ($sourceCount > $displayedCount) {
             $truncation = $this->fillTpl('capturedSourceTruncation.html', array(
@@ -123,12 +133,15 @@ class ABJ_404_Solution_CapturedSourceEvidenceRenderer {
         $title = isset($source['post_title']) && is_scalar($source['post_title']) ? trim((string)$source['post_title']) : '';
         $referrerUrl = isset($source['referrer_url']) && is_scalar($source['referrer_url']) ? (string)$source['referrer_url'] : '';
         $label = $title !== '' ? $title : $referrerUrl;
-        $postId = isset($source['post_id']) && is_numeric($source['post_id']) ? (int)$source['post_id'] : 0;
+        $postId = ABJ_404_Solution_ExactInteger::readOr($source['post_id'] ?? null, 0, 0);
 
         return $this->fillTpl('capturedSourcesRow.html', array(
             '{source_label}' => esc_html($label),
-            '{hit_count}' => esc_html((string)(isset($source['hit_count']) && is_numeric($source['hit_count'])
-                ? (int)$source['hit_count'] : 0)),
+            '{hit_count}' => esc_html((string)ABJ_404_Solution_ExactInteger::readOr(
+                $source['hit_count'] ?? null,
+                0,
+                0
+            )),
             '{edit_link}' => $this->editLinkHtml($postId),
         ));
     }

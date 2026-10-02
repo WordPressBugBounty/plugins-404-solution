@@ -186,6 +186,7 @@ class ABJ_404_Solution_NGramFilter {
      * @return array<int, float>
      */
     private function findSimilar($url404, $minSimilarity, $maxCandidates, $type) {
+        $budget = ABJ_404_Solution_MatchingTimeBudget::current();
         $startTime = abj_clock()->nowFloat();
 
         $url404Normalized = $this->f->strtolower(trim($url404));
@@ -219,9 +220,15 @@ class ABJ_404_Solution_NGramFilter {
 
         if ($totalCount > ABJ_404_Solution_NGramCacheRepository::CACHE_LOAD_LIMIT) {
             $this->logger->debugMessage("Using database-side filtering for {$totalCount} entries");
-            $cachedPages = $this->repo->getCachedNGramsFiltered($minCount, $maxCount, ABJ_404_Solution_NGramCacheRepository::CACHE_LOAD_LIMIT, $queryCombinedCount, $type);
+            $cachedPages = $this->repo->getCachedNGramsFiltered(ABJ_404_Solution_NGramCountRangeQuery::fromArray(array(
+                'minCount' => $minCount,
+                'maxCount' => $maxCount,
+                'limit' => ABJ_404_Solution_NGramCacheRepository::CACHE_LOAD_LIMIT,
+                'targetCount' => $queryCombinedCount,
+                'type' => $type,
+            )), $budget);
         } else {
-            $cachedPages = $this->repo->getAllCachedNGrams($type);
+            $cachedPages = $this->repo->getAllCachedNGrams($type, $budget);
         }
 
         if (empty($cachedPages)) {
@@ -263,8 +270,17 @@ class ABJ_404_Solution_NGramFilter {
      * @return array<int, float> [id => similarity]
      */
     private function scoreCachedRows(array $cachedPages, array $queryNGrams, $queryCombinedCount, $minSimilarity) {
+        $budget = ABJ_404_Solution_MatchingTimeBudget::current();
         $similarities = [];
+        $i = 0;
         foreach ($cachedPages as $page) {
+            if ($i % 100 === 0 && $budget !== null
+                && ($budget->isExhausted() || !$budget->hasTimeFor(0.05))) {
+                $budget->markExhausted();
+                $this->logger->debugMessage("N-gram scoring: time budget exhausted after {$i} rows, returning no candidates");
+                return [];
+            }
+            $i++;
             if (!is_array($page)) {
                 continue;
             }
@@ -371,14 +387,11 @@ class ABJ_404_Solution_NGramFilter {
     }
 
     /**
-     * @param int $minNgramCount
-     * @param int $maxNgramCount
-     * @param int $limit
-     * @param int|null $targetNgramCount
+     * @param ABJ_404_Solution_NGramCountRangeQuery $query
      * @return array<int, array<string, mixed>>
      */
-    public function getCachedNGramsFiltered($minNgramCount, $maxNgramCount, $limit = 1000, $targetNgramCount = null) {
-        return $this->repo->getCachedNGramsFiltered($minNgramCount, $maxNgramCount, $limit, $targetNgramCount);
+    public function getCachedNGramsFiltered(ABJ_404_Solution_NGramCountRangeQuery $query) {
+        return $this->repo->getCachedNGramsFiltered($query);
     }
 
     /**

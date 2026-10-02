@@ -87,7 +87,7 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
             }
         }
 
-        $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->core->queryDiagnostics()->extractSqlFilename($query);
+        $sqlInfo = $this->core->queryDiagnostics()->sqlForErrorLog($query);
         $elapsed = isset($result['elapsed_time']) && is_numeric($result['elapsed_time'])
             ? round((float)$result['elapsed_time'], 4) : 0;
         $message = 'SQL query error observed: ' . $lastError
@@ -167,7 +167,7 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
      * @return void
      */
     public function logSqlThrowable(string $query, Throwable $e, array $options, bool $producesRows): void {
-        $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->core->queryDiagnostics()->extractSqlFilename($query);
+        $sqlInfo = $this->core->queryDiagnostics()->sqlForErrorLog($query);
         $logErrors = !array_key_exists('log_errors', $options) || (bool)$options['log_errors'];
         $message = 'SQL query threw exception: ' . $e->getMessage()
             . ', SQL: ' . $sqlInfo
@@ -237,7 +237,7 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
         }
 
         if ($options['log_too_slow'] && $timer->getElapsedTime() > 5) {
-            $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->core->queryDiagnostics()->extractSqlFilename($query);
+            $sqlInfo = $this->core->queryDiagnostics()->sqlForErrorLog($query);
             $this->logger->debugMessage("Slow query (" . round($timer->getElapsedTime(), 2) . " seconds): " .
                     $sqlInfo);
         }
@@ -333,7 +333,7 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
         $someMySQLVariables = $wpdb->get_results($extraDataQuery, ARRAY_A);
         $variables = print_r($someMySQLVariables, true);
 
-        $sqlInfo = (defined('WP_DEBUG') && WP_DEBUG) ? $query : $this->core->queryDiagnostics()->extractSqlFilename($query);
+        $sqlInfo = $this->core->queryDiagnostics()->sqlForErrorLog($query);
         $dbVer = $wpdb->db_version();
         $this->logger->errorMessage("Ugh. SQL query error: " . $lastError .
                 ", SQL: " . $sqlInfo .

@@ -190,7 +190,7 @@ class ABJ_404_Solution_StatusCountsRefreshCoordinator {
             call_user_func($this->warn, 'Ignoring unknown status-count refresh scope: ' . $scope);
             return;
         }
-        if (!$this->isCronRequest()) {
+        if (!ABJ_404_Solution_RequestKind::isCron()) {
             $this->scheduleRefresh($scope);
             return;
         }
@@ -212,8 +212,13 @@ class ABJ_404_Solution_StatusCountsRefreshCoordinator {
         try {
             $refreshed = ($refresh['recompute'])($timeoutSeconds);
             if ($refreshed !== true) {
+                // The cause lives one layer down, flattened to `false` by the
+                // recompute's bool contract; the repository keeps it alongside.
+                $cause = $this->statusCounts->lastRecomputeFailure();
                 call_user_func($this->warn,
-                    'Status-count refresh failed for scope ' . $scope . '; retaining the last-known cache.'
+                    'Status-count refresh failed for scope ' . $scope
+                    . ($cause !== '' ? ' (' . $cause . ')' : ' (no cause recorded)')
+                    . '; retaining the last-known cache.'
                 );
             }
         } finally {
@@ -316,7 +321,7 @@ class ABJ_404_Solution_StatusCountsRefreshCoordinator {
      * an aggregate on shutdown would retain the request's PHP worker.
      */
     private function armDeferredRefresh(string $scope): void {
-        if ($this->isCronRequest() || $this->isAjaxRequest() || !empty($this->deferredArmed[$scope])) {
+        if (ABJ_404_Solution_RequestKind::isCron() || ABJ_404_Solution_RequestKind::isAjax() || !empty($this->deferredArmed[$scope])) {
             return;
         }
         if ($this->refresherFor($scope) === null || !function_exists('add_action')) {
@@ -368,22 +373,6 @@ class ABJ_404_Solution_StatusCountsRefreshCoordinator {
         }
         set_transient($key, 1, self::DEFERRED_REFRESH_COOLDOWN_SECONDS);
         return true;
-    }
-
-    private function isCronRequest(): bool {
-        return function_exists('wp_doing_cron') && wp_doing_cron();
-    }
-
-    private function isAjaxRequest(): bool {
-        if (function_exists('wp_doing_ajax') && wp_doing_ajax()) {
-            return true;
-        }
-        $scriptName = isset($_SERVER['SCRIPT_NAME']) && is_string($_SERVER['SCRIPT_NAME'])
-            ? $_SERVER['SCRIPT_NAME'] : '';
-        if ($scriptName !== '' && basename($scriptName) === 'admin-ajax.php') {
-            return true;
-        }
-        return isset($GLOBALS['pagenow']) && $GLOBALS['pagenow'] === 'admin-ajax.php';
     }
 
     /**

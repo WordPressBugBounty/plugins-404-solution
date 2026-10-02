@@ -56,9 +56,6 @@ class ABJ_404_Solution_FrontendRequestPipeline {
     /** @var ABJ_404_Solution_FrontendHitRecorder */
     private $hitRecorder;
 
-    /** @var ABJ_404_Solution_FrontendAsyncSuggestionTrigger */
-    private $asyncSuggestionTrigger;
-
     /** @var ABJ_404_Solution_FrontendRuntimeOptions */
     private $runtimeOptions;
 
@@ -86,7 +83,6 @@ class ABJ_404_Solution_FrontendRequestPipeline {
         $this->dispatcher = $dependencies->dispatcher();
         $this->dbVersionRecovery = $dependencies->dbVersionRecovery();
         $this->hitRecorder = $dependencies->hitRecorder();
-        $this->asyncSuggestionTrigger = $dependencies->asyncSuggestionTrigger();
         $this->runtimeOptions = $dependencies->runtimeOptions();
         $this->existingRedirectLookup = $dependencies->existingRedirectLookup();
         $this->autoRedirectHandler = $dependencies->autoRedirectHandler();
@@ -134,6 +130,7 @@ class ABJ_404_Solution_FrontendRequestPipeline {
             // SAFE_BAIL: not a 404 or in wp-admin - nothing for us to do.
             return;
         }
+        ABJ_404_Solution_RequestPhaseTimeline::stamp('abj404:404');
 
         // Read whether core's canonical redirect was still going to run, HERE,
         // because here is the only place the answer is true: this is inside
@@ -232,7 +229,6 @@ class ABJ_404_Solution_FrontendRequestPipeline {
             }
 
             if (!$autoRedirectsAreOn) {
-                $this->asyncSuggestionTrigger->triggerIfNeeded($requestedURL);
                 $this->telemetry->emitBenchmarkHeadersIfEnabled();
                 $this->notFoundResponse->sendTo404Page($requestedURL, 'Do not create redirects per the options.', true, $options);
                 return;
@@ -242,12 +238,12 @@ class ABJ_404_Solution_FrontendRequestPipeline {
             $this->dispatcher->handleEmptyUrlSinglePageRedirect($requestedURL, $redirect, $options, $this->trace);
         }
 
+        ABJ_404_Solution_RequestPhaseTimeline::stamp('abj404:after_match');
         $this->wpGuessFallback->tryFallback($autoRedirectsAreOn, $requestedURL, $options, $this->trace);
 
         $this->requestIgnoreNormalizer->tryNormalPostQuery($options);
         $this->trace->add('Result', 'No redirect - showed 404 page');
         $this->hitRecorder->record($requestedURL, '404', 'gave up.', null, $this->trace->getSteps());
-        $this->asyncSuggestionTrigger->triggerIfNeeded($requestedURL);
         $this->telemetry->emitBenchmarkHeadersIfEnabled();
         $this->notFoundResponse->sendTo404Page($requestedURL, '', true, $options);
     }

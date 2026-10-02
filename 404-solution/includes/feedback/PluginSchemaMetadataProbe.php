@@ -162,7 +162,9 @@ class ABJ_404_Solution_PluginSchemaMetadataProbe {
                     foreach ($row as $col => $val) {
                         $clow = strtolower((string)$col);
                         if ($clow === 'key_name' && is_scalar($val)) { $idxName = (string)$val; }
-                        if ($clow === 'cardinality' && is_scalar($val) && is_numeric($val)) { $card = (int)$val; }
+                        // read(), not readOr(): NULL means the engine has no estimate
+                        // yet, and 0 is a real answer this map uses to spot damaged indexes.
+                        if ($clow === 'cardinality') { $card = ABJ_404_Solution_ExactInteger::read($val, 0); }
                     }
                     if ($idxName === '' || $card === null) { continue; }
                     if (!isset($byIndex[$idxName]) || $card > $byIndex[$idxName]) {

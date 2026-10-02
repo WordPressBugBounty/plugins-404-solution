@@ -65,6 +65,7 @@
             ms: typeof observation.ms === 'number' ? Math.round(observation.ms) : -1,
             bytes: typeof observation.bytes === 'number' ? observation.bytes : -1,
             textStatus: String(observation.textStatus || '').slice(0, MAX_TEXT_STATUS_CHARS),
+            httpStatus: typeof observation.httpStatus === 'number' ? observation.httpStatus : -1,
             contentEncoding: String(observation.contentEncoding || '').slice(0, MAX_TEXT_STATUS_CHARS),
             transferBytes: typeof observation.transferBytes === 'number' ? observation.transferBytes : -1,
             encodedBodyBytes: typeof observation.encodedBodyBytes === 'number' ? observation.encodedBodyBytes : -1,

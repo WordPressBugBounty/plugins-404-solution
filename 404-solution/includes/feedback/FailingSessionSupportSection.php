@@ -126,6 +126,11 @@ final class ABJ_404_Solution_FailingSessionSupportSection {
         foreach ($clientFailingIds as $id => $present) {
             $failingIds[$id] = true;
         }
+        // The ledgers condemn ids neither journal names; see
+        // ABJ_404_Solution_SupportEvidenceExcerpt::collectChannels().
+        if (class_exists('ABJ_404_Solution_StrandedRequestLedger')) {
+            $failingIds += ABJ_404_Solution_StrandedRequestLedger::condemnedRequestIds();
+        }
         return $failingIds;
     }
 

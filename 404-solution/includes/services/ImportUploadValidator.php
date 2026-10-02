@@ -72,6 +72,6 @@ class ABJ_404_Solution_ImportUploadValidator {
      */
     private function intField(array $file, string $key): int {
         $value = $file[$key] ?? 0;
-        return is_numeric($value) ? (int)$value : 0;
+        return ABJ_404_Solution_ExactInteger::readOr($value, 0, 0);
     }
 }

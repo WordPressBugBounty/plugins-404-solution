@@ -256,7 +256,32 @@ class ABJ_404_Solution_ShortcodeSuggestionsPresenter {
             'loading_text' => esc_html__('Loading page suggestions...', '404-solution'),
             'skeletons' => $skeletons,
             'after' => wp_kses_post($this->optionString($options, 'suggest_after')),
+            'noscript_suggest_url' => $this->noscriptSuggestUrl(),
+            'noscript_link_text' => esc_html__('Show suggested pages', '404-solution'),
         ));
+    }
+
+    /**
+     * URL for the placeholder's <noscript> fallback link: the current
+     * request re-fetched with abj404_suggest=1, which
+     * ABJ_404_Solution_ShortCode::shortcodePageSuggestions() honors by
+     * computing suggestions synchronously in that request instead of
+     * opening an async job that only a page script would ever poll (t_260924_170058_682).
+     *
+     * A reader without JavaScript never runs SuggestionPolling.js, so
+     * without this link they would see the loading skeleton forever. The
+     * link carries rel="nofollow" so a compliant crawler that merely
+     * fetches this HTML is not credited for following it; a crawler that
+     * ignores nofollow and does follow it is still bounded by the
+     * per-actor 'compute_suggestions' rate limiter the synchronous render
+     * is gated behind.
+     *
+     * @return string
+     */
+    private function noscriptSuggestUrl(): string {
+        $requestUri = isset($_SERVER['REQUEST_URI']) && is_string($_SERVER['REQUEST_URI'])
+            ? wp_unslash($_SERVER['REQUEST_URI']) : '';
+        return esc_url(add_query_arg(ABJ_404_Solution_QueryStringHelper::SUGGEST_OPT_IN_QUERY_ARG, '1', $requestUri));
     }
 
     /**
@@ -278,8 +303,8 @@ class ABJ_404_Solution_ShortcodeSuggestionsPresenter {
      */
     private function isExcludedSuggestion(string $idAndTypeStr): bool {
         $idTypeParts = explode('|', $idAndTypeStr, 2);
-        $idInt = isset($idTypeParts[0]) && is_numeric($idTypeParts[0]) ? (int)$idTypeParts[0] : 0;
-        $typeInt = isset($idTypeParts[1]) && is_numeric($idTypeParts[1]) ? (int)$idTypeParts[1] : 0;
+        $idInt = ABJ_404_Solution_ExactInteger::readOr($idTypeParts[0] ?? null, 0, 0);
+        $typeInt = ABJ_404_Solution_ExactInteger::readOr($idTypeParts[1] ?? null, 0, 0);
         if ($idInt <= 0) {
             return false;
         }

@@ -63,10 +63,29 @@ final class ABJ_404_Solution_AjaxRequestIdScopes {
      * the wrong scope at a call site.
      */
     public static function fromGlobalContext(): self {
+        $context = $GLOBALS['abj404_ajax_context'] ?? null;
+        $checkpoint = '';
+        $measured = '';
+        if (is_array($context)
+                && class_exists('ABJ_404_Solution_AjaxDiagnosticRequestPolicy')) {
+            try {
+                // These explicit-context methods existed before this value
+                // object was introduced. During an in-flight plugin update,
+                // PHP may retain the previous release's already-loaded policy
+                // class while loading this current file from disk.
+                $checkpoint = ABJ_404_Solution_AjaxDiagnosticRequestPolicy::instrumentedRequestId($context);
+                $measured = ABJ_404_Solution_AjaxDiagnosticRequestPolicy::diagnosticRequestId($context);
+            } catch (Throwable $error) {
+                abj404_logPhpFallback(
+                    'ajax-request-id-scopes',
+                    get_class($error) . ' code ' . $error->getCode() . ': ' . $error->getMessage()
+                );
+            }
+        }
         return new self(array(
-            'checkpoint' => ABJ_404_Solution_AjaxDiagnosticRequestPolicy::instrumentedRequestIdFromGlobalContext(),
+            'checkpoint' => $checkpoint,
             'ledger' => ABJ_404_Solution_AjaxRequestLedger::requestIdFromGlobalContext(),
-            'measured' => ABJ_404_Solution_AjaxDiagnosticRequestPolicy::diagnosticRequestIdFromGlobalContext(),
+            'measured' => $measured,
         ));
     }
 

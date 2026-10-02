@@ -56,7 +56,7 @@ if (!function_exists('abj404_benchmark_state_ref')) {
 		$GLOBALS['abj404_benchmark_state'] = array(
 			'start' => isset($rawState['start']) && is_numeric($rawState['start']) ? (float)$rawState['start'] : 0.0,
 			'bootstrap_done' => isset($rawState['bootstrap_done']) && is_numeric($rawState['bootstrap_done']) ? (float)$rawState['bootstrap_done'] : 0.0,
-			'db_query_count' => isset($rawState['db_query_count']) && is_numeric($rawState['db_query_count']) ? (int)$rawState['db_query_count'] : 0,
+			'db_query_count' => ABJ_404_Solution_ExactInteger::readOr($rawState['db_query_count'] ?? null, 0, 0),
 			'db_query_ms' => isset($rawState['db_query_ms']) && is_numeric($rawState['db_query_ms']) ? (float)$rawState['db_query_ms'] : 0.0,
 			'redirect_lookup_ms' => isset($rawState['redirect_lookup_ms']) && is_numeric($rawState['redirect_lookup_ms']) ? (float)$rawState['redirect_lookup_ms'] : 0.0,
 		);

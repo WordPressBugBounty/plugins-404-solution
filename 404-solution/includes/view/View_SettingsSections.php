@@ -9,13 +9,40 @@ if (!defined('ABSPATH')) {
  */
 class ABJ_404_Solution_View_SettingsSections extends ABJ_404_Solution_ViewComponent {
 
-    /** @param array<string,string> $vars */
+    /**
+     * Turn a `name => value` map into the `{name} => value` map the template binders take.
+     *
+     * @param array<string,string> $vars
+     * @return array<string,string>
+     */
+    private function braceKeys(array $vars): array {
+        $bound = array();
+        foreach ($vars as $key => $value) {
+            $bound['{' . $key . '}'] = (string)$value;
+        }
+        return $bound;
+    }
+
+    /**
+     * Bind values into a template that carries no `{msgid}` tokens (its braces may be CSS), in one
+     * pass so a bound value is never rescanned as a placeholder. Use renderTemplate for a template
+     * whose `{msgid}` tokens must be translated.
+     *
+     * @param array<string,string> $vars
+     */
     private function fillSettingsTemplate(string $templateName, array $vars): string {
         $html = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . '/html/' . $templateName);
-        foreach ($vars as $key => $value) {
-            $html = $this->f->str_replace('{' . $key . '}', $value, $html);
-        }
-        return (string)$html;
+        return strtr((string)$html, $this->braceKeys($vars));
+    }
+
+    /**
+     * Constants and `{msgid}` translations run over the TEMPLATE; every value is bound last.
+     *
+     * @param array<string,string> $vars
+     */
+    private function renderSettingsTemplate(string $templateName, array $vars): string {
+        $html = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . '/html/' . $templateName);
+        return $this->f->renderTemplate((string)$html, $this->braceKeys($vars));
     }
 
     /** @param array<string, mixed> $options */
@@ -23,11 +50,12 @@ class ABJ_404_Solution_View_SettingsSections extends ABJ_404_Solution_ViewCompon
         $options = $this->optionsPresenter->normalizeOptionsForView($options);
 
         $spaces = esc_html("&nbsp;&nbsp;&nbsp;");
-        $content = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/adminOptionsDefault404Destination.html");
-        $content = $this->f->str_replace(
-            array('{default_404_destination_label}', '{behavior_tiles_html}'),
-            array(esc_html__('Default 404 destination', '404-solution'), $this->optionsPresenter->getBehaviorTilesHTML($options)),
-            $content
+        $content = $this->f->renderTemplate(
+            ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/adminOptionsDefault404Destination.html"),
+            array(
+                '{default_404_destination_label}' => esc_html__('Default 404 destination', '404-solution'),
+                '{behavior_tiles_html}' => $this->optionsPresenter->getBehaviorTilesHTML($options),
+            )
         );
 
         $selectedAutoRedirects = $this->optionsPresenter->getCheckedAttr($options, 'auto_redirects');
@@ -36,16 +64,19 @@ class ABJ_404_Solution_View_SettingsSections extends ABJ_404_Solution_ViewCompon
         $selectedAutoTags = $this->optionsPresenter->getCheckedAttr($options, 'auto_tags');
         $selectedAutoTrashRedirect = $this->optionsPresenter->getCheckedAttr($options, 'auto_trash_redirect');
 
-        $html = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/adminOptionsAutoRedirects.html");
-        $html = $this->f->str_replace('{selectedAutoRedirects}', $selectedAutoRedirects, $html);
-        $html = $this->f->str_replace('{selectedAutoSlugs}', $selectedAutoSlugs, $html);
-        $html = $this->f->str_replace('{selectedAutoCats}', $selectedAutoCats, $html);
-        $html = $this->f->str_replace('{selectedAutoTags}', $selectedAutoTags, $html);
-        $html = $this->f->str_replace('{selectedAutoTrashRedirect}', $selectedAutoTrashRedirect, $html);
-        $html = $this->f->str_replace('{auto_deletion}', esc_attr($this->optionsPresenter->optStr($options, 'auto_deletion')), $html);
-        $html = $this->f->str_replace('{auto_302_expiration_days}', esc_attr($this->optionsPresenter->optStr($options, 'auto_302_expiration_days')), $html);
-        $html = $this->f->str_replace('{spaces}', $spaces, $html);
-        $html = $this->f->doNormalReplacements($html);
+        $html = $this->f->renderTemplate(
+            ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/adminOptionsAutoRedirects.html"),
+            array(
+                '{selectedAutoRedirects}' => $selectedAutoRedirects,
+                '{selectedAutoSlugs}' => $selectedAutoSlugs,
+                '{selectedAutoCats}' => $selectedAutoCats,
+                '{selectedAutoTags}' => $selectedAutoTags,
+                '{selectedAutoTrashRedirect}' => $selectedAutoTrashRedirect,
+                '{auto_deletion}' => esc_attr($this->optionsPresenter->optStr($options, 'auto_deletion')),
+                '{auto_302_expiration_days}' => esc_attr($this->optionsPresenter->optStr($options, 'auto_302_expiration_days')),
+                '{spaces}' => $spaces,
+            )
+        );
         $content .= $html;
 
         return $content;
@@ -57,33 +88,29 @@ class ABJ_404_Solution_View_SettingsSections extends ABJ_404_Solution_ViewCompon
         $allPostTypesTemp = $this->viewReadService->getAllPostTypes();
         $allPostTypes = esc_html(implode(', ', $allPostTypesTemp));
 
-        $html = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/settingsAdvancedContent.html");
-
-        $html = $this->f->str_replace('{recognized_post_types}',
-            str_replace('\\n', "\n", wp_kses_post($this->optionsPresenter->optStr($options, 'recognized_post_types'))), $html);
-        $html = $this->f->str_replace('{all_post_types}', $allPostTypes, $html);
-        $html = $this->f->str_replace('{recognized_categories}',
-            str_replace('\\n', "\n", wp_kses_post($this->optionsPresenter->optStr($options, 'recognized_categories'))), $html);
-        $html = $this->f->str_replace('{folders_files_ignore}',
-            str_replace('\\n', "\n", wp_kses_post($this->optionsPresenter->optStr($options, 'folders_files_ignore'))), $html);
-        $html = $this->f->str_replace('{suggest_regex_exclusions}',
-            str_replace('\\n', "\n", esc_textarea($this->optionsPresenter->optStr($options, 'suggest_regex_exclusions'))), $html);
-
-        $html = $this->f->str_replace('{add-exclude-page-data-url}',
-            "admin-ajax.php?action=echoRedirectToPages&includeDefault404Page=false&includeSpecial=false&nonce=" . wp_create_nonce('abj404_ajax'), $html);
-        $html = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_EMPTY}',
-            __('(Type a page name)', '404-solution'), $html);
-        $html = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_PAGE}',
-            __('(A page has been selected.)', '404-solution'), $html);
-        $html = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING}',
-            __('(A custom string has been entered.)', '404-solution'), $html);
-        $html = $this->f->str_replace('{TOOLTIP_POPUP_EXPLANATION_URL}',
-            __('(An external URL will be used.)', '404-solution'), $html);
-        $html = $this->f->str_replace('{loaded-excluded-pages}',
-            urlencode($this->optionsPresenter->optStr($options, 'excludePages[]')), $html);
-        $html = $this->f->doNormalReplacements($html);
-
-        return $html;
+        // Every stored option below is admin-authored text that may itself contain `{...}`; the token
+        // passes run over the template and these values are bound last, in one pass.
+        return $this->f->renderTemplate(
+            ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/settingsAdvancedContent.html"),
+            array(
+                '{recognized_post_types}' =>
+                    str_replace('\\n', "\n", wp_kses_post($this->optionsPresenter->optStr($options, 'recognized_post_types'))),
+                '{all_post_types}' => $allPostTypes,
+                '{recognized_categories}' =>
+                    str_replace('\\n', "\n", wp_kses_post($this->optionsPresenter->optStr($options, 'recognized_categories'))),
+                '{folders_files_ignore}' =>
+                    str_replace('\\n', "\n", wp_kses_post($this->optionsPresenter->optStr($options, 'folders_files_ignore'))),
+                '{suggest_regex_exclusions}' =>
+                    str_replace('\\n', "\n", esc_textarea($this->optionsPresenter->optStr($options, 'suggest_regex_exclusions'))),
+                '{add-exclude-page-data-url}' =>
+                    "admin-ajax.php?action=echoRedirectToPages&includeDefault404Page=false&includeSpecial=false&nonce=" . wp_create_nonce('abj404_ajax'),
+                '{TOOLTIP_POPUP_EXPLANATION_EMPTY}' => __('(Type a page name)', '404-solution'),
+                '{TOOLTIP_POPUP_EXPLANATION_PAGE}' => __('(A page has been selected.)', '404-solution'),
+                '{TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING}' => __('(A custom string has been entered.)', '404-solution'),
+                '{TOOLTIP_POPUP_EXPLANATION_URL}' => __('(An external URL will be used.)', '404-solution'),
+                '{loaded-excluded-pages}' => urlencode($this->optionsPresenter->optStr($options, 'excludePages[]')),
+            )
+        );
     }
 
     /** @param array<string, mixed> $options */
@@ -103,18 +130,19 @@ class ABJ_404_Solution_View_SettingsSections extends ABJ_404_Solution_ViewCompon
         $debugFileSize = sprintf(__('Debug file size: %1$s KB (%2$s MB).', '404-solution'),
                 $kbFileSizePretty, $mbFileSizePretty);
 
-        $html = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/settingsAdvancedLogging.html");
-        $html = $this->f->str_replace('checked="log_raw_ips"', $selectedLogRawIPs, $html);
-        $html = $this->f->str_replace('checked="debug_mode"', $selectedDebugLogging, $html);
-        $html = $this->f->str_replace('{<a>View</a> the debug file.}', $debugExplanation, $html);
-        $html = $this->f->str_replace('{Debug file size: %s KB.}', $debugFileSize, $html);
-        $html = $this->f->str_replace('{ignore_dontprocess}',
-            str_replace('\\n', "\n", wp_kses_post($this->optionsPresenter->optStr($options, 'ignore_dontprocess'))), $html);
-        $html = $this->f->str_replace('{ignore_doprocess}',
-            str_replace('\\n', "\n", wp_kses_post($this->optionsPresenter->optStr($options, 'ignore_doprocess'))), $html);
-        $html = $this->f->doNormalReplacements($html);
-
-        return $html;
+        return $this->f->renderTemplate(
+            ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/settingsAdvancedLogging.html"),
+            array(
+                'checked="log_raw_ips"' => $selectedLogRawIPs,
+                'checked="debug_mode"' => $selectedDebugLogging,
+                '{<a>View</a> the debug file.}' => $debugExplanation,
+                '{Debug file size: %s KB.}' => $debugFileSize,
+                '{ignore_dontprocess}' =>
+                    str_replace('\\n', "\n", wp_kses_post($this->optionsPresenter->optStr($options, 'ignore_dontprocess'))),
+                '{ignore_doprocess}' =>
+                    str_replace('\\n', "\n", wp_kses_post($this->optionsPresenter->optStr($options, 'ignore_doprocess'))),
+            )
+        );
     }
 
     /** @param array<string, mixed> $options */
@@ -128,17 +156,6 @@ class ABJ_404_Solution_View_SettingsSections extends ABJ_404_Solution_ViewCompon
             $hideRedirectAllRequests = "true";
         }
 
-        $html = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/settingsAdvancedSystem.html");
-        $html = $this->f->str_replace('{DATABASE_VERSION}', esc_html($this->optionsPresenter->optStr($options, 'DB_VERSION')), $html);
-        $html = $this->f->str_replace('checked="redirect_all_requests"', $selectedRedirectAllRequests, $html);
-        $html = $this->f->str_replace('{disallow-redirect-all-requests}', $hideRedirectAllRequests, $html);
-        $html = $this->f->str_replace('{OPTION_MIN_AUTO_SCORE}', esc_attr($this->optionsPresenter->optStr($options, 'auto_score')), $html);
-        $html = $this->f->str_replace('{OPTION_AUTO_SCORE_TITLE}', esc_attr($this->optionsPresenter->optStr($options, 'auto_score_title')), $html);
-        $html = $this->f->str_replace('{OPTION_AUTO_SCORE_CATEGORY_TAG}', esc_attr($this->optionsPresenter->optStr($options, 'auto_score_category_tag')), $html);
-        $html = $this->f->str_replace('{OPTION_AUTO_SCORE_CONTENT}', esc_attr($this->optionsPresenter->optStr($options, 'auto_score_content')), $html);
-        $html = $this->f->str_replace('{OPTION_TEMPLATE_REDIRECT_PRIORITY}', esc_attr($this->optionsPresenter->optStr($options, 'template_redirect_priority')), $html);
-        $html = $this->f->str_replace('{days_wait_before_major_update}', esc_attr($this->optionsPresenter->optStr($options, 'days_wait_before_major_update')), $html);
-
         $pluginAdminUsersRaw2 = $options['plugin_admin_users'];
         if (is_array($pluginAdminUsersRaw2)) {
             $pluginAdminUsers = implode("\n", $pluginAdminUsersRaw2);
@@ -146,10 +163,22 @@ class ABJ_404_Solution_View_SettingsSections extends ABJ_404_Solution_ViewCompon
             $pluginAdminUsers = is_string($pluginAdminUsersRaw2) ? $pluginAdminUsersRaw2 : '';
         }
         $pluginAdminUsers = str_replace('\\n', "\n", wp_kses_post($pluginAdminUsers));
-        $html = $this->f->str_replace('{plugin_admin_users}', wp_kses_post($pluginAdminUsers), $html);
-        $html = $this->f->doNormalReplacements($html);
 
-        return $html;
+        return $this->f->renderTemplate(
+            ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/settingsAdvancedSystem.html"),
+            array(
+                '{DATABASE_VERSION}' => esc_html($this->optionsPresenter->optStr($options, 'DB_VERSION')),
+                'checked="redirect_all_requests"' => $selectedRedirectAllRequests,
+                '{disallow-redirect-all-requests}' => $hideRedirectAllRequests,
+                '{OPTION_MIN_AUTO_SCORE}' => esc_attr($this->optionsPresenter->optStr($options, 'auto_score')),
+                '{OPTION_AUTO_SCORE_TITLE}' => esc_attr($this->optionsPresenter->optStr($options, 'auto_score_title')),
+                '{OPTION_AUTO_SCORE_CATEGORY_TAG}' => esc_attr($this->optionsPresenter->optStr($options, 'auto_score_category_tag')),
+                '{OPTION_AUTO_SCORE_CONTENT}' => esc_attr($this->optionsPresenter->optStr($options, 'auto_score_content')),
+                '{OPTION_TEMPLATE_REDIRECT_PRIORITY}' => esc_attr($this->optionsPresenter->optStr($options, 'template_redirect_priority')),
+                '{days_wait_before_major_update}' => esc_attr($this->optionsPresenter->optStr($options, 'days_wait_before_major_update')),
+                '{plugin_admin_users}' => wp_kses_post($pluginAdminUsers),
+            )
+        );
     }
 
     /** @param array<string, mixed> $options */
@@ -169,10 +198,7 @@ class ABJ_404_Solution_View_SettingsSections extends ABJ_404_Solution_ViewCompon
             )
         );
 
-        $html = $this->fillSettingsTemplate('adminOptionsGeneral.html', $viewData);
-        $html = $this->f->doNormalReplacements($html);
-
-        return $html;
+        return $this->renderSettingsTemplate('adminOptionsGeneral.html', $viewData);
     }
 
     /**

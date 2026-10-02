@@ -83,7 +83,7 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_HostProbes {
                 return $info['basedir'];
             }
         }
-        if (defined('ABSPATH') && is_string(ABSPATH) && ABSPATH !== '') {
+        if (defined('ABSPATH') && is_string(ABSPATH)) {
             return ABSPATH;
         }
         return __DIR__;
@@ -168,8 +168,9 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_HostProbes {
         );
         if (function_exists('get_option')) {
             $t = get_option('abj404_installed_time', null);
-            if (is_scalar($t) && is_numeric($t)) {
-                $out['installed_at'] = (int)$t;
+            $installedAt = ABJ_404_Solution_ExactInteger::read($t, 0);
+            if ($installedAt !== null) {
+                $out['installed_at'] = $installedAt;
             }
         }
         $optionsRepository = function_exists('abj_service_optional') ? abj_service_optional('options_repository') : null;
@@ -321,7 +322,7 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_HostProbes {
                 return rtrim($home, "/\\") . '/.htaccess';
             }
         }
-        if (defined('ABSPATH') && ABSPATH !== '') {
+        if (defined('ABSPATH')) {
             return rtrim(ABSPATH, "/\\") . '/.htaccess';
         }
         return '';

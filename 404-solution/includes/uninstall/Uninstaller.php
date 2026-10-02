@@ -26,7 +26,7 @@ class ABJ_404_Solution_Uninstaller {
         /** @var array<string, mixed> $preferences */
 
         // 1. Delete database tables based on user preferences
-        self::deleteTables($wpdb, $preferences);
+        $droppedEveryTable = self::deleteTables($wpdb, $preferences);
 
         // 2. Delete system page if user chose to delete data
         $deleteAnyData = ($preferences['delete_redirects'] ?? false)
@@ -38,6 +38,15 @@ class ABJ_404_Solution_Uninstaller {
 
         // 3. Delete all WordPress options
         self::deleteAllOptions();
+
+        // The schema high-water mark (ABJ_404_Solution_SchemaHighWaterMark::OPTION,
+        // spelled out because uninstall runs without the autoloader) records the
+        // newest build that shaped these tables. It goes only with the tables: a
+        // kept table may still hold a newer build's columns, and without the mark
+        // an older build installed next would drop them.
+        if ($droppedEveryTable) {
+            delete_option('abj404_schema_high_water');
+        }
 
         // 4. Clean up scheduled cron jobs
         self::cleanupCronJobs();
@@ -118,9 +127,10 @@ class ABJ_404_Solution_Uninstaller {
      *
      * @param object $wpdb        WordPress database object (wpdb or compatible)
      * @param array<string, mixed> $preferences User preferences
-     * @return void
+     * @return bool True when every plugin table was dropped (all three deletion
+     *              preferences on), false when any category was kept.
      */
-    private static function deleteTables(object $wpdb, array $preferences): void {
+    private static function deleteTables(object $wpdb, array $preferences): bool {
         // Use wpdb prefix directly - Uninstaller must be standalone (no autoloader)
         /** @var \wpdb $wpdb */
         $prefix = strtolower($wpdb->prefix);
@@ -146,7 +156,7 @@ class ABJ_404_Solution_Uninstaller {
                     }
                 }
             }
-            return;
+            return true;
         }
 
         // Partial deletion: respect each category preference separately.
@@ -168,6 +178,7 @@ class ABJ_404_Solution_Uninstaller {
 
         // Always delete temporary tables (they hold no user data worth preserving).
         self::deleteTable($prefix . 'abj404_logs_hits_temp');
+        return false;
     }
 
     /**
@@ -234,7 +245,16 @@ class ABJ_404_Solution_Uninstaller {
             'abj404_ngram_current_site_offset',
             'abj404_ngram_total_sites',
             'abj404_ngram_pending_sites',
-            'abj404_uninstall_preferences' // Clean up the preferences option
+            'abj404_uninstall_preferences', // Clean up the preferences option
+            // Requests PHP's time limit killed inside the plugin, the slow
+            // callbacks found while timing, when the report was last seen,
+            // and the armed timing window. The window option is autoloaded,
+            // so a leftover one would be loaded on every request of a site
+            // that no longer runs the plugin.
+            'abj404_time_limit_fatals',
+            'abj404_time_limit_fatals_seen_at',
+            'abj404_time_limit_slow_callbacks',
+            'abj404_time_attribution_armed',
         );
 
         // Delete each option

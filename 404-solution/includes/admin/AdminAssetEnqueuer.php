@@ -62,11 +62,11 @@ class ABJ_404_Solution_AdminAssetEnqueuer {
             wp_register_script(
                 'abj404-redirect_to_ajax',
                 $redirectToScriptUrl,
-                array('jquery', 'jquery-ui-autocomplete'),
+                array('jquery', 'jquery-ui-autocomplete', 'abj404-admin-ajax'),
                 ABJ_404_Solution_WPUtils::createUpdatedVersionNumber($redirectToScriptUrl)
             );
             wp_register_script('abj404-exclude_pages_ajax', $includesUrl . 'ajax/exclude_pages_ajax.js',
-                array('jquery', 'jquery-ui-autocomplete', 'abj404-redirect_to_ajax'));
+                array('jquery', 'jquery-ui-autocomplete', 'abj404-redirect_to_ajax', 'abj404-admin-ajax'));
             $translation_array = array(
                 'type_a_page_name' => __('(Type a page name or an external URL)', '404-solution'),
                 'a_page_has_been_selected' => __('(A page has been selected.)', '404-solution'),
@@ -90,7 +90,7 @@ class ABJ_404_Solution_AdminAssetEnqueuer {
             }
             if ($isListPage || $isEditPage) {
                 ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-table-interactions', $includesUrl . 'js/tableInteractions.js',
-                        array('jquery'));
+                        array('jquery', 'abj404-admin-ajax'));
             }
 
             if ($isListPage || $isStatsPage) {
@@ -107,17 +107,17 @@ class ABJ_404_Solution_AdminAssetEnqueuer {
                 ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-stats-confidence-chart',
                     ABJ404_URL . 'includes/js/statsConfidenceChart.js', array('abj404-chartjs'));
                 ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-stats-trends',
-                    ABJ404_URL . 'includes/js/statsTrends.js', array('abj404-chartjs'));
+                    ABJ404_URL . 'includes/js/statsTrends.js', array('abj404-chartjs', 'abj404-admin-ajax'));
             }
 
             if ($isToolsPage) {
                 ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-tools-migrate-plugin',
-                    ABJ404_URL . 'includes/js/toolsMigratePlugin.js', array());
+                    ABJ404_URL . 'includes/js/toolsMigratePlugin.js', array('abj404-admin-ajax'));
             }
 
             if ($isLogsPage) {
                 ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-search_logs_ajax', $includesUrl . 'ajax/search_logs_ajax.js',
-                    array('jquery', 'jquery-ui-autocomplete'));
+                    array('jquery', 'jquery-ui-autocomplete', 'abj404-admin-ajax'));
             }
 
             if ($isOptionsPage) {
@@ -137,7 +137,7 @@ class ABJ_404_Solution_AdminAssetEnqueuer {
                 ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-behavior-tiles', ABJ404_URL . 'includes/js/behaviorTiles.js',
                     array());
                 ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-settings-deferred', ABJ404_URL . 'includes/js/settingsDeferred.js',
-                    array('jquery'));
+                    array('jquery', 'abj404-admin-ajax'));
             }
 
             if ($isCardAccordionPage) {
@@ -152,7 +152,7 @@ class ABJ_404_Solution_AdminAssetEnqueuer {
             if ($isOptionsPage) {
                 ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-engine-profiles',
                     $includesUrl . 'ajax/ajax-engine-profiles.js',
-                    array('jquery'));
+                    array('jquery', 'abj404-admin-ajax'));
                 wp_localize_script('abj404-engine-profiles', 'abj404EngineProfiles', array(
                     'nonce'   => wp_create_nonce('abj404_engine_profiles_nonce'),
                     'ajaxUrl' => admin_url('admin-ajax.php'),
@@ -271,7 +271,8 @@ class ABJ_404_Solution_AdminAssetEnqueuer {
         $enq('abj404-view-updater-refresh-pill',
             $vuBase . 'view_updater_refresh_pill.js', array('jquery'));
         $enq('abj404-view-updater-stats', $vuBase . 'view_updater_stats.js',
-            array('jquery', 'abj404-view-updater-refresh-pill', 'abj404-view-updater-nonce-refresh'));
+            array('jquery', 'abj404-view-updater-refresh-pill', 'abj404-view-updater-nonce-refresh',
+                'abj404-admin-ajax'));
         $enq('abj404-view-updater-table-init', $vuBase . 'view_updater_table_init.js',
             array('jquery', 'abj404-view-updater-refresh-pill', 'abj404-view-updater-stats',
                 'abj404-view-updater-nonce-refresh'));
@@ -324,7 +325,7 @@ class ABJ_404_Solution_AdminAssetEnqueuer {
             array('jquery', 'abj404-view-updater-nonce-refresh',
                 'abj404-view-updater-transport-telemetry',
                 'abj404-view-updater-transport-telemetry-delivery',
-                'abj404-view-updater-client-build-registry'));
+                'abj404-view-updater-client-build-registry', 'abj404-admin-ajax'));
         $enq('abj404-view-updater-pagination-transport',
             $vuBase . 'view_updater_pagination_transport.js',
             array('jquery', 'abj404-view-updater-nonce-refresh',

@@ -129,7 +129,7 @@ class ABJ_404_Solution_SpellLevenshteinEngine {
 			$this->publishedPostsProvider,
 			$this->skipNgramGate4
 		);
-		if ($ngramPrefilterResult === 'early_return') {
+		if ($ngramPrefilterResult === 'early_return' || $ngramPrefilterResult === 'budget_exhausted') {
 			return array();
 		}
 		$ngramPrefilterApplied = ($ngramPrefilterResult === 'applied');
@@ -155,8 +155,14 @@ class ABJ_404_Solution_SpellLevenshteinEngine {
 		}
 		$currentBatch = $postsProvider->getNextBatch($requestedURLCleanedLength);
 
+		$budget = ABJ_404_Solution_MatchingTimeBudget::current();
+		$scored = 0;
 		$row = array_pop($currentBatch);
 		while ($row != null) {
+			if ($scored % 100 === 0 && $this->scanBudgetTripped($scored, $budget)) {
+				return array();
+			}
+			$scored++;
 			$row = (array)$row;
 
 			if ($this->enablePerformanceCounters) {
@@ -200,6 +206,9 @@ class ABJ_404_Solution_SpellLevenshteinEngine {
 
 			$row = array_pop($currentBatch);
 			if ($row == null) {
+				if ($this->scanBudgetTripped($scored, $budget)) {
+					return array();
+				}
 				$maxAcceptableDistance = $ranker->getMaxAcceptableDistance($onlyNeedThisManyPages);
 
             	$currentBatch = $postsProvider->getNextBatch(
@@ -220,6 +229,26 @@ class ABJ_404_Solution_SpellLevenshteinEngine {
 		return $this->permalinkLookup->lookup(
 			array_values(array_unique($candidateIds)), $rowType, $observedPermalinksById
 		);
+	}
+
+	/**
+	 * Shared trip check for the candidate batch loop: a null budget never
+	 * trips; true means stop and return []. On a trip, clears the per-row
+	 * debug_info breadcrumb first (the early return skips the normal clear),
+	 * sets the sticky flag, and writes one DEBUG line with rows scored.
+	 *
+	 * @param int $scored Rows scored so far (for the DEBUG line).
+	 * @param ABJ_404_Solution_MatchingTimeBudget|null $budget
+	 * @return bool
+	 */
+	private function scanBudgetTripped(int $scored, ?ABJ_404_Solution_MatchingTimeBudget $budget): bool {
+		if ($budget === null || (!$budget->isExhausted() && $budget->hasTimeFor(0.05))) {
+			return false;
+		}
+		abj_service('request_context')->debug_info = '';
+		$budget->markExhausted();
+		$this->logger->debugMessage("Levenshtein scan: time budget exhausted after {$scored} rows, returning no candidates");
+		return true;
 	}
 
 	/**

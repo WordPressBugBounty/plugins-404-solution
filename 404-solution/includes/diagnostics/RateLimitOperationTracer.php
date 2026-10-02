@@ -107,10 +107,10 @@ final class ABJ_404_Solution_RateLimitOperationTracer {
     }
 
     private static function requestId(): string {
-        if (!class_exists('ABJ_404_Solution_AjaxDiagnosticRequestPolicy')) {
+        if (!class_exists('ABJ_404_Solution_AjaxRequestIdScopes')) {
             return '';
         }
-        return ABJ_404_Solution_AjaxDiagnosticRequestPolicy::instrumentedRequestIdFromGlobalContext();
+        return ABJ_404_Solution_AjaxRequestIdScopes::fromGlobalContext()->checkpoint();
     }
 
     private static function beginOperationBudget(): void {

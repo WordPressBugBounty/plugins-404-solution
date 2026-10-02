@@ -31,9 +31,19 @@ class ABJ_404_Solution_Ajax_TrendData {
 
         /** @var ABJ_404_Solution_LogsRepositoryInterface $logsRepository */
         $logsRepository = abj_service('logs_repository');
-        $data = $logsRepository->getDailyActivityTrend($days);
-
-        wp_send_json_success($data, 200);
+        try {
+            wp_send_json_success($logsRepository->getDailyActivityTrend($days), 200);
+        } catch (ABJ_404_Solution_TrendDataQueryException $failure) {
+            // A failed read is a failure, not an empty series: the chart has an
+            // error element for it, and the fetch seam records this message.
+            $logger = abj_service('logging');
+            if (is_object($logger) && method_exists($logger, 'warnCaught')) {
+                $logger->warnCaught('Trend data request could not be served.', $failure);
+            }
+            wp_send_json_error(array(
+                'message' => __('Could not load trend data.', '404-solution') . ' (' . $failure->getMessage() . ')',
+            ), 500);
+        }
     }
 
 }

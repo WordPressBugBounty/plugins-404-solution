@@ -162,8 +162,8 @@ class ABJ_404_Solution_PermalinkCache {
      * @throws Exception
      */
     function updatePermalinkCache($maxExecutionTime, $executionCount = 1) {
-        $budgetSeconds = is_numeric($maxExecutionTime) ? max(1, (int)$maxExecutionTime) : 1;
-        $executionCount = is_numeric($executionCount) ? max(1, (int)$executionCount) : 1;
+        $budgetSeconds = ABJ_404_Solution_ExactInteger::readOr($maxExecutionTime, 1, 1);
+        $executionCount = ABJ_404_Solution_ExactInteger::readOr($executionCount, 1, 1);
         $deadline = abj_clock()->nowFloat() + $budgetSeconds;
 
     	// check to see if we need to upgrade the database.

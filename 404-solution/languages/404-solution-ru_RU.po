@@ -591,6 +591,9 @@ msgstr "Ошибка: Вы выбрали внешний URL, но не ввел
 msgid "Error: unable to add new redirect."
 msgstr "Ошибка: невозможно добавить новое перенаправление."
 
+msgid "Error: The database did not save the new redirect. The debug log has the underlying database error."
+msgstr "Ошибка: база данных не сохранила новое перенаправление. В журнале отладки содержится основная ошибка базы данных."
+
 msgid "Error: unable to mark URL as %s"
 msgstr "Ошибка: невозможно пометить URL как %s"
 
@@ -1995,8 +1998,14 @@ msgstr "Редактировать"
 msgid "View Logs"
 msgstr "Просмотр журнала"
 
+msgid "View Redirect Logs"
+msgstr "Просмотр журнала перенаправлений"
+
 msgid "Delete Permanently"
 msgstr "Удалить навсегда"
+
+msgid "Delete Redirect Permanently"
+msgstr "Удалить перенаправление навсегда"
 
 msgid "Are you sure you want to permanently delete this item?"
 msgstr "Вы уверены, что хотите навсегда удалить этот элемент?"
@@ -2598,6 +2607,9 @@ msgstr "Ошибка:"
 #: includes/ajax/ImportRedirects.php
 msgid "Ignored importing redirect because a redirect with the same from URL already exists. URL:"
 msgstr "Импорт перенаправления пропущен, так как перенаправление с таким же исходным URL уже существует. URL:"
+
+msgid "Redirect not imported: the database did not save it. URL: %1$s (repository result: %2$s)"
+msgstr "Перенаправление не импортировано: база данных не сохранила его. URL: %1$s (результат репозитория: %2$s)"
 
 #: includes/ajax/ImportRedirects.php
 msgid "Unrecognized destination type while importing file. Destination:"
@@ -4188,6 +4200,9 @@ msgstr "Ошибка: относительные назначения регул
 msgid "Error: Regex destination references $%1$d, but the source pattern defines %2$d capture group(s)."
 msgstr "Ошибка: назначение регулярного выражения ссылается на $%1$d, но исходный шаблон определяет %2$d групп(ы) захвата."
 
+msgid "Error: Regex destination puts a capture token ($1, $2, ...) inside the scheme, host or port, so every redirect would be refused. Write the host literally and use tokens only in the path, query or fragment, for example https://example.com/$1."
+msgstr "Ошибка: назначение регулярного выражения помещает токен захвата ($1, $2, ...) в схему, хост или порт, поэтому любое перенаправление было бы отклонено. Запишите хост буквально и используйте токены только в пути, строке запроса или фрагменте, например https://example.com/$1."
+
 msgid "Could not load chart data. Reload this page and try again."
 msgstr "Не удалось загрузить данные диаграммы. Перезагрузите эту страницу и повторите попытку."
 
@@ -4260,6 +4275,9 @@ msgstr "Не удалось отправить отчет. Повторите п
 msgid "Could not load the migration tool configuration. Reload this page and try again."
 msgstr "Не удалось загрузить конфигурацию инструмента миграции. Перезагрузите эту страницу и повторите попытку."
 
+msgid "Could not load trend data."
+msgstr "Не удалось загрузить данные о трендах."
+
 msgid "No suggested match was scored for this URL"
 msgstr "Для этого URL не оценено ни одного предложенного совпадения"
 
@@ -4305,3 +4323,239 @@ msgid_plural "Note: %1$s conditions were not saved. A redirect may have at most 
 msgstr[0] "Примечание: %1$s условие не сохранено. Перенаправление может содержать не более %2$s условий."
 msgstr[1] "Примечание: %1$s условия не сохранены. Перенаправление может содержать не более %2$s условий."
 msgstr[2] "Примечание: %1$s условий не сохранено. Перенаправление может содержать не более %2$s условий."
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:296
+msgid "The Hits and Last Used columns on the Page Redirects screen have been out of date for at least %d hour(s). 404 Solution has not been able to finish rebuilding its hit-count summary in that time."
+msgstr "Столбцы «Обращения» и «Последнее использование» на экране «Перенаправления страниц» устарели не менее чем на %d ч. 404 Solution не смог завершить перестроение сводки обращений за это время."
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:322
+msgid "This site's WP-Cron is not running the plugin's scheduled rebuild. If DISABLE_WP_CRON is set in wp-config.php, either remove it or configure a system cron job that requests wp-cron.php periodically. In the meantime 404 Solution retries the rebuild in the background after an admin page has finished loading."
+msgstr "WP-Cron этого сайта не выполняет запланированное перестроение плагина. Если в wp-config.php задан DISABLE_WP_CRON, удалите его или настройте системное задание cron, которое будет периодически запрашивать wp-cron.php. А пока 404 Solution повторяет перестроение в фоновом режиме после полной загрузки страницы администрирования."
+
+#: includes/logs/LogsHitsRollupStallWatchdog.php:326
+msgid "The scheduled rebuild is being picked up but is not completing. Enable debug logging on the 404 Solution Options screen and check the log for the reason the rebuild stopped."
+msgstr "Запланированное перестроение запускается, но не завершается. Включите ведение отладочного журнала на экране настроек 404 Solution и проверьте журнал, чтобы узнать причину остановки перестроения."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:51
+msgid "WordPress core"
+msgstr "Ядро WordPress"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:52
+msgid "Before 404 Solution loaded (WordPress start-up, drop-ins, must-use plugins)"
+msgstr "До загрузки 404 Solution (запуск WordPress, drop-in-файлы, обязательные плагины)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:53
+msgid "Main query (WordPress core and query filters)"
+msgstr "Основной запрос (ядро WordPress и фильтры запроса)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:54
+msgid "Page output (templates and content filters)"
+msgstr "Вывод страницы (шаблоны и фильтры контента)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:55
+msgid "Other components"
+msgstr "Другие компоненты"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:56
+msgid "Unattributed"
+msgstr "Не распределено"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:64
+msgid "Theme: %s"
+msgstr "Тема: %s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:66
+msgid "Must-use plugin: %s"
+msgstr "Обязательный плагин: %s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:68
+msgid "Drop-in: %s"
+msgstr "Drop-in-файл: %s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:70
+msgid "%s action (all callbacks, not timed one by one)"
+msgstr "Действие %s (все обработчики вместе, без замера каждого по отдельности)"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:72
+msgid "Loading plugins"
+msgstr "Загрузка плагинов"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:72
+msgid "From the %s action to the next"
+msgstr "От действия %s до следующего"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:74
+msgid "Other code"
+msgstr "Прочий код"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:125
+msgid "PHP stopped this request at its %1$d second time limit while it was running %2$s."
+msgstr "PHP остановил этот запрос по достижении лимита времени (%1$d с), пока выполнялся компонент %2$s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:127
+msgid "PHP stopped this request at its time limit while it was running %s."
+msgstr "PHP остановил этот запрос по достижении лимита времени, пока выполнялся компонент %s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:130
+msgid "%s had already passed before 404 Solution loaded."
+msgstr "До загрузки 404 Solution уже прошло %s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:137
+msgid "404 Solution itself used %1$s of the request's %2$s."
+msgstr "Сам 404 Solution использовал %1$s из %2$s времени запроса."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:140
+msgid "404 Solution's own measured time: %1$s of the request's %2$s (its callbacks inside the action totals are not split out)."
+msgstr "Собственное измеренное время 404 Solution: %1$s из %2$s времени запроса (его обработчики внутри итогов по действиям отдельно не выделены)."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:160
+msgid "Running when PHP stopped the request: %1$s (%2$s) on the %3$s action, %4$s so far."
+msgstr "Выполнялось, когда PHP остановил запрос: %1$s (%2$s) в действии %3$s, прошло %4$s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:162
+msgid "Slow callback: %1$s (%2$s) on the %3$s action, %4$s."
+msgstr "Медленный обработчик: %1$s (%2$s) в действии %3$s, %4$s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:166
+msgid "Seen on this site in the last day, while 404 Solution timed callbacks: %1$s (%2$s) on the %3$s action took %4$s."
+msgstr "Замечено на этом сайте за последние сутки, пока 404 Solution замерял обработчики: %1$s (%2$s) в действии %3$s занял %4$s."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:170
+msgid "CPU time after 404 Solution loaded: %1$s of %2$s wall-clock time."
+msgstr "Время CPU после загрузки 404 Solution: %1$s из %2$s реального времени."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:186
+msgid "To name the slow callback, 404 Solution now times each callback on 1 in %1$d requests for the next %2$d minutes; what it finds appears on the 404 Solution admin screen."
+msgstr "Чтобы определить медленный обработчик, 404 Solution теперь замеряет каждый обработчик в 1 из %1$d запросов в течение следующих %2$d мин.; результаты появятся на странице администрирования 404 Solution."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:190
+msgid "Measured on this request: how long each plugin took to load, and each callback on the main WordPress actions (plugins_loaded, init, wp_loaded, template_redirect, admin_init and others). Time in filters and in code between those actions is shown as a window or as unattributed. Times are wall-clock seconds."
+msgstr "Измерено для этого запроса: сколько времени загружался каждый плагин, а также каждый обработчик основных действий WordPress (plugins_loaded, init, wp_loaded, template_redirect, admin_init и других). Время в фильтрах и в коде между этими действиями показано как интервал или как нераспределённое. Время указано в секундах реального времени."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:192
+msgid "Measured on this request: how long each plugin took to load, the total of each main WordPress action, and each callback on the actions that ran after the request became slow. Times are wall-clock seconds."
+msgstr "Измерено для этого запроса: сколько времени загружался каждый плагин, общее время каждого основного действия WordPress и каждый обработчик в действиях, выполненных после того, как запрос стал медленным. Время указано в секундах реального времени."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:195
+msgid "Measured on this request: how long each plugin took to load, and the total of each main WordPress action. Callbacks are not timed one by one on normal requests, to keep the site fast. Times are wall-clock seconds."
+msgstr "Измерено для этого запроса: сколько времени загружался каждый плагин и общее время каждого основного действия WordPress. В обычных запросах обработчики не замеряются по отдельности, чтобы сайт работал быстро. Время указано в секундах реального времени."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:198
+msgid "Per-plugin timing is switched off on this site, so only WordPress phases are shown. Times are wall-clock seconds."
+msgstr "Замер времени по плагинам отключён на этом сайте, поэтому показаны только этапы WordPress. Время указано в секундах реального времени."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:251
+msgid "Component"
+msgstr "Компонент"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:252
+msgid "Seconds"
+msgstr "Секунды"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:267
+msgid "The 404 Solution admin screen shows where the time went."
+msgstr "Страница администрирования 404 Solution показывает, на что ушло время."
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:306
+msgid "%1$s (%2$s) on the %3$s action: %4$s"
+msgstr "%1$s (%2$s) в действии %3$s: %4$s"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:324
+msgid "Where this request's time went"
+msgstr "На что ушло время этого запроса"
+
+#: includes/diagnostics/TimeLimitReportRenderer.php:327
+msgid "Where this request's time went (PHP time limit: %d s)"
+msgstr "На что ушло время этого запроса (лимит времени PHP: %d с)"
+
+#: includes/diagnostics/TimeLimitReportView.php:105
+msgid "(CPU %s)"
+msgstr "(время CPU: %s)"
+
+#: includes/diagnostics/TimeLimitReportView.php:121
+msgid "The dark line marks PHP's %d second time limit. Depending on the server, PHP counts either CPU time or wall-clock time against it (Linux counts CPU time, so a request waiting on the network or the database can run longer than the limit in wall-clock time)."
+msgstr "Тёмная линия отмечает лимит времени PHP (%d с). В зависимости от сервера PHP учитывает в этом лимите либо время CPU, либо реальное время (Linux учитывает время CPU, поэтому запрос, ожидающий сеть или базу данных, по реальному времени может длиться дольше лимита)."
+
+#: includes/diagnostics/TimeLimitReportView.php:122
+msgid "PHP did not report its time limit for this request."
+msgstr "PHP не сообщил лимит времени для этого запроса."
+
+#: includes/diagnostics/TimeLimitReportView.php:126
+msgid "The last request PHP stopped at its time limit while 404 Solution's code was running: %1$s, %2$s"
+msgstr "Последний запрос, остановленный PHP по лимиту времени во время выполнения кода 404 Solution: %1$s, %2$s"
+
+#: includes/diagnostics/TimeLimitReportView.php:128
+msgid "Where the request's time went, by WordPress lifecycle window"
+msgstr "На что ушло время запроса, по этапам жизненного цикла WordPress"
+
+#: includes/diagnostics/TimeLimitReportView.php:153
+msgid "404 Solution: PHP stopped a request on this site at its time limit while 404 Solution's code was running. 404 Solution recorded which components used that request's time."
+msgstr "404 Solution: PHP остановил запрос на этом сайте по достижении лимита времени во время выполнения кода 404 Solution. 404 Solution записал, какие компоненты использовали время этого запроса."
+
+#: includes/diagnostics/TimeLimitReportView.php:155
+msgid "See where the time went"
+msgstr "Посмотреть, на что ушло время"
+
+#: includes/diagnostics/TimeLimitReportView.php:174
+msgid "Slow callbacks found while 404 Solution timed each callback"
+msgstr "Медленные обработчики, найденные, пока 404 Solution замерял каждый обработчик"
+
+#: includes/diagnostics/TimeLimitReportView.php:198
+msgid "Recent time-limit deaths"
+msgstr "Недавние остановки по лимиту времени"
+
+#: includes/diagnostics/TimeLimitReportView.php:199
+msgid "When"
+msgstr "Когда"
+
+#: includes/diagnostics/TimeLimitReportView.php:200
+msgid "Path"
+msgstr "Путь"
+
+#: includes/diagnostics/TimeLimitReportView.php:201
+msgid "Wall time"
+msgstr "Реальное время"
+
+#: includes/diagnostics/TimeLimitReportView.php:202
+msgid "CPU time (after 404 Solution loaded)"
+msgstr "Время CPU (после загрузки 404 Solution)"
+
+#: includes/diagnostics/TimeLimitReportView.php:203
+msgid "Stopped in"
+msgstr "Остановлен в"
+
+#: includes/diagnostics/TimeLimitReportView.php:214
+msgid "Before 404 Solution loaded"
+msgstr "До загрузки 404 Solution"
+
+#: includes/diagnostics/TimeLimitReportView.php:216
+msgid "plugins_loaded to init (theme setup)"
+msgstr "От plugins_loaded до init (настройка темы)"
+
+#: includes/diagnostics/TimeLimitReportView.php:217
+msgid "init to wp_loaded"
+msgstr "Этап от init до wp_loaded"
+
+#: includes/diagnostics/TimeLimitReportView.php:218
+msgid "wp_loaded to template_redirect (main query)"
+msgstr "От wp_loaded до template_redirect (основной запрос)"
+
+#: includes/diagnostics/TimeLimitReportView.php:219
+msgid "template_redirect to the end (page output)"
+msgstr "От template_redirect до конца (вывод страницы)"
+
+#: includes/diagnostics/TimeLimitReportView.php:220
+msgid "admin_init to the end (admin screen)"
+msgstr "От admin_init до конца (страница администрирования)"
+
+#: includes/diagnostics/TimeLimitReportView.php:221
+msgid "login_init to the end (login screen)"
+msgstr "От login_init до конца (страница входа)"
+
+#: includes/view/View_Tools.php:151
+msgid "Timed-out requests"
+msgstr "Запросы, превысившие лимит времени"
+
+#: includes/view/ShortcodeSuggestionsPresenter.php:260
+msgid "Show suggested pages"
+msgstr "Показать предлагаемые страницы"

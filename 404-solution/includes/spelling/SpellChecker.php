@@ -64,9 +64,6 @@ class ABJ_404_Solution_SpellChecker {
 	/** @var ABJ_404_Solution_SpellPostListeners */
 	private $postListeners;
 
-	/** @var ABJ_404_Solution_SpellSuggestionShortcodeDetector */
-	private $shortcodeDetector;
-
 	/** @var ABJ_404_Solution_SuggestionPublisher */
 	private $suggestionPublisher;
 
@@ -121,10 +118,6 @@ class ABJ_404_Solution_SpellChecker {
 			$this->f, $this->logic, $this->logger, $this->contentRepository,
 			$this->urlMatcher, $this->levenshteinEngine, $this->postListeners,
 			$custom404PageIDResolved, $this->separatingCharacters, $this->separatingCharactersForImages
-		);
-
-		$this->shortcodeDetector = new ABJ_404_Solution_SpellSuggestionShortcodeDetector(
-			$this->notFoundResponse
 		);
 
 		$this->suggestionPublisher = new ABJ_404_Solution_SuggestionPublisher($this->logger);
@@ -412,22 +405,6 @@ class ABJ_404_Solution_SpellChecker {
 		}
 
 		return null;
-	}
-
-	/**
-	 * Ask for background suggestions for this URL, rolling back the pending
-	 * marker if the dispatch fails. Delegates to the suggestion publisher, which
-	 * owns the transient and the loopback request.
-	 *
-	 * @param string $requestedURL
-	 * @return bool True when a background computation was dispatched.
-	 */
-	public function triggerAndCleanupOnFailure(string $requestedURL): bool {
-		return $this->suggestionPublisher->triggerAsyncSuggestions($requestedURL);
-	}
-
-	public function does404PageHaveSuggestionsShortcode() {
-		return $this->shortcodeDetector->does404PageHaveSuggestionsShortcode();
 	}
 
 }

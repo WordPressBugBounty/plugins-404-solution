@@ -39,9 +39,13 @@ class ABJ_404_Solution_View_RedirectForms extends ABJ_404_Solution_ViewComponent
         return rtrim((string)$raw, "\n");
     }
 
-    /** @param array<string,string> $vars */
+    /**
+     * Single-pass render: a value bound into one slot is never rescanned by a later key.
+     *
+     * @param array<string,string> $vars
+     */
     private function fillTpl(string $name, array $vars): string {
-        return (string)$this->f->str_replace(array_keys($vars), array_values($vars), $this->tpl($name));
+        return $this->f->renderTemplate($this->tpl($name), $vars);
     }
 
     /**
@@ -83,36 +87,31 @@ class ABJ_404_Solution_View_RedirectForms extends ABJ_404_Solution_ViewComponent
         $html = ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/addManualRedirectTop.html");
         $html .= ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) .
                 "/html/addManualRedirectPageSearchDropdown.html");
-
-        $html = $this->f->str_replace(
-            array('{redirect_to_label}', '{TOOLTIP_POPUP_EXPLANATION_EMPTY}', '{TOOLTIP_POPUP_EXPLANATION_PAGE}',
-                  '{TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING}', '{TOOLTIP_POPUP_EXPLANATION_URL}',
-                  '{REDIRECT_TO_USER_FIELD_WARNING}', '{redirectPageTitle}', '{pageIDAndType}', '{data-url}'),
-            array(__('Redirect to', '404-solution'),
-                  __('(Type a page name or an external URL)', '404-solution'),
-                  __('(A page has been selected.)', '404-solution'),
-                  __('(A custom string has been entered.)', '404-solution'),
-                  __('(An external URL will be used.)', '404-solution'),
-                  '', '', '',
-                  "admin-ajax.php?action=echoRedirectToPages&includeDefault404Page=true&includeSpecial=true&nonce=" . wp_create_nonce('abj404_ajax')),
-            $html
-        );
-
         $html .= ABJ_404_Solution_FileSystemService::readFileContents(dirname(__DIR__) . "/html/addManualRedirectBottom.html");
-        $html = $this->f->str_replace(
-            array('{addManualRedirectAction}', '{urlPlaceholder}', '{postedURL}',
-                  '{301selected}', '{302selected}', '{307selected}', '{308selected}',
-                  '{410selected}', '{451selected}', '{0selected}'),
-            array($link, esc_attr($urlPlaceholder), esc_attr($postedURL),
-                  $selected301, $selected302, $selected307, $selected308,
-                  $selected410, $selected451, $selected0),
-            $html
-        );
 
-        // constants and translations.
-        $html = $this->f->doNormalReplacements($html);
-
-        echo $html;
+        // Constants and `{msgid}` translations run over the TEMPLATE; every value below (the posted
+        // URL included) is bound last, in one pass, so a value is never scanned as a token.
+        echo $this->f->renderTemplate($html, array(
+            '{redirect_to_label}' => __('Redirect to', '404-solution'),
+            '{TOOLTIP_POPUP_EXPLANATION_EMPTY}' => __('(Type a page name or an external URL)', '404-solution'),
+            '{TOOLTIP_POPUP_EXPLANATION_PAGE}' => __('(A page has been selected.)', '404-solution'),
+            '{TOOLTIP_POPUP_EXPLANATION_CUSTOM_STRING}' => __('(A custom string has been entered.)', '404-solution'),
+            '{TOOLTIP_POPUP_EXPLANATION_URL}' => __('(An external URL will be used.)', '404-solution'),
+            '{REDIRECT_TO_USER_FIELD_WARNING}' => '',
+            '{redirectPageTitle}' => '',
+            '{pageIDAndType}' => '',
+            '{data-url}' => "admin-ajax.php?action=echoRedirectToPages&includeDefault404Page=true&includeSpecial=true&nonce=" . wp_create_nonce('abj404_ajax'),
+            '{addManualRedirectAction}' => $link,
+            '{urlPlaceholder}' => esc_attr($urlPlaceholder),
+            '{postedURL}' => esc_attr($postedURL),
+            '{301selected}' => $selected301,
+            '{302selected}' => $selected302,
+            '{307selected}' => $selected307,
+            '{308selected}' => $selected308,
+            '{410selected}' => $selected410,
+            '{451selected}' => $selected451,
+            '{0selected}' => $selected0,
+        ));
     }
 
     /** This is used both to add and to edit a redirect.

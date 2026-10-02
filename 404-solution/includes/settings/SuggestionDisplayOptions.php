@@ -225,19 +225,7 @@ final class ABJ_404_Solution_SuggestionDisplayOptions {
         if (!isset($options[$key])) {
             return $default;
         }
-        $v = $options[$key];
-        if (is_int($v)) {
-            return $v < 0 ? $default : $v;
-        }
-        if (is_float($v)) {
-            $i = (int)$v;
-            return $i < 0 ? $default : $i;
-        }
-        if (is_string($v) && is_numeric($v)) {
-            $i = (int)$v;
-            return $i < 0 ? $default : $i;
-        }
-        return $default;
+        return ABJ_404_Solution_ExactInteger::readOr($options[$key], 0, $default);
     }
 
     /**

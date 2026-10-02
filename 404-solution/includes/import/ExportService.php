@@ -110,14 +110,14 @@ class ABJ_404_Solution_ExportService {
 
         if ($format === 'redirection') {
             $nativeExportFile = $this->getExportFilename('native');
-            $this->viewReadService->doRedirectsExport($nativeExportFile);
+            $this->writeNativeCsv($nativeExportFile);
             $error = $this->convertExportCsvToRedirectionFormat($nativeExportFile, $tempFile);
             if ($error !== '') {
                 $this->loggerWarn($error);
                 return;
             }
         } else {
-            $this->viewReadService->doRedirectsExport($tempFile);
+            $this->writeNativeCsv($tempFile);
         }
 
         if (file_exists($tempFile)) {
@@ -163,8 +163,20 @@ class ABJ_404_Solution_ExportService {
     }
 
     /**
+     * Write the native CSV (the shape this plugin's own importer reads) to
+     * $tempFile. The file is not created when the export query cannot run.
+     *
+     * @param string $tempFile
+     * @return void
+     */
+    public function writeNativeCsv(string $tempFile): void {
+        ABJ_404_Solution_NativeRedirectCsvWriter::write($tempFile, $this->viewReadService->redirectsExportRows());
+    }
+
+    /**
      * Fetch all exportable (manual + regex, non-trashed) redirects and resolve
-     * destination URLs.
+     * destination URLs. A redirect with no destination to export (see
+     * ABJ_404_Solution_RedirectExportDestination::forServerRule()) is left out.
      *
      * Each returned element has:
      *   source   string  The from-URL stored in the DB (relative path or full URL).
@@ -180,7 +192,21 @@ class ABJ_404_Solution_ExportService {
             return array();
         }
 
-        return $this->redirectsRepository->getExportableRedirects();
+        $redirects = array();
+        foreach ($this->redirectsRepository->getExportableRedirectRows() as $row) {
+            $dest = ABJ_404_Solution_RedirectExportDestination::forServerRule($row);
+            if ($dest === null) {
+                continue;
+            }
+            $redirects[] = array(
+                'source'   => $row['source'],
+                'dest'     => $dest,
+                'code'     => $row['code'],
+                'is_regex' => $row['is_regex'],
+            );
+        }
+
+        return $redirects;
     }
 
     /**

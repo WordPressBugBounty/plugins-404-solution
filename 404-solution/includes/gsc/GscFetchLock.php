@@ -110,21 +110,48 @@ final class ABJ_404_Solution_GscFetchLock {
 
     private function initializeAtomicReadyAt(): int {
         $rawReadyAt = $this->store->atomicReadyAt();
-        if ($rawReadyAt === false || !is_numeric($rawReadyAt)) {
-            $readyAt = abj_clock()->now() + ABJ_404_Solution_GscConfig::ATOMIC_LOCK_MIGRATION_DELAY;
-            if (!$this->store->persistAtomicReadyAt($readyAt)) {
-                $this->logger->warn('Could not persist the GSC atomic-lock migration deadline; GSC fetches remain paused.');
-                return PHP_INT_MAX;
-            }
+        $storedReadyAt = ABJ_404_Solution_ExactInteger::read($rawReadyAt, 0);
+        if ($storedReadyAt !== null) {
+            return $storedReadyAt;
+        }
+
+        $readyAt = abj_clock()->now() + ABJ_404_Solution_GscConfig::ATOMIC_LOCK_MIGRATION_DELAY;
+        if ($this->store->persistAtomicReadyAt($readyAt)) {
             return $readyAt;
         }
-        return max(0, (int)$rawReadyAt);
+
+        // A refused write is not a failed one. `update_option()` answers whether
+        // the stored bytes CHANGED, and it falls through to `add_option()`,
+        // whose upsert affects no rows when the row already holds those bytes.
+        // Two requests reaching here on a site that has never stored the
+        // deadline read it absent in the same second and compute the same
+        // `now + MIGRATION_DELAY`, so the loser of that add/add race is told
+        // false about a deadline that IS stored, with its own value. Believing
+        // it costs a warning about nothing plus a paused fetch, which is the
+        // shape report 395 reported against the suggestion cache; the durable
+        // end state is what actually answers the question.
+        //
+        // Whatever deadline is in the row wins, not this request's: every racer
+        // has to migrate on one date, and the request that got there first
+        // already published it.
+        $persistedReadyAt = ABJ_404_Solution_ExactInteger::read(
+            $this->store->freshAtomicReadyAt(), 0);
+        if ($persistedReadyAt !== null) {
+            return $persistedReadyAt;
+        }
+
+        // Nothing readable is stored, so the write really did fail: a full
+        // options table, a read-only replica, a downed object cache. Those are
+        // real and the caller's pause is real work.
+        $this->logger->warn('Could not persist the GSC atomic-lock migration deadline; GSC fetches remain paused.');
+        return PHP_INT_MAX;
     }
 
     private function hasAgedOut(string $value, int $now): bool {
         $timestamp = explode(':', $value, 2)[0];
-        return $value === '' || !is_numeric($timestamp)
-            || ($now - (int)$timestamp) > ABJ_404_Solution_GscConfig::LOCK_TTL;
+        $timestampInt = ABJ_404_Solution_ExactInteger::read($timestamp, 0);
+        return $value === '' || $timestampInt === null
+            || ($now - $timestampInt) > ABJ_404_Solution_GscConfig::LOCK_TTL;
     }
 
     private function atomicLease(string $value, int $now): ABJ_404_Solution_GscFetchLease {

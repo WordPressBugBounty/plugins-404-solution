@@ -98,8 +98,14 @@ interface ABJ_404_Solution_ViewReadServiceInterface {
      */
     public function getLogsCount($logID);
 
-    /** @param string $tempFile @return void */
-    public function doRedirectsExport(string $tempFile): void;
+    /**
+     * The raw rows of the redirect export query, streamed one at a time.
+     * Null when the query could not run; an empty iterable when it ran and
+     * found no redirects.
+     *
+     * @return iterable<int, array<string, mixed>>|null
+     */
+    public function redirectsExportRows(): ?iterable;
 
     /** @return iterable<int, array<string, mixed>> */
     public function getRedirectsWithRegEx();

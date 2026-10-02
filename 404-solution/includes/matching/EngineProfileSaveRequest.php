@@ -198,20 +198,8 @@ final class ABJ_404_Solution_EngineProfileSaveRequest {
         if (!isset($raw[$key])) {
             return 0;
         }
-        $v = $raw[$key];
-        if (is_int($v)) {
-            return $v < 0 ? -$v : $v;
-        }
-        if (is_float($v)) {
-            return abs((int)$v);
-        }
-        if (is_string($v) && is_numeric($v)) {
-            return abs((int)$v);
-        }
-        if (is_string($v) && function_exists('absint')) {
-            return (int)absint($v);
-        }
-        return 0;
+        $value = ABJ_404_Solution_ExactInteger::read($raw[$key], -PHP_INT_MAX);
+        return $value === null ? 0 : abs($value);
     }
 
     /**
@@ -221,20 +209,7 @@ final class ABJ_404_Solution_EngineProfileSaveRequest {
         if (!isset($raw[$key])) {
             return 0;
         }
-        $v = $raw[$key];
-        if (is_int($v)) {
-            return $v;
-        }
-        if (is_float($v)) {
-            return (int)$v;
-        }
-        if (is_string($v) && is_numeric($v)) {
-            return (int)$v;
-        }
-        if (is_bool($v)) {
-            return $v ? 1 : 0;
-        }
-        return 0;
+        return ABJ_404_Solution_ExactInteger::readOr($raw[$key], PHP_INT_MIN, 0);
     }
 
     /**
