@@ -1,4 +1,0 @@
-{
-  "_comment": "This fixture MUST fail validation. The required token field is missing.",
-  "url": "/old-page"
-}
