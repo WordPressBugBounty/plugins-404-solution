@@ -57,7 +57,7 @@ final class ABJ_404_Solution_RestApiRequestParser {
 
     /**
      * @param \WP_REST_Request $request
-     * @return array{from: string, to: string, code: int, regex: bool}|WP_Error
+     * @return array{from: string, to: string, code: int, regex: bool, query_mode?: string|null}|WP_Error
      */
     public function createRedirect($request) {
         $rawFrom  = $request->get_param('from');
@@ -77,7 +77,9 @@ final class ABJ_404_Solution_RestApiRequestParser {
             return new \WP_Error('invalid_destination', __('The "to" URL must be a relative path or an http/https URL.', '404-solution'), array('status' => 400));
         }
 
-        return array(
+        $mode = $this->queryModeInput($request);
+        if ($mode instanceof \WP_Error) { return $mode; }
+        return $mode + array(
             'from'  => $from,
             'to'    => $to,
             'code'  => $this->redirectCode($rawCode),
@@ -87,7 +89,7 @@ final class ABJ_404_Solution_RestApiRequestParser {
 
     /**
      * @param \WP_REST_Request $request
-     * @return array{id: int, from: string, to: string, code: int, regex: bool}|WP_Error
+     * @return array{id: int, from: string, to: string, code: int, regex: bool, query_mode?: string|null}|WP_Error
      */
     public function updateRedirect($request) {
         $rawId    = $request->get_param('id');
@@ -110,7 +112,9 @@ final class ABJ_404_Solution_RestApiRequestParser {
             return new \WP_Error('invalid_destination', __('The "to" URL must be a relative path or an http/https URL.', '404-solution'), array('status' => 400));
         }
 
-        return array(
+        $mode = $this->queryModeInput($request);
+        if ($mode instanceof \WP_Error) { return $mode; }
+        return $mode + array(
             'id'    => $id,
             'from'  => $from,
             'to'    => $to,
@@ -121,7 +125,7 @@ final class ABJ_404_Solution_RestApiRequestParser {
 
     /**
      * @param \WP_REST_Request $request
-     * @return array{id: int, to: string, code: int}|WP_Error
+     * @return array{id: int, to: string, code: int, query_mode?: string|null}|WP_Error
      */
     public function capturedRedirect($request) {
         $rawId   = $request->get_param('id');
@@ -141,7 +145,9 @@ final class ABJ_404_Solution_RestApiRequestParser {
             return new \WP_Error('invalid_destination', __('The "to" URL must be a relative path or an http/https URL.', '404-solution'), array('status' => 400));
         }
 
-        return array(
+        $mode = $this->queryModeInput($request);
+        if ($mode instanceof \WP_Error) { return $mode; }
+        return $mode + array(
             'id'   => $id,
             'to'   => $to,
             'code' => $this->redirectCode($rawCode),
@@ -203,6 +209,19 @@ final class ABJ_404_Solution_RestApiRequestParser {
     private function redirectCode($rawCode): int {
         $code = absint(is_scalar($rawCode) ? $rawCode : 301);
         return in_array($code, array(301, 302), true) ? $code : 301;
+    }
+
+    /**
+     * @param \WP_REST_Request $request
+     * @return array{query_mode?: string|null}|\WP_Error
+     */
+    private function queryModeInput($request) {
+        if (!$request->has_param('query_mode')) { return array(); }
+        try {
+            return array('query_mode' => ABJ_404_Solution_QueryStringHelper::queryMode($request->get_param('query_mode')));
+        } catch (InvalidArgumentException $e) {
+            return new \WP_Error('invalid_query_mode', $e->getMessage(), array('status' => 400));
+        }
     }
 
     private function isSafeDestination(string $to): bool {

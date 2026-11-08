@@ -50,13 +50,17 @@ class ABJ_404_Solution_StatusLinkActionHandler {
             return sprintf(__('Error: Bad %s operation specified.', '404-solution'), $errorActionName);
         }
 
-        $id = isset($_GET['id']) && is_scalar($_GET['id']) ? (string)$_GET['id'] : '';
-        if ($id === '' || !$this->parent->getFunctions()->regexMatch('[0-9]+', $id)) {
+        $id = ABJ_404_Solution_ExactInteger::readOr($_GET['id'] ?? null, 1, 0);
+        if ($id === 0) {
             return '';
         }
 
         $newstatus = $operation === '1' ? $activeStatus : ABJ404_STATUS_CAPTURED;
-        $message = $this->parent->getRedirectsRepo()->updateRedirectTypeStatus(absint($id), (string)$newstatus);
+        try {
+            $message = $this->parent->getRedirectsRepo()->updateRedirectTypeStatus($id, (string)$newstatus);
+        } catch (ABJ_404_Solution_RedirectCycleException $e) {
+            return __('Error:', '404-solution') . ' ' . esc_html($e->getMessage());
+        }
         if ($message == '') {
             if ($newstatus == ABJ404_STATUS_CAPTURED) {
                 return sprintf(__('Removed 404 URL from %s list successfully!', '404-solution'), $successActionName);
@@ -64,9 +68,13 @@ class ABJ_404_Solution_StatusLinkActionHandler {
             return sprintf(__('404 URL marked as %s successfully!', '404-solution'), $successActionName);
         }
 
+        // The repository's message is the cause (a refused graph lock, a refused UPDATE):
+        // keep it next to the translated summary rather than replacing it.
         if ($newstatus == ABJ404_STATUS_CAPTURED) {
-            return sprintf(__('Error: unable to remove URL from %s list', '404-solution'), $successActionName);
+            return sprintf(__('Error: unable to remove URL from %s list', '404-solution'), $successActionName)
+                . ': ' . esc_html($message);
         }
-        return sprintf(__('Error: unable to mark URL as %s', '404-solution'), $successActionName);
+        return sprintf(__('Error: unable to mark URL as %s', '404-solution'), $successActionName)
+            . ': ' . esc_html($message);
     }
 }

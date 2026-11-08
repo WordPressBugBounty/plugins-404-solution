@@ -64,6 +64,22 @@ final class ABJ_404_Solution_CheckpointJournalReader {
     const MAX_SUPPORT_EXCERPT_BYTES = 134144;
 
     /**
+     * What the required-evidence block may occupy of MAX_SUPPORT_EXCERPT_BYTES.
+     *
+     * The block is charged to the budget first and the ranked failing-request
+     * groups get the rest, so the block's ceiling is the ranked section's
+     * floor: 134144 - 81920 = 52224 bytes, which holds the whole failing session
+     * (27 records x 320 bytes x 6 attempts = 51840) that
+     * SupportExcerptBudgetContractTest pins. Raising this ceiling without
+     * raising the budget takes room from the failing requests themselves.
+     * Measured in the run-6 transport failure: thirty requests of a canary
+     * ladder reserved 255 KB here, and the ranked section received nothing.
+     */
+    const MAX_REQUIRED_EVIDENCE_BYTES = 81920;
+
+    const REQUIRED_EVIDENCE_HEADING = "Required AJAX checkpoint evidence (JSONL):\n";
+
+    /**
      * Bounded recent checkpoint lines for the support-request payload.
      *
      * Without this the checkpoints are written and never read by anyone: the
@@ -97,7 +113,7 @@ final class ABJ_404_Solution_CheckpointJournalReader {
         $required = self::requiredSupportEvidence($paths);
         $requiredBlock = $required === ''
             ? ''
-            : "Required AJAX checkpoint evidence (JSONL):\n" . $required;
+            : self::REQUIRED_EVIDENCE_HEADING . $required;
         $rankedBudget = self::MAX_SUPPORT_EXCERPT_BYTES
             - ($requiredBlock === '' ? 0 : strlen($requiredBlock) + 1);
         $activePath = ABJ_404_Solution_DurableOperationRecorder::activePath(
@@ -109,7 +125,7 @@ final class ABJ_404_Solution_CheckpointJournalReader {
         ));
         $rankedSelection = self::withoutPathFromSelection($fileSelection, $activePath);
         $activeLines = $activePath === '' ? array()
-            : ABJ_404_Solution_ActiveOperationBreadcrumbs::compactSupportLines(
+            : ABJ_404_Solution_ActiveOperationBreadcrumbState::compactSupportLines(
                 ABJ_404_Solution_DiagnosticJournalExcerpt::readAllLines(array($activePath))
             );
         $activeClosedIds =
@@ -132,10 +148,12 @@ final class ABJ_404_Solution_CheckpointJournalReader {
 
     /**
      * Latest complete record of each evidence type that must bypass ordinary
-     * request-group ranking.
+     * request-group ranking, fitted to MAX_REQUIRED_EVIDENCE_BYTES.
      *
-     * The selector owns the record schemas. This reader owns byte accounting
-     * and applies the same support compaction used by the ranked remainder.
+     * The selector owns the record schemas and what each record is worth. The
+     * support compaction runs over the whole selection first, because it picks
+     * the slowest write across it; the fit then measures the compacted bytes,
+     * which are the bytes the report actually carries.
      *
      * @param array<int, string> $paths
      */
@@ -143,8 +161,28 @@ final class ABJ_404_Solution_CheckpointJournalReader {
         $lines = ABJ_404_Solution_DurableOperationRecorder::compactSupportLines(
             ABJ_404_Solution_DiagnosticJournalExcerpt::readAllLines($paths)
         );
-        $required = ABJ_404_Solution_RequiredCheckpointEvidence::select($lines);
-        return implode("\n", self::compactRoutinePhaseMaps($required));
+        $units = ABJ_404_Solution_RequiredCheckpointEvidence::selectUnits($lines);
+        $flat = array();
+        foreach ($units as $unit) {
+            foreach ($unit['lines'] as $line) {
+                $flat[] = $line;
+            }
+        }
+        $compacted = self::compactRoutinePhaseMaps($flat);
+        if (count($compacted) !== count($flat)) {
+            // The redaction policy is mid-update and answered with its notice.
+            return implode("\n", $compacted);
+        }
+        $offset = 0;
+        foreach ($units as $position => $unit) {
+            $count = count($unit['lines']);
+            $units[$position]['lines'] = array_slice($compacted, $offset, $count);
+            $offset += $count;
+        }
+        return implode("\n", ABJ_404_Solution_RequiredCheckpointEvidenceBudget::fit(
+            $units,
+            self::MAX_REQUIRED_EVIDENCE_BYTES - strlen(self::REQUIRED_EVIDENCE_HEADING)
+        ));
     }
 
     /**
@@ -181,7 +219,7 @@ final class ABJ_404_Solution_CheckpointJournalReader {
      *   reserved outside the ranked lines, such as active-operation state.
      * @return array<int, string>
      */
-    private static function compactForSupport(array $lines, array $additionalClosedIds = array()): array {
+    public static function compactForSupport(array $lines, array $additionalClosedIds = array()): array {
         $lines = ABJ_404_Solution_DurableOperationRecorder::compactSupportLines($lines);
         $withoutClosedIntents = ABJ_404_Solution_CheckpointIntentCorrelation::withoutClosedIntents(
             $lines,
@@ -221,16 +259,43 @@ final class ABJ_404_Solution_CheckpointJournalReader {
     }
 
     /**
+     * A journal record is a JSON object. A line that decodes to anything else
+     * (a scalar, a list, a torn write) is not a record and stays verbatim.
+     *
+     * @return array<string, mixed>|null
+     */
+    private static function decodeJournalRecord(string $line): ?array {
+        $decoded = json_decode($line, true);
+        if (!is_array($decoded)) {
+            return null;
+        }
+        $record = array();
+        foreach ($decoded as $key => $value) {
+            if (!is_string($key)) {
+                return null;
+            }
+            $record[$key] = $value;
+        }
+        return $record;
+    }
+
+    /**
      * @param array<int, string> $lines
      * @return array<int, string>
      */
     private static function compactRoutinePhaseMaps(array $lines): array {
+        // An updater can replace this reader after the older policy class was loaded.
+        if (!class_exists('ABJ_404_Solution_ClientTransportReport')
+                || !in_array('sanitizeJournalLine', get_class_methods('ABJ_404_Solution_ClientTransportReport'), true)) {
+            return array('Diagnostic journal evidence unavailable: client redaction policy is updating.');
+        }
         $slowestIndex = self::slowestTelemetryIndex($lines);
         $decodedByIndex = array();
         $hostPressureSnapshotByRequest = array();
         foreach ($lines as $index => $line) {
-            $record = json_decode($line, true);
-            $decodedByIndex[$index] = $record;
+            $line = ABJ_404_Solution_ClientTransportReport::sanitizeJournalLine($line);
+            $lines[$index] = $line;
+            $decodedByIndex[$index] = self::decodeJournalRecord($line);
         }
         foreach ($decodedByIndex as $index => $record) {
             if (!is_array($record)) {
@@ -357,8 +422,15 @@ final class ABJ_404_Solution_CheckpointJournalReader {
         $paths = array();
         foreach (array(ABJ_404_Solution_CheckpointJournalWriter::CHECKPOINT_FILE,
                 ABJ_404_Solution_CheckpointJournalWriter::ROTATED_FILE) as $name) {
-            if (@is_file($directory . $name)) {
-                $paths[] = $directory . $name;
+            $path = $directory . $name;
+            $fileResult = ABJ_404_Solution_HostFilesystemCall::isFile($path);
+            if ($fileResult['warning'] !== null) {
+                self::reportFailure('AJAX checkpoint archive path check warning: ' . $path
+                    . ' (' . $fileResult['warning'] . ')');
+                continue;
+            }
+            if ($fileResult['result']) {
+                $paths[] = $path;
             }
         }
         return $paths;

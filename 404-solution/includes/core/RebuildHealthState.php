@@ -32,6 +32,8 @@ class ABJ_404_Solution_RebuildHealthState {
     private $logger;
     /** @var string|null Exact row value acquired by this instance. */
     private $trialLockValue;
+    /** @var string|null Health-state token owned by this instance. */
+    private $trialToken;
 
     /**
      * @param ABJ_404_Solution_Clock $clock
@@ -46,7 +48,7 @@ class ABJ_404_Solution_RebuildHealthState {
     public function mayStartExpensiveRebuild(): bool {
         $state = $this->readState();
         if ($state === null) {
-            $this->log('warn', 'Rebuild health state is corrupt; refusing expensive rebuild.');
+            $this->log('warn', 'Rebuild health state is unavailable or corrupt; refusing expensive rebuild.');
             return false;
         }
         $gate = $state['gate'];
@@ -100,12 +102,17 @@ class ABJ_404_Solution_RebuildHealthState {
         if ($this->acquireTrialToken() === null) {
             return false;
         }
-        $this->mutateState(function (array $state) use ($now): array {
-            $state['gate']['last_daily_maintenance_attempt_ts'] = $now;
-            $state['trial']['daily_recovery_until'] = $now + self::TRIAL_TTL_SECONDS;
-            return $state;
-        });
-        return true;
+        $stored = false;
+        try {
+            $stored = $this->mutateState(function (array $state) use ($now): array {
+                $state['gate']['last_daily_maintenance_attempt_ts'] = $now;
+                $state['trial']['daily_recovery_until'] = $now + self::TRIAL_TTL_SECONDS;
+                return $state;
+            });
+            return $stored;
+        } finally {
+            if (!$stored) { $this->releaseTrialLock(); }
+        }
     }
 
     /** Give up the trial lock row.
@@ -125,6 +132,29 @@ class ABJ_404_Solution_RebuildHealthState {
             'value' => $this->trialLockValue,
         ));
         $this->trialLockValue = null;
+    }
+
+    /**
+     * Finish an admitted attempt that did not record a rebuild outcome.
+     * Clears only this instance's trial, preserving failure/backoff history and
+     * any replacement worker's token. Safe after recordSuccess/recordFailure.
+     */
+    public function endExpensiveRebuildAttempt(): void {
+        if ($this->trialLockValue === null) {
+            return;
+        }
+        $token = $this->trialToken;
+        try {
+            $this->mutateState(static function (array $state) use ($token): array {
+                if ($token !== null && ($state['trial']['token'] ?? '') === $token) {
+                    $state['trial'] = array('token' => '', 'started_at' => 0,
+                        'ttl' => self::TRIAL_TTL_SECONDS, 'daily_recovery_until' => 0);
+                }
+                return $state;
+            });
+        } finally {
+            $this->releaseTrialLock();
+        }
     }
 
     /** @return string|null */
@@ -149,14 +179,23 @@ class ABJ_404_Solution_RebuildHealthState {
         $added = $lockRow->claim(array('optionName' => self::TRIAL_LOCK_OPTION, 'value' => $claimValue));
         if (!$added) { return null; }
         $this->trialLockValue = $claimValue;
+        $stored = false;
         try {
-            $token = bin2hex(random_bytes(8));
-        } catch (\Throwable $t) {
-            // allow-silent-catch: random_bytes unavailable on some hosts; fallback token is sufficient for trial lock dedup.
-            $token = (string)mt_rand() . '_' . (string)$now;
+            try {
+                $token = bin2hex(random_bytes(8));
+            } catch (\Throwable $t) {
+                // allow-silent-catch: random_bytes unavailable on some hosts; fallback token is sufficient for trial lock dedup.
+                $token = (string)mt_rand() . '_' . (string)$now;
+            }
+            $this->trialToken = $token;
+            $stored = $this->mutateState(function (array $state) use ($token, $now): array { $state['trial'] = array('token' => $token, 'started_at' => $now, 'ttl' => self::TRIAL_TTL_SECONDS); return $state; });
+            return $stored ? $token : null;
+        } finally {
+            if (!$stored) {
+                $this->releaseTrialLock();
+                $this->trialToken = null;
+            }
         }
-        $this->mutateState(function (array $state) use ($token, $now): array { $state['trial'] = array('token' => $token, 'started_at' => $now, 'ttl' => self::TRIAL_TTL_SECONDS); return $state; });
-        return $token;
     }
 
     /**
@@ -165,49 +204,67 @@ class ABJ_404_Solution_RebuildHealthState {
      * @return void
      */
     public function recordFailure(string $msg, string $class = 'unknown'): void {
-        $now = $this->clock->now();
-        $this->mutateState(function (array $state) use ($msg, $class, $now): array {
-            $gate = $state['gate'];
-            $fc = ABJ_404_Solution_ExactInteger::readOr($gate['failure_count'] ?? null, 0, 0);
-            $gate['failure_count'] = $fc + 1;
-            $gate['last_failure_ts'] = $now;
-            $gate['last_failure_msg'] = substr($msg, 0, 500);
-            $gate['last_failure_class'] = $class;
-            $cd = ABJ_404_Solution_ExactInteger::readOr(
-                $gate['cooldown_seconds'] ?? null,
-                0,
-                self::INITIAL_COOLDOWN_SECONDS
-            );
-            if ($class === 'disk') {
-                $gate['cooldown_seconds'] = self::DISK_ERROR_COOLDOWN_SECONDS;
-                $gate['next_allowed_at'] = $now + self::DISK_ERROR_COOLDOWN_SECONDS;
-            } elseif (($fc + 1) >= self::FAILURE_THRESHOLD) {
-                $gate['next_allowed_at'] = $now + $cd;
-                $gate['cooldown_seconds'] = min(self::MAX_COOLDOWN_SECONDS, $cd * 2);
-            }
-            $state['gate'] = $gate;
-            $state['trial'] = array('token' => '', 'started_at' => 0, 'ttl' => self::TRIAL_TTL_SECONDS, 'daily_recovery_until' => 0);
-            return $state;
-        });
-        $this->releaseTrialLock();
+        try {
+            $now = $this->clock->now();
+            $token = $this->trialToken;
+            $this->mutateState(function (array $state) use ($msg, $class, $now, $token): array {
+                $gate = $state['gate'];
+                $fc = ABJ_404_Solution_ExactInteger::readOr($gate['failure_count'] ?? null, 0, 0);
+                $gate['failure_count'] = $fc + 1;
+                $gate['last_failure_ts'] = $now;
+                $gate['last_failure_msg'] = substr($msg, 0, 500);
+                $gate['last_failure_class'] = $class;
+                $cd = ABJ_404_Solution_ExactInteger::readOr(
+                    $gate['cooldown_seconds'] ?? null,
+                    0,
+                    self::INITIAL_COOLDOWN_SECONDS
+                );
+                if ($class === 'disk') {
+                    $gate['cooldown_seconds'] = self::DISK_ERROR_COOLDOWN_SECONDS;
+                    $gate['next_allowed_at'] = $now + self::DISK_ERROR_COOLDOWN_SECONDS;
+                } elseif (($fc + 1) >= self::FAILURE_THRESHOLD) {
+                    $gate['next_allowed_at'] = $now + $cd;
+                    $gate['cooldown_seconds'] = min(self::MAX_COOLDOWN_SECONDS, $cd * 2);
+                }
+                $state['gate'] = $gate;
+                if (($state['trial']['token'] ?? '') === ($token ?? '')) {
+                    $state['trial'] = array('token' => '', 'started_at' => 0, 'ttl' => self::TRIAL_TTL_SECONDS, 'daily_recovery_until' => 0);
+                }
+                return $state;
+            });
+        } finally {
+            $this->releaseTrialLock();
+        }
         $this->log('warn', sprintf('Rebuild health: failure (class=%s). Message: %s', $class, substr($msg, 0, 200)));
     }
 
     /** @return void */
     public function recordSuccess(): void {
-        $now = $this->clock->now();
-        $this->mutateState(function (array $state) use ($now): array {
-            $state['gate'] = array('failure_count' => 0, 'next_allowed_at' => 0, 'last_failure_ts' => 0, 'last_failure_msg' => '', 'last_failure_class' => '', 'cooldown_seconds' => self::INITIAL_COOLDOWN_SECONDS, 'last_success_ts' => $now);
-            $state['trial'] = array('token' => '', 'started_at' => 0, 'ttl' => self::TRIAL_TTL_SECONDS, 'daily_recovery_until' => 0);
-            return $state;
-        });
-        $this->releaseTrialLock();
+        try {
+            $now = $this->clock->now();
+            $token = $this->trialToken;
+            $this->mutateState(function (array $state) use ($now, $token): array {
+                $state['gate'] = array('failure_count' => 0, 'next_allowed_at' => 0, 'last_failure_ts' => 0, 'last_failure_msg' => '', 'last_failure_class' => '', 'cooldown_seconds' => self::INITIAL_COOLDOWN_SECONDS, 'last_success_ts' => $now);
+                if (($state['trial']['token'] ?? '') === ($token ?? '')) {
+                    $state['trial'] = array('token' => '', 'started_at' => 0, 'ttl' => self::TRIAL_TTL_SECONDS, 'daily_recovery_until' => 0);
+                }
+                return $state;
+            });
+        } finally {
+            $this->releaseTrialLock();
+        }
     }
 
     /** @return void */
     public function reset(): void {
-        if (function_exists('update_option')) { update_option(self::OPTION_NAME, $this->defaultState(), false); }
-        $this->releaseTrialLock();
+        try {
+            ABJ_404_Solution_OptionRowCompareAndSwap::update(array(
+                'optionName' => self::OPTION_NAME,
+                'compute' => fn(?string $current): string => serialize($this->defaultState()),
+            ));
+        } finally {
+            $this->releaseTrialLock();
+        }
     }
 
     /** @return array{failure_count: int, last_failure_msg: string, last_failure_class: string, cooldown_seconds: int, next_allowed_at: int}|null */
@@ -276,25 +333,42 @@ class ABJ_404_Solution_RebuildHealthState {
      * @return array<string, array<string, mixed>>|null
      */
     public function readState(): ?array {
-        if (!function_exists('get_option')) { return $this->defaultState(); }
-        $raw = get_option(self::OPTION_NAME, null);
-        if ($raw === null || $raw === false) { return $this->defaultState(); }
+        $row = ABJ_404_Solution_OptionRowCompareAndSwap::readResult(self::OPTION_NAME);
+        if ($row['status'] === 'failed') { return null; }
+        return $this->decodeState($row['status'] === 'found' ? $row['value'] : null);
+    }
+
+    /**
+     * Decode WordPress's serialized array while retaining the existing corruption contract.
+     * @param string|null $stored null means the row is absent.
+     * @return array<string, array<string, mixed>>|null
+     */
+    private function decodeState(?string $stored): ?array {
+        if ($stored === null) { return $this->defaultState(); }
+        $raw = maybe_unserialize($stored);
         if (!is_array($raw) || !isset($raw['gate']) || !is_array($raw['gate'])) { return null; }
         return $this->mergeDefaults($raw);
     }
 
     /**
+     * Compute from the durable row and retry a concurrent change without losing its fields.
      * @param callable $mutator
-     * @return void
+     * @return bool whether a valid state was stored or was already unchanged.
      */
-    private function mutateState(callable $mutator): void {
-        $state = $this->readState();
-        if ($state === null) { $state = $this->defaultState(); }
-        $mutated = $mutator($state);
-        if (is_array($mutated)) {
-            $state = $mutated;
-        }
-        if (function_exists('update_option')) { update_option(self::OPTION_NAME, $state, false); }
+    private function mutateState(callable $mutator): bool {
+        $valid = true;
+        $result = ABJ_404_Solution_OptionRowCompareAndSwap::update(array(
+            'optionName' => self::OPTION_NAME,
+            'compute' => function (?string $current) use ($mutator, &$valid): ?string {
+                $state = $this->decodeState($current);
+                if ($state === null) { $valid = false; return null; }
+                $mutated = $mutator($state);
+                return serialize(is_array($mutated) ? $mutated : $state);
+            },
+        ));
+        if (!$valid) { $this->log('warn', 'Rebuild health state is corrupt; refusing to overwrite it.'); }
+        return $valid && in_array($result, array(ABJ_404_Solution_OptionRowCompareAndSwap::RESULT_SWAPPED,
+            ABJ_404_Solution_OptionRowCompareAndSwap::RESULT_UNCHANGED), true);
     }
 
     /**

@@ -4,12 +4,16 @@
 #
 # Usage: bash contracts/check-schema-staleness.sh [server-contracts-dir]
 # Default server dir: $ABJ404_SERVER_CONTRACTS_DIR, or
-#                     ~/dev/404-solution-server/contracts
+#                     404-solution-server/contracts beside the primary checkout
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-SERVER_DIR="${1:-${ABJ404_SERVER_CONTRACTS_DIR:-$HOME/dev/404-solution-server/contracts}}"
+SERVER_DIR="${1:-${ABJ404_SERVER_CONTRACTS_DIR:-}}"
+if [ -z "$SERVER_DIR" ]; then
+  SERVER_DIR="$(node -e 'process.stdout.write(require(process.argv[1]).defaultServerContractsDir(process.argv[2]));' \
+    "$SCRIPT_DIR/contractFileIO.js" "$SCRIPT_DIR/..")"
+fi
 LOCAL_SCHEMA="$SCRIPT_DIR/schemas/report.schema.json"
 SERVER_SCHEMA="${SERVER_DIR%/}/schemas/report.schema.json"
 

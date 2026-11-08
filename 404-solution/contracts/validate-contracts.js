@@ -7,7 +7,7 @@
 // Usage: node validate-contracts.js [--contracts-dir <path>] [--vendor-dir <path>]
 //                                   [--server-contracts-dir <path>]
 // Defaults: --contracts-dir ./contracts --vendor-dir ./vendor-contracts
-//           --server-contracts-dir ../404-solution-server/contracts
+//           --server-contracts-dir beside the primary Git checkout
 //                                  (env: ABJ404_SERVER_CONTRACTS_DIR)
 //
 // Exit 0: all checks pass (or no contracts directory found)
@@ -15,6 +15,7 @@
 
 const path = require("path");
 const {
+  defaultServerContractsDir,
   fileExists,
   pathExists,
   filesEqual,
@@ -32,7 +33,7 @@ const args = process.argv.slice(2);
  * three in one function is what stops the same setting being read twice with
  * two different defaults.
  *
- * @param {{name: string, fallback: string, envName?: string}} options
+ * @param {{name: string, fallback: string|(() => string), envName?: string}} options
  * @returns {string}
  */
 function getArg({ name, fallback, envName }) {
@@ -46,7 +47,7 @@ function getArg({ name, fallback, envName }) {
     return value;
   }
   const fromEnv = envName ? process.env[envName] : undefined; // allow-direct-env: this IS the config adapter, the only env read in this script
-  return fromEnv || fallback;
+  return fromEnv || (typeof fallback === "function" ? fallback() : fallback);
 }
 
 const contractsDir = path.resolve(getArg({ name: "contracts-dir", fallback: "./contracts" }));
@@ -54,7 +55,7 @@ const vendorDir = path.resolve(getArg({ name: "vendor-dir", fallback: "./vendor-
 const serverContractsDir = path.resolve(
   getArg({
     name: "server-contracts-dir",
-    fallback: path.join(__dirname, "..", "..", "404-solution-server", "contracts"),
+    fallback: () => defaultServerContractsDir(path.resolve(__dirname, "..")),
     envName: "ABJ404_SERVER_CONTRACTS_DIR",
   })
 );

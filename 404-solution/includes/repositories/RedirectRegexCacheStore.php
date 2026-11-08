@@ -43,6 +43,45 @@ class ABJ_404_Solution_RedirectRegexCacheStore {
      */
     private static $regexRedirectsCacheBlogId = null;
 
+    /** @var array{blogId:int,version:int,rows:array<int,array<string,mixed>>|null}|null */
+    private static $manualSnapshot = null;
+    /** @var int Invalidates incomplete streams across mutations and ownership scopes. */
+    private static $manualVersion = 0;
+
+    /**
+     * Reuse a complete, bounded candidate population only during graph ownership.
+     * @internal The repository invokes this inside its continuously held mutex.
+     * @param callable():void $operation
+     */
+    public static function runWithManualSnapshot(callable $operation): void {
+        if (self::$manualSnapshot !== null) { $operation(); return; }
+        self::$manualSnapshot = array('blogId' => self::currentBlogId(),
+            'version' => ++self::$manualVersion, 'rows' => null);
+        try { $operation(); }
+        finally { self::$manualSnapshot = null; }
+    }
+
+    /** Null means no snapshot is permitted for the current blog. */
+    public static function manualSnapshotVersion(): ?int {
+        if (self::$manualSnapshot === null || self::$manualSnapshot['blogId'] !== self::currentBlogId()) {
+            return null;
+        }
+        return self::$manualSnapshot['version'];
+    }
+
+    /** @return array<int,array<string,mixed>>|null Null is cold; an empty array is a complete miss. */
+    public static function manualSnapshotRows(): ?array {
+        $snapshot = self::$manualSnapshot;
+        return $snapshot !== null && $snapshot['blogId'] === self::currentBlogId() ? $snapshot['rows'] : null;
+    }
+
+    /** @param array<int,array<string,mixed>> $rows Entire healthy stream, never a truncated prefix. */
+    public static function rememberManualSnapshot(array $rows, int $version): void {
+        if (self::$manualSnapshot !== null && self::manualSnapshotVersion() === $version && count($rows) <= self::MAX_COUNT) {
+            self::$manualSnapshot['rows'] = $rows;
+        }
+    }
+
     public function clear(): void {
         self::clearStatic();
     }
@@ -51,6 +90,10 @@ class ABJ_404_Solution_RedirectRegexCacheStore {
         self::$regexRedirectsCache = null;
         self::$regexCacheDisabled = false;
         self::$regexRedirectsCacheBlogId = null;
+        if (self::$manualSnapshot !== null) {
+            self::$manualSnapshot['rows'] = null;
+            self::$manualSnapshot['version'] = ++self::$manualVersion;
+        }
     }
 
     /** @return array<int, array<string, mixed>>|null */

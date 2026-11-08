@@ -181,6 +181,10 @@ class ABJ_404_Solution_CanonicalPaginationRedirect {
             abj404_benchmark_emit_headers();
         }
 
+        if (is_callable(array('ABJ_404_Solution_RedirectLoopGuard', 'permitsDestination'))
+            && !ABJ_404_Solution_RedirectLoopGuard::permitsDestination($canonicalUrl)) {
+            return false;
+        }
         $redirectAccepted = wp_safe_redirect($canonicalUrl, self::REDIRECT_STATUS, ABJ404_NAME);
         if ($redirectAccepted === false) {
             $this->logger->warn('Canonical pagination redirect to "' . $canonicalUrl .

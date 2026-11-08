@@ -46,7 +46,8 @@
           "fixtures/heartbeat.valid.json"
         ],
         "invalid": [
-          "fixtures/heartbeat.invalid-missing-version.json"
+          "fixtures/heartbeat.invalid-missing-version.json",
+          "fixtures/heartbeat.invalid-bad-ajax-failure-counts.json"
         ]
       }
     },

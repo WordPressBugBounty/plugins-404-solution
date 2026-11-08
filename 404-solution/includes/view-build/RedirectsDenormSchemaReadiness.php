@@ -132,7 +132,7 @@ class ABJ_404_Solution_RedirectsDenormSchemaReadiness {
             return $latch !== '' && function_exists('get_option') && self::trace(
                 'latch_option_read',
                 array('column' => $column, 'option' => $latch),
-                static fn(): bool => get_option($latch) === '1'
+                static fn(): bool => ABJ_404_Solution_OptionShapeRead::scalar($latch) === '1'
             );
         });
     }
@@ -153,6 +153,23 @@ class ABJ_404_Solution_RedirectsDenormSchemaReadiness {
             }
             return $this->sortKeyCompositeIndexesPresent($column);
         });
+    }
+
+    /**
+     * The public readiness status for a narrow sort-key column. Schema
+     * availability and backfill convergence are both schema-owner decisions;
+     * callers only need the shared view-read status vocabulary.
+     *
+     * @param string $column url_sort_key | dest_sort_key.
+     * @return string One of the SORT_READINESS_* constants.
+     */
+    public function readinessForColumn(string $column): string {
+        if (!$this->sortKeySchemaAvailableForColumn($column)) {
+            return ABJ_404_Solution_ViewReadServiceInterface::SORT_READINESS_SCHEMA_UNAVAILABLE;
+        }
+        return $this->sortKeyReadyForColumn($column)
+            ? ABJ_404_Solution_ViewReadServiceInterface::SORT_READINESS_READY
+            : ABJ_404_Solution_ViewReadServiceInterface::SORT_READINESS_BACKFILL_PENDING;
     }
 
     /**
@@ -208,6 +225,28 @@ class ABJ_404_Solution_RedirectsDenormSchemaReadiness {
         });
         $this->redirectsIndexSetCache = is_array($definitions) ? $definitions : array();
         return $this->redirectsIndexSetCache;
+    }
+
+    /**
+     * A verified index for bounded candidate reads within each status bucket.
+     * Keeping the status predicate inside the LIMIT prevents a continuous 404
+     * stream from hiding older manual redirects behind unrelated captured rows.
+     * An empty result leaves the bounded PRIMARY window as the last resort.
+     */
+    public function boundedStatusIndex(): string {
+        $candidates = array(
+            'idx_status_disabled_timestamp_id' => array('status', 'disabled', 'timestamp', 'id'),
+            'idx_status_disabled' => array('status', 'disabled'),
+            'status' => array('status'),
+        );
+        $present = $this->redirectsIndexSet();
+        foreach ($candidates as $name => $columns) {
+            $definition = $present[$name] ?? null;
+            if (!is_array($definition)) { continue; }
+            $expected = array_map(static fn(string $column): array => array('column' => $column, 'prefix' => null), $columns);
+            if (array_slice($definition['columns'], 0, count($columns)) === $expected) { return $name; }
+        }
+        return '';
     }
 
     /**

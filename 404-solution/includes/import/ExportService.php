@@ -63,6 +63,7 @@ class ABJ_404_Solution_ExportService {
     }
 
     /**
+     * Legacy browser-export path for retention cleanup. Active exports use RedirectExportWorkspace.
      * @param string $format
      * @return string
      */
@@ -106,21 +107,30 @@ class ABJ_404_Solution_ExportService {
             return;
         }
 
-        $tempFile = $this->getExportFilename($format);
-
-        if ($format === 'redirection') {
-            $nativeExportFile = $this->getExportFilename('native');
-            $this->writeNativeCsv($nativeExportFile);
-            $error = $this->convertExportCsvToRedirectionFormat($nativeExportFile, $tempFile);
-            if ($error !== '') {
-                $this->loggerWarn($error);
+        $workspace = ABJ_404_Solution_RedirectExportWorkspace::create();
+        if ($workspace instanceof WP_Error) {
+            $this->csvExportFailure($workspace);
+            return;
+        }
+        try {
+            $tempFile = $workspace->csvPath($format);
+            $nativeExportFile = $workspace->csvPath();
+            $failure = $this->writeNativeCsv($nativeExportFile);
+            if ($failure instanceof WP_Error) {
+                $this->csvExportFailure($failure);
                 return;
             }
-        } else {
-            $this->writeNativeCsv($tempFile);
-        }
-
-        if (file_exists($tempFile)) {
+            if ($format === 'redirection') {
+                $error = $this->convertExportCsvToRedirectionFormat($nativeExportFile, $tempFile);
+                if ($error !== '') {
+                    $this->loggerWarn($error);
+                    return;
+                }
+            }
+            if (!file_exists($tempFile)) {
+                $this->loggerInfo("I don't see any data to export.");
+                return;
+            }
             header('Content-Description: File Transfer');
             header('Content-Disposition: attachment; filename=' . basename($tempFile));
             header('Expires: 0');
@@ -129,10 +139,18 @@ class ABJ_404_Solution_ExportService {
             header('Content-Length: ' . filesize($tempFile));
             header('Content-Type: text/csv; charset=utf-8');
             readfile($tempFile);
-            exit();
+        } finally {
+            $workspace->close();
         }
+        exit();
+    }
 
-        $this->loggerInfo("I don't see any data to export.");
+    private function csvExportFailure(WP_Error $failure): void {
+        $detail = 'Export failed (' . $failure->get_error_code() . '): ' . $failure->get_error_message();
+        $this->loggerWarn($detail);
+        abj_service('db_core')->noticeState()->setPluginDbNotice(
+            'redirect_export', $detail, '', $detail, ABJ_404_Solution_DatabaseNoticeStateHolder::SEVERITY_WARNING
+        );
     }
 
     /**
@@ -167,10 +185,10 @@ class ABJ_404_Solution_ExportService {
      * $tempFile. The file is not created when the export query cannot run.
      *
      * @param string $tempFile
-     * @return void
+     * @return WP_Error|null Database/write failure, or null on success.
      */
-    public function writeNativeCsv(string $tempFile): void {
-        ABJ_404_Solution_NativeRedirectCsvWriter::write($tempFile, $this->viewReadService->redirectsExportRows());
+    public function writeNativeCsv(string $tempFile): ?WP_Error {
+        return ABJ_404_Solution_NativeRedirectCsvWriter::write($tempFile, $this->viewReadService->redirectsExportRows());
     }
 
     /**

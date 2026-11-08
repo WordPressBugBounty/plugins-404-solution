@@ -122,7 +122,7 @@ class ABJ_404_Solution_GscSearchAnalyticsClient {
      * @return bool
      */
     public function isRefreshNeeded(): bool {
-        $lastFetch = get_option(ABJ_404_Solution_GscConfig::LAST_FETCH_OPTION_KEY, 0);
+        $lastFetch = ABJ_404_Solution_OptionShapeRead::scalar(ABJ_404_Solution_GscConfig::LAST_FETCH_OPTION_KEY, 0);
         $lastFetchTime = ABJ_404_Solution_ExactInteger::readOr($lastFetch, 0, 0);
         return (abj_clock()->now() - $lastFetchTime) > ABJ_404_Solution_GscConfig::STALE_THRESHOLD;
     }
@@ -168,7 +168,7 @@ class ABJ_404_Solution_GscSearchAnalyticsClient {
      */
     private function doFetchFromApi(array $urls, int $days = 90): array {
         $s = $this->oauthStore->getSettings();
-        $token = get_option(ABJ_404_Solution_GscConfig::TOKEN_OPTION_KEY, false);
+        $token = ABJ_404_Solution_OptionShapeRead::arrayValue(ABJ_404_Solution_GscConfig::TOKEN_OPTION_KEY, false);
         $accessToken = $this->tokenAccessToken($token);
         if ($accessToken === '') {
             return array('rows' => array(), 'completed' => true);

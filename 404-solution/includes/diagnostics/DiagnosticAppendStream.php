@@ -39,11 +39,12 @@ if (!defined('ABSPATH')) {
  * same guard, because a rename retains the records and a delete destroys them:
  *
  *   1. Every append, one fstat asks whether the file still has a directory
- *      entry at all (isUnlinkedSink). It does not after a delete, and writes
- *      through the descriptor then succeed into an inode no reader can reach,
- *      which breaks the per-record durability contract above. So this one
- *      cannot be amortized: a bounded window here would lose whole windows of
- *      evidence silently. nlink survives a rename, so it never fires on (2).
+ *      entry at all (DiagnosticSinkIdentity::isUnlinked). It does not after a
+ *      delete, and writes through the descriptor then succeed into an inode no
+ *      reader can reach, which breaks the per-record durability contract
+ *      above. So this one cannot be amortized: a bounded window here would
+ *      lose whole windows of evidence silently. nlink survives a rename, so it
+ *      never fires on (2).
  *   2. Every REVALIDATE_AFTER_APPENDS appends, one fstat/stat pair checks that
  *      the descriptor still names the path. That bounds mis-targeted records to
  *      one revalidation window, and they land in the rotated file rather than
@@ -52,7 +53,7 @@ if (!defined('ABSPATH')) {
  *      fresh descriptor on the next append.
  *
  * The size the caller enforces its cap against is tracked here rather than
- * stat()ed per record, seeded from one filesize() at open and re-seeded at each
+ * stat()ed per record, seeded from one fstat() at open and re-seeded at each
  * revalidation, so concurrent writers cannot make the cap drift by more than
  * one window either.
  *
@@ -90,30 +91,49 @@ final class ABJ_404_Solution_DiagnosticAppendStream {
     /**
      * Append one line, and flush it, through a descriptor held for the request.
      *
-     * @return array{status: string, reason: string, bytes: int} bytes is this
-     *   sink's tracked size AFTER the append, which is what a caller enforces
-     *   its rotation cap against. Zero when the append did not happen.
+     * @return array{status: string, reason: string, bytes: int, warning: string}
+     *   bytes is this sink's tracked size AFTER the append, which is what a
+     *   caller enforces its rotation cap against. Zero when the append did not
+     *   happen. warning is the native cause of a failed open, write or flush
+     *   (several joined by "; "), captured here because the capture below keeps
+     *   it from any handler the caller installed: a caller that reports the
+     *   failure appends it so the report names its actual cause. Empty on
+     *   success.
      */
     public static function append(string $path, string $line): array {
-        $stream = self::stream($path);
+        $openFailure = '';
+        $stream = self::stream($path, $openFailure);
         if ($stream === null) {
-            return array('status' => 'failed', 'reason' => 'open_failed', 'bytes' => 0);
+            return array('status' => 'failed', 'reason' => 'open_failed', 'bytes' => 0, 'warning' => $openFailure);
         }
         $length = strlen($line);
-        $written = @fwrite($stream['handle'], $line);
-        $flushed = @fflush($stream['handle']);
+        $write = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($stream, $line) { return fwrite($stream['handle'], $line); }
+        );
+        self::reportFilesystemWarning('diagnostic append write', $write['warning']);
+        $written = $write['result'];
+        $flush = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($stream) { return fflush($stream['handle']); }
+        );
+        self::reportFilesystemWarning('diagnostic append flush', $flush['warning']);
+        $flushed = $flush['result'];
         if ($written !== $length || !$flushed) {
             // A short write leaves a truncated line in a file another process
             // parses, so the descriptor is not trustworthy any more: drop it
             // and let the next append start from a fresh one.
             self::invalidate($path);
-            return array('status' => 'failed', 'reason' => 'append_flush_failed', 'bytes' => 0);
+            $causes = array_filter(array($write['warning'], $flush['warning']), static function ($warning): bool {
+                return is_string($warning) && $warning !== '';
+            });
+            return array('status' => 'failed', 'reason' => 'append_flush_failed', 'bytes' => 0,
+                'warning' => implode('; ', array_unique($causes)));
         }
         self::$streams[$path]['bytes'] += $length;
         return array(
             'status' => 'complete',
             'reason' => '',
             'bytes' => self::$streams[$path]['bytes'],
+            'warning' => '',
         );
     }
 
@@ -121,9 +141,9 @@ final class ABJ_404_Solution_DiagnosticAppendStream {
      * This sink's size, without a stat syscall once it is open.
      *
      * Opens the sink if it is not open yet, because the callers that ask are
-     * about to append to it and the alternative is the per-record filesize()
+     * about to append to it and the alternative is a per-record metadata read
      * this class exists to remove. Zero when the sink cannot be opened at all,
-     * which is the same answer the callers' own @filesize() gave them.
+     * which is the same zero-size answer the callers use when opening fails.
      *
      * Accurate to within one revalidation window when other processes are
      * appending to the same file (see the class comment).
@@ -149,7 +169,7 @@ final class ABJ_404_Solution_DiagnosticAppendStream {
         if ($stream === null) {
             return 0;
         }
-        $identity = self::identityOf($stream['handle'], $path);
+        $identity = ABJ_404_Solution_DiagnosticSinkIdentity::inspect($stream['handle'], $path);
         if (!$identity['still_names_path']) {
             self::invalidate($path);
             $stream = self::stream($path);
@@ -174,17 +194,21 @@ final class ABJ_404_Solution_DiagnosticAppendStream {
      *
      * @param int $timeoutUs Give up after this long rather than blocking. A
      *   held lock must never manufacture the stall this diagnostic measures.
-     * @return array{status: string, reason: string, held: bool} held is true
-     *   only when THIS call took the lock, so only that caller releases it.
+     * @return array{status: string, reason: string, held: bool, warning: string}
+     *   held is true only when THIS call took the lock, so only that caller
+     *   releases it. warning is the native cause when the lock file could not
+     *   be opened (see append()), empty otherwise.
      */
     public static function acquireExclusive(string $path, int $timeoutUs): array {
-        $stream = self::stream($path);
+        $openFailure = '';
+        $stream = self::stream($path, $openFailure);
         if ($stream === null) {
-            return array('status' => 'failed', 'reason' => 'lock_open_failed', 'held' => false);
+            return array('status' => 'failed', 'reason' => 'lock_open_failed', 'held' => false,
+                'warning' => $openFailure);
         }
         if (self::$streams[$path]['locked'] > 0) {
             self::$streams[$path]['locked']++;
-            return array('status' => 'complete', 'reason' => 'already_held', 'held' => false);
+            return array('status' => 'complete', 'reason' => 'already_held', 'held' => false, 'warning' => '');
         }
         // A host with no monotonic clock cannot measure the deadline, and a
         // deadline that always reads as zero elapsed is not a bounded wait, it
@@ -194,17 +218,21 @@ final class ABJ_404_Solution_DiagnosticAppendStream {
         $measurable = function_exists('hrtime');
         $startedNs = self::monotonicNanoseconds();
         do {
-            if (@flock($stream['handle'], LOCK_EX | LOCK_NB)) {
+            $lock = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($stream) { return flock($stream['handle'], LOCK_EX | LOCK_NB); }
+            );
+            self::reportFilesystemWarning('diagnostic lock acquire', $lock['warning']);
+            if ($lock['result']) {
                 self::$streams[$path]['locked'] = 1;
-                return array('status' => 'complete', 'reason' => '', 'held' => true);
+                return array('status' => 'complete', 'reason' => '', 'held' => true, 'warning' => '');
             }
             if (!$measurable) {
                 return array('status' => 'lock_timeout', 'reason' => 'lock_wait_unmeasurable',
-                    'held' => false);
+                    'held' => false, 'warning' => '');
             }
             if (self::elapsedMicroseconds($startedNs) >= $timeoutUs) {
                 return array('status' => 'lock_timeout', 'reason' => 'lock_wait_exceeded',
-                    'held' => false);
+                    'held' => false, 'warning' => '');
             }
             usleep(1000);
         } while (true);
@@ -224,7 +252,11 @@ final class ABJ_404_Solution_DiagnosticAppendStream {
         if (self::$streams[$path]['locked'] > 0) {
             return array('status' => 'complete', 'reason' => 'still_nested');
         }
-        if (!@flock(self::$streams[$path]['handle'], LOCK_UN)) {
+        $unlock = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($path) { return flock(self::$streams[$path]['handle'], LOCK_UN); }
+        );
+        self::reportFilesystemWarning('diagnostic lock release', $unlock['warning']);
+        if (!$unlock['result']) {
             return array('status' => 'failed', 'reason' => 'unlock_failed');
         }
         return array('status' => 'complete', 'reason' => '');
@@ -240,10 +272,16 @@ final class ABJ_404_Solution_DiagnosticAppendStream {
         }
         $handle = self::$streams[$path]['handle'];
         if (self::$streams[$path]['locked'] > 0) {
-            @flock($handle, LOCK_UN);
+            $unlock = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($handle) { return flock($handle, LOCK_UN); }
+            );
+            self::reportFilesystemWarning('diagnostic lock invalidate', $unlock['warning']);
         }
         unset(self::$streams[$path]);
-        @fclose($handle);
+        $close = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($handle) { return fclose($handle); }
+        );
+        self::reportFilesystemWarning('diagnostic stream close', $close['warning']);
     }
 
     /** How many descriptors this request has opened for one sink. */
@@ -272,12 +310,14 @@ final class ABJ_404_Solution_DiagnosticAppendStream {
     /**
      * The open descriptor for one sink, opening it if needed.
      *
+     * @param string $openFailure Receives the native cause when the sink could
+     *   not be opened (empty when it was, or when PHP raised no warning).
      * @return array{handle: resource, bytes: int, appends: int, locked: int}|null
      */
-    private static function stream(string $path) {
+    private static function stream(string $path, string &$openFailure = '') {
         if (isset(self::$streams[$path])) {
             $stream = self::$streams[$path];
-            if (self::isUnlinkedSink($stream['handle'])) {
+            if (ABJ_404_Solution_DiagnosticSinkIdentity::isUnlinked($stream['handle'])) {
                 // Nothing links to this inode any more, so every byte written
                 // through this descriptor is reachable by nobody. Re-resolve
                 // the path: if the directory survived, the record lands in a
@@ -296,7 +336,7 @@ final class ABJ_404_Solution_DiagnosticAppendStream {
                     );
                     return self::$streams[$path];
                 }
-                $identity = self::identityOf($stream['handle'], $path);
+                $identity = ABJ_404_Solution_DiagnosticSinkIdentity::inspect($stream['handle'], $path);
                 if ($identity['still_names_path']) {
                     // The window is spent either way: reset it, and take the size
                     // the descriptor itself reports so a sibling's appends do not
@@ -320,91 +360,43 @@ final class ABJ_404_Solution_DiagnosticAppendStream {
         // 'ab' creates without truncating and positions at the end on every
         // write, which is what both a journal and a lock file need. 'cb' is the
         // fallback for a filesystem that refuses the append mode outright.
-        $handle = @fopen($path, 'ab');
+        $appendOpen = ABJ_404_Solution_HostFilesystemCall::fopen($path, 'ab');
+        $handle = $appendOpen['result'];
+        $openWarnings = $appendOpen['warning'] !== null ? array($appendOpen['warning']) : array();
         if ($handle === false) {
-            $handle = @fopen($path, 'cb');
+            $createOpen = ABJ_404_Solution_HostFilesystemCall::fopen($path, 'cb');
+            $handle = $createOpen['result'];
+            if ($createOpen['warning'] !== null) {
+                $openWarnings[] = $createOpen['warning'];
+            }
         }
         if ($handle === false) {
-            abj404_logPhpFallback(
-                'diagnostic-append-stream',
-                'sink could not be opened: ' . $path
-            );
+            $message = 'sink could not be opened: ' . $path;
+            $openWarning = implode('; ', array_unique($openWarnings));
+            $openFailure = $openWarning;
+            if ($openWarning !== '') {
+                $message .= ' (' . $openWarning . ')';
+            }
+            abj404_logPhpFallback('logger-internal', $message);
             return null;
         }
         self::evictOldestWhenFull();
         clearstatcache(true, $path);
-        $size = @filesize($path);
+        $metadataResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($handle) { return fstat($handle); }
+        );
+        self::reportFilesystemWarning('diagnostic sink stat', $metadataResult['warning']);
+        $metadata = $metadataResult['result'];
+        $size = is_array($metadata) && is_int($metadata['size'] ?? null)
+            ? $metadata['size'] : 0;
         self::$streams[$path] = array(
             'handle' => $handle,
-            'bytes' => is_int($size) ? $size : 0,
+            'bytes' => $size,
             'appends' => 1,
             'locked' => 0,
         );
         self::$opens[$path] = (self::$opens[$path] ?? 0) + 1;
         return self::$streams[$path];
-    }
-
-    /**
-     * Has this descriptor's file been unlinked out from under it?
-     *
-     * This is the per-record half of the identity problem, and it is separate
-     * from identityOf() below because the two failures have different costs.
-     * A rotation RENAME retains every record already written, so noticing it one
-     * revalidation window late loses nothing and the bounded check is enough. An
-     * UNLINK retains nothing: the descriptor keeps accepting writes, fwrite and
-     * fflush both report success, and the bytes are unreachable to every reader.
-     * Measured on APFS 2026-08-10: after the directory was removed, fwrite
-     * returned the full length and fflush returned true, with nlink at 0. That
-     * silently breaks this class's durability contract, which is per-record, so
-     * this check has to be per-record too. It costs one fstat, 1.11 us against
-     * the 24.8 us this class spends per record.
-     *
-     * nlink is the right signal precisely because it stays 1 through a rename,
-     * so this cannot fire on the rotation case the bounded window exists for.
-     *
-     * @param resource $handle
-     */
-    private static function isUnlinkedSink($handle): bool {
-        $open = @fstat($handle);
-        if (!is_array($open) || !isset($open['nlink'])) {
-            // A filesystem that will not report a link count gets the bounded
-            // path-identity check and nothing stricter. Failing closed here
-            // would re-open on every append and hand back the entire cost this
-            // class exists to remove, on every host with an unusual stat().
-            return false;
-        }
-        return (int)$open['nlink'] === 0;
-    }
-
-    /**
-     * Does this descriptor still point at the file this path names, and how
-     * big does the descriptor itself say the file is?
-     *
-     * Pure: the caller owns the stream table, so this only reports.
-     *
-     * @param resource $handle
-     * @return array{still_names_path: bool, bytes: int|null}
-     */
-    private static function identityOf($handle, string $path): array {
-        clearstatcache(true, $path);
-        $onDisk = @stat($path);
-        $open = @fstat($handle);
-        if (!is_array($open)) {
-            // The descriptor itself is unreadable, so there is nothing to
-            // compare and re-opening on every window would give back the cost
-            // this class exists to remove.
-            return array('still_names_path' => true, 'bytes' => null);
-        }
-        $bytes = isset($open['size']) && is_int($open['size']) ? $open['size'] : null;
-        if (!is_array($onDisk)) {
-            // Nothing at the path while our descriptor is still valid: the file
-            // was renamed or unlinked out from under us. This is the window
-            // between a sibling's rotation rename and its first new record.
-            return array('still_names_path' => false, 'bytes' => $bytes);
-        }
-        $sameFile = ($onDisk['ino'] ?? null) === ($open['ino'] ?? null)
-            && ($onDisk['dev'] ?? null) === ($open['dev'] ?? null);
-        return array('still_names_path' => $sameFile, 'bytes' => $bytes);
     }
 
     /** Keep the number of held descriptors bounded, oldest sink first. */
@@ -424,5 +416,11 @@ final class ABJ_404_Solution_DiagnosticAppendStream {
 
     private static function elapsedMicroseconds(int $startedNs): int {
         return max(0, (int)round((self::monotonicNanoseconds() - $startedNs) / 1000));
+    }
+
+    private static function reportFilesystemWarning(string $operation, ?string $warning): void {
+        if ($warning !== null && $warning !== '') {
+            abj404_logPhpFallback('logger-internal', $operation . ': ' . $warning);
+        }
     }
 }

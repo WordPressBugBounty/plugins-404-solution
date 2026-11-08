@@ -47,6 +47,7 @@ class ABJ_404_Solution_SettingsFieldValidator {
         }
 
         $value = $postData[$fieldName];
+        $value = is_string($value) ? trim($value) : $value;
         $scalarValue = is_scalar($value) ? $value : 0;
 
         if ($useAbsintForCheck) {

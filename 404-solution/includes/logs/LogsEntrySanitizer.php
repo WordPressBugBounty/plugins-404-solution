@@ -26,28 +26,14 @@ class ABJ_404_Solution_LogsEntrySanitizer {
             }
         }
 
-        $normalizeString = function($value, $maxLen) {
-            if (is_object($value) || is_array($value)) {
-                return null;
-            }
-            $str = (string)$value;
-            if (function_exists('mb_convert_encoding')) {
-                $converted = mb_convert_encoding($str, 'UTF-8', 'UTF-8');
-                if (is_string($converted)) {
-                    $str = $converted;
-                }
-            }
-            return substr($str, 0, $maxLen);
-        };
-
         $sanitized = array();
         $tsVal = $entry['timestamp'] ?? abj_clock()->now();
         $sanitized['timestamp'] = absint(is_scalar($tsVal) ? $tsVal : abj_clock()->now());
-        $sanitized['user_ip'] = $normalizeString($entry['user_ip'], 512);
-        $sanitized['referrer'] = $normalizeString($entry['referrer'], 512);
-        $sanitized['dest_url'] = $normalizeString($entry['dest_url'], 512);
-        $sanitized['requested_url'] = $normalizeString($entry['requested_url'], 2048);
-        $sanitized['requested_url_detail'] = $normalizeString($entry['requested_url_detail'], 2048);
+        $sanitized['user_ip'] = $this->normalizeStorageString($entry['user_ip'], 512);
+        $sanitized['referrer'] = $this->normalizeStorageString($entry['referrer'], 512);
+        $sanitized['dest_url'] = $this->normalizeStorageString($entry['dest_url'], 512);
+        $sanitized['requested_url'] = $this->normalizeStorageString($entry['requested_url'], 2048);
+        $sanitized['requested_url_detail'] = $this->normalizeStorageString($entry['requested_url_detail'], 2048);
         if (!is_string($sanitized['requested_url']) || $sanitized['requested_url'] === ''
                 || !is_string($sanitized['dest_url']) || $sanitized['dest_url'] === '') {
             return null;
@@ -59,12 +45,17 @@ class ABJ_404_Solution_LogsEntrySanitizer {
             $canonical = '/' . trim($sanitized['requested_url'], '/');
         }
         $sanitized['canonical_url'] = substr($canonical, 0, 2048);
+        // SQL LEFT counts characters, including on hosts without mbstring.
+        // Derive from the sanitized URL, never a caller-supplied sort key.
+        // Invalid UTF-8 remains NULL for the background SQL backfill rather
+        // than publishing a byte-truncated key with a different ordering.
+        $sanitized['url_sort_key'] = $this->urlSortKey($sanitized['requested_url']);
 
         $usernameVal = $entry['username'] ?? null;
         $sanitized['username'] = ($usernameVal === null || !is_scalar($usernameVal)) ? null : absint($usernameVal);
         $minLogIdVal = $entry['min_log_id'] ?? null;
         $sanitized['min_log_id'] = ($minLogIdVal === null || !is_scalar($minLogIdVal)) ? null : absint($minLogIdVal);
-        $sanitized['engine'] = $normalizeString($entry['engine'], 64);
+        $sanitized['engine'] = $this->normalizeStorageString($entry['engine'], 64);
         if (array_key_exists('pipeline_trace', $entry)) {
             $traceVal = $entry['pipeline_trace'];
             $sanitized['pipeline_trace'] = ($traceVal === null || is_string($traceVal)) ? $traceVal : null;
@@ -72,6 +63,23 @@ class ABJ_404_Solution_LogsEntrySanitizer {
             $sanitized['pipeline_trace'] = null;
         }
         return $sanitized;
+    }
+
+    /** @param mixed $value Reject composite values before storage byte limits apply. */
+    private function normalizeStorageString($value, int $maxLen): ?string {
+        if (!is_scalar($value) && $value !== null) { return null; }
+        $str = (string)$value;
+        if (function_exists('mb_convert_encoding')) {
+            $converted = mb_convert_encoding($str, 'UTF-8', 'UTF-8');
+            if (is_string($converted)) { $str = $converted; }
+        }
+        return substr($str, 0, $maxLen);
+    }
+
+    /** Match SQL LEFT's character limit without requiring the mbstring extension. */
+    private function urlSortKey(string $url): ?string {
+        $prefix = array();
+        return preg_match('/^.{0,191}/us', $url, $prefix) === 1 ? $prefix[0] : null;
     }
 
     /**

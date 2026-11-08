@@ -5,7 +5,7 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * Specialized, non-paginated reads of the redirects table for callers that
+ * Specialized reads of the redirects table for callers that
  * don't go through the staged admin-list pipeline.
  *
  * Owns:
@@ -21,7 +21,7 @@ if (!defined('ABSPATH')) {
  */
 class ABJ_404_Solution_RedirectsBulkReader {
 
-    /** Number of rows fetched by each keyset page once caching is unsafe. */
+    /** Number of rows fetched by each uncached regex or manual fallback page. */
     const REGEX_READ_BATCH_SIZE = 250;
 
     /** @var ABJ_404_Solution_DatabaseCore */
@@ -50,41 +50,70 @@ class ABJ_404_Solution_RedirectsBulkReader {
 
     /**
      * Run the export query and hand its rows back one at a time, straight from
-     * the mysqli result, so the row buffer stays bounded on large redirect
-     * tables. The rows are raw (getRedirectsExport.sql columns); deciding where
+     * the buffered mysqli result without building a second PHP row array.
+     * The rows are raw (getRedirectsExport.sql columns); deciding where
      * each exported redirect points is Core's job
      * (ABJ_404_Solution_RedirectExportDestination).
      *
      * The query runs here, before any row is read, so a query that cannot run
-     * (null) is distinguishable from one that ran and returned no redirects
+     * (WP_Error) is distinguishable from one that ran and returned no redirects
      * (an empty generator).
      *
-     * @return \Generator<int, array<string, mixed>>|null Null when the query failed.
+     * @return \Generator<int, array<string, mixed>>|WP_Error Database code and message when the query failed.
      */
-    public function redirectsExportRows(): ?\Generator {
+    public function redirectsExportRows() {
         global $wpdb;
 
         $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getRedirectsExport.sql");
         $query = $this->dbCore->doTableNameReplacements($query);
 
-        $result = mysqli_query($wpdb->dbh, $query);
-        if (!($result instanceof \mysqli_result)) {
-            return null;
+        try {
+            // Read metadata on the same connection that streams the export.
+            $table = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
+            $probe = mysqli_query($wpdb->dbh, 'SELECT * FROM `' . $table . '` LIMIT 0');
+            if ($probe instanceof \mysqli_result) {
+                $columns = array_map(static function ($field) { return $field->name; }, mysqli_fetch_fields($probe));
+                mysqli_free_result($probe);
+                if (!in_array('query_mode', $columns, true)) {
+                    $query = str_replace('r.query_mode', 'NULL AS query_mode', $query);
+                }
+            }
+            $result = mysqli_query($wpdb->dbh, $query);
+        } catch (\mysqli_sql_exception $error) {
+            return new WP_Error($error->getCode(), $error->getMessage(), array('query' => $query));
         }
-        return $this->streamExportRows($result);
+        if (!($result instanceof \mysqli_result)) {
+            return new WP_Error(mysqli_errno($wpdb->dbh), mysqli_error($wpdb->dbh) ?? 'mysqli returned no message for the failed export query.', array('query' => $query));
+        }
+        if ($result->num_rows === 0) {
+            mysqli_free_result($result);
+            return $this->streamExportRows(null);
+        }
+        $rows = $this->streamExportRows($result);
+        // Enter try/finally before handing ownership to a consumer that may
+        // never iterate (for example, when the CSV file cannot be opened).
+        // current() retains the first row for the consumer's foreach.
+        $rows->current();
+        return $rows;
     }
 
     /**
      * Yield each row of an open export result, freeing the result when the
-     * stream ends, whether it finished, the consumer stopped early, or
+     * stream ends or is discarded, even before the consumer reads a row:
+     * redirectsExportRows() primes nonempty streams before returning them.
+     * Empty results are freed there and represented here by null, keeping an
+     * unstarted empty generator available for iteration. Cleanup also runs if
      * mysqli's default error mode (MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT
      * since PHP 8.1) threw mysqli_sql_exception on a dropped connection
      * mid-fetch.
      *
-     * @param \mysqli_result $result
+     * @param \mysqli_result|null $result
      * @return \Generator<int, array<string, mixed>>
      */
-    private function streamExportRows(\mysqli_result $result): \Generator {
+    private function streamExportRows(?\mysqli_result $result): \Generator {
+        if ($result === null) {
+            return;
+        }
         try {
             while (($row = mysqli_fetch_array($result, MYSQLI_ASSOC))) {
                 yield $row;
@@ -171,36 +200,100 @@ class ABJ_404_Solution_RedirectsBulkReader {
         return $greatestId;
     }
 
-    /** @return array<int, array<string, mixed>> */
-    // DESIGN-AUDIT-OK(2026-06-19, owner): status=MANUAL AND disabled=0 seeks via
-    //   idx_status_disabled to the few hand-made MANUAL rows first, so INSTR() runs only
-    //   over that bounded subset, not a full table scan. A LIMIT would drop valid manual
-    //   regex redirects (changes results), so no cap. Reviewed + accepted 2026-06-18.
-    public function getManualRedirectsWithRegexMetachars(): array {
-        $query = "select \n  {wp_abj404_redirects}.id,\n  {wp_abj404_redirects}.url,\n  {wp_abj404_redirects}.status,\n"
-                . "  {wp_abj404_redirects}.type,\n  {wp_abj404_redirects}.final_dest,\n  {wp_abj404_redirects}.code,\n"
-                . "  {wp_abj404_redirects}.timestamp,\n {wp_posts}.id as wp_post_id\n ";
-        $query .= "from {wp_abj404_redirects}\n " .
-                "  LEFT OUTER JOIN {wp_posts} \n " .
-                "    on {wp_abj404_redirects}.final_dest = {wp_posts}.id \n " .
+    /**
+     * Stream every enabled MANUAL redirect whose URL contains regex metacharacters.
+     * Keyset pages bound the active MANUAL rows read per query; the metacharacter
+     * filter is applied within each page so plain rows cannot force a full-table
+     * scan before eligible rows are found.
+     *
+     * @return iterable<int, array<string, mixed>>
+     */
+    public function getManualRedirectsWithRegexMetachars(): iterable {
+        $cached = ABJ_404_Solution_RedirectRegexCacheStore::manualSnapshotRows();
+        if ($cached !== null) {
+            foreach ($cached as $row) { yield $row; }
+            return;
+        }
+        $version = ABJ_404_Solution_RedirectRegexCacheStore::manualSnapshotVersion();
+        $remembered = array();
+        $query = "select manual_page.*, {wp_posts}.id as wp_post_id,\n " .
+                "    (INSTR(`url`, '*') > 0 " .
+                "      OR INSTR(`url`, '[') > 0 " .
+                "      OR INSTR(`url`, ']') > 0 " .
+                "      OR INSTR(`url`, '|') > 0 " .
+                "      OR INSTR(`url`, '^') > 0 " .
+                "      OR INSTR(`url`, '\\\\') > 0 " .
+                "      OR INSTR(`url`, '{') > 0 " .
+                "      OR INSTR(`url`, '}') > 0) as _abj404_regex_metachars\n ";
+        // allow-unbounded-select: keyset page; the loop below appends "limit REGEX_READ_BATCH_SIZE" to the inner select in $pageQuery (the LIMIT lands in a separate concatenated string than SELECT/FROM)
+        $query .= "from (\n " .
+                "select * from {wp_abj404_redirects}\n " .
+                "where status = " . ABJ404_STATUS_MANUAL . " \n " .
+                "     and disabled = 0";
+
+        $afterId = 0;
+        do {
+            $pageQuery = $query . "\n " .
+                "     and {wp_abj404_redirects}.id > " . (int)$afterId . " \n " .
+                " order by {wp_abj404_redirects}.id asc \n " .
+                " limit " . self::REGEX_READ_BATCH_SIZE . "\n " .
+                ") as manual_page\n " .
+                "left outer join {wp_posts} \n " .
+                "  on manual_page.final_dest = {wp_posts}.id \n " .
                 // final_dest is a post id only for a post redirect; a term id otherwise.
-                "    and {wp_abj404_redirects}.type = " . ABJ404_TYPE_POST . " \n ";
+                "  and manual_page.type = " . ABJ404_TYPE_POST . " \n " .
+                "order by manual_page.id asc";
+            $results = $this->dbCore->queryAndGetResults($pageQuery);
 
-        $query .= "where status = " . ABJ404_STATUS_MANUAL . " \n " .
-                "     and disabled = 0 \n " .
-                "     and (INSTR(`url`, '*') > 0 " .
-                "       OR INSTR(`url`, '[') > 0 " .
-                "       OR INSTR(`url`, ']') > 0 " .
-                "       OR INSTR(`url`, '|') > 0 " .
-                "       OR INSTR(`url`, '^') > 0 " .
-                "       OR INSTR(`url`, '\\\\') > 0 " .
-                "       OR INSTR(`url`, '{') > 0 " .
-                "       OR INSTR(`url`, '}') > 0)";
-        $results = $this->dbCore->queryAndGetResults($query);
+            $this->assertRegexQuerySucceeded($results);
 
-        /** @var array<int, array<string, mixed>> $rows */
-        $rows = is_array($results['rows']) ? $results['rows'] : array();
-        return $rows;
+            /** @var array<int, array<string, mixed>> $rows */
+            $rows = is_array($results['rows'] ?? null) ? $results['rows'] : array();
+            if (empty($rows)) {
+                break;
+            }
+
+            $nextAfterId = $this->greatestRedirectId($rows);
+            if ($nextAfterId <= $afterId) {
+                throw new ABJ_404_Solution_ViewQueryFailureException(
+                    'Manual regex redirect keyset page did not advance past id ' . $afterId . '.',
+                    array('operation' => 'manual_regex_lookup')
+                );
+            }
+
+            foreach ($rows as $row) {
+                if (empty($row['_abj404_regex_metachars'])) {
+                    continue;
+                }
+                unset($row['_abj404_regex_metachars']);
+                if ($version !== null) {
+                    $remembered[] = $row;
+                    if (count($remembered) > ABJ_404_Solution_RedirectRegexCacheStore::MAX_COUNT) {
+                        $version = null;
+                        $remembered = array();
+                    }
+                }
+                yield $row;
+            }
+            $afterId = $nextAfterId;
+        } while (count($rows) === self::REGEX_READ_BATCH_SIZE);
+        // Reaching here proves exhaustion. A match, exception or discarded
+        // generator never publishes its incomplete candidate prefix.
+        if ($version !== null) {
+            ABJ_404_Solution_RedirectRegexCacheStore::rememberManualSnapshot($remembered, $version);
+        }
+    }
+
+    /** @param array<string,mixed> $results */
+    private function assertRegexQuerySucceeded(array $results): void {
+        $error = isset($results['last_error']) && is_string($results['last_error']) ? trim($results['last_error']) : '';
+        if ($error !== '' || !array_key_exists('query_succeeded', $results) || $results['query_succeeded'] !== true
+            || (array_key_exists('timed_out', $results) && $results['timed_out'] !== false)) {
+            throw new ABJ_404_Solution_ViewQueryFailureException(
+                $error !== '' ? $error : 'Manual regex lookup did not confirm query success.',
+                array('operation' => 'manual_regex_lookup')
+            );
+        }
     }
 
     /**

@@ -24,8 +24,21 @@ class ABJ_404_Solution_ToolsDiagnostics {
         if (function_exists('abj404_getUploadsDir')) {
             $uploadDir = (string)abj404_getUploadsDir();
         }
-        $uploadDirReadable = ($uploadDir !== '' && is_dir($uploadDir));
-        $uploadDirWritable = ($uploadDir !== '' && is_writable($uploadDir));
+        $uploadDirReadable = false;
+        if ($uploadDir !== '') {
+            $directoryCheck = ABJ_404_Solution_HostFilesystemCall::isDir($uploadDir);
+            $this->reportFilesystemWarning('uploads directory check', $uploadDir, $directoryCheck['warning']);
+            $uploadDirReadable = ($directoryCheck['warning'] === null && (bool)$directoryCheck['result']);
+        }
+        // Writability is only asked of a directory the probe above could see.
+        $uploadDirWritable = false;
+        if ($uploadDirReadable) {
+            $writableCheck = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($uploadDir) { return is_writable($uploadDir); }
+            );
+            $this->reportFilesystemWarning('uploads directory writable check', $uploadDir, $writableCheck['warning']);
+            $uploadDirWritable = ($writableCheck['warning'] === null && (bool)$writableCheck['result']);
+        }
 
         $pluginVersion = defined('ABJ404_VERSION') ? ABJ404_VERSION : __('Unknown', '404-solution');
         $rows = array(
@@ -65,6 +78,12 @@ class ABJ_404_Solution_ToolsDiagnostics {
         }
 
         return $rows;
+    }
+
+    private function reportFilesystemWarning(string $operation, string $path, ?string $warning): void {
+        if ($warning !== null && $warning !== '') {
+            abj404_logPhpFallback('logger-internal', $operation . ' failed for ' . $path . ': ' . $warning);
+        }
     }
 
     /** @return string */

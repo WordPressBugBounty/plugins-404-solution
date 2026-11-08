@@ -21,9 +21,21 @@ if (!defined('ABSPATH')) {
  */
 class ABJ_404_Solution_RequestKind {
 
+    const KIND_ADMIN_AJAX = 'admin-ajax';
+    const KIND_REST = 'rest';
+    const KIND_CRON = 'cron';
+    const KIND_ADMIN_PAGE = 'admin-page';
+    const KIND_FRONT_END = 'front-end';
+    const INVALID_ACTION = 'invalid';
+
     /** @return bool Whether this request is WP-Cron executing. */
     public static function isCron(): bool {
         return function_exists('wp_doing_cron') && wp_doing_cron();
+    }
+
+    /** @return bool Whether this request is a WordPress REST request. */
+    public static function isRest(): bool {
+        return defined('REST_REQUEST') && REST_REQUEST === true;
     }
 
     /** @return bool Whether this request is an admin-ajax.php call. */
@@ -47,5 +59,43 @@ class ABJ_404_Solution_RequestKind {
      */
     public static function isAdminPageRender(): bool {
         return function_exists('is_admin') && is_admin() && !self::isAjax() && !self::isCron();
+    }
+
+    /**
+     * Return the stable request-kind value used by diagnostics.
+     *
+     * @return string One of admin-ajax, rest, cron, admin-page, front-end.
+     */
+    public static function current(): string {
+        if (self::isCron()) { return self::KIND_CRON; }
+        if (self::isAjax()) { return self::KIND_ADMIN_AJAX; }
+        if (self::isRest()) { return self::KIND_REST; }
+        if (self::isAdminPageRender()) { return self::KIND_ADMIN_PAGE; }
+        return self::KIND_FRONT_END;
+    }
+
+    /**
+     * Read and sanitize the admin-ajax action while memory is healthy.
+     *
+     * @return string|null Null for non-AJAX requests.
+     */
+    public static function currentAjaxAction(): ?string {
+        if (self::current() !== self::KIND_ADMIN_AJAX) { return null; }
+        $raw = isset($_REQUEST['action']) && is_scalar($_REQUEST['action'])
+            ? (string)$_REQUEST['action'] : '';
+        return self::sanitizeAjaxAction($raw);
+    }
+
+    /**
+     * Keep only the low-cardinality action vocabulary safe to persist.
+     *
+     * @param mixed $action
+     * @return string
+     */
+    public static function sanitizeAjaxAction($action): string {
+        if (!is_string($action) || preg_match('/\A[A-Za-z0-9_-]{1,64}\z/D', $action) !== 1) {
+            return self::INVALID_ACTION;
+        }
+        return $action;
     }
 }

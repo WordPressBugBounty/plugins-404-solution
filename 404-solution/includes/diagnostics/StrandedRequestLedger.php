@@ -4,11 +4,15 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/Utf8SafeRecord.php';
+require_once __DIR__ . '/../database/DatabaseTransactionConnection.php';
+
 /**
  * The durable account of requests that were never deregistered by their own
  * process -- the workers that died or stalled past any plausible lifetime.
  *
- * ABJ_404_Solution_SameSiteRequestCensus reaps those leftover rows so a dead
+ * ABJ_404_Solution_SameSiteCensusReaper reaps those leftover rows (a census
+ * reading on an admin screen, and the nightly maintenance sweep) so a dead
  * request stops being counted as a live competitor. Reaping is correct and has
  * to keep happening, but it used to be a silent DELETE that kept only a count,
  * which threw away precisely the evidence the census exists to produce: the
@@ -30,33 +34,23 @@ if (!defined('ABSPATH')) {
  * Storage is a single non-autoloaded option rather than a file: the payload is
  * assembled from the database anyway, and the uploads directory is the one
  * place a shared host is most likely to have made unwritable.
+ *
+ * What an entry looks like and how the ledger is trimmed -- the data rules --
+ * belong to ABJ_404_Solution_StrandedRequestLedgerEntries; this class owns the
+ * options that hold the entries and the writes to them.
+ *
+ * @phpstan-import-type NativeResult from ABJ_404_Solution_DatabaseTransactionConnection
  */
 final class ABJ_404_Solution_StrandedRequestLedger {
 
     /** The option holding the whole ledger. Non-autoloaded; read only on demand. */
     const OPTION_NAME = 'abj404_stranded_requests';
 
-    /**
-     * How many accounts are kept.
-     *
-     * Small on purpose. This has to fit whole inside a support payload without
-     * competing with the journal excerpts for their byte budget, and twenty
-     * strands is already far past the point where the reader has the pattern.
-     */
-    const MAX_ENTRIES = 20;
+    /** MAX_ENTRIES is owned by the ledger entry rules. */
+    const MAX_ENTRIES = ABJ_404_Solution_StrandedRequestLedgerEntries::MAX_ENTRIES;
 
-    /**
-     * How many of the EARLIEST accounts are never evicted.
-     *
-     * A plain ring keeps the newest and loses the first, which is backwards for
-     * this evidence: the first strands on an install happened before retries,
-     * warmed caches and an already-degraded host could confound them, so they
-     * are the cleanest single account of the failure. The newest matter too --
-     * they are contemporaneous with the click that sent the report -- so the
-     * ledger keeps both ends and drops the middle, which is the part that only
-     * repeats what the two ends already say.
-     */
-    const RETAINED_EARLIEST = 6;
+    /** RETAINED_EARLIEST is owned by the ledger entry rules. */
+    const RETAINED_EARLIEST = ABJ_404_Solution_StrandedRequestLedgerEntries::RETAINED_EARLIEST;
 
     /**
      * The option holding the promoted request timelines. Non-autoloaded; read
@@ -66,12 +60,8 @@ final class ABJ_404_Solution_StrandedRequestLedger {
      */
     const TIMELINE_OPTION_NAME = 'abj404_request_timelines';
 
-    /**
-     * How many promoted timelines are kept. Twenty finished requests is far
-     * past the point where the reader has the pattern, and the support
-     * section sheds to the newest 8 when the whole record would not fit.
-     */
-    const MAX_TIMELINE_ENTRIES = 20;
+    /** MAX_TIMELINE_ENTRIES is owned by the ledger entry rules. */
+    const MAX_TIMELINE_ENTRIES = ABJ_404_Solution_StrandedRequestLedgerEntries::MAX_TIMELINE_ENTRIES;
 
     /** Promotion reasons: why a finished request's timeline was kept. */
     const REASON_SLOW = 'slow';
@@ -86,8 +76,8 @@ final class ABJ_404_Solution_StrandedRequestLedger {
      * written.
      *
      * Takes loosely-typed decoded registry rows on purpose: the caller is
-     * handing over whatever came back out of an options row, and account()
-     * below is what decides which of it is usable. A stricter parameter type
+     * handing over whatever came back out of an options row, and the entry rules
+     * decide which of it is usable. A stricter parameter type
      * here would only move that validation to a caller that has no better
      * information than this one does.
      *
@@ -101,7 +91,7 @@ final class ABJ_404_Solution_StrandedRequestLedger {
         try {
             $added = array();
             foreach ($entries as $entry) {
-                $account = self::account($entry);
+                $account = ABJ_404_Solution_StrandedRequestLedgerEntries::account($entry);
                 if ($account !== null) {
                     $added[] = $account;
                 }
@@ -110,13 +100,98 @@ final class ABJ_404_Solution_StrandedRequestLedger {
                 return 0;
             }
             $result = self::append(self::OPTION_NAME, static function (array $existing) use ($added): array {
-                return self::trim(array_merge($existing, $added));
+                return ABJ_404_Solution_StrandedRequestLedgerEntries::trim(array_merge($existing, $added));
             });
-            return $result === ABJ_404_Solution_OptionRowCompareAndSwap::RESULT_SWAPPED ? count($added) : 0;
+            if ($result !== ABJ_404_Solution_OptionRowCompareAndSwap::RESULT_SWAPPED) {
+                return 0;
+            }
+            self::reportAddedAccounts($added);
+            return count($added);
         } catch (Throwable $e) {
             abj404_logPhpFallback('stranded-request-ledger',
                 'stranded request record failed (code ' . $e->getCode() . '): ' . $e->getMessage());
             return 0;
+        }
+    }
+
+    /**
+     * Append one handoff while the caller owns the pinned InnoDB transaction.
+     * The ledger row is locked before its bounded keep-both-ends rewrite, so
+     * the source event identity is authoritative for the whole transaction.
+     *
+     * @param ABJ_404_Solution_DatabaseTransactionConnection $connection
+     * @param array<string,mixed> $entry
+     * @return 'recorded'|'already_durable'|'unavailable'
+     */
+    public static function recordHandoffInTransaction(
+        ABJ_404_Solution_DatabaseTransactionConnection $connection,
+        array $entry,
+        string $eventId,
+        string $table,
+        object $wpdb
+    ): string {
+        $account = ABJ_404_Solution_StrandedRequestLedgerEntries::account($entry, $eventId);
+        if ($account === null || $eventId === '' || !is_callable(array($wpdb, 'prepare'))) {
+            return 'unavailable';
+        }
+        $select = self::transactionSql($wpdb,
+            "SELECT option_value FROM `" . $table . "` "
+                . "WHERE option_name = %s AND BINARY option_name = BINARY %s FOR UPDATE",
+            array(self::OPTION_NAME, self::OPTION_NAME));
+        $result = $connection->execute($select);
+        self::requireTransactionResult($result, 'The stranded-request ledger could not be locked.');
+        $existingRaw = null;
+        if (count($result['rows']) > 1) {
+            throw self::transactionFailure('The stranded-request ledger returned duplicate rows.');
+        }
+        if (count($result['rows']) === 1) {
+            $row = $result['rows'][0];
+            if (!is_array($row) || !array_key_exists('option_value', $row)
+                    || !is_scalar($row['option_value'])) {
+                throw self::transactionFailure('The stranded-request ledger row is malformed.');
+            }
+            $existingRaw = (string)$row['option_value'];
+        }
+        $existing = ABJ_404_Solution_StrandedRequestLedgerEntries::entriesFromRaw($existingRaw ?? '');
+        foreach ($existing as $stored) {
+            if (($stored['source_event_id'] ?? '') === $eventId) {
+                return 'already_durable';
+            }
+        }
+        $encoded = ABJ_404_Solution_Utf8SafeRecord::encode(
+            ABJ_404_Solution_StrandedRequestLedgerEntries::trim(array_merge($existing, array($account))),
+            'stranded request ledger'
+        );
+        if ($encoded === '') {
+            throw self::transactionFailure('The stranded-request ledger could not be encoded.');
+        }
+        if ($existingRaw === null) {
+            $write = self::transactionSql($wpdb,
+                "INSERT INTO `" . $table . "` (option_name, option_value, autoload) "
+                    . "VALUES (%s, %s, 'no')", array(self::OPTION_NAME, $encoded));
+        } else {
+            $write = self::transactionSql($wpdb,
+                "UPDATE `" . $table . "` SET option_value = %s "
+                    . "WHERE option_name = %s AND BINARY option_name = BINARY %s "
+                    . "AND BINARY option_value = BINARY %s",
+                array($encoded, self::OPTION_NAME, self::OPTION_NAME, $existingRaw));
+        }
+        $written = $connection->execute($write);
+        self::requireTransactionResult($written, 'The stranded-request ledger append failed.');
+        if ($written['rows_affected'] !== 1) {
+            throw self::transactionFailure('The stranded-request ledger append was not acknowledged.');
+        }
+        return 'recorded';
+    }
+
+    /**
+     * Report only after a transaction that newly appended this account commits.
+     * @param array<string,mixed> $entry
+     */
+    public static function reportCommittedHandoff(array $entry): void {
+        $account = ABJ_404_Solution_StrandedRequestLedgerEntries::account($entry, null);
+        if ($account !== null) {
+            self::reportAddedAccounts(array($account));
         }
     }
 
@@ -156,6 +231,7 @@ final class ABJ_404_Solution_StrandedRequestLedger {
      * @return bool whether an entry was recorded.
      */
     public static function recordTimeline(array $timeline, array $promotion): bool {
+        $timeline = ABJ_404_Solution_StrandedRequestLedgerEntries::normalizeTimeline($timeline);
         $reason = $promotion['reason'];
         $state = $promotion['state'] ?? 'retired';
         $rid = isset($timeline['rid']) && is_string($timeline['rid']) ? $timeline['rid'] : '';
@@ -182,7 +258,7 @@ final class ABJ_404_Solution_StrandedRequestLedger {
                         'state' => substr($state, 0, 16),
                         'timeline' => $timeline,
                     );
-                    return self::trim($existing, self::MAX_TIMELINE_ENTRIES);
+                    return ABJ_404_Solution_StrandedRequestLedgerEntries::trim($existing, self::MAX_TIMELINE_ENTRIES);
                 });
             return $result === ABJ_404_Solution_OptionRowCompareAndSwap::RESULT_SWAPPED;
         } catch (Throwable $e) {
@@ -267,8 +343,10 @@ final class ABJ_404_Solution_StrandedRequestLedger {
             if (!function_exists('get_option')) {
                 return array();
             }
-            $raw = get_option($optionName, '');
-            return self::entriesFromRaw(is_string($raw) ? $raw : '');
+            $raw = ABJ_404_Solution_OptionShapeRead::scalar($optionName, '');
+            return ABJ_404_Solution_StrandedRequestLedgerEntries::entriesFromRaw(
+                is_string($raw) ? $raw : ''
+            );
         } catch (Throwable $e) {
             abj404_logPhpFallback('stranded-request-ledger',
                 'stranded request read failed (code ' . $e->getCode() . '): ' . $e->getMessage());
@@ -277,114 +355,25 @@ final class ABJ_404_Solution_StrandedRequestLedger {
     }
 
     /**
-     * One reaped row as a bounded account, or null when the row carries nothing
-     * worth keeping.
-     *
-     * @param array<string, mixed> $entry
-     * @return array<string, mixed>|null
+     * Report newly-added accounts once; duplicate handoffs never reach here.
+     * @param array<int,array<string,mixed>> $accounts
      */
-    private static function account(array $entry): ?array {
-        $pid = ABJ_404_Solution_ExactInteger::readOr($entry['pid'] ?? null, 0, 0);
-        $ageMs = ABJ_404_Solution_ExactInteger::readOr($entry['age_ms'] ?? null, 0, 0);
-        if ($pid === 0 && $ageMs === 0) {
-            return null;
-        }
-        $phase = isset($entry['phase']) && is_string($entry['phase']) && $entry['phase'] !== ''
-            ? substr($entry['phase'], 0, 32)
-            // A row written before phases existed, or by a request that died
-            // before its first transition. Named rather than blank, so it is
-            // never read as "reached no phase".
-            : 'unrecorded';
-        return array(
-            'channel' => isset($entry['channel']) && is_string($entry['channel'])
-                ? substr($entry['channel'], 0, 16) : '',
-            'action' => isset($entry['action']) && is_string($entry['action'])
-                ? substr($entry['action'], 0, 64) : '',
-            'pid' => $pid,
-            'phase' => $phase,
-            'started_at_ms' => ABJ_404_Solution_ExactInteger::readOr(
-                $entry['started_at_ms'] ?? null,
-                0,
-                0
-            ),
-            'age_ms_at_reap' => $ageMs,
-            // The row's own phase timeline, decoded: the worst strand on the
-            // site keeps its record of where it spent its time. Null when the
-            // row predates timelines or carried none.
-            'timeline' => isset($entry['timeline']) && is_string($entry['timeline'])
-                ? ABJ_404_Solution_RequestPhaseTimeline::decode($entry['timeline'])
-                : null,
-        );
-    }
-
-    /**
-     * Keep both ends and drop the middle. See RETAINED_EARLIEST.
-     *
-     * @param array<int, array<string, mixed>> $entries
-     * @param int $maxEntries how many accounts survive the trim.
-     * @return array<int, array<string, mixed>>
-     */
-    private static function trim(array $entries, int $maxEntries = self::MAX_ENTRIES): array {
-        // The gap marker is NOT an account and must never occupy a slot or be
-        // re-counted. Folding prior markers back into one running total first
-        // is what keeps the ledger at MAX_ENTRIES accounts with exactly one
-        // marker, instead of growing by one marker per trim.
-        $dropped = 0;
-        $accounts = array();
-        foreach ($entries as $entry) {
-            if (isset($entry['dropped_middle_accounts'])) {
-                // A hand-edited or truncated option can put anything here. A
-                // non-numeric marker still means "accounts were dropped", so it
-                // is kept as a marker and counted as at least one rather than
-                // silently becoming zero.
-                $dropped += ABJ_404_Solution_ExactInteger::readOr(
-                    $entry['dropped_middle_accounts'],
-                    0,
-                    1
-                );
+    private static function reportAddedAccounts(array $accounts): void {
+        foreach ($accounts as $account) {
+            if (($account['channel'] ?? '') !== 'ajax') {
                 continue;
             }
-            $accounts[] = $entry;
+            $timeline = is_array($account['timeline']) ? $account['timeline'] : array();
+            ABJ_404_Solution_AjaxFailureReporter::record(array(
+                'kind' => 'stranded',
+                'action' => $account['action'],
+                'phase' => $account['phase'],
+                'age_ms' => $account['age_ms_at_reap'],
+                'subpage' => $timeline['subpage'] ?? '',
+                'request_id' => $timeline['rid'] ?? '',
+                'retry_count' => $timeline['rc'] ?? 0,
+            ));
         }
-
-        if (count($accounts) > $maxEntries) {
-            $earliest = array_slice($accounts, 0, self::RETAINED_EARLIEST);
-            $newest = array_slice($accounts, -($maxEntries - self::RETAINED_EARLIEST));
-            $dropped += count($accounts) - count($earliest) - count($newest);
-        } else {
-            $earliest = array_slice($accounts, 0, self::RETAINED_EARLIEST);
-            $newest = array_slice($accounts, self::RETAINED_EARLIEST);
-        }
-
-        if ($dropped === 0) {
-            return array_merge($earliest, $newest);
-        }
-        // The gap is stated in the ledger itself. A reader who cannot see that
-        // accounts were dropped would read the two ends as one continuous
-        // history, which is the same "looks complete, is 3% of it" failure the
-        // journal excerpt summary exists to prevent.
-        return array_merge($earliest, array(array('dropped_middle_accounts' => $dropped)), $newest);
-    }
-
-    /**
-     * The entries a stored ledger value holds, oldest first; anything
-     * unreadable is an empty ledger.
-     *
-     * @param string $raw
-     * @return array<int, array<string, mixed>>
-     */
-    private static function entriesFromRaw(string $raw): array {
-        $decoded = $raw !== '' ? json_decode($raw, true) : null;
-        if (!is_array($decoded)) {
-            return array();
-        }
-        $entries = array();
-        foreach ($decoded as $entry) {
-            if (is_array($entry)) {
-                $entries[] = $entry;
-            }
-        }
-        return $entries;
     }
 
     /**
@@ -402,7 +391,10 @@ final class ABJ_404_Solution_StrandedRequestLedger {
         return ABJ_404_Solution_OptionRowCompareAndSwap::update(array(
             'optionName' => $optionName,
             'compute' => static function (?string $current) use ($next): ?string {
-                $entries = call_user_func($next, self::entriesFromRaw($current ?? ''));
+                $entries = call_user_func(
+                    $next,
+                    ABJ_404_Solution_StrandedRequestLedgerEntries::entriesFromRaw($current ?? '')
+                );
                 if ($entries === null) {
                     return null;
                 }
@@ -410,5 +402,34 @@ final class ABJ_404_Solution_StrandedRequestLedger {
                 return $encoded === '' ? null : $encoded;
             },
         ));
+    }
+
+    /**
+     * @param object $wpdb WordPress-compatible database envelope.
+     * @param array<int,mixed> $params
+     */
+    private static function transactionSql(object $wpdb, string $sql, array $params): string {
+        $prepare = array($wpdb, 'prepare');
+        if (!is_callable($prepare)) {
+            throw self::transactionFailure('The stranded-request ledger SQL preparer is unavailable.');
+        }
+        $prepared = Closure::fromCallable($prepare)($sql, ...$params);
+        if (!is_string($prepared) || $prepared === '') {
+            throw self::transactionFailure('The stranded-request ledger SQL could not be prepared.');
+        }
+        return $prepared;
+    }
+
+    /** @param NativeResult $result */
+    private static function requireTransactionResult(array $result, string $message): void {
+        if ($result['query_succeeded'] !== true || $result['last_error'] !== '') {
+            throw self::transactionFailure($result['last_error'] !== ''
+                ? $result['last_error'] : $message);
+        }
+    }
+
+    private static function transactionFailure(string $message): ABJ_404_Solution_DatabaseMutationFailedException {
+        return new ABJ_404_Solution_DatabaseMutationFailedException(
+            ABJ_404_Solution_DatabaseMutationFailedException::STATEMENT_REFUSED, $message);
     }
 }

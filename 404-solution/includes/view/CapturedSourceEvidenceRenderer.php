@@ -62,7 +62,9 @@ class ABJ_404_Solution_CapturedSourceEvidenceRenderer {
         $typedEvidence = array();
         foreach ($evidence as $url => $rowEvidence) {
             if (is_string($url) && is_array($rowEvidence)) {
-                $typedEvidence[$url] = $rowEvidence;
+                // The service is resolved by name, so its rows are only known
+                // to be arrays; a row is an evidence record of named fields.
+                $typedEvidence[$url] = array_filter($rowEvidence, 'is_string', ARRAY_FILTER_USE_KEY);
             }
         }
         return $typedEvidence;

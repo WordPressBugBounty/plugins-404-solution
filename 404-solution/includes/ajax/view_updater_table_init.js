@@ -270,10 +270,15 @@ function triggerInitialTableLoadIfNeeded() {
         return;
     }
 
+    // The admin ready signal (includes/js/adminReady.js) waits for the
+    // whole table, counts and pagination chain, whatever its outcome.
+    var releaseReady = (window.ABJ404 && window.ABJ404.adminReady)
+        ? window.ABJ404.adminReady.hold('table') : function() {};
     paginationLinksChange(perpageElements[0], {
         backgroundRefresh: false,
         detectOnly: false,
         cacheMode: 'normal',
+        onSettled: releaseReady,
         onComplete: function() {
             $config.attr('data-pagination-initial-load', '0');
         },

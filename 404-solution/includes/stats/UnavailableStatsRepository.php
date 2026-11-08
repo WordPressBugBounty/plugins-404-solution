@@ -34,8 +34,8 @@ class ABJ_404_Solution_UnavailableStatsRepository implements ABJ_404_Solution_St
     }
 
     public function getStatsCount($query, array $valueParams) { $this->unavailable(); }
-    public function getPeriodicStatsSummary($sinceTimestamp, $notFoundDest = '404') { $this->unavailable(); }
-    public function getPeriodicStatsSummariesCached($notFoundDest = '404') { $this->unavailable(); }
+    public function getPeriodicStatsSummary($sinceTimestamp) { $this->unavailable(); }
+    public function getPeriodicStatsSummariesCached() { $this->unavailable(); }
     public function getStatsDashboardSnapshot($allowStale = true) { $this->unavailable(); }
     public function refreshStatsDashboardSnapshot($force = false) { $this->unavailable(); }
     public function getEarliestLogTimestamp() { $this->unavailable(); }

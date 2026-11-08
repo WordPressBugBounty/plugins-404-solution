@@ -137,7 +137,7 @@ final class ABJ_404_Solution_ResponseBodyDeliveryEvidence {
             // the confidence of a real one.
             $source = ABJ_404_Solution_CheckpointJournalReader::supportCollectionSource();
             $checkpointLines = ABJ_404_Solution_DiagnosticJournalExcerpt::readAllLines($source['paths']);
-            $traceSource = ABJ_404_Solution_AjaxTraceJournal::supportCollectionSource();
+            $traceSource = ABJ_404_Solution_AjaxTraceJournalReader::supportCollectionSource();
             $traceLines = ABJ_404_Solution_DiagnosticJournalExcerpt::readAllLines($traceSource['paths']);
             return self::fromLines(
                 $checkpointLines,

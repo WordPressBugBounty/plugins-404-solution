@@ -50,5 +50,6 @@ pinned by such a test is extracted here.
 
 ## Direct-access guard
 
-Every file in this directory begins with `<?php` and the standard
-`if (!defined('ABSPATH')) { exit; }` guard, enforced by `DirectAccessGuardTest`.
+Every file in this directory begins with `<?php` and the standard three-line
+guard (`if (!defined('ABSPATH')) {`, then `exit;` on its own line, then `}`),
+enforced by `DirectAccessGuardTest`. The one-line spelling is not accepted.

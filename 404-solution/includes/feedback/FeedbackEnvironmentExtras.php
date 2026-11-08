@@ -11,6 +11,7 @@ require_once __DIR__ . '/FeedbackEnvironmentExtras_HostProbes.php';
 require_once __DIR__ . '/FeedbackEnvironmentExtras_PlatformFingerprint.php';
 require_once __DIR__ . '/FeedbackEnvironmentExtras_CacheFingerprint.php';
 require_once __DIR__ . '/FeedbackEnvironmentExtras_DebugLogSignatures.php';
+require_once __DIR__ . '/FeedbackSiteSummary.php';
 require_once __DIR__ . '/FeedbackTransportLog.php';
 require_once dirname(__DIR__) . '/services/PostResponseWorkerBudget.php';
 
@@ -118,16 +119,21 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras {
         $platform = $this->platform;
         $cache = $this->cache;
         $debugLog = $this->debugLog;
+        $siteSummary = new ABJ_404_Solution_FeedbackSiteSummary();
 
         // MySQL global variables: the binding constraints for slow
         // JOIN / GROUP BY on Bruno-class sites. SHOW GLOBAL VARIABLES
         // is read-only, no plugin tables involved.
-        $this->recordProbe($extras, 'mysql_globals', function () use ($server) { return $server->collectMysqlGlobals(); }, array());
+        $globals = $this->recordProbe($extras, 'mysql_globals', function () use ($server) { return $server->collectMysqlGlobals(); }, array());
 
         // Live SHOW SESSION VARIABLES probe for this connection. Some hosts
         // override operational variables per-session (poolers, connection
         // init hooks), so this can diverge from mysql_globals.
-        $this->recordProbe($extras, 'mysql_session_probe', function () use ($server) { return $server->collectMysqlSessionVariables(); }, array());
+        $session = $this->recordProbe($extras, 'mysql_session_probe', function () use ($server) { return $server->collectMysqlSessionVariables(); }, array());
+        $extras['mysql_runbook_absent'] = $server->runbookAbsence(array(
+            'global' => $globals,
+            'session' => $session,
+        ));
 
         // Disk headroom on the WP uploads directory (where the plugin's
         // debug log and any cron-scratch files land). "Table is full"
@@ -172,6 +178,9 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras {
         // sufficient explanation for a previously-fast JOIN suddenly
         // doing a full table scan. Shape: {table: {index: int}}.
         $this->recordProbe($extras, 'index_cardinality', function () use ($schema) { return $schema->probeIndexCardinality(); }, array());
+        // Count the narrowed composite definitions without exposing DDL or
+        // invoking the upgrade repair path during a diagnostic send.
+        $this->recordProbe($extras, 'index_definition_drift_count', function () use ($schema) { return $schema->probeCompositeIndexDriftCount(); }, null);
 
         // Best-effort hosting-class hint parsed from server_software
         // and host-specific environment markers (cPanel, hPanel,
@@ -276,6 +285,10 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras {
         // uploads dir cannot see this.
         $this->recordProbe($extras, 'tmp_free_bytes', function () use ($host) { return $host->probeTmpFreeBytesOrThrow(); }, null);
 
+        $this->recordProbe($extras, 'site_summary', function () use ($siteSummary) {
+            return $siteSummary->collect();
+        }, ABJ_404_Solution_FeedbackSiteSummary::unavailable('probe_unavailable'));
+
         if (function_exists('apply_filters')) {
             $filtered = apply_filters('abj404_environment_extras', $extras);
             if (is_array($filtered)) {
@@ -301,24 +314,31 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras {
      * from "probe failed and we have no signal." Markers make failure
      * explicit so the server side does not have to guess.
      *
+     * The typed observation is also returned for probes that need to explain
+     * missing subfields. It comes from the same success/failure decision that
+     * writes the wire fields; callers never guess a type from a mixed map.
+     *
+     * @template T
      * @param array<string,mixed> $extras
      * @param string $key
-     * @param callable $fn
-     * @param mixed $default Value written to $extras[$key] on failure
+     * @param callable(): T $fn
+     * @param T $default Value written to $extras[$key] on failure
      *   so downstream consumers can iterate without per-probe null
      *   checks.
-     * @return void
+     * @return array{value: T, error: string}
      */
-    private function recordProbe(array &$extras, string $key, callable $fn, $default): void {
+    private function recordProbe(array &$extras, string $key, callable $fn, $default): array {
         try {
             $value = $fn();
         } catch (\Throwable $e) {
             $extras[$key] = $default;
-            $extras[$key . '_error'] = $this->classifyProbeError($e);
+            $reason = $this->classifyProbeError($e);
+            $extras[$key . '_error'] = $reason;
             ABJ_404_Solution_FeedbackTransportLog::log('warn', 'FeedbackEnvironmentExtras probe "' . $key . '" failed: ' . $e->getMessage());
-            return;
+            return array('value' => $default, 'error' => $reason);
         }
         $extras[$key] = $value;
+        return array('value' => $value, 'error' => '');
     }
 
     /**

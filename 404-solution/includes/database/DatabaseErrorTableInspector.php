@@ -136,7 +136,7 @@ class ABJ_404_Solution_DatabaseErrorTableInspector {
             $dbName = '';
         }
         // DAO-bypass-approved: read-only information_schema engine probe for classifying table-full DB errors.
-        $engine = $wpdb->get_var(
+        $engine = ABJ_404_Solution_DatabaseDriverCall::getVar($wpdb,
             // DAO-bypass-approved: prepare call for read-only information_schema engine probe placeholders.
             $wpdb->prepare(
                 "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",

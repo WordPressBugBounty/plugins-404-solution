@@ -56,7 +56,7 @@ require_once __DIR__ . '/View_Logs.php';
  * @method mixed echoChosenAdminTab($action, $sub, $message)
  * @method mixed echoConditionRow($index, array<mixed> $cond)
  * @method mixed echoConditionsJavaScript()
- * @method mixed echoConfidenceDistributionSection()
+ * @method mixed echoConfidenceDistributionSection(mixed $statsData = [])
  * @method string buildSubsubsubFilters(string $sub, array<int, array{0: int|string, 1: string}> $items, array<string, mixed> $tableOptions)
  * @method mixed echoEditRedirect(ABJ_404_Solution_EditRedirectFormContext $ctx)
  * @method mixed echoExpandCollapseButton($showSuggestions = true)

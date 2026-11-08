@@ -9,11 +9,14 @@ if (!defined('ABSPATH')) {
  * whether each request actually took effect.
  *
  * Two mechanisms, because two different parties compress. `Cache-Control:
- * no-transform` asks an intermediary (LiteSpeed, Cloudflare, a caching reverse
+ * no-transform` asks an intermediary (Cloudflare, a caching reverse
  * proxy) to leave the bytes alone; `zlib.output_compression` is PHP's own
  * output handler. Suppressing one and not the other still yields a compressed
  * response, so the two outcomes are reported separately and `applied` is the
- * conjunction.
+ * conjunction. LiteSpeed's origin compression ignores no-transform, and its
+ * LSAPI SAPI exposes no per-response server compression control. That refusal
+ * is reported separately: successfully requesting a proxy header must not
+ * certify an identity response from an origin that still compresses it.
  *
  * BOTH are refusable at runtime, and neither refusal raises anything a caller
  * would notice:
@@ -37,12 +40,15 @@ final class ABJ_404_Solution_ResponseCompressionSuppression {
     /**
      * Request suppression from both parties and report what each one did.
      *
-     * @return array{noTransformHeader: bool, zlibOutputCompression: bool, applied: bool}
+     * @return array{noTransformHeader: bool, zlibOutputCompression: bool, originServerCompression: bool, applied: bool}
      *   `noTransformHeader`: the no-transform header was set on this response.
      *   `zlibOutputCompression`: PHP's output compression is now off (a
      *   directive that was already off still counts -- the state is what the
      *   probe depends on, not whether this call changed it).
-     *   `applied`: both, so the response is genuinely unsuppressed-by-nobody.
+     *   `originServerCompression`: the SAPI supports this suppression contract;
+     *   false for LSAPI, whose origin compression is outside PHP control.
+     *   `applied`: every required local control succeeded. The delivery suite
+     *   separately proves the resulting representation over HTTP.
      */
     public static function apply(): array {
         $noTransformHeader = false;
@@ -57,10 +63,13 @@ final class ABJ_404_Solution_ResponseCompressionSuppression {
         $zlibDisabled = ABJ_404_Solution_PhpRuntimeCapabilityAdapter::setIni(
             array('directive' => 'zlib.output_compression', 'value' => '0')) !== false;
 
+        $originServerCompression = PHP_SAPI !== 'litespeed';
+
         return array(
             'noTransformHeader' => $noTransformHeader,
             'zlibOutputCompression' => $zlibDisabled,
-            'applied' => $noTransformHeader && $zlibDisabled,
+            'originServerCompression' => $originServerCompression,
+            'applied' => $noTransformHeader && $zlibDisabled && $originServerCompression,
         );
     }
 }

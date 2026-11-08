@@ -43,7 +43,7 @@ class ABJ_404_Solution_DatabaseUpgradeMultiSite extends ABJ_404_Solution_Databas
      * @return bool True if all sites are done, false if more batches needed.
      */
     public function processMultisiteBatch(string $optionPrefix, string $hookName, string $label, callable $perSiteAction): bool {
-        $processedBlogs = get_site_option($optionPrefix . '_processed_blogs', array());
+        $processedBlogs = ABJ_404_Solution_OptionShapeRead::networkArrayValue($optionPrefix . '_processed_blogs', array());
         if (!is_array($processedBlogs)) {
             $processedBlogs = array();
         }
@@ -154,8 +154,6 @@ class ABJ_404_Solution_DatabaseUpgradeMultiSite extends ABJ_404_Solution_Databas
             ABJ_404_Solution_CronScheduler::HOOK_NETWORK_ACTIVATION_BACKGROUND,
             'activation',
             function (int $siteId): void {
-                add_option('abj404_settings', '', '', false);
-
                 $this->upgrades()->bootstrapUpgrade()->runInitialCreateTables();
                 $this->upgrades()->collationDriftUpgrade()->correctCollations();
                 $this->upgrades()->engineNormalizationUpgrade()->updateTableEngineToInnoDB();

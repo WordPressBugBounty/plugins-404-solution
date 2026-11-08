@@ -24,26 +24,36 @@ final class ABJ_404_Solution_RestApiRedirectMutationService {
     }
 
     /**
-     * @param array{from: string, to: string, code: int, regex: bool} $input
+     * @param array{from: string, to: string, code: int, regex: bool, query_mode?: string|null} $input
      * @return \WP_REST_Response|\WP_Error
      */
     public function create(array $input) {
         $status = $input['regex'] ? (string)ABJ404_STATUS_REGEX : (string)ABJ404_STATUS_MANUAL;
         $resolved = $this->resolveDestinationType($input['to']);
 
-        $insertedId = $this->redirectsRepo->setupRedirect(
-            \ABJ_404_Solution_RedirectSpec::fromArray(array(
-                'fromURL' => $input['from'],
-                'status' => $status,
-                'type' => (string)$resolved['type'],
-                'finalDest' => $resolved['dest'],
-                'code' => (string)$input['code'],
-                'disabled' => 0,
-                'engine' => 'rest-api',
-            ))
-        );
+        try {
+            $insertedId = $this->redirectsRepo->setupRedirect(
+                \ABJ_404_Solution_RedirectSpec::fromArray(array(
+                    'fromURL' => $input['from'],
+                    'status' => $status,
+                    'type' => (string)$resolved['type'],
+                    'finalDest' => $resolved['dest'],
+                    'code' => (string)$input['code'],
+                    'disabled' => 0,
+                    'engine' => 'rest-api',
+                    'query_mode' => $input['query_mode'] ?? null,
+                ))
+            );
+        } catch (\ABJ_404_Solution_RedirectCycleException $e) {
+            return $this->presenter->createFailed($e->getMessage());
+        }
 
         if (!$insertedId) {
+            $cycleError = method_exists($this->redirectsRepo, 'getLastWriteError')
+                ? (string)$this->redirectsRepo->getLastWriteError() : '';
+            if ($cycleError !== '') {
+                return $this->presenter->createFailed($cycleError);
+            }
             return $this->presenter->createFailed();
         }
 
@@ -51,21 +61,25 @@ final class ABJ_404_Solution_RestApiRedirectMutationService {
     }
 
     /**
-     * @param array{id: int, from: string, to: string, code: int, regex: bool} $input
+     * @param array{id: int, from: string, to: string, code: int, regex: bool, query_mode?: string|null} $input
      * @return \WP_REST_Response|\WP_Error
      */
     public function update(array $input) {
         $statusType = $input['regex'] ? (string)ABJ404_STATUS_REGEX : (string)ABJ404_STATUS_MANUAL;
         $resolved = $this->resolveDestinationType($input['to']);
 
-        $error = $this->redirectsRepo->updateRedirect(ABJ_404_Solution_RedirectUpdate::fromArray(array(
-            'id' => $input['id'],
-            'type' => (int)$resolved['type'],
-            'fromUrl' => (string)$input['from'],
-            'destination' => (string)$resolved['dest'],
-            'code' => (string)$input['code'],
-            'statusType' => (string)$statusType,
-        )));
+        try {
+            $error = $this->redirectsRepo->updateRedirect(ABJ_404_Solution_RedirectUpdate::fromArray(array_intersect_key($input, array('query_mode' => true)) + array(
+                'id' => $input['id'],
+                'type' => (int)$resolved['type'],
+                'fromUrl' => (string)$input['from'],
+                'destination' => (string)$resolved['dest'],
+                'code' => (string)$input['code'],
+                'statusType' => (string)$statusType,
+            )));
+        } catch (\ABJ_404_Solution_RedirectCycleException $e) {
+            return $this->presenter->updateFailed($e->getMessage());
+        }
 
         if ($error !== '') {
             return $this->presenter->updateFailed((string)$error);
@@ -89,31 +103,37 @@ final class ABJ_404_Solution_RestApiRedirectMutationService {
     }
 
     /**
-     * @param array{id: int, to: string, code: int} $input
+     * @param array{id: int, to: string, code: int, query_mode?: string|null} $input
      * @return \WP_REST_Response|\WP_Error
      */
     public function promoteCaptured(array $input) {
-        $rows = $this->redirectsRepo->getRedirectsByIDs(array($input['id']));
-        if (empty($rows)) {
+        $resolved = $this->resolveDestinationType($input['to']);
+        $from = '';
+        try {
+            $error = $this->redirectsRepo->updateRedirectFromStoredRow($input['id'], function (array $row) use (&$from, $input, $resolved) {
+                $from = isset($row['url']) && is_string($row['url']) ? $row['url'] : '';
+                if ($from === '') {
+                    return 'bad_captured_record';
+                }
+                return ABJ_404_Solution_RedirectUpdate::fromArray(array_intersect_key($input, array('query_mode' => true)) + array(
+                    'id' => $input['id'],
+                    'type' => (int)$resolved['type'],
+                    'fromUrl' => $from,
+                    'destination' => (string)$resolved['dest'],
+                    'code' => (string)$input['code'],
+                    'statusType' => (string)ABJ404_STATUS_MANUAL,
+                ));
+            });
+        } catch (\ABJ_404_Solution_RedirectCycleException $e) {
+            return $this->presenter->updateFailed($e->getMessage());
+        }
+
+        if ($error === ABJ_404_Solution_RedirectsRepositoryInterface::ROW_NOT_FOUND) {
             return $this->presenter->capturedNotFound();
         }
-        $row = $rows[0];
-        $from = is_array($row) && isset($row['url']) && is_string($row['url']) ? $row['url'] : '';
-
-        if ($from === '') {
+        if ($error === 'bad_captured_record') {
             return $this->presenter->capturedBadRecord();
         }
-
-        $resolved = $this->resolveDestinationType($input['to']);
-        $error = $this->redirectsRepo->updateRedirect(ABJ_404_Solution_RedirectUpdate::fromArray(array(
-            'id' => $input['id'],
-            'type' => (int)$resolved['type'],
-            'fromUrl' => (string)$from,
-            'destination' => (string)$resolved['dest'],
-            'code' => (string)$input['code'],
-            'statusType' => (string)ABJ404_STATUS_MANUAL,
-        )));
-
         if ($error !== '') {
             return $this->presenter->updateFailed((string)$error);
         }

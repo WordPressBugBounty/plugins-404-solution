@@ -111,27 +111,29 @@ class ABJ_404_Solution_DatabaseUpgradeIndexes extends ABJ_404_Solution_DatabaseU
 			$this->logger->infoMessage($this->getUpgradeRuntimeId() . ": On {$tableName} I'm adding missing indexes: " . implode(', ', $missingIndexNames));
 		}
 
+		$missingSpecs = array();
 		foreach ($missingIndexNames as $indexName) {
 			$spec = $goalSpecsByName[$indexName] ?? null;
 			if (empty($spec) || !$this->indexColumnsAllExist($tableName, $spec, $existingColumns)) {
 				continue;
 			}
 			$this->deleteSpellingCacheBeforeUniqueIndex($tableName, $spec);
-			$this->indexWriter()->addIndex($tableName, $spec);
+			$missingSpecs[] = $spec;
 		}
 
+		$driftedSpecs = array();
 		foreach ($driftedIndexNames as $indexName) {
 			$spec = $goalSpecsByName[$indexName] ?? null;
 			if (empty($spec) || !$this->indexColumnsAllExist($tableName, $spec, $existingColumns)) {
 				continue;
 			}
-			$this->rebuildDriftedIndex($tableName, $spec,
-				$liveDefinitions[strtolower((string)$indexName)]);
+			$driftedSpecs[] = $spec;
 		}
+		$this->repairIndexBatch($tableName, $missingSpecs, $driftedSpecs, $liveDefinitions);
 	    }
 
 	    /**
-	     * Rebuild one index whose live definition no longer matches the DDL.
+	     * Repair missing and drifted indexes together so a cold upgrade scans the table once.
 	     *
 	     * DROP and ADD go in a single ALTER so the index is never absent between
 	     * two statements, and so the engine makes one pass over the table
@@ -151,53 +153,81 @@ class ABJ_404_Solution_DatabaseUpgradeIndexes extends ABJ_404_Solution_DatabaseU
 	     *    changes the goal signature, which re-arms the repair.
 	     *
 	     * @param string $tableName
-	     * @param array{name: string, columns: string, unique: bool} $spec
-	     * @param array{columns: array<int, array{column: string, prefix: int|null}>, unique: bool} $liveDefinition
+     * @param list<array{name: string, columns: string, unique: bool}> $missingSpecs
+     * @param list<array{name: string, columns: string, unique: bool}> $driftedSpecs
+	     * @param array<string, array{columns: array<int, array{column: string, prefix: int|null}>, unique: bool}> $liveDefinitions
 	     * @return void
 	     */
-	    private function rebuildDriftedIndex($tableName, array $spec, array $liveDefinition): void {
-	        if ($this->dbCore->noticeState()->shouldSkipNonEssentialDbWrites()) {
-	            $this->logger->debugMessage("Deferring the rebuild of {$spec['name']} on {$tableName} " .
-	                "until the database write cooldown ends.");
-	            return;
-	        }
-	        $goalSignature = ABJ_404_Solution_IndexDefinitionComparator::signatureOfDdlSpec($spec);
-	        if ($goalSignature === null) {
-	            // verifyIndexes() already refuses an unreadable goal, so this is
-	            // the belt to that braces: a rebuild whose target definition
-	            // nobody could read has no target, and there is no version of
-	            // "drop the real index first" that is safe without one.
-	            return;
-	        }
-	        $guardName = self::REBUILD_GUARD_PREFIX . md5(strtolower($tableName) . '|' .
-	            strtolower((string)$spec['name']) . '|' . $goalSignature);
-	        if (function_exists('get_transient') && get_transient($guardName) !== false) {
-	            return;
-	        }
-	        if (function_exists('set_transient')) {
-	            set_transient($guardName, 1, self::REBUILD_GUARD_SECONDS);
+	    private function repairIndexBatch($tableName, array $missingSpecs, array $driftedSpecs, array $liveDefinitions): void {
+	        $pending = array();
+	        foreach ($missingSpecs as $spec) {
+	            // Shipped missing specs carry no replacement intent. Only the
+	            // proven drift branch below adds that destructive instruction.
+	            $pending[] = $spec;
 	        }
 
-	        $this->logger->infoMessage($this->getUpgradeRuntimeId() . ": On {$tableName} I'm rebuilding " .
-	            "{$spec['name']}: the table has (" .
-	            ABJ_404_Solution_TableIndexDefinitions::describeColumns($liveDefinition) .
-	            ") but the schema defines " . trim((string)$spec['columns']) . ".");
-
-	        $this->deleteSpellingCacheBeforeUniqueIndex($tableName, $spec);
-	        $this->indexWriter()->addIndex($tableName, $spec, array('replace_existing' => true));
-
-	        $after = (new ABJ_404_Solution_TableIndexDefinitions($this->dbCore))->readLive($tableName);
-	        $rebuilt = is_array($after) ? ($after[strtolower((string)$spec['name'])] ?? null) : null;
-	        if (is_array($rebuilt)
-	                && ABJ_404_Solution_IndexDefinitionComparator::signatureOfLiveDefinition($rebuilt) === $goalSignature) {
-	            if (function_exists('delete_transient')) {
-	                delete_transient($guardName);
+	        $guards = array();
+	        $signatures = array();
+	        $driftedPending = array();
+	        foreach ($driftedSpecs as $spec) {
+	            if ($this->dbCore->noticeState()->shouldSkipNonEssentialDbWrites()) {
+	                $this->logger->debugMessage("Deferring the rebuild of {$spec['name']} on {$tableName} " .
+	                    "until the database write cooldown ends.");
+	                continue;
 	            }
+	            $goalSignature = ABJ_404_Solution_IndexDefinitionComparator::signatureOfDdlSpec($spec);
+	            if ($goalSignature === null) {
+	                // verifyIndexes() already refuses an unreadable goal, so this is
+	                // the belt to that braces: a rebuild whose target definition
+	                // nobody could read has no target, and there is no version of
+	                // "drop the real index first" that is safe without one.
+	                continue;
+	            }
+	            $guardName = self::REBUILD_GUARD_PREFIX . md5(strtolower($tableName) . '|' .
+	                strtolower((string)$spec['name']) . '|' . $goalSignature);
+	            if (function_exists('get_transient') && get_transient($guardName) !== false) {
+	                continue;
+	            }
+	            if (function_exists('set_transient')) {
+	                set_transient($guardName, 1, self::REBUILD_GUARD_SECONDS);
+	            }
+
+	            $this->logger->infoMessage($this->getUpgradeRuntimeId() . ": On {$tableName} I'm rebuilding " .
+	                "{$spec['name']}: the table has (" .
+	                ABJ_404_Solution_TableIndexDefinitions::describeColumns($liveDefinitions[strtolower($spec['name'])]) .
+	                ") but the schema defines " . trim((string)$spec['columns']) . ".");
+
+	            $this->deleteSpellingCacheBeforeUniqueIndex($tableName, $spec);
+	            $spec['replace_existing'] = true;
+	            $pending[] = $spec;
+	            $driftedPending[] = $spec;
+	            $guards[$spec['name']] = $guardName;
+	            $signatures[$spec['name']] = $goalSignature;
+	        }
+	        if (empty($pending)) {
 	            return;
 	        }
-	        $this->logger->warn("After rebuilding {$spec['name']} on {$tableName} the server still describes it " .
-	            "differently from " . trim((string)$spec['columns']) . ". Treating that as a difference in how this " .
-	            "server reports indexes rather than as schema drift, and not rebuilding it again.");
+	        // The one batch carries per-index replacement intent: missing members
+	        // are ADD-only while only proven drifted members are DROP+ADD.
+	        $this->indexWriter()->addIndexes($tableName, $pending);
+
+	        if (empty($driftedPending)) {
+	            return;
+	        }
+	        $after = (new ABJ_404_Solution_TableIndexDefinitions($this->dbCore))->readLive($tableName);
+	        foreach ($driftedPending as $spec) {
+	            $rebuilt = is_array($after) ? ($after[strtolower((string)$spec['name'])] ?? null) : null;
+	            if (is_array($rebuilt)
+	                    && ABJ_404_Solution_IndexDefinitionComparator::signatureOfLiveDefinition($rebuilt) === $signatures[$spec['name']]) {
+	                if (function_exists('delete_transient')) {
+	                    delete_transient($guards[$spec['name']]);
+	                }
+	                continue;
+	            }
+	            $this->logger->warn("After rebuilding {$spec['name']} on {$tableName} the server still describes it " .
+	                "differently from " . trim((string)$spec['columns']) . ". Treating that as a difference in how this " .
+	                "server reports indexes rather than as schema drift, and not rebuilding it again.");
+	        }
 	    }
 
 	    /**
@@ -292,9 +322,8 @@ class ABJ_404_Solution_DatabaseUpgradeIndexes extends ABJ_404_Solution_DatabaseU
 	    }
 
 	    /**
-	     * Put redirect admin-view performance indexes before lower-impact recovery
-	     * indexes. Each index is still added by its own ALTER TABLE statement; this
-	     * only controls which missing index is attempted first on weak hosts.
+	     * Put redirect admin-view performance goals first in each missing-index
+	     * batch. Stable order also prioritizes any single-index race fallbacks.
 	     *
 	     * @param array<int, string> $missingIndexNames
 	     * @return array<int, string>
@@ -402,6 +431,54 @@ class ABJ_404_Solution_DatabaseUpgradeIndexes extends ABJ_404_Solution_DatabaseU
 	            'try_online_first' => false,
 	        ));
 	    }
+
+    /**
+     * Drop every non-primary index on a table, ahead of a table conversion
+     * (engine or collation) that the existing indexes would block.
+     *
+     * @param string $tableName
+     * @return void
+     */
+    public function deleteIndexes(string $tableName): void {
+
+	// get the indexes list.
+	$results = $this->dbCore->queryAndGetResults("show index from " . $tableName .
+		" where key_name != 'PRIMARY'");
+	/** @var array<int, array<string, mixed>> $rows */
+	$rows = isset($results['rows']) && is_array($results['rows']) ? $results['rows'] : [];
+
+	if (empty($rows)) {
+		return;
+	}
+
+	// SHOW INDEX lists one row per indexed column, so a composite index appears
+	// once per column. Validate every row before issuing any DDL: a partial
+	// metadata answer must never produce a partial set of destructive drops.
+	$indexNames = [];
+	$seenNames = [];
+	foreach ($rows as $row) {
+		if (!is_array($row)) {
+			$this->logger->errorMessage("Cannot drop indexes on " . $tableName .
+				": SHOW INDEX returned malformed metadata; skipping all drops.");
+			return;
+		}
+		$indexName = ABJ_404_Solution_ShowIndexRowReader::normalizedFields($row)['key_name'] ?? null;
+		if (!is_string($indexName) || $indexName === '') {
+			$this->logger->errorMessage("Cannot drop indexes on " . $tableName .
+				": SHOW INDEX returned a row without a readable key name; skipping all drops.");
+			return;
+		}
+		$normalizedName = $this->f->strtolower($indexName);
+		if (!isset($seenNames[$normalizedName])) {
+			$seenNames[$normalizedName] = true;
+			$indexNames[] = $indexName;
+		}
+	}
+
+	$query = "alter table " . $tableName . " drop index " . implode(', drop index ',
+		$indexNames);
+	$this->dbCore->queryAndGetResults($query);
+    }
 
 	    /**
 	     * The engine-facing half of index repair: what statement this server

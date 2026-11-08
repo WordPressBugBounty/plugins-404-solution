@@ -78,7 +78,7 @@ class ABJ_404_Solution_RegexDestinationSubstitutor {
      * @return string|null The safe destination, or null when the captured text would change the origin.
      */
     public function substitute(string $template, array $captures): ?string {
-        if (preg_match(self::TOKEN_PATTERN, $template) !== 1) {
+        if (!$this->hasCaptureTokens($template)) {
             return $template;
         }
 
@@ -87,6 +87,19 @@ class ABJ_404_Solution_RegexDestinationSubstitutor {
             return $this->guardRelative($substituted);
         }
         return $this->guardAbsolute($template, $substituted);
+    }
+
+    /**
+     * Whether the template holds a `$N` capture token, i.e. whether its result
+     * depends on the requested URL. Any other `$` (a lone `$`, `$0`, `price$`)
+     * is literal text that substitute() returns unchanged, so a template
+     * without a token names one fixed destination.
+     *
+     * @param string $template The admin's destination template.
+     * @return bool True when substitute() would fill at least one token.
+     */
+    public function hasCaptureTokens(string $template): bool {
+        return preg_match(self::TOKEN_PATTERN, $template) === 1;
     }
 
     /**

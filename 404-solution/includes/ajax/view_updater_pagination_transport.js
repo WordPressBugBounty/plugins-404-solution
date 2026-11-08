@@ -5,7 +5,8 @@
  * deadline. Only transport-level failures are retryable: timeout, status 0
  * network failure, or an unstructured 5xx response. Permission, validation,
  * rate-limit, and structured server errors are terminal. The fixed retry
- * schedule contains two entries, so every part has at most three attempts.
+ * schedule contains two entries. A shared-flight exchange has at most seven
+ * part HTTP attempts under the original deadline, including nonce retries.
  *
  * Every attempt carries its own ledger identity (a unique attempt id in the
  * POST body, the query string, and the X-ABJ404-Request-ID header, plus the
@@ -150,6 +151,9 @@ function abj404PaginationAttemptData(req, part, attemptIndex, record, parentAtte
     if (record.sid) {
         data.sessionId = record.sid;
     }
+    if (record.flightToken) {
+        data.flightToken = record.flightToken;
+    }
     if (parentAttemptId) {
         data.retryParentId = parentAttemptId;
     }
@@ -202,23 +206,114 @@ function abj404RequestPaginationPart(req, part, callbacks) {
     var telemetry = abj404PaginationTelemetry();
     var ajaxRunner = (typeof abj404AjaxWithNonceRetry === 'function')
         ? abj404AjaxWithNonceRetry : jQuery.ajax; // ajax-direct-approved: fallback when the nonce-refresh module has not loaded
+    var flight = window.abj404TableFlight.create({
+        timeoutMs: req.ajaxTimeoutMs,
+        now: function() { return Date.now(); }, // allow-direct-time: table-flight deadline clock adapter
+        setTimeout: function(callback, delay) { return window.setTimeout(callback, delay); },
+        clearTimeout: function(timer) { window.clearTimeout(timer); },
+        shouldAbort: function() {
+            return typeof callbacks.shouldAbort === 'function' && callbacks.shouldAbort();
+        },
+        onAbort: function() { notifyAbort(); },
+        onDeadline: function() { finishDeadline(); },
+        onFollowUp: function() {
+            sendAttempt(0, lastRecord ? lastRecord.id : '');
+        }
+    });
+    var lifecycleState = 'open';
+    var requestCount = 0;
+    var currentAttempt = null;
+    var lastRecord = null;
+    var concurrentControlRelay = null;
+    var concurrentControlState = 'open';
 
-    var sendAttempt = function(attemptIndex, parentAttemptId) {
-        if (typeof callbacks.shouldAbort === 'function' && callbacks.shouldAbort()) {
-            if (typeof callbacks.onAbort === 'function') {
-                callbacks.onAbort(part);
-            }
+    var settleConcurrentControl = function(record) {
+        if (concurrentControlRelay && concurrentControlState !== 'settled') {
+            concurrentControlState = 'settled';
+            concurrentControlRelay.tableSettled(record);
+        }
+    };
+
+    var stopActiveAttempt = function(outcome, textStatus) {
+        var attempt = currentAttempt;
+        if (!attempt || attempt.state === 'settled') {
             return;
         }
-        var settled = false;
+        attempt.state = 'settled';
+        telemetry.finishAttempt(attempt.record, outcome, attempt.jqXHR || {}, textStatus);
+        settleConcurrentControl(attempt.record);
+        if (attempt.jqXHR && typeof attempt.jqXHR.abort === 'function') {
+            attempt.jqXHR.abort();
+        }
+    };
+    var notifyAbort = function() {
+        if (lifecycleState === 'settled') {
+            return;
+        }
+        stopActiveAttempt('abort', 'abort');
+        lifecycleState = 'settled';
+        flight.settle();
+        if (typeof callbacks.onAbort === 'function') {
+            callbacks.onAbort(part);
+        }
+    };
+    var notifyTerminal = function(jqXHR, textStatus, errorThrown, attemptIndex) {
+        if (lifecycleState === 'settled') {
+            return;
+        }
+        lifecycleState = 'settled';
+        flight.settle();
+        if (typeof callbacks.onTerminalError === 'function') {
+            callbacks.onTerminalError(jqXHR, textStatus, errorThrown, part, attemptIndex);
+        }
+    };
+    var finishDeadline = function() {
+        if (lifecycleState === 'settled') {
+            return;
+        }
+        if (typeof callbacks.shouldAbort === 'function' && callbacks.shouldAbort()) {
+            notifyAbort();
+            return;
+        }
+        var attempt = currentAttempt;
+        stopActiveAttempt('timeout', 'timeout');
+        var terminalRecord = (attempt && attempt.record) || lastRecord || {};
+        var relayRecord = attempt && attempt.record
+            ? attempt.record
+            : jQuery.extend({}, terminalRecord, { outcome: 'timeout' });
+        settleConcurrentControl(relayRecord);
+        abj404PaginationTelemetryDelivery().sendBeacon(req.baseUrl, terminalRecord, req.nonce);
+        var failure = window.abj404TableFlight.error(
+            'TABLE_FLIGHT_DEADLINE',
+            'Table flight deadline exceeded (TABLE_FLIGHT_DEADLINE).'
+        );
+        notifyTerminal(failure, 'error', failure.responseJSON.data.message,
+            attempt ? attempt.attemptIndex : 0);
+    };
+    var sendAttempt = function(attemptIndex, parentAttemptId) {
+        if (lifecycleState === 'settled') {
+            return;
+        }
+        var attemptPlan = flight.beginAttempt();
+        if (attemptPlan === null) {
+            return;
+        }
+        requestCount++;
         var record = telemetry.beginAttempt({
             requestId: req.requestId,
             part: part,
             attemptIndex: attemptIndex,
             parentAttemptId: parentAttemptId || '',
             subpage: req.subpage,
-            timeoutMs: req.ajaxTimeoutMs
+            timeoutMs: attemptPlan.timeoutMs,
+            flightFollowUpCount: attemptPlan.followUpCount
         });
+        if (attemptPlan.flightToken) {
+            record.flightToken = attemptPlan.flightToken;
+        }
+        lastRecord = record;
+        var attempt = { record: record, attemptIndex: attemptIndex, jqXHR: null, state: 'open' };
+        currentAttempt = attempt;
         var thresholdTimer = null;
         var thresholdMs = abj404PaginationServerOperationThresholdMs();
         var cancelThresholdReport = function() {
@@ -227,10 +322,10 @@ function abj404RequestPaginationPart(req, part, callbacks) {
                 thresholdTimer = null;
             }
         };
-        if (req.ajaxTimeoutMs > thresholdMs) {
+        if (req.ajaxTimeoutMs > thresholdMs && requestCount === 1) {
             thresholdTimer = window.setTimeout(function() {
                 thresholdTimer = null;
-                if (!settled) {
+                if (attempt.state !== 'settled') {
                     abj404PaginationTelemetryDelivery().sendThresholdBeacon(
                         req.baseUrl,
                         record,
@@ -240,8 +335,7 @@ function abj404RequestPaginationPart(req, part, callbacks) {
                 }
             }, thresholdMs);
         }
-        var concurrentControlRelay = null;
-        if (part === 'table' && attemptIndex === 0 && !req.isBackgroundRefresh &&
+        if (part === 'table' && requestCount === 1 && !req.isBackgroundRefresh &&
                 window.abj404CanaryLadder &&
                 typeof window.abj404CanaryLadder.runConcurrentControl === 'function') {
             concurrentControlRelay = abj404ConcurrentControlRelay(record);
@@ -274,38 +368,77 @@ function abj404RequestPaginationPart(req, part, callbacks) {
             url: abj404PaginationAttemptUrl(req, part, attemptIndex, record.id),
             type: 'POST',
             dataType: 'json',
-            timeout: req.ajaxTimeoutMs,
+            timeout: attemptPlan.timeoutMs,
             data: abj404PaginationAttemptData(req, part, attemptIndex, record, parentAttemptId),
             xhr: telemetry.xhrFactory(record),
-            beforeSend: function(jqXHR) {
+            beforeSend: function(jqXHR, settings) {
+                var wireTimeout = flight.admitWire(attempt.jqXHR !== null);
+                if (wireTimeout === null) {
+                    return false;
+                }
+                settings.timeout = wireTimeout;
+                attempt.jqXHR = jqXHR;
                 if (record.id && jqXHR && typeof jqXHR.setRequestHeader === 'function') {
                     jqXHR.setRequestHeader('X-ABJ404-Request-ID', record.id);
                 }
             },
             success: function(result, textStatus, jqXHR) {
-                settled = true;
+                if (lifecycleState === 'settled' || attempt.state === 'settled') {
+                    return;
+                }
+                attempt.state = 'settled';
                 cancelThresholdReport();
                 telemetry.finishAttempt(record, 'success', jqXHR, textStatus);
-                if (concurrentControlRelay) {
-                    concurrentControlRelay.tableSettled(record);
+                currentAttempt = null;
+                var response = flight.acceptResponse(result);
+                if (response.state === 'invalid') {
+                    settleConcurrentControl(jQuery.extend({}, record, { outcome: 'error' }));
+                    abj404PaginationTelemetryDelivery().sendBeacon(req.baseUrl, record, req.nonce);
+                    notifyTerminal(response.error, 'error', response.error.responseJSON.data.message, attemptIndex);
+                    return;
                 }
+                if (response.state === 'pending' || response.state === 'deadline') {
+                    return;
+                }
+                settleConcurrentControl(record);
+                lifecycleState = 'settled';
                 if (typeof callbacks.onSuccess === 'function') {
                     callbacks.onSuccess(result, part, attemptIndex);
                 }
             },
             error: function(jqXHR, textStatus, errorThrown) {
-                settled = true;
+                if (lifecycleState === 'settled' || attempt.state === 'settled') {
+                    return;
+                }
+                attempt.state = 'settled';
                 cancelThresholdReport();
                 telemetry.finishAttempt(record, abj404PaginationOutcome(textStatus), jqXHR, textStatus);
-                if (concurrentControlRelay) {
-                    concurrentControlRelay.tableSettled(record);
+                currentAttempt = null;
+                if (!flight.isWaiting()) {
+                    settleConcurrentControl(record);
                 }
-                var canRetry = abj404PaginationFailureIsTransient(jqXHR, textStatus) &&
+                var transientFailure = abj404PaginationFailureIsTransient(jqXHR, textStatus);
+                var canRetry = transientFailure &&
                     attemptIndex < retryDelays.length;
-                if (canRetry) {
+                if (!flight.isWaiting() && canRetry) {
+                    var retryDelay = retryDelays[attemptIndex];
                     window.setTimeout(function() {
                         sendAttempt(attemptIndex + 1, record.id);
-                    }, retryDelays[attemptIndex]);
+                    }, retryDelay);
+                    return;
+                }
+                if (flight.isWaiting()) {
+                    if (canRetry) {
+                        flight.scheduleTransportRetry(retryDelays[attemptIndex], function() {
+                            sendAttempt(attemptIndex + 1, record.id);
+                        });
+                    } else if (transientFailure) {
+                        finishDeadline();
+                    } else {
+                        abj404PaginationTelemetryDelivery().sendBeacon(req.baseUrl, record, req.nonce);
+                        settleConcurrentControl(record);
+                        notifyTerminal(jqXHR, textStatus, errorThrown, attemptIndex);
+                    }
                     return;
                 }
                 // Final attempt for this part: try the supplemental beacon so
@@ -313,20 +446,16 @@ function abj404RequestPaginationPart(req, part, callbacks) {
                 // the admin closes the tab. It may share the failing network
                 // path, which is why it is never the only channel.
                 abj404PaginationTelemetryDelivery().sendBeacon(req.baseUrl, record, req.nonce);
-                if (typeof callbacks.onTerminalError === 'function') {
-                    callbacks.onTerminalError(jqXHR, textStatus, errorThrown, part, attemptIndex);
-                }
+                notifyTerminal(jqXHR, textStatus, errorThrown, attemptIndex);
             },
             complete: function(jqXHR, textStatus) {
                 cancelThresholdReport();
-                if (!settled) {
+                if (lifecycleState !== 'settled' && attempt.state !== 'settled') {
+                    attempt.state = 'settled';
+                    currentAttempt = null;
                     telemetry.finishAttempt(record, 'abort', jqXHR, textStatus || 'abort');
-                    if (concurrentControlRelay) {
-                        concurrentControlRelay.tableSettled(record);
-                    }
-                    if (typeof callbacks.onTerminalError === 'function') {
-                        callbacks.onTerminalError(jqXHR || {}, textStatus || 'abort', 'request incomplete', part, attemptIndex);
-                    }
+                    settleConcurrentControl(record);
+                    notifyTerminal(jqXHR || {}, textStatus || 'abort', 'request incomplete', attemptIndex);
                 }
             }
         });

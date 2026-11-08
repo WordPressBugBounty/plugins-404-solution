@@ -147,7 +147,7 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsSortKeyBackfill extends ABJ_404_S
         // forever after convergence (raw-SQL writers that NULL a key are re-healed
         // by the Step 3d reconcile, which repopulates every row's sort key).
         $latchOption = ABJ_404_Solution_RedirectsDenormColumnSql::sortKeyBackfillLatchOption($targetColumn);
-        if ($latchOption !== '' && get_option($latchOption) === '1') {
+        if ($latchOption !== '' && ABJ_404_Solution_OptionShapeRead::scalar($latchOption) === '1') {
             return 0;
         }
 
@@ -157,7 +157,7 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsSortKeyBackfill extends ABJ_404_S
         // through queryAndGetResults would log a benign "table doesn't exist"
         // error on a freshly-installed site before create-tables ran.
         // DAO-bypass-approved: schema existence probe, see comment above.
-        $found = $wpdb->get_var("SHOW TABLES LIKE '" . esc_sql($redirectsTable) . "'");
+        $found = ABJ_404_Solution_DatabaseDriverCall::getVar($wpdb, "SHOW TABLES LIKE '" . esc_sql($redirectsTable) . "'");
         if ($found !== $redirectsTable) {
             return 0;
         }
@@ -234,27 +234,35 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsSortKeyBackfill extends ABJ_404_S
      *
      * @param string $redirectsTable
      * @param string $targetColumn Class-internal literal column name.
+     * @param bool $revalidate Recheck retained readiness at the upgrade boundary.
      * @return void
      */
-    private function markSortKeyLatchIfComplete(string $redirectsTable, string $targetColumn): void {
+    private function markSortKeyLatchIfComplete(string $redirectsTable, string $targetColumn, bool $revalidate = false): void {
         $latchOption = ABJ_404_Solution_RedirectsDenormColumnSql::sortKeyBackfillLatchOption($targetColumn);
-        if ($latchOption === '' || get_option($latchOption) === '1') {
+        if ($latchOption === '' || (!$revalidate && ABJ_404_Solution_OptionShapeRead::scalar($latchOption) === '1')) {
             return;
         }
         $result = $this->dbCore->queryAndGetResults(
             "SELECT id FROM " . $redirectsTable . " WHERE " . $targetColumn . " IS NULL LIMIT 1"
         );
         $lastError = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
-        if ($lastError !== '') {
-            // Could not confirm convergence; leave the latch for a later run.
+        if (($result['query_succeeded'] ?? null) !== true
+                || (array_key_exists('timed_out', $result) && $result['timed_out'] !== false)
+                || $lastError !== '' || !array_key_exists('rows', $result) || !is_array($result['rows'])) {
+            // An upgrade cannot certify a retained flag without a readable probe.
+            if ($revalidate) {
+                delete_option($latchOption);
+            }
             return;
         }
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+        $rows = $result['rows'];
         if (empty($rows)) {
             // autoload=false: this latch is read only on admin redirect-table
             // loads, never on the front end, so it must not bloat the autoload
             // payload of every request.
             update_option($latchOption, '1', false);
+        } elseif ($revalidate) {
+            delete_option($latchOption);
         }
     }
 
@@ -267,7 +275,9 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsSortKeyBackfill extends ABJ_404_S
      * when the column is already fully populated -- so an install that already has
      * every sort key (a small site, or one upgraded from a build that already
      * carried the column) switches to the index-ordered sort immediately on
-     * upgrade instead of waiting for the first daily-cron drain. A site with a
+     * upgrade instead of waiting for the first daily-cron drain. Retained ready
+     * flags are revalidated here because restored data or recreated columns can
+     * carry NULL keys while the old completion option survives. A site with a
      * real backlog is left for the cron drain; until then the read path falls back
      * to the wide source column (correct order, filesort), so there is no
      * correctness gap either way.
@@ -282,13 +292,15 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsSortKeyBackfill extends ABJ_404_S
         $redirectsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
         // @utf8-audit: opt-out - $redirectsTable is doTableNameReplacements() of a fixed internal placeholder (lowercase prefix + literal suffix); system-controlled, cannot contain invalid UTF-8.
         // DAO-bypass-approved: schema existence probe, same shape as the drains.
-        $found = $wpdb->get_var("SHOW TABLES LIKE '" . esc_sql($redirectsTable) . "'");
+        $found = ABJ_404_Solution_DatabaseDriverCall::getVar($wpdb, "SHOW TABLES LIKE '" . esc_sql($redirectsTable) . "'");
         if ($found !== $redirectsTable) {
             return;
         }
         foreach (array_keys(self::SORT_KEY_COLUMNS) as $targetColumn) {
             if ($this->columnExists($redirectsTable, $targetColumn) === true) {
-                $this->markSortKeyLatchIfComplete($redirectsTable, $targetColumn);
+                $this->markSortKeyLatchIfComplete($redirectsTable, $targetColumn, true);
+            } else {
+                delete_option(ABJ_404_Solution_RedirectsDenormColumnSql::sortKeyBackfillLatchOption($targetColumn));
             }
         }
     }

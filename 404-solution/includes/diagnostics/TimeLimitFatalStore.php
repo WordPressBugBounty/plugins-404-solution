@@ -111,7 +111,7 @@ final class ABJ_404_Solution_TimeLimitFatalStore {
         if (!function_exists('get_option')) {
             return null;
         }
-        $raw = get_option(ABJ_404_Solution_RequestTimeRecorder::ARMED_OPTION, '');
+        $raw = ABJ_404_Solution_OptionShapeRead::scalar(ABJ_404_Solution_RequestTimeRecorder::ARMED_OPTION, '');
         $until = self::untilOf(is_string($raw) ? $raw : '');
         return $until > $now ? $until : null;
     }
@@ -189,7 +189,7 @@ final class ABJ_404_Solution_TimeLimitFatalStore {
         if (!function_exists('get_option')) {
             return array();
         }
-        $raw = get_option(self::SLOW_OPTION_NAME, '');
+        $raw = ABJ_404_Solution_OptionShapeRead::scalar(self::SLOW_OPTION_NAME, '');
         return self::slowCallbacksFromRaw(is_string($raw) ? $raw : '');
     }
 
@@ -252,7 +252,7 @@ final class ABJ_404_Solution_TimeLimitFatalStore {
         if (!function_exists('get_option')) {
             return array();
         }
-        $raw = get_option(self::OPTION_NAME, '');
+        $raw = ABJ_404_Solution_OptionShapeRead::scalar(self::OPTION_NAME, '');
         return self::entriesFromRaw(is_string($raw) ? $raw : '');
     }
 
@@ -286,7 +286,7 @@ final class ABJ_404_Solution_TimeLimitFatalStore {
         if ($entries === array()) {
             return false;
         }
-        $seen = function_exists('get_option') ? get_option(self::SEEN_OPTION_NAME, 0) : 0;
+        $seen = function_exists('get_option') ? ABJ_404_Solution_OptionShapeRead::scalar(self::SEEN_OPTION_NAME, 0) : 0;
         return $entries[count($entries) - 1]['at'] > ABJ_404_Solution_ExactInteger::readOr($seen, 0, 0);
     }
 

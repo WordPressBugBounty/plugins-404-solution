@@ -4,57 +4,41 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// allow-no-test-found: exercised by RedirectsCanonicalUrlBackfillCompleteTest
-
 require_once __DIR__ . '/LogsHitsCanonicalUrlJoinHelper.php';
+require_once __DIR__ . '/LogsHitsRebuildBudget.php';
+require_once __DIR__ . '/LogsHitsRebuildProgress.php';
+require_once __DIR__ . '/LogsHitsTableMetadata.php';
 require_once __DIR__ . '/../database/DatabaseCollationHelper.php';
 
 /**
- * Two-phase SQL execution engine for the wp_abj404_logs_hits rollup.
+ * Resumable SQL materialization of the logs-hits rollup.
  *
- * Extracted from LogsHitsRollupService (i468) so the service stays focused on
- * rebuild coordination (gate / lock / scheduling), staleness signaling, and
- * freshness/id reads, while this class owns the one cohesive responsibility of
- * materializing the rollup and swapping it in.
+ * Each phase changes only generation-private staging tables until one atomic
+ * RENAME publishes the complete snapshot. Phase-one range replacement and the
+ * merge's target exclusion make a committed unit replay-safe if PHP dies before
+ * its checkpoint is saved. The coordinator owns persistence and scheduling;
+ * this execution layer never decides when to arm another request.
  *
- * Given a snapshot id range it:
- *   1. (re)creates and truncates the {wp_abj404_logs_hits}_temp staging table,
- *   2. picks the direct INSERT...SELECT path for small ranges or the chunked
- *      pre-aggregation path (Phase 1 per-id-range -> Phase 2 JOIN) for large
- *      ones,
- *   3. stamps the temp table COMMENT with elapsed|maxLogId and renames it over
- *      the live table in a single transaction,
- *   4. records per-phase success/failure into RebuildHealthState and cleans up
- *      the pre-aggregation temp table.
- *
- * The min/max log-id snapshot is supplied by the caller (not read here) so the
- * tracking test subclass can control the id range without a live logsv2 table,
- * and so the watermark stored in the table COMMENT is the pre-insert value.
- *
- * Pure data-access / execution layer: no admin-notice policy, no scheduling
- * decision, no runtime-flag bookkeeping. Those stay on the service.
+ * @phpstan-import-type State from ABJ_404_Solution_LogsHitsRebuildProgress
  */
 class ABJ_404_Solution_LogsHitsTableRebuilder {
 
-    /** @var int Number of logsv2 IDs to process per chunk during pre-aggregation. */
     const HITS_TABLE_PREAGG_CHUNK_SIZE = 100000;
-    /** @var int Direct-path threshold for hits-table rebuild. */
     const HITS_TABLE_DIRECT_PATH_THRESHOLD = 5000;
+    const MERGE_CHUNK_SIZE = 1000;
 
     /** @var ABJ_404_Solution_DatabaseCore */
     private $dbCore;
-
     /** @var ABJ_404_Solution_Logging */
     private $logger;
-
     /** @var ABJ_404_Solution_RebuildHealthState|null */
     private $rebuildHealth;
-
     /** @var ABJ_404_Solution_LogsHitsCanonicalUrlJoinHelper */
     private $joinHelper;
-
     /** @var callable():bool|null */
     private $leaseRenewer;
+    /** @var ABJ_404_Solution_LogsHitsTableMetadata */
+    private $metadata;
 
     /**
      * @param ABJ_404_Solution_DatabaseCore $dbCore
@@ -63,101 +47,387 @@ class ABJ_404_Solution_LogsHitsTableRebuilder {
      * @param ABJ_404_Solution_LogsHitsCanonicalUrlJoinHelper $joinHelper
      * @param callable():bool|null $leaseRenewer
      */
-    public function __construct(
-        ABJ_404_Solution_DatabaseCore $dbCore,
-        $logger,
-        $rebuildHealth,
-        ABJ_404_Solution_LogsHitsCanonicalUrlJoinHelper $joinHelper,
-        $leaseRenewer = null
-    ) {
+    public function __construct(ABJ_404_Solution_DatabaseCore $dbCore, $logger, $rebuildHealth,
+        ABJ_404_Solution_LogsHitsCanonicalUrlJoinHelper $joinHelper, $leaseRenewer = null) {
         $this->dbCore = $dbCore;
         $this->logger = $logger;
-        $this->rebuildHealth = $rebuildHealth instanceof ABJ_404_Solution_RebuildHealthState
-            ? $rebuildHealth
-            : null;
+        $this->rebuildHealth = $rebuildHealth instanceof ABJ_404_Solution_RebuildHealthState ? $rebuildHealth : null;
         $this->joinHelper = $joinHelper;
+        $this->metadata = new ABJ_404_Solution_LogsHitsTableMetadata($dbCore, $logger);
         if ($leaseRenewer !== null && !is_callable($leaseRenewer)) {
-            throw new InvalidArgumentException(
-                'LogsHitsTableRebuilder lease renewer must be callable or null.'
-            );
+            throw new InvalidArgumentException('LogsHitsTableRebuilder lease renewer must be callable or null.');
         }
         $this->leaseRenewer = $leaseRenewer;
     }
 
     /**
-     * Materialize the rollup over [$minLogId, $maxLogId] into a fresh temp
-     * table and rename it over the live wp_abj404_logs_hits table. Records
-     * per-phase outcomes into RebuildHealthState and cleans up the
-     * pre-aggregation temp table.
+     * Execute a bounded slice, checkpointing each complete replay-safe unit.
      *
-     * Expected SQL failures (timeout / last_error) are caught and reported via
-     * the return value; unexpected Throwables are recorded and also reported
-     * via the return value (never re-thrown) so the caller's lock release runs
-     * unconditionally.
+     * The two-argument entry remains available for internal consumers; a caller
+     * continuing a yielded result supplies its state in the options bag.
      *
-     * @param int $minLogId Pre-insert MIN(logsv2.id) snapshot.
-     * @param int $maxLogId Pre-insert MAX(logsv2.id) snapshot (stored as the watermark).
-     * @return array{refreshed: bool, elapsed_time: float, error: string}
+     * @param int $minLogId Inclusive snapshot minimum.
+     * @param int $maxLogId Inclusive snapshot maximum, used as the watermark.
+     * @param array{state?:State,budget?:ABJ_404_Solution_LogsHitsRebuildBudget,checkpoint?:callable(State):void} $options
+     * @return array{refreshed:bool,pending:bool,state:State,elapsed_time:float,error:string}
      */
-    public function rebuildAndSwap(int $minLogId, int $maxLogId): array {
-        $preAggTable = $this->dbCore->doTableNameReplacements("{wp_abj404_logs_hits}_preagg");
+    public function rebuildAndSwap(int $minLogId, int $maxLogId, array $options = array()): array {
+        $budget = $options['budget'] ?? new ABJ_404_Solution_LogsHitsRebuildBudget(abj_clock());
+        $state = $options['state'] ?? (new ABJ_404_Solution_LogsHitsRebuildProgress($this->logger))->start(array(
+            'min_log_id' => $minLogId, 'max_log_id' => $maxLogId,
+            'chunk_size' => $this->getHitsRebuildChunkSize($maxLogId - $minLogId),
+        ));
+        // A new request may follow a cold restart or a resource-cap change.
+        // Revalidate throughput with one small unit before growing again.
+        if ($state['phase'] === 'prepare' || $state['phase'] === 'preaggregate') {
+            $state['chunk_size'] = min($state['chunk_size'],
+                ABJ_404_Solution_LogsHitsRebuildBudget::INITIAL_LOG_CHUNK_SIZE);
+        }
+        $error = '';
         try {
-            $finalDestTable = $this->dbCore->doTableNameReplacements("{wp_abj404_logs_hits}");
-            $tempDestTable = $this->dbCore->doTableNameReplacements("{wp_abj404_logs_hits}_temp");
-            $this->renewLeaseOrThrow();
-            $this->dbCore->queryAndGetResults("drop table if exists " . $tempDestTable);
-            $this->renewLeaseOrThrow();
-            $resolvedCollation = $this->joinHelper->resolveHitsJoinCollation();
-            $createTempTableQuery = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/createLogsHitsTempTable.sql");
-            $createTempTableQuery = $this->dbCore->doTableNameReplacements($createTempTableQuery);
-            $createTempTableQuery = $this->applyJoinCharsetCollation(array(
-                'ddl' => $createTempTableQuery,
-                'rawCollation' => $resolvedCollation,
-            ));
-            $this->dbCore->queryAndGetResults($createTempTableQuery);
-            $this->renewLeaseOrThrow();
-            // @cache-write-audit: opt-out - truncates an unpublished temp table before rebuilding it.
-            $this->dbCore->queryAndGetResults("truncate table " . $tempDestTable);
-            $idRange = $maxLogId - $minLogId;
-            $chunkSize = $this->getHitsRebuildChunkSize($idRange);
-            $this->renewLeaseOrThrow();
-            if ($idRange <= self::HITS_TABLE_DIRECT_PATH_THRESHOLD) { $results = $this->hitsTableInsertDirect($tempDestTable); } else { $results = $this->hitsTableInsertChunked($tempDestTable, $preAggTable, $minLogId, $maxLogId, $chunkSize); }
-            $this->renewLeaseOrThrow();
-            if ($results === false || !empty($results['timed_out']) || !empty($results['last_error'])) {
-                $rawLastError = is_array($results) && isset($results['last_error']) && is_string($results['last_error']) ? $results['last_error'] : '';
-                $errorMessage = $results === false ? 'Hits rebuild phase 1 chunk failed.' : ($rawLastError !== '' ? $rawLastError : 'Hits rebuild timed out.');
-                $this->recordHitsRebuildFailure($errorMessage);
-                if ($idRange > self::HITS_TABLE_DIRECT_PATH_THRESHOLD && $results !== false && (!empty($results['timed_out']) || !empty($results['last_error']))) {
-                    $this->recordHitsChunkFailure();
-                }
-                $this->dropScratchTableIfLeaseOwned($tempDestTable);
-                $this->logger->debugMessage(__FUNCTION__ . " INSERT timed out or errored; aborting rebuild.");
-                return array('refreshed' => false, 'elapsed_time' => 0.0, 'error' => $errorMessage);
+            while ($state['phase'] !== 'complete' && $budget->canStart()) {
+                $this->renewLeaseOrThrow();
+                $phase = $state['phase'];
+                $started = abj_clock()->nowFloat();
+                $state = $this->advancePhase($state, $budget);
+                $this->renewLeaseOrThrow();
+                $budget->completeUnit();
+                $elapsed = max(0.0, abj_clock()->nowFloat() - $started);
+                $state['elapsed_time'] += $elapsed;
+                $state['step_seconds'] = $state['phase'] === $phase ? $elapsed : 0.0;
+                $state['updated_at'] = abj_clock()->now();
+                if (isset($options['checkpoint'])) { ($options['checkpoint'])($state); }
             }
-            $rawElapsed = $results['elapsed_time'] ?? 0;
-            $elapsedTime = is_numeric($rawElapsed) ? (float)$rawElapsed : 0.0;
-            $comment = $elapsedTime . '|' . $maxLogId;
-            $this->renewLeaseOrThrow();
-            // @utf8-audit: opt-out - rebuild table comment is synthesized from numeric timing and ID values.
-            // Bound, not spliced: the comment is data, and the executor rewrites
-            // `{wp_...}` tokens over the statement text before it binds query_params.
-            $comment = substr($comment, 0, 2048);
-            $this->dbCore->queryAndGetResults(
-                "ALTER TABLE " . $tempDestTable . " COMMENT %s",
-                array('query_params' => array($comment))
-            );
-            $this->renewLeaseOrThrow();
-            $statements = array("drop table if exists " . $finalDestTable, "rename table " . $tempDestTable . ' to ' . $finalDestTable);
-            $this->dbCore->executeAsTransaction($statements);
-            $this->recordHitsRebuildSuccess($chunkSize);
-            $this->logger->debugMessage(__FUNCTION__ . " refreshed " . $finalDestTable . " in " . $elapsedTime . " seconds.");
-            return array('refreshed' => true, 'elapsed_time' => $elapsedTime, 'error' => '');
+        } catch (ABJ_404_Solution_LogsHitsRebuildYield $e) {
+            // No cursor advanced for an incomplete unit; its SQL is replay-safe.
+            // A yield is the healthy liveness signal of a budgeted drain, not a
+            // failure: it is recorded as a durable INFO line (a WARN would read
+            // as a fault on every healthy slice, and a debug line is lost while
+            // debug_mode is off).
+            $this->logger->infoMessage('Logs-hits rebuild yielded during ' . $state['phase']
+                . ' (code ' . $e->getCode() . '): ' . $e->getMessage() . ' A later request resumes it.');
         } catch (Throwable $e) {
-            $this->recordHitsRebuildFailure($e->getMessage());
-            $this->logger->errorMessage(__FUNCTION__ . " failed: " . $e->getMessage(), $e instanceof \Exception ? $e : null);
-            return array('refreshed' => false, 'elapsed_time' => 0.0, 'error' => $e->getMessage());
-        } finally {
-            $this->dropScratchTableIfLeaseOwned($preAggTable);
+            $error = get_class($e) . ' (' . $e->getCode() . '): ' . $e->getMessage();
+            if ($e->getCode() !== 409) { $this->recordHitsRebuildFailure($error); }
+            $this->logger->warn('Logs-hits rebuild stopped: ' . $error);
+            try {
+                $this->discard($state, $budget);
+            } catch (Throwable $cleanupError) {
+                // The durable running checkpoint lets a later owner finish
+                // cleanup if the budget or exclusive lease is already gone.
+                $this->logger->warnCaught('Logs-hits staging cleanup deferred.', $cleanupError);
+            }
+        }
+        $complete = $error === '' && $state['phase'] === 'complete';
+        if ($complete) { $this->recordHitsRebuildSuccess($state['chunk_size']); }
+        return array('refreshed' => $complete, 'pending' => !$complete && $error === '',
+            'state' => $state, 'elapsed_time' => (float)$state['elapsed_time'], 'error' => $error);
+    }
+
+    /**
+     * @param State $state
+     * @return State
+     */
+    private function advancePhase(array $state, ABJ_404_Solution_LogsHitsRebuildBudget $budget): array {
+        switch ($state['phase']) {
+            case 'prepare': return $this->prepareGeneration($state, $budget);
+            case 'direct': return $this->fillDirectSnapshot($state, $budget);
+            case 'preaggregate': return $this->preaggregateRange($state, $budget);
+            case 'merge': return $this->mergeRedirectRange($state, $budget);
+            case 'publish': return $this->publishGeneration($state, $budget);
+            case 'denormalize': return $this->writeBackRedirectRange($state, $budget);
+            case 'cleanup': return $this->cleanGeneration($state, $budget);
+            default: throw new InvalidArgumentException('Unknown logs-hits rebuild phase.');
+        }
+    }
+
+    /**
+     * Discard only an abandoned generation's unpublished resources.
+     * @param State $state
+     */
+    public function discard(array $state, ABJ_404_Solution_LogsHitsRebuildBudget $budget): void {
+        $tables = $this->generationTables($state);
+        foreach (array('temp', 'preagg', 'backup') as $kind) {
+            $scratchTable = $tables[$kind];
+            $this->query('DROP TABLE IF EXISTS ' . $scratchTable, $budget);
+        }
+    }
+
+    /**
+     * Recover a crash between atomic RENAME and checkpoint persistence.
+     * @param State $state
+     */
+    public function isPublishedGeneration(array $state, ABJ_404_Solution_LogsHitsRebuildBudget $budget): bool {
+        return $this->statusMatchesGeneration($this->readLiveStatus($budget), $state);
+    }
+
+    /** @return array<string,mixed> */
+    private function readLiveStatus(ABJ_404_Solution_LogsHitsRebuildBudget $budget): array {
+        $this->renewLeaseOrThrow();
+        $row = $this->metadata->statusRow(array('timeout' => $budget->timeoutSeconds()));
+        $this->renewLeaseOrThrow();
+        return $row;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @param State $state
+     */
+    private function statusMatchesGeneration(array $row, array $state): bool {
+        return isset($row['comment']) && is_string($row['comment'])
+            && substr($row['comment'], -20) === '|v1:' . $state['generation'];
+    }
+
+    /**
+     * @param State $state
+     * @return State
+     */
+    private function prepareGeneration(array $state, ABJ_404_Solution_LogsHitsRebuildBudget $budget): array {
+        $tables = $this->generationTables($state);
+        $collation = $this->joinHelper->resolveHitsJoinCollation(fn(): array => $this->queryAdmissionOptions($budget));
+        $this->createStagingTable('createLogsHitsTempTable.sql', '{wp_abj404_logs_hits}_temp', $tables['temp'], $collation, $budget);
+        $state['phase'] = 'direct';
+        if ($state['max_log_id'] - $state['min_log_id'] > self::HITS_TABLE_DIRECT_PATH_THRESHOLD) {
+            $this->createStagingTable('createLogsHitsPreAggTempTable.sql', '{wp_abj404_logs_hits}_preagg', $tables['preagg'], $collation, $budget);
+            $state['phase'] = 'preaggregate';
+        }
+        return $state;
+    }
+
+    /** Create only generation-private scratch names derived by this engine. */
+    private function createStagingTable(string $file, string $token, string $table, string $collation,
+        ABJ_404_Solution_LogsHitsRebuildBudget $budget): void {
+        $ddl = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . '/../sql/' . $file);
+        $ddl = str_replace($token, $table, $ddl);
+        $ddl = $this->applyJoinCharsetCollation(array('ddl' => $ddl, 'rawCollation' => $collation));
+        $this->query($ddl, $budget);
+    }
+
+    /**
+     * @param State $state
+     * @return State
+     */
+    private function fillDirectSnapshot(array $state, ABJ_404_Solution_LogsHitsRebuildBudget $budget): array {
+        $tempTable = $this->generationTables($state)['temp'];
+        // A crash before this phase's checkpoint must not duplicate its rows.
+        // @cache-write-audit: opt-out - truncates only this generation's unpublished rollup.
+        $this->query('TRUNCATE TABLE ' . $tempTable, $budget);
+        $this->hitsTableInsertDirect($tempTable, $state, $budget);
+        $state['phase'] = 'publish';
+        return $state;
+    }
+
+    /** @param State $state */
+    private function hitsTableInsertDirect(string $tempDestTable, array $state,
+        ABJ_404_Solution_LogsHitsRebuildBudget $budget): void {
+        $select = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . '/../sql/getRedirectsForViewTempTable.sql');
+        $queryOptionsFactory = fn(): array => $this->queryAdmissionOptions($budget);
+        if ($this->joinHelper->isLogsv2CanonicalUrlBackfillComplete($queryOptionsFactory)) {
+            $select = $this->joinHelper->dropLogsv2CanonicalCoalesceWrap($select);
+        }
+        $select = str_replace('{redirects_canonical_url_join_rhs}', $this->joinHelper->buildDirectJoinRhs($queryOptionsFactory), $select);
+        $select = str_replace('{snapshot_min_log_id}', (string)$state['min_log_id'], $select);
+        $select = str_replace('{snapshot_max_log_id}', (string)$state['max_log_id'], $select);
+        $this->query('/* abj404:src=LogsHitsTableRebuilder::hitsTableInsertDirect */ INSERT INTO ' . $tempDestTable
+            . ' (requested_url, logsid, last_used, logshits, failed_hits) ' . $select, $budget);
+    }
+
+    /**
+     * @param State $state
+     * @return State
+     */
+    private function preaggregateRange(array $state, ABJ_404_Solution_LogsHitsRebuildBudget $budget): array {
+        $tables = $this->generationTables($state);
+        $started = abj_clock()->nowFloat();
+        $start = $state['next_log_id'];
+        // Walk PRIMARY so covering secondary indexes cannot filesort the history.
+        // Bound actual input rows. Empty ID gaps must neither consume many
+        // callbacks nor train the next dense range to use an oversized unit.
+        $boundary = $this->query('/* abj404:src=LogsHitsTableRebuilder#phase1Boundary */ '
+            . 'SELECT MAX(id) AS range_end FROM (SELECT id FROM {wp_abj404_logsv2} FORCE INDEX (PRIMARY) WHERE id >= %d AND id <= %d ORDER BY id ASC LIMIT %d) bounded_logs',
+            $budget, array('query_params' => array($start, $state['max_log_id'], $state['chunk_size'])));
+        $lastId = (new ABJ_404_Solution_LogsReadResult($boundary, 'logs-hits phase-one boundary'))->integerAggregate(true);
+        if ($lastId === 0) {
+            $state['next_log_id'] = $state['max_log_id'] + 1;
+            $state['phase'] = 'merge';
+            return $state;
+        }
+        if ($lastId < $start || $lastId > $state['max_log_id']) {
+            throw new UnexpectedValueException('Logs-hits phase-one boundary is outside its snapshot.');
+        }
+        $end = $lastId + 1;
+        // MIN(id) of every preaggregated row belongs to exactly this range.
+        // @cache-write-audit: opt-out - replay removes only an unpublished generation's current range.
+        $this->query('DELETE FROM ' . $tables['preagg'] . ' WHERE logsid >= %d AND logsid < %d',
+            $budget, array('query_params' => array($start, $end)));
+        $canonical = $this->joinHelper->isLogsv2CanonicalUrlBackfillComplete(fn(): array => $this->queryAdmissionOptions($budget))
+            ? 'canonical_url' : "COALESCE(canonical_url, CONCAT('/', TRIM(BOTH '/' FROM requested_url)))";
+        $this->query('/* abj404:src=LogsHitsTableRebuilder::hitsTableInsertChunked#phase1Chunk */ INSERT INTO '
+            . $tables['preagg'] . ' (requested_url, logsid, last_used, logshits, failed_hits) SELECT '
+            . $canonical . ", MIN(id), MAX(timestamp), COUNT(*), SUM(CASE WHEN dest_url = '' OR dest_url IS NULL THEN 1 ELSE 0 END) FROM "
+            . '{wp_abj404_logsv2} WHERE id >= %d AND id < %d GROUP BY ' . $canonical,
+            $budget, array('query_params' => array($start, $end)));
+        $state['next_log_id'] = $end;
+        if ($end > $state['max_log_id']) {
+            $state['phase'] = 'merge';
+        } else {
+            $state['chunk_size'] = $budget->nextLogChunkSize($state['chunk_size'],
+                max(0.0, abj_clock()->nowFloat() - $started));
+        }
+        return $state;
+    }
+
+    /**
+     * @param State $state
+     * @return State
+     */
+    private function mergeRedirectRange(array $state, ABJ_404_Solution_LogsHitsRebuildBudget $budget): array {
+        $tables = $this->generationTables($state);
+        $result = $this->query('SELECT id FROM {wp_abj404_redirects} FORCE INDEX (PRIMARY) WHERE id > %d ORDER BY id ASC LIMIT %d',
+            $budget, array('query_params' => array($state['merge_after_id'], self::MERGE_CHUNK_SIZE)));
+        $ids = $this->redirectIds($result, $state['merge_after_id']);
+        if (empty($ids)) { $state['phase'] = 'publish'; return $state; }
+        $queryOptionsFactory = fn(): array => $this->queryAdmissionOptions($budget);
+        $joinRhs = $this->joinHelper->buildPhase2JoinRhs(
+            $this->joinHelper->resolveHitsJoinCollation($queryOptionsFactory), $queryOptionsFactory);
+        // DISTINCT prevents duplicate redirects multiplying hits; LEFT JOIN to
+        // the regular scratch target makes replays and cross-range duplicates
+        // harmless without a target-table subquery (MySQL 5.6 compatibility).
+        $sql = '/* abj404:src=LogsHitsTableRebuilder::hitsTableInsertChunked#phase2Aggregate */ INSERT INTO '
+            . $tables['temp'] . ' (requested_url, logsid, last_used, logshits, failed_hits) '
+            . 'SELECT a.requested_url, MIN(a.logsid), MAX(a.last_used), SUM(a.logshits), SUM(a.failed_hits) FROM '
+            . '(SELECT DISTINCT ' . $joinRhs . ' AS requested_url FROM {wp_abj404_redirects} r WHERE r.id IN ('
+            . implode(',', $ids) . ')) redirect_keys INNER JOIN ' . $tables['preagg']
+            . ' a ON a.requested_url = redirect_keys.requested_url LEFT JOIN ' . $tables['temp']
+            . ' existing ON existing.requested_url = a.requested_url WHERE existing.requested_url IS NULL GROUP BY a.requested_url';
+        $this->query($sql, $budget);
+        $state['merge_after_id'] = max($ids);
+        if (count($ids) < self::MERGE_CHUNK_SIZE) { $state['phase'] = 'publish'; }
+        return $state;
+    }
+
+    /**
+     * @param array{rows:array<mixed>} $result
+     * @return list<int>
+     */
+    private function redirectIds(array $result, int $afterId): array {
+        $ids = array();
+        foreach ($result['rows'] as $row) {
+            $id = is_array($row) ? ABJ_404_Solution_ExactInteger::read($row['id'] ?? null, 1) : null;
+            if ($id === null || $id <= $afterId) {
+                throw new UnexpectedValueException('Invalid redirect ID after logs-hits merge cursor ' . $afterId . '.');
+            }
+            $ids[] = $id;
+            $afterId = $id;
+        }
+        return $ids;
+    }
+
+    /**
+     * @param State $state
+     * @return State
+     */
+    private function publishGeneration(array $state, ABJ_404_Solution_LogsHitsRebuildBudget $budget): array {
+        $tables = $this->generationTables($state);
+        $status = $this->readLiveStatus($budget);
+        if (!$this->statusMatchesGeneration($status, $state)) {
+            $this->query('ALTER TABLE ' . $tables['temp'] . ' COMMENT %s', $budget,
+                array('query_params' => array($state['elapsed_time'] . '|' . $state['max_log_id'] . '|v1:' . $state['generation'])));
+            // DDL auto-commits: a transaction around DROP + RENAME does not
+            // protect the live table. One RENAME keeps it continuously whole.
+            $rename = empty($status) ? '' : $tables['live'] . ' TO ' . $tables['backup'] . ', ';
+            $this->query('RENAME TABLE ' . $rename . $tables['temp'] . ' TO ' . $tables['live'], $budget);
+        }
+        $state['phase'] = 'denormalize';
+        return $state;
+    }
+
+    /**
+     * @param State $state
+     * @return State
+     */
+    private function writeBackRedirectRange(array $state, ABJ_404_Solution_LogsHitsRebuildBudget $budget): array {
+        $result = ABJ_404_Solution_RedirectsDenormChunkResolver::writeHitsChunk($this->dbCore, $this->logger, array(
+            'after_id' => $state['denorm_after_id'],
+            'before_query' => fn(): array => $this->queryAdmissionOptions($budget),
+        ));
+        if ($result['error'] !== '') { throw new RuntimeException($result['error']); }
+        $state['denorm_after_id'] = $result['cursor'];
+        if ($result['complete']) { $state['phase'] = 'cleanup'; }
+        return $state;
+    }
+
+    /**
+     * @param State $state
+     * @return State
+     */
+    private function cleanGeneration(array $state, ABJ_404_Solution_LogsHitsRebuildBudget $budget): array {
+        $tables = $this->generationTables($state);
+        $kinds = array('preagg', 'backup');
+        if ($state['cleanup_index'] < count($kinds)) {
+            $scratchTable = $tables[$kinds[$state['cleanup_index']]];
+            $this->query('DROP TABLE IF EXISTS ' . $scratchTable, $budget);
+            $state['cleanup_index']++;
+        }
+        if ($state['cleanup_index'] === count($kinds)) { $state['phase'] = 'complete'; }
+        return $state;
+    }
+
+    /**
+     * Shared SQL admission for staging, canonical probes and metadata fallbacks.
+     * @return array{timeout:int}
+     */
+    private function queryAdmissionOptions(ABJ_404_Solution_LogsHitsRebuildBudget $budget): array {
+        $this->renewLeaseOrThrow();
+        return array('timeout' => $budget->timeoutSeconds());
+    }
+
+    /**
+     * SQL timeout and exclusive-lease boundary shared by every staging unit.
+     * @param array<string,mixed> $options
+     * @return array{rows:array<mixed>,last_error?:mixed,timed_out?:mixed}
+     */
+    private function query(string $sql, ABJ_404_Solution_LogsHitsRebuildBudget $budget, array $options = array()): array {
+        $options = array_merge(array('log_too_slow' => false), $options, $this->queryAdmissionOptions($budget));
+        $result = $this->dbCore->queryAndGetResults($sql, $options);
+        $this->renewLeaseOrThrow();
+        $error = is_string($result['last_error'] ?? null) ? $result['last_error'] : '';
+        if ($error !== '' || !empty($result['timed_out'])) {
+            if (strpos($sql, '#phase1Chunk') !== false || strpos($sql, '#phase2Aggregate') !== false) {
+                $this->recordHitsChunkFailure();
+            }
+            throw new RuntimeException($error !== '' ? $error : 'Logs-hits rebuild SQL timed out.');
+        }
+        if (!array_key_exists('query_succeeded', $result) || $result['query_succeeded'] !== true) {
+            if (strpos($sql, '#phase1Chunk') !== false || strpos($sql, '#phase2Aggregate') !== false) {
+                $this->recordHitsChunkFailure();
+            }
+            throw new RuntimeException('Logs-hits rebuild SQL failed without an error message.');
+        }
+        $rows = $result['rows'] ?? null;
+        if (!is_array($rows)) {
+            throw new UnexpectedValueException('Logs-hits rebuild SQL returned malformed rows.');
+        }
+        return array_merge($result, array('rows' => $rows));
+    }
+
+    /**
+     * @param State $state
+     * @return array{live:string,temp:string,preagg:string,backup:string}
+     */
+    private function generationTables(array $state): array {
+        if (!is_string($state['generation'] ?? null) || !preg_match('/^[0-9a-f]{16}$/D', $state['generation'])) {
+            throw new InvalidArgumentException('Unsafe logs-hits staging generation; refusing table mutation.');
+        }
+        $live = $this->dbCore->doTableNameReplacements('{wp_abj404_logs_hits}');
+        $stem = substr($live, 0, 36) . '_w' . $state['generation'];
+        return array('live' => $live, 'temp' => $stem . '_temp', 'preagg' => $stem . '_preagg', 'backup' => $stem . '_old');
+    }
+
+    /** Abort before a superseded worker can mutate or publish another unit. */
+    private function renewLeaseOrThrow(): void {
+        if ($this->leaseRenewer !== null && !(bool)call_user_func($this->leaseRenewer)) {
+            throw new RuntimeException('The logs-hits rebuild lost its exclusive lease; preserving replacement ownership.', 409);
         }
     }
 
@@ -188,89 +458,11 @@ class ABJ_404_Solution_LogsHitsTableRebuilder {
         );
     }
 
-    /**
-     * @param string $tempDestTable
-     * @return array<string, mixed>
-     */
-    private function hitsTableInsertDirect(string $tempDestTable): array {
-        $ttSelectQuery = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getRedirectsForViewTempTable.sql");
-        if ($this->joinHelper->isLogsv2CanonicalUrlBackfillComplete()) { $ttSelectQuery = $this->joinHelper->dropLogsv2CanonicalCoalesceWrap($ttSelectQuery); }
-        $ttSelectQuery = str_replace('{redirects_canonical_url_join_rhs}', $this->joinHelper->buildDirectJoinRhs(), $ttSelectQuery);
-        $ttSelectQuery = $this->dbCore->doTableNameReplacements($ttSelectQuery);
-        $ttInsertQuery = "/* abj404:src=LogsHitsTableRebuilder::hitsTableInsertDirect */ insert into " . $tempDestTable . " (requested_url, logsid, last_used, logshits, failed_hits) \n " . $ttSelectQuery;
-        return $this->dbCore->queryAndGetResults($ttInsertQuery, array('log_too_slow' => false, 'timeout' => 60));
-    }
-
-    /** @return array<string, mixed>|false */
-    private function hitsTableInsertChunked(string $tempDestTable, string $preAggTable, int $minId, int $maxId, int $chunkSize) {
-        $logsv2Table = $this->dbCore->doTableNameReplacements("{wp_abj404_logsv2}");
-        $redirectsTable = $this->dbCore->doTableNameReplacements("{wp_abj404_redirects}");
-        $resolvedCollation = $this->joinHelper->resolveHitsJoinCollation();
-        $startTime = abj_clock()->nowFloat();
-        $this->renewLeaseOrThrow();
-        $this->dbCore->queryAndGetResults("drop table if exists " . $preAggTable);
-        $this->renewLeaseOrThrow();
-        $createPreAggQuery = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/createLogsHitsPreAggTempTable.sql");
-        $createPreAggQuery = $this->dbCore->doTableNameReplacements($createPreAggQuery);
-        $createPreAggQuery = $this->applyJoinCharsetCollation(array(
-            'ddl' => $createPreAggQuery,
-            'rawCollation' => $resolvedCollation,
-        ));
-        $this->dbCore->queryAndGetResults($createPreAggQuery);
-        $this->renewLeaseOrThrow();
-        $logsv2CanonicalExpr = $this->joinHelper->isLogsv2CanonicalUrlBackfillComplete() ? "canonical_url" : "COALESCE(canonical_url, CONCAT('/', TRIM(BOTH '/' FROM requested_url)))";
-        for ($start = $minId; $start <= $maxId; $start += $chunkSize) {
-            $this->renewLeaseOrThrow();
-            $end = $start + $chunkSize;
-            $chunkQuery = "/* abj404:src=LogsHitsTableRebuilder::hitsTableInsertChunked#phase1Chunk */ INSERT INTO " . $preAggTable . " (requested_url, logsid, last_used, logshits, failed_hits) SELECT " . $logsv2CanonicalExpr . ", MIN(id), MAX(timestamp), COUNT(*), SUM(CASE WHEN dest_url = '' OR dest_url IS NULL THEN 1 ELSE 0 END) FROM " . $logsv2Table . " WHERE id >= %d AND id < %d GROUP BY " . $logsv2CanonicalExpr;
-            $chunkResult = $this->dbCore->queryAndGetResults($chunkQuery, array('log_too_slow' => false, 'timeout' => 10, 'query_params' => array($start, $end)));
-            $this->renewLeaseOrThrow();
-            if (!empty($chunkResult['timed_out']) || !empty($chunkResult['last_error'])) { $this->recordHitsChunkFailure(); $this->logger->debugMessage(__FUNCTION__ . " Phase 1 chunk failed at id range [{$start}, {$end}); aborting."); return false; }
-        }
-        // Defensive form covers legacy and in-progress installs; optimized
-        // form lets idx_canonical_url serve the JOIN probe and gets the
-        // rebuild under the host's 60s max_statement_time on Bruno-class
-        // data (i359). See LogsHitsCanonicalUrlJoinHelper::buildPhase2JoinRhs.
-        $joinRhs = $this->joinHelper->buildPhase2JoinRhs($resolvedCollation);
-        $this->renewLeaseOrThrow();
-        $phase2Query = "/* abj404:src=LogsHitsTableRebuilder::hitsTableInsertChunked#phase2Aggregate */ INSERT INTO " . $tempDestTable . " (requested_url, logsid, last_used, logshits, failed_hits) SELECT a.requested_url, MIN(a.logsid), MAX(a.last_used), SUM(a.logshits), SUM(a.failed_hits) FROM " . $preAggTable . " a INNER JOIN " . $redirectsTable . " r ON a.requested_url = " . $joinRhs . " GROUP BY a.requested_url";
-        $results = $this->dbCore->queryAndGetResults($phase2Query, array('log_too_slow' => false, 'timeout' => 60));
-        $this->renewLeaseOrThrow();
-        $results['elapsed_time'] = round(abj_clock()->nowFloat() - $startTime, 3);
-        return $results;
-    }
-
-    /** Abort before another request can run beside a worker that lost its lease. */
-    private function renewLeaseOrThrow(): void {
-        if (!$this->renewLease()) {
-            throw new RuntimeException(
-                'The logs-hits rebuild lost its exclusive lease; aborting before staging-table work can overlap.'
-            );
-        }
-    }
-
-    /** Return whether this worker still owns (and has renewed) its lease. */
-    private function renewLease(): bool {
-        return $this->leaseRenewer === null || (bool)call_user_func($this->leaseRenewer);
-    }
-
-    /** Never let a superseded worker drop a replacement worker's scratch table. */
-    private function dropScratchTableIfLeaseOwned(string $scratchTable): void {
-        if (!$this->renewLease()) {
-            $this->logger->debugMessage(
-                __FUNCTION__ . " skipped cleanup after lease ownership was lost: " . $scratchTable
-            );
-            return;
-        }
-        $this->dbCore->queryAndGetResults("drop table if exists " . $scratchTable);
-    }
-
     /** @param int $idRange @return int */
-    private function getHitsRebuildChunkSize(int $idRange): int {
-        if ($this->rebuildHealth === null) {
-            return self::HITS_TABLE_PREAGG_CHUNK_SIZE;
-        }
-        return $this->rebuildHealth->getHitsChunkSize($idRange);
+    public function getHitsRebuildChunkSize(int $idRange): int {
+        $planned = $this->rebuildHealth === null ? self::HITS_TABLE_PREAGG_CHUNK_SIZE
+            : $this->rebuildHealth->getHitsChunkSize($idRange);
+        return min(ABJ_404_Solution_LogsHitsRebuildBudget::INITIAL_LOG_CHUNK_SIZE, $planned);
     }
 
     /** @return void */

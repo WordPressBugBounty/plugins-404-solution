@@ -124,8 +124,42 @@ class ABJ_404_Solution_PermalinkCacheRepository {
 
     /** @return int */
     public function getPermalinkCacheCount(): int {
+        $result = $this->readPermalinkCacheCount();
+        return $result['state'] === 'read' ? $result['count'] : 0;
+    }
+
+    /**
+     * Read the cache count with enough state for rebuild coordinators to
+     * distinguish a real empty table from an unavailable or malformed read.
+     *
+     * @return array{state:'read',count:int}|array{state:'failed',error:string}
+     */
+    public function readPermalinkCacheCount(): array {
         $table = $this->dbCore->doTableNameReplacements('{wp_abj404_permalink_cache}');
-        return $this->dbCore->queryScalarInt("SELECT COUNT(*) FROM `{$table}`");
+        $result = $this->dbCore->queryAndGetResults(
+            "SELECT COUNT(*) AS cache_count FROM `{$table}`"
+        );
+        $lastError = isset($result['last_error']) && is_scalar($result['last_error'])
+            ? trim((string)$result['last_error']) : '';
+        if ($lastError !== '') {
+            return array('state' => 'failed', 'error' => $lastError);
+        }
+        if (!empty($result['timed_out'])) {
+            return array('state' => 'failed', 'error' => 'Permalink cache count query timed out.');
+        }
+        if (!array_key_exists('query_succeeded', $result) || $result['query_succeeded'] !== true) {
+            return array('state' => 'failed', 'error' => 'Permalink cache count query failed without an error message.');
+        }
+        $rows = $result['rows'] ?? null;
+        if (!is_array($rows) || count($rows) !== 1 || !is_array($rows[0] ?? null)
+                || !array_key_exists('cache_count', $rows[0])) {
+            return array('state' => 'failed', 'error' => 'Malformed permalink cache count result.');
+        }
+        $count = ABJ_404_Solution_ExactInteger::read($rows[0]['cache_count'], 0);
+        if ($count === null) {
+            return array('state' => 'failed', 'error' => 'Malformed permalink cache count value.');
+        }
+        return array('state' => 'read', 'count' => $count);
     }
 
     /**

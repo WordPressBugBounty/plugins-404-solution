@@ -17,11 +17,11 @@ class ABJ_404_Solution_PluginUpdateMetadataRepository {
     /** @var ABJ_404_Solution_DatabaseCore */
     private $dbCore;
 
-    /** @var ABJ_404_Solution_Functions */
-    private $f;
-
     /** @var ABJ_404_Solution_Logging */
     private $logger;
+
+    /** @var ABJ_404_Solution_Functions */
+    private $functions;
 
     /**
      * @param ABJ_404_Solution_DatabaseCore $dbCore
@@ -34,7 +34,12 @@ class ABJ_404_Solution_PluginUpdateMetadataRepository {
         $logging = null
     ) {
         $this->dbCore = $dbCore;
-        $this->f = $functions !== null ? $functions : abj_service('functions');
+        // Keep the historical dependency slot validated for callers that still
+        // provide it; import policy now belongs to CrossPluginImporter.
+        if ($functions !== null && !is_object($functions)) {
+            throw new InvalidArgumentException('Plugin update functions dependency must be an object.');
+        }
+        $this->functions = $functions !== null ? $functions : abj_service('functions');
         $this->logger = $logging !== null ? $logging : abj_service('logging');
     }
 
@@ -141,17 +146,115 @@ class ABJ_404_Solution_PluginUpdateMetadataRepository {
         global $wpdb;
 
         $oldTable = $wpdb->prefix . 'wbz404_redirects';
-        $newTable = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
+        $tableStatus = $this->dbCore->tableNameResolver()->tableExistenceStatus($oldTable);
+        if ($tableStatus === ABJ_404_Solution_DatabaseTableNameResolver::TABLE_ABSENT) {
+            /* translators: %s is the legacy Redirectioner source table name. */
+            $message = sprintf(
+                __('[ABJ404-IMPORT-SOURCE-NOT-FOUND] Legacy Redirectioner source table "%s" was not found; no records were imported. Confirm that the legacy redirects are present in this WordPress installation before retrying the import.', '404-solution'),
+                $oldTable
+            );
+            $this->logger->warn($message);
+            return array('rows_affected' => 0, 'last_error' => '', 'errors' => array($message), 'issues_omitted' => 0);
+        }
+        $rowsAffected = 0;
+        $lastID = 0;
+        $issueSummary = new ABJ_404_Solution_ImportIssueSummary();
+        $lastError = '';
+        $batchSize = 250;
 
-        $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/importDataFromPluginRedirectioner.sql");
-        $query = $this->f->str_replace('{OLD_TABLE}', $oldTable, $query);
-        $query = $this->f->str_replace('{NEW_TABLE}', $newTable, $query);
+        // The old importer used one INSERT...SELECT. Read a bounded id-keyset
+        // page, then admit each row through the production writer so cycle
+        // checks, duplicate policy, caches, and denorm maintenance are shared.
+        while (true) {
+            $priorID = $lastID;
+            $query = "SELECT id AS id, url, status, type, final_dest, code, disabled, timestamp " .
+                "FROM `" . $oldTable . "` WHERE id > %d ORDER BY id ASC LIMIT " . $batchSize;
+            $page = $this->dbCore->queryAndGetResults($query, array('query_params' => array($lastID)));
+            try {
+                $rows = ABJ_404_Solution_ForeignSourceQueryGateway::requireSourceRows($page);
+            } catch (ABJ_404_Solution_ImportSourceReadException $e) {
+                $lastError = $e->getMessage();
+                break;
+            }
+            if (empty($rows)) {
+                break;
+            }
 
-        $result = $this->dbCore->queryAndGetResults($query);
+            $typedRows = array();
+            foreach ($rows as $row) {
+                if (is_array($row)) {
+                    $typedRows[] = $row;
+                    $rowID = $this->legacyRowID($row);
+                    $lastID = max($lastID, $rowID);
+                }
+            }
+            if ($lastID <= $priorID) {
+                $lastError = 'Legacy Redirectioner import stopped because source IDs did not advance past ' .
+                    $priorID . '; no further rows were imported.';
+                $this->logger->warn($lastError);
+                break;
+            }
+            // Bootstrap owns the import policy. Supply this reader's own
+            // dependencies so a custom/injected database is never replaced
+            // with the globally registered connection during row admission.
+            $importRows = abj_service('redirectioner_row_importer');
+            if (!is_callable($importRows)) {
+                $resolvedType = is_object($importRows) ? get_class($importRows) : gettype($importRows);
+                $lastError = 'Legacy Redirectioner import refused: redirectioner_row_importer resolved to ' .
+                    $resolvedType . ', expected callable; no further rows were imported.';
+                $this->logger->warn($lastError);
+                break;
+            }
+            $importResult = $importRows($typedRows, array(
+                'core' => $this->dbCore, 'functions' => $this->functions, 'logging' => $this->logger,
+            ));
+            $rowsAffected += ABJ_404_Solution_ExactInteger::readOr(
+                $importResult['imported'] ?? null, 0, 0
+            );
+            $pageSummary = $this->legacyPageIssueSummary($importResult);
+            $issueSummary = new ABJ_404_Solution_ImportIssueSummary(
+                array_merge($issueSummary->details(), $pageSummary->details()),
+                $issueSummary->omittedCount() + $pageSummary->omittedCount()
+            );
 
-        $this->logger->infoMessage("Importing redirectioner SQL result: " .
-                wp_kses_post((string)json_encode($result)));
+            if (count($rows) < $batchSize) {
+                break;
+            }
+        }
 
+        $result = array(
+            'rows_affected' => $rowsAffected,
+            'last_error' => $lastError,
+            'errors' => $issueSummary->messages(),
+            'issues_omitted' => $issueSummary->omittedCount(),
+        );
+        $this->logger->infoMessage("Importing redirectioner import result: " .
+            wp_kses_post((string)json_encode($result)));
         return $result;
+    }
+
+    /**
+     * Normalize one row-import callback's diagnostic payload, including older
+     * callbacks that return only issues, before combining bounded summaries.
+     * @param array<string, mixed> $result
+     */
+    private function legacyPageIssueSummary(array $result): ABJ_404_Solution_ImportIssueSummary {
+        $raw = $result['issue_details'] ?? null;
+        if (!is_array($raw)) {
+            $raw = $result['issues'] ?? array();
+        }
+        $details = is_array($raw) ? array_values(array_filter($raw, 'is_string')) : array();
+        $omitted = ABJ_404_Solution_ExactInteger::readOr($result['issues_omitted'] ?? null, 0, 0);
+        return new ABJ_404_Solution_ImportIssueSummary($details, $omitted);
+    }
+
+    /** @param array<mixed, mixed> $row */
+    private function legacyRowID(array $row): int {
+        foreach ($row as $key => $value) {
+            if (strtolower((string)$key) === 'id') {
+                return ABJ_404_Solution_ExactInteger::readOr($value, 1, 0);
+            }
+        }
+        return 0;
     }
 }

@@ -302,8 +302,17 @@ class ABJ_404_Solution_RedirectEditFormPresenter {
      * @param bool $isOpen Whether the details element starts open.
      * @return string
      */
-    public function buildAdvancedOptionsHtml(string $startDate, string $endDate, string $conditionsHtml, bool $isOpen): string {
+    public function buildAdvancedOptionsHtml(string $startDate, string $endDate, string $conditionsHtml, bool $isOpen, ?string $queryMode = null, bool $showQueryMode = true): string {
         $html = $this->readTemplate('editRedirectAdvancedOptions.html');
+        $labels = array('default' => __('Routing parameters, pass query (default)', '404-solution'), 'exact' => __('Exact URL, pass query', '404-solution'), 'ignore' => __('Routing parameters, discard query', '404-solution'), 'pass' => __('Path only, pass query', '404-solution'));
+        $html = $this->functions->str_replace('{query_mode_label}', esc_html__('Query strings', '404-solution'), $html);
+        $html = $this->functions->str_replace('{query_mode_hidden}', $showQueryMode ? '' : ' hidden', $html);
+        $html = $this->functions->str_replace('{query_mode_disabled}', $showQueryMode ? '' : ' disabled', $html);
+        foreach ($labels as $mode => $label) {
+            $html = $this->functions->str_replace('{query_mode_' . $mode . '_label}', esc_html($label), $html);
+            $selected = ($queryMode ?? 'default') === $mode ? ' selected' : '';
+            $html = $this->functions->str_replace('{query_mode_' . $mode . '_selected}', $selected, $html);
+        }
         $html = $this->functions->str_replace('{advanced_options_label}', esc_html__('Advanced Options', '404-solution'), $html);
         $html = $this->functions->str_replace('{open_attr}', $isOpen ? ' open' : '', $html);
         $html = $this->functions->str_replace('{start_date_label}', esc_html__('Active From (optional)', '404-solution'), $html);

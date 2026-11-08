@@ -4,6 +4,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// allow-no-test-found: exercised through the real table AJAX entry point in tests/TableRendererPreludeTracerTest.php, tests/OptionPersistenceTracerTest.php, and tests/AjaxHookCallbackAttributionTest.php
 /**
  * Durable boundaries around WordPress hook-registry inspection and mutation.
  *
@@ -20,8 +21,6 @@ if (!defined('ABSPATH')) {
  * malformed or plugin-modified registry can stall there just as a traversal
  * can; the boundary phases (PHASE_REGISTRATION / PHASE_REMOVAL) distinguish
  * them from the surrounding install/restore traversal in support evidence.
- *
- * allow-no-test-found: exercised through the real table AJAX entry point in tests/TableRendererPreludeTracerTest.php, tests/OptionPersistenceTracerTest.php, and tests/AjaxHookCallbackAttributionTest.php
  *
  * @phpstan-type LifecycleToken array{
  *   operation_id: string,

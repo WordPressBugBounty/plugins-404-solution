@@ -104,7 +104,7 @@ class ABJ_404_Solution_FrontendLegacyAdapters {
      */
     private function adaptNotFoundResponse($forceRedirect, $sendTo404Page, $thereIsAUserSpecified404Page) {
         return new class($forceRedirect, $sendTo404Page, $thereIsAUserSpecified404Page) extends ABJ_404_Solution_NotFoundResponseService {
-            /** @var \Closure(string, int, mixed, string, bool): bool */
+            /** @var \Closure(string, int, mixed, string, bool, ?string): bool */
             private \Closure $forceRedirectCallback;
             /** @var \Closure(string, string, bool, mixed): void */
             private \Closure $sendTo404PageCallback;
@@ -117,8 +117,8 @@ class ABJ_404_Solution_FrontendLegacyAdapters {
                 $this->thereIsAUserSpecified404PageCallback = \Closure::fromCallable($thereIsAUserSpecified404Page);
             }
 
-            function forceRedirect(string $location, int $status = 302, $type = -1, string $requestedURL = '', bool $isCustom404 = false): bool {
-                return (bool)call_user_func($this->forceRedirectCallback, $location, $status, $type, $requestedURL, $isCustom404);
+            function forceRedirect(string $location, int $status = 302, $type = -1, string $requestedURL = '', bool $isCustom404 = false, ?string $queryMode = null): bool {
+                return (bool)call_user_func($this->forceRedirectCallback, $location, $status, $type, $requestedURL, $isCustom404, $queryMode);
             }
 
             function sendTo404Page(string $requestedURL, string $reason = '', bool $useUserSpecified404 = true, $optionsOverride = null): void {

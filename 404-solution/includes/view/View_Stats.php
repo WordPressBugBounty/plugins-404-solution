@@ -25,6 +25,35 @@ class ABJ_404_Solution_View_Stats extends ABJ_404_Solution_ViewComponent {
     }
 
     /**
+     * Output the hidden config for stale-while-refresh stats snapshots.
+     *
+     * @param array{data:array<string,mixed>,hash:string,refreshed_at?:mixed,state?:string,error?:array{code:int|string,message:string}} $statsSnapshot
+     * @return void
+     */
+    private function echoStatsRefreshConfig(array $statsSnapshot) {
+        $statsHash = $statsSnapshot['hash'];
+        $statsSnapshotAt = is_scalar($statsSnapshot['refreshed_at'] ?? null) ? intval($statsSnapshot['refreshed_at']) : 0;
+        $statsServerNow = intval(abj_clock()->now());
+
+        $refresh = $this->tpl('viewStatsRefreshConfig.html');
+        $hasPublication = !empty($statsSnapshot['data']);
+        $refresh = $this->f->str_replace('{display_style}', $hasPublication ? 'display:none' : '', $refresh);
+        $status = $hasPublication ? '' : __('Loading...', '404-solution');
+        if (($statsSnapshot['state'] ?? '') === 'unavailable' && isset($statsSnapshot['error'])) {
+            $status = $statsSnapshot['error']['message'] . ' (' . (string)$statsSnapshot['error']['code'] . ')';
+        }
+        $refresh = $this->f->str_replace('{refresh_status}', esc_html($status), $refresh);
+        $refresh = $this->f->str_replace('{refresh_nonce}', esc_attr(wp_create_nonce('abj404_refreshStatsDashboard')), $refresh);
+        $refresh = $this->f->str_replace('{current_hash}', esc_attr($statsHash), $refresh);
+        $refresh = $this->f->str_replace('{available_text}', esc_attr(__('Refresh available', '404-solution')), $refresh);
+        $refresh = $this->f->str_replace('{snapshot_at}', esc_attr((string)$statsSnapshotAt), $refresh);
+        $refresh = $this->f->str_replace('{server_now}', esc_attr((string)$statsServerNow), $refresh);
+        $refresh = $this->f->str_replace('{generation}', esc_attr((string)($statsSnapshot['generation'] ?? '')), $refresh);
+        $refresh = $this->f->str_replace('{snapshot_state}', esc_attr((string)($statsSnapshot['state'] ?? 'ready')), $refresh);
+        echo $refresh;
+    }
+
+    /**
      * Output the stats page.
      * @return void
      */
@@ -33,7 +62,6 @@ class ABJ_404_Solution_View_Stats extends ABJ_404_Solution_ViewComponent {
 
         $statsSnapshot = $this->statsRepository->getStatsDashboardSnapshot(true);
         $statsData = $statsSnapshot['data'];
-        $statsHash = $statsSnapshot['hash'];
 
         // Header (container open + h2 + Expand All button).
         $header = $this->tpl('viewStatsPageHeader.html');
@@ -42,17 +70,43 @@ class ABJ_404_Solution_View_Stats extends ABJ_404_Solution_ViewComponent {
         echo $header;
 
         // Config for stale-while-refresh stats snapshot updates (no visible table overwrite).
-        $refresh = $this->tpl('viewStatsRefreshConfig.html');
-        $refresh = $this->f->str_replace('{refresh_nonce}', esc_attr(wp_create_nonce('abj404_refreshStatsDashboard')), $refresh);
-        $refresh = $this->f->str_replace('{current_hash}', esc_attr($statsHash), $refresh);
-        $refresh = $this->f->str_replace('{available_text}', esc_attr(__('Refresh available', '404-solution')), $refresh);
-        echo $refresh;
+        $this->echoStatsRefreshConfig($statsSnapshot);
 
         // Flow layout for stats cards.
         echo $this->tpl('viewStatsFlowLayoutOpen.html');
 
+        // No publication is an unknown count, including an empty new install.
+        // Keep the existing refresh status until background work publishes real data.
+        if (empty($statsData)) {
+            $this->echoTrendsSection();
+            $this->echoBrokenInternalLinksSection();
+            echo $this->tpl('viewStatsPageFooter.html');
+            return;
+        }
+
+        $this->echoRedirectStatsCard($statsData);
+        $this->echoCapturedStatsCard($statsData);
+        $this->echoPeriodicStatsCards($statsData);
+
+        // Match Confidence distribution card (full-width)
+        $this->echoConfidenceDistributionSection($statsData);
+
+        // Trend Analytics section (full-width, below the flow layout cards)
+        $this->echoTrendsSection();
+
+        // Broken Internal Links section
+        $this->echoBrokenInternalLinksSection();
+
+        // Closes flow layout, settings content, and container in that order.
+        echo $this->tpl('viewStatsPageFooter.html');
+    }
+
+    /** @param array<string,mixed> $statsData Published dashboard counters. */
+    private function echoRedirectStatsCard(array $statsData): void {
+        global $abj404view;
+
         // Redirects Statistics Card
-        $redirectStats = (is_array($statsData) && isset($statsData['redirects']) && is_array($statsData['redirects']))
+        $redirectStats = (isset($statsData['redirects']) && is_array($statsData['redirects']))
             ? $statsData['redirects']
             : array();
         $auto301 = intval($redirectStats['auto301'] ?? 0);
@@ -83,9 +137,14 @@ class ABJ_404_Solution_View_Stats extends ABJ_404_Solution_ViewComponent {
 
         $content = $this->f->renderTemplate($content, $redirectVars);
         $abj404view->echoOptionsSection(new ABJ_404_Solution_OptionsSectionView('stats-redirects', 'abj404-redirectStats', __('Redirects', '404-solution'), $content, true, $abj404view->getCardIcon('chart')));
+    }
+
+    /** @param array<string,mixed> $statsData Published dashboard counters. */
+    private function echoCapturedStatsCard(array $statsData): void {
+        global $abj404view;
 
         // Captured URLs Statistics Card
-        $capturedStats = (is_array($statsData) && isset($statsData['captured']) && is_array($statsData['captured']))
+        $capturedStats = (isset($statsData['captured']) && is_array($statsData['captured']))
             ? $statsData['captured']
             : array();
         $captured = intval($capturedStats['captured'] ?? 0);
@@ -102,9 +161,14 @@ class ABJ_404_Solution_View_Stats extends ABJ_404_Solution_ViewComponent {
             '{total}' => esc_html((string)$total),
         ));
         $abj404view->echoOptionsSection(new ABJ_404_Solution_OptionsSectionView('stats-captured', 'abj404-capturedStats', __('Captured URLs', '404-solution'), $content, true, $abj404view->getCardIcon('warning')));
+    }
+
+    /** @param array<string,mixed> $statsData Published dashboard counters. */
+    private function echoPeriodicStatsCards(array $statsData): void {
+        global $abj404view;
 
         // Periodic Stats Cards
-        $periodicStats = (is_array($statsData) && isset($statsData['periods']) && is_array($statsData['periods']))
+        $periodicStats = (isset($statsData['periods']) && is_array($statsData['periods']))
             ? $statsData['periods']
             : array();
         $periodMeta = array(
@@ -117,7 +181,7 @@ class ABJ_404_Solution_View_Stats extends ABJ_404_Solution_ViewComponent {
         for ($x = 0; $x <= 3; $x++) {
             $title = $periodMeta[$x]['title'];
             $periodKey = $periodMeta[$x]['key'];
-            $periodStats = (is_array($periodicStats) && isset($periodicStats[$periodKey]) && is_array($periodicStats[$periodKey]))
+            $periodStats = (isset($periodicStats[$periodKey]) && is_array($periodicStats[$periodKey]))
                 ? $periodicStats[$periodKey]
                 : array();
             $disp404 = intval($periodStats['disp404'] ?? 0);
@@ -142,18 +206,6 @@ class ABJ_404_Solution_View_Stats extends ABJ_404_Solution_ViewComponent {
             ));
             $abj404view->echoOptionsSection(new ABJ_404_Solution_OptionsSectionView('stats-periodic-' . $x, 'abj404-stats' . $x, $title, $content, ($x == 0), $abj404view->getCardIcon('clock')));
         }
-
-        // Match Confidence distribution card (full-width)
-        $this->echoConfidenceDistributionSection();
-
-        // Trend Analytics section (full-width, below the flow layout cards)
-        $this->echoTrendsSection();
-
-        // Broken Internal Links section
-        $this->echoBrokenInternalLinksSection();
-
-        // Closes flow layout, settings content, and container in that order.
-        echo $this->tpl('viewStatsPageFooter.html');
     }
 
     /**
@@ -162,23 +214,35 @@ class ABJ_404_Solution_View_Stats extends ABJ_404_Solution_ViewComponent {
      * into the Chart.js doughnut card. Presentation only: the SQL, table name,
      * and HIGH/MEDIUM thresholds live in
      * ABJ_404_Solution_StatsReadRepository::getConfidenceBandCounts().
+     * @param mixed $statsData Already computed dashboard data; older snapshots omit confidence.
      * @return void
      */
-    public function echoConfidenceDistributionSection() {
+    public function echoConfidenceDistributionSection($statsData = array()) {
         global $abj404view;
 
-        // Ask the stats repository for the band counts. The repository owns the
-        // table name, the SQL, and the HIGH/MEDIUM thresholds; this view method
-        // only formats the result into the card template.
-        $bands = $this->statsRepository->getConfidenceBandCounts();
-        if (!is_array($bands) || (int)($bands['total'] ?? 0) === 0) {
+        // Format the confidence counts from the published snapshot. Missing
+        // confidence in an older snapshot waits for its background replacement.
+        $bands = is_array($statsData) && array_key_exists('confidence', $statsData)
+            ? $statsData['confidence'] : null;
+        if (!is_array($bands)) {
             return;
         }
 
-        $highCount   = (int)($bands['high']   ?? 0);
-        $mediumCount = (int)($bands['medium'] ?? 0);
-        $lowCount    = (int)($bands['low']    ?? 0);
-        $manualCount = (int)($bands['manual'] ?? 0);
+        $counts = array();
+        foreach (array('total', 'high', 'medium', 'low', 'manual') as $key) {
+            $value = $bands[$key] ?? 0;
+            if (!is_numeric($value)) {
+                return;
+            }
+            $counts[$key] = (int)$value;
+        }
+        if ($counts['total'] === 0) {
+            return;
+        }
+        $highCount   = $counts['high'];
+        $mediumCount = $counts['medium'];
+        $lowCount    = $counts['low'];
+        $manualCount = $counts['manual'];
         $avgRaw      = $bands['avg'] ?? null;
         $avgScore    = is_numeric($avgRaw) ? (float)$avgRaw : null;
 

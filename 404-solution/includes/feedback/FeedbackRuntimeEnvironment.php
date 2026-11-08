@@ -13,8 +13,9 @@ class ABJ_404_Solution_FeedbackRuntimeEnvironment {
      * @return array<string, int>
      */
     public function resourceLimits(): array {
+        $memoryLimit = function_exists('ini_get') ? ini_get('memory_limit') : false;
         return array(
-            'php_memory' => function_exists('ini_get') ? self::iniSizeToBytesForPayload((string)ini_get('memory_limit')) : 0,
+            'php_memory' => is_string($memoryLimit) ? self::iniSizeToBytesForPayload($memoryLimit) : 0,
             'wp_memory'  => defined('WP_MEMORY_LIMIT') ? self::iniSizeToBytesForPayload((string)WP_MEMORY_LIMIT) : 0,
             'php_max_execution_seconds' => function_exists('ini_get') ? max(0, (int)ini_get('max_execution_time')) : 0,
             'php_post_max_size' => function_exists('ini_get') ? self::iniSizeToBytesForPayload((string)ini_get('post_max_size')) : 0,

@@ -5,6 +5,7 @@ if (!defined('ABSPATH')) {
 }
 
 require_once __DIR__ . '/DatabaseInfrastructureErrorTaxonomy.php';
+require_once __DIR__ . '/../core/DatabaseDriverCall.php';
 require_once __DIR__ . '/../core/DatabaseMetadataLockWaitGuard.php';
 
 /**
@@ -56,7 +57,7 @@ class ABJ_404_Solution_DatabaseQueryExecutor {
     /** @var ABJ_404_Solution_DatabaseMetadataLockWaitGuard */
     private $metadataLockWaitGuard;
 
-    /** @var string Current wpdb result type for queryAndGetResults (ARRAY_A or OBJECT). */
+    /** @var 'OBJECT'|'ARRAY_A' Current wpdb result type for queryAndGetResults (ARRAY_A or OBJECT). */
     private $currentResultType = ARRAY_A;
 
     /**
@@ -82,7 +83,7 @@ class ABJ_404_Solution_DatabaseQueryExecutor {
         $this->currentResultType = ARRAY_A;
     }
 
-    /** @return string */
+    /** @return 'OBJECT'|'ARRAY_A' */
     public function getCurrentResultType(): string {
         return $this->currentResultType;
     }
@@ -143,6 +144,8 @@ class ABJ_404_Solution_DatabaseQueryExecutor {
                     'rows' => array(),
                     'rows_affected' => 0,
                     'last_error' => 'wpdb unavailable',
+                    'query_succeeded' => false,
+                    'query_rows_affected' => null,
                     'elapsed_time' => 0.0,
                 );
             }
@@ -211,6 +214,7 @@ class ABJ_404_Solution_DatabaseQueryExecutor {
         // Announced before the timer starts, and therefore before the query
         // can block: a stalled statement leaves this record as the last thing
         // on disk, which is what names the SQL shape that hung.
+        $failureIdentity = $this->queryDiagnostics->beginFailureQuery($query, $timeoutSeconds);
         $queryIdentity = $this->queryDiagnostics->recordQueryTimelineStart(
             $query,
             $timeoutSeconds,
@@ -222,67 +226,65 @@ class ABJ_404_Solution_DatabaseQueryExecutor {
 
         $timer = new ABJ_404_Solution_Timer();
 
-        $suppressWpdbErrors = !$options['log_errors'] && method_exists($wpdb, 'suppress_errors');
-        $previousSuppressState = false;
-        if ($suppressWpdbErrors) {
-            /** @var wpdb $wpdb */
-            $previousSuppressState = $wpdb->suppress_errors(true);
-        }
-
+        // wpdb::print_error() calls error_log() after recording the driver's
+        // last_error. The scope keeps the core printer quiet for this whole
+        // attempt, retries and repairs included, where that function is
+        // unavailable or the caller asked for no error logging, so the plugin
+        // harvests and reports the SQL error itself. The finally block hands the
+        // connection back with the flag it had even when recovery throws.
+        $printerScope = ABJ_404_Solution_DatabaseDriverCall::suppressPrinter($wpdb, !$options['log_errors']);
         $result = array();
         try {
-            $result = ABJ_404_Solution_DatabaseQueryFilterTracer::trace(
-                $queryIdentity,
-                fn(): array => $this->executeWpdbQuery($query, $resultType, $producesRows)
-            );
-        } catch (Throwable $e) {
-            $recoveryTracer->recordFirstDriverReturn('failed', $e);
-            $recoveryTracer->startRecovery();
-            $recoveryTracer->completeRecovery('failed', $e);
-            $result['elapsed_time'] = $timer->stop();
-            $this->queryDiagnostics->recordQueryTimelineEnd(((float)$result['elapsed_time']) * 1000.0);
-            $this->core->sqlErrorReporter()->logSqlThrowable($query, $e, $options, $producesRows);
-            if ($suppressWpdbErrors) {
-                /** @var wpdb $wpdb */
-                $wpdb->suppress_errors($previousSuppressState);
+            try {
+                $result = ABJ_404_Solution_DatabaseQueryFilterTracer::trace(
+                    $queryIdentity,
+                    fn(): array => $this->executeWpdbQuery($query, $resultType, $producesRows)
+                );
+            } catch (Throwable $e) {
+                $this->queryDiagnostics->finishFailureQuery($failureIdentity, array(), true);
+                $recoveryTracer->recordFirstDriverReturn('failed', $e);
+                $recoveryTracer->startRecovery();
+                $recoveryTracer->completeRecovery('failed', $e);
+                $result['elapsed_time'] = $timer->stop();
+                $this->queryDiagnostics->recordQueryTimelineEnd(((float)$result['elapsed_time']) * 1000.0);
+                $this->core->sqlErrorReporter()->logSqlThrowable($query, $e, $options, $producesRows);
+                throw $e;
             }
-            throw $e;
-        }
-        // Preserve the first-attempt duration for the observed-error log while
-        // keeping the timer running through every retry/recovery branch below.
-        $result['elapsed_time'] = $timer->getElapsedTime();
-        $recoveryTracer->recordFirstDriverReturn();
-        $recoveryTracer->startRecovery();
-        $lastErrorForObservedLog = is_string($result['last_error'] ?? null) ? $result['last_error'] : '';
-        $retryDecision = $this->queryRecoveryPolicy->classifyRetry($lastErrorForObservedLog);
-        if ($lastErrorForObservedLog === ''
-            || $retryDecision['strategy'] === ABJ_404_Solution_DatabaseInfrastructureErrorTaxonomy::QUERY_RETRY_NONE) {
-            $this->core->sqlErrorReporter()->logObservedSqlError($query, $result, $options, $producesRows);
-        }
+            // Preserve the first-attempt duration for the observed-error log while
+            // keeping the timer running through every retry/recovery branch below.
+            $result['elapsed_time'] = $timer->getElapsedTime();
+            $this->queryDiagnostics->finishFailureQuery($failureIdentity, $result);
+            $recoveryTracer->recordFirstDriverReturn();
+            $recoveryTracer->startRecovery();
+            $lastErrorForObservedLog = is_string($result['last_error'] ?? null) ? $result['last_error'] : '';
+            $retryDecision = $this->queryRecoveryPolicy->classifyRetry($lastErrorForObservedLog);
+            if ($lastErrorForObservedLog === ''
+                || $retryDecision['strategy'] === ABJ_404_Solution_DatabaseInfrastructureErrorTaxonomy::QUERY_RETRY_NONE) {
+                $this->core->sqlErrorReporter()->logObservedSqlError($query, $result, $options, $producesRows);
+            }
 
-        if ($producesRows && !is_array($result['rows'])) {
-            $this->queryDiagnostics->logMalformedRowsIfNeeded($query, $result['rows']);
-        }
+            if ($producesRows && !is_array($result['rows'])) {
+                $this->queryDiagnostics->logMalformedRowsIfNeeded($query, $result['rows']);
+            }
 
-        $queryForBudget = $query;
-        $producesRows = $this->queryRecoveryPolicy->recoverQueryResult(
-            $query,
-            $result,
-            $options,
-            $resultType,
-            $producesRows,
-            $timeoutSeconds,
-            $recoveryTracer
-        );
+            $queryForBudget = $query;
+            $producesRows = $this->queryRecoveryPolicy->recoverQueryResult(
+                $query,
+                $result,
+                $options,
+                $resultType,
+                $producesRows,
+                $timeoutSeconds,
+                $recoveryTracer
+            );
 
-        $result['elapsed_time'] = $timer->stop();
-        $elapsedMs = ((float)$result['elapsed_time']) * 1000.0;
-        $this->queryDiagnostics->recordQueryTimelineEnd($elapsedMs);
-        $this->queryDiagnostics->recordQueryBudgetIfEnabled($queryForBudget, $elapsedMs, $timeoutSeconds);
-
-        if ($suppressWpdbErrors) {
-            /** @var wpdb $wpdb */
-            $wpdb->suppress_errors($previousSuppressState);
+            $result['elapsed_time'] = $timer->stop();
+            $this->queryDiagnostics->finishFailureQuery($failureIdentity, $result);
+            $elapsedMs = ((float)$result['elapsed_time']) * 1000.0;
+            $this->queryDiagnostics->recordQueryTimelineEnd($elapsedMs);
+            $this->queryDiagnostics->recordQueryBudgetIfEnabled($queryForBudget, $elapsedMs, $timeoutSeconds);
+        } finally {
+            ABJ_404_Solution_DatabaseDriverCall::restorePrinter($wpdb, $printerScope);
         }
 
         $this->core->sqlErrorReporter()->handleFinalSqlErrorReporting(
@@ -397,55 +399,88 @@ class ABJ_404_Solution_DatabaseQueryExecutor {
     }
 
     /**
+     * Execute and harvest one prepared query attempt, including recovery retries.
+     * Does not re-enter preparation, diagnostics, or the recovery policy.
+     *
+     * This is the one place a pipeline statement reaches wpdb: the first attempt
+     * and every recovery retry (DatabaseQueryRecoveryPolicy, the SET STATEMENT
+     * fallback in DatabaseQueryTimeoutManager) run here, so a statement that can
+     * wait for a metadata lock is bounded on every attempt, not only the first.
+     *
+     * @internal Shared by retry paths so their metadata-lock policy cannot drift.
      * @param string $query
      * @param 'OBJECT'|'OBJECT_K'|'ARRAY_A'|'ARRAY_N' $resultType
      * @param bool $producesRows
      * @return array<string, mixed>
      */
-    private function executeWpdbQuery(string $query, string $resultType, bool $producesRows): array {
+    public function executeWpdbQuery(string $query, string $resultType, bool $producesRows): array {
         global $wpdb;
         if ($this->queryCanWaitForMetadataLock($query)) {
+            $operationResult = array();
             $guarded = $this->metadataLockWaitGuard->runWithBoundedWait($wpdb, array(
                 'description' => 'executing a schema or metadata statement through the database query pipeline',
-                'operation' => function () use ($wpdb, $query, $resultType, $producesRows) {
+                'operation' => function () use ($wpdb, $query, $resultType, $producesRows, &$operationResult) {
                     if ($producesRows) {
-                        return $wpdb->get_results($query, $resultType);
+                        $driverResult = ABJ_404_Solution_DatabaseDriverCall::getResults($wpdb, $query, $resultType);
+                    } else {
+                        $driverResult = ABJ_404_Solution_DatabaseDriverCall::query($wpdb, $query);
                     }
-                    $wpdb->query($query);
-                    return array();
+                    $operationResult = array(
+                        'rows' => $producesRows ? $driverResult : array(),
+                    );
+                    // Snapshot the mutable wpdb envelope while the guarded
+                    // operation is still current; restoration may issue
+                    // session SQL on a drop-in connection.
+                    $this->resultHarvester->harvestWpdbResult($operationResult, $driverResult, $producesRows);
+                    return $operationResult;
                 },
             ));
-            $result = array('rows' => $producesRows ? $guarded['value'] : array());
+            if ($guarded['status'] === 'completed') {
+                return $operationResult;
+            }
+            $guardedRows = isset($guarded['value']) && is_array($guarded['value'])
+                ? $guarded['value'] : array();
+            return array(
+                'rows' => $producesRows ? $guardedRows : array(),
+                'last_error' => isset($guarded['error']) && is_string($guarded['error'])
+                    ? $guarded['error'] : '',
+                'last_result' => array(),
+                'rows_affected' => 0,
+                'insert_id' => 0,
+                'query_succeeded' => false,
+                'query_rows_affected' => null,
+            );
         } else if ($producesRows) {
-            $result = array('rows' => $wpdb->get_results($query, $resultType));
+            $driverResult = ABJ_404_Solution_DatabaseDriverCall::getResults($wpdb, $query, $resultType);
+            $result = array('rows' => $driverResult);
         } else {
-            $wpdb->query($query);
+            $driverResult = ABJ_404_Solution_DatabaseDriverCall::query($wpdb, $query);
             $result = array('rows' => array());
         }
         // Snapshot wpdb synchronously before any diagnostic write, hook
         // restoration, or logger can issue a nested query and overwrite its
         // mutable result properties.
-        $this->resultHarvester->harvestWpdbResult($result);
+        $this->resultHarvester->harvestWpdbResult($result, $driverResult, $producesRows);
         return $result;
     }
 
     /**
-     * DDL and metadata inspection take metadata locks. Bound these uncommon
-     * statements without adding two session SETs to every ordinary frontend
-     * SELECT/INSERT/UPDATE.
+     * DDL, table maintenance, and metadata inspection take metadata locks.
+     * Bound these uncommon statements without adding two session SETs to
+     * every ordinary frontend SELECT/INSERT/UPDATE.
+     *
+     * Table maintenance (ANALYZE, OPTIMIZE, REPAIR, CHECK, CHECKSUM, FLUSH) is
+     * listed because MySQL has no per-statement timeout for it
+     * (DatabaseQueryTimeoutManager::applyStatementTimeout returns the query
+     * unchanged there) and its default lock_wait_timeout is one year, so this
+     * guard is the only thing that keeps a contended maintenance statement
+     * from holding the worker.
      */
     private function queryCanWaitForMetadataLock(string $query): bool {
-        $unwrapped = (string)preg_replace(
-            '/^\s*SET\s+STATEMENT\s+max_statement_time\s*=\s*\d+\s+FOR\s+/i',
-            '',
-            $query,
-            1
-        );
-        $unwrapped = (string)preg_replace('/^\s*(?:\/\*[\s\S]*?\*\/\s*)+/', '', $unwrapped);
-        return preg_match(
-            '/^\s*(?:ALTER|CREATE|DROP|RENAME|TRUNCATE|SHOW|DESCRIBE|DESC|LOCK)\b/i',
-            $unwrapped
-        ) === 1;
+        return in_array($this->core->queryTimeoutManager()->queryStatementCommand($query), array(
+            'ALTER', 'CREATE', 'DROP', 'RENAME', 'TRUNCATE', 'SHOW', 'DESCRIBE', 'DESC', 'LOCK',
+            'ANALYZE', 'OPTIMIZE', 'REPAIR', 'CHECK', 'CHECKSUM', 'FLUSH', 'EXPLAIN',
+        ), true);
     }
 
 }

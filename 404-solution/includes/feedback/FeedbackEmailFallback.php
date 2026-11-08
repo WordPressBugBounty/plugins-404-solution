@@ -50,7 +50,7 @@ class ABJ_404_Solution_FeedbackEmailFallback {
                 ABJ_404_Solution_FeedbackTransportLog::log('warn', 'FeedbackEmailFallback delegate (' . $type . ') failed: ' . $e->getMessage());
             }
         }
-        $to = defined('ABJ404_AUTHOR_EMAIL') ? ABJ404_AUTHOR_EMAIL : '404solution@ajexperience.com';
+        $to = defined('ABJ404_AUTHOR_EMAIL') ? ABJ404_AUTHOR_EMAIL : 'support@forethought-studio.com';
         $version = defined('ABJ404_VERSION') ? ABJ404_VERSION : '';
         $subject = sprintf('[404 Solution] %s report (HTTP fallback) v%s', $type, $version);
         $json = function_exists('wp_json_encode') ? wp_json_encode($payload, JSON_PRETTY_PRINT) : json_encode($payload, JSON_PRETTY_PRINT);
@@ -71,7 +71,7 @@ class ABJ_404_Solution_FeedbackEmailFallback {
      * @return bool
      */
     private static function supportRequest(array $payload): bool {
-        $to = defined('ABJ404_AUTHOR_EMAIL') ? ABJ404_AUTHOR_EMAIL : '404solution@ajexperience.com';
+        $to = defined('ABJ404_AUTHOR_EMAIL') ? ABJ404_AUTHOR_EMAIL : 'support@forethought-studio.com';
         $version = defined('ABJ404_VERSION') ? ABJ404_VERSION : '';
         $subject = sprintf('[404 Solution] Support request v%s', $version);
 

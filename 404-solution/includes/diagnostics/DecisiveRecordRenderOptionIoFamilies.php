@@ -4,10 +4,10 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// allow-no-test-found: structural coverage is in tests/DecisiveRecordManifestTest.php and real-entry coverage is in tests/AjaxPaginationOptionAttributionTest.php
 /**
  * Manifest and discriminator contracts for option I/O inside render scopes.
  *
- * allow-no-test-found: structural coverage is in tests/DecisiveRecordManifestTest.php and real-entry coverage is in tests/AjaxPaginationOptionAttributionTest.php
  */
 final class ABJ_404_Solution_DecisiveRecordRenderOptionIoFamilies {
 

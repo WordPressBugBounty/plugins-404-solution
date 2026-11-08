@@ -38,7 +38,7 @@ final class ABJ_404_Solution_CheckpointIntentStore {
         try {
             $paths = self::pathMap();
             if ($paths === null) {
-                self::reportFailure('AJAX checkpoint intent system temp directory is unavailable.');
+                self::reportFailure('[warning] AJAX checkpoint intent system temp directory is unavailable.');
                 return self::result('failed', 'temp_directory_unavailable',
                     $requestId, $event, $startedNs);
             }
@@ -66,7 +66,11 @@ final class ABJ_404_Solution_CheckpointIntentStore {
     public static function paths(): array {
         return array_values(array_filter(self::candidatePaths(), static function (string $path): bool {
             clearstatcache(true, $path);
-            return is_file($path);
+            $isFile = ABJ_404_Solution_HostFilesystemCall::isFile($path);
+            if ($isFile['warning'] !== null && $isFile['warning'] !== '') {
+                self::reportFailure('AJAX checkpoint intent path check failed: ' . $path . ' (' . $isFile['warning'] . ')');
+            }
+            return $isFile['warning'] === null && (bool)$isFile['result'];
         }));
     }
 
@@ -89,70 +93,126 @@ final class ABJ_404_Solution_CheckpointIntentStore {
         // record. See ABJ_404_Solution_DiagnosticAppendStream for why: this
         // sink takes one write per checkpoint, and a checkpoint-heavy request
         // writes thousands.
-        $size = ABJ_404_Solution_DiagnosticAppendStream::sizeOf($paths['current']);
-        if (($size + strlen($line)) > self::MAX_BYTES) {
-            self::rotate($paths, strlen($line));
+        $warningMessages = array_fill(0, 0, '');
+        $warningHandler = static function (int $severity, string $message) use (&$warningMessages): bool {
+            if (($severity & (E_WARNING | E_USER_WARNING | E_NOTICE | E_USER_NOTICE)) !== 0) {
+                $warningMessages[] = $message;
+                return true;
+            }
+            return false;
+        };
+        set_error_handler($warningHandler, E_WARNING | E_USER_WARNING | E_NOTICE | E_USER_NOTICE);
+        try {
+            // This handler owns only the synchronous sink operations below.
+            // Its local message keeps repeated identical warnings attributable
+            // without changing the caller's last-error snapshot.
+            $size = ABJ_404_Solution_DiagnosticAppendStream::sizeOf($paths['current']);
+            if (($size + strlen($line)) > self::MAX_BYTES) {
+                self::rotate($paths, strlen($line), $warningMessages);
+            }
+            $outcome = self::writeLine($paths['current'], $line, $warningMessages);
+            if ($outcome['status'] === 'complete' && $warningMessages !== array()) {
+                self::reportFailure('AJAX checkpoint intent completed with filesystem warnings: '
+                    . self::warningSuffix($warningMessages));
+            }
+            return $outcome;
+        } finally {
+            // Restore the request's previous handler and its error mask before
+            // returning to the caller, including every failure path above.
+            restore_error_handler();
         }
-        return self::writeLine($paths['current'], $line);
     }
 
-    /** @param array{current: string, rotated: string, lock: string} $paths */
-    private static function rotate(array $paths, int $incomingBytes): void {
-        self::clearLastError();
-        $lock = @fopen($paths['lock'], 'cb');
+    /**
+     * @param array{current: string, rotated: string, lock: string} $paths
+     * @param list<string> $warningMessages
+     */
+    private static function rotate(array $paths, int $incomingBytes, array &$warningMessages): void {
+        $opened = ABJ_404_Solution_HostFilesystemCall::fopen($paths['lock'], 'cb');
+        if ($opened['warning'] !== null && $opened['warning'] !== '') {
+            $warningMessages[] = $opened['warning'];
+        }
+        $lock = $opened['result'];
         if ($lock === false) {
             self::reportFailure('AJAX checkpoint intent rotation lock could not be opened: '
-                . $paths['lock'] . self::lastErrorSuffix());
+                . $paths['lock'] . self::warningSuffix($warningMessages));
             return;
         }
         try {
-            if (!@flock($lock, LOCK_EX | LOCK_NB)) {
+            if (!flock($lock, LOCK_EX | LOCK_NB)) {
                 return;
             }
             clearstatcache(true, $paths['current']);
-            $size = @filesize($paths['current']);
+            $isCurrent = is_file($paths['current']);
+            $size = false;
+            if ($isCurrent) {
+                $sizeResult = ABJ_404_Solution_HostFilesystemCall::filesize($paths['current']);
+                if ($sizeResult['warning'] !== null && $sizeResult['warning'] !== '') {
+                    $warningMessages[] = $sizeResult['warning'];
+                }
+                $size = $sizeResult['warning'] === null ? $sizeResult['result'] : false;
+            }
             if (!is_int($size) || ($size + $incomingBytes) <= self::MAX_BYTES) {
                 return;
             }
-            if (is_file($paths['rotated']) && !@unlink($paths['rotated'])) {
+            if (is_file($paths['rotated']) && !unlink($paths['rotated'])) {
                 self::reportFailure('AJAX checkpoint intent rotated file could not be deleted: '
-                    . $paths['rotated'] . self::lastErrorSuffix());
+                    . $paths['rotated'] . self::warningSuffix($warningMessages));
                 return;
             }
-            if (is_file($paths['current']) && !@rename($paths['current'], $paths['rotated'])) {
+            if (is_file($paths['current']) && !rename($paths['current'], $paths['rotated'])) {
                 self::reportFailure('AJAX checkpoint intent file could not be rotated: '
-                    . $paths['current'] . self::lastErrorSuffix());
+                    . $paths['current'] . self::warningSuffix($warningMessages));
             }
         } finally {
             // Whatever happened above, the held descriptor may now name the
             // rotated file. Drop it so the next intent re-resolves the path.
             ABJ_404_Solution_DiagnosticAppendStream::invalidate($paths['current']);
-            @flock($lock, LOCK_UN);
-            @fclose($lock);
+            flock($lock, LOCK_UN);
+            fclose($lock);
         }
     }
-
-    /** @return array{status: string, reason: string} */
-    private static function writeLine(string $path, string $line): array {
-        self::clearLastError();
+    /**
+     * @param list<string> $warningMessages
+     * @return array{status: string, reason: string}
+     */
+    private static function writeLine(string $path, string $line, array &$warningMessages): array {
         $result = ABJ_404_Solution_DiagnosticAppendStream::append($path, $line);
         if ($result['status'] === 'complete') {
             return array('status' => 'complete', 'reason' => '');
         }
+        // The append stream captures its own native warnings, so the handler
+        // that fills $warningMessages never sees them: carry the cause over.
+        if ($result['warning'] !== '') {
+            $warningMessages[] = $result['warning'];
+        }
         if ($result['reason'] === 'open_failed') {
             self::reportFailure('AJAX checkpoint intent file could not be opened: '
-                . $path . self::lastErrorSuffix());
+                . $path . self::warningSuffix($warningMessages));
             return array('status' => 'failed', 'reason' => 'intent_open_failed');
         }
         self::reportFailure('AJAX checkpoint intent append/flush failed: '
-            . $path . self::lastErrorSuffix());
+            . $path . self::warningSuffix($warningMessages));
         return array('status' => 'failed', 'reason' => 'intent_append_failed');
     }
 
     /** @return array{current: string, rotated: string, lock: string}|null */
     private static function pathMap(): ?array {
-        $directory = rtrim((string)sys_get_temp_dir(), '/\\');
-        if ($directory === '' || !is_dir($directory)) {
+        // An update may replace this caller after the old adapter was loaded.
+        $temporary = is_callable(array(ABJ_404_Solution_PhpRuntimeCapabilityAdapter::class, 'temporaryDirectory'))
+            ? ABJ_404_Solution_PhpRuntimeCapabilityAdapter::temporaryDirectory() : null;
+        $directory = rtrim($temporary ?? '', '/\\');
+        // A captured denial means the system temp directory is unavailable;
+        // this method returns null without allowing the warning to escape.
+        if ($directory === '') {
+            return null;
+        }
+        $directoryCheck = ABJ_404_Solution_HostFilesystemCall::isDir($directory);
+        if ($directoryCheck['warning'] !== null && $directoryCheck['warning'] !== '') {
+            self::reportFailure('AJAX checkpoint intent temp directory check failed: '
+                . $directory . ' (' . $directoryCheck['warning'] . ')');
+        }
+        if ($directoryCheck['warning'] !== null || !$directoryCheck['result']) {
             return null;
         }
         $scope = defined('ABSPATH') ? (string)ABSPATH : __DIR__;
@@ -188,15 +248,12 @@ final class ABJ_404_Solution_CheckpointIntentStore {
         return isset($record[$key]) && is_string($record[$key]) ? $record[$key] : $fallback;
     }
 
-    private static function clearLastError(): void {
-        if (function_exists('error_clear_last')) {
-            error_clear_last();
+    /** @param list<string> $warningMessages */
+    private static function warningSuffix(array $warningMessages): string {
+        if ($warningMessages === array()) {
+            return '';
         }
-    }
-
-    private static function lastErrorSuffix(): string {
-        $error = error_get_last();
-        return is_array($error) ? ' (' . $error['message'] . ')' : '';
+        return ' (' . implode('; ', $warningMessages) . ')';
     }
 
     private static function monotonicNanoseconds(): int {

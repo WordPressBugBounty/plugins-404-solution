@@ -107,11 +107,53 @@ final class ABJ_404_Solution_SupportRequestButton {
      */
     private static function readTemplate(string $filename): string {
         $path = dirname(__DIR__) . '/html/' . $filename;
-        if (!is_readable($path)) {
+        $readable = self::captureFilesystemOperation(
+            static function () use ($path) { return is_readable($path); }
+        );
+        self::reportFilesystemWarning('support template readability check', $path, $readable['warning']);
+        if ($readable['warning'] !== null || !$readable['result']) {
             return '';
         }
-        $contents = @file_get_contents($path);
-        return is_string($contents) ? $contents : '';
+        $contents = self::captureFilesystemOperation(
+            static function () use ($path) { return file_get_contents($path); }
+        );
+        self::reportFilesystemWarning('support template read', $path, $contents['warning']);
+        if ($contents['warning'] !== null) {
+            return '';
+        }
+        return is_string($contents['result']) ? $contents['result'] : '';
+    }
+
+    /**
+     * Capture one template filesystem operation without requiring the full
+     * classmap; degraded admin boot loads this renderer before that map.
+     *
+     * @return array{result:mixed,warning:?string}
+     */
+    private static function captureFilesystemOperation(callable $operation): array {
+        if (class_exists('ABJ_404_Solution_FileSystemService', false)) {
+            return ABJ_404_Solution_FileSystemService::captureFilesystemWarnings($operation);
+        }
+        $warning = null;
+        set_error_handler(static function ($severity, $message) use (&$warning): bool {
+            if (($severity & (E_WARNING | E_USER_WARNING | E_NOTICE | E_USER_NOTICE)) !== 0) {
+                $warning = $warning === null ? (string)$message : $warning . '; ' . (string)$message;
+                return true;
+            }
+            return false;
+        }, E_WARNING | E_USER_WARNING | E_NOTICE | E_USER_NOTICE);
+        try {
+            $result = $operation();
+        } finally {
+            restore_error_handler();
+        }
+        return array('result' => $result, 'warning' => $warning);
+    }
+
+    private static function reportFilesystemWarning(string $operation, string $path, ?string $warning): void {
+        if ($warning !== null && $warning !== '' && function_exists('abj404_logPhpFallback')) {
+            abj404_logPhpFallback('logger-internal', $operation . ' failed for ' . $path . ': ' . $warning);
+        }
     }
 
     /**

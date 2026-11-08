@@ -11,7 +11,7 @@ require_once __DIR__ . '/PhpErrorLogFallback.php';
  * mysqli nor a MySQL PDO connection.
  */
 interface ABJ_404_Solution_DatabaseSessionStatementConnection {
-    /** @return array{success: bool, error: string} */
+    /** @return array{success: bool, error: string, cause?:Throwable|null} */
     public function executeAbj404SessionStatement(string $sql): array;
 }
 
@@ -37,12 +37,12 @@ final class ABJ_404_Solution_DatabaseMetadataLockWaitGuard {
     /** @var ABJ_404_Solution_Logging|(callable(): (ABJ_404_Solution_Logging|null))|null */
     private $logger;
 
-    /** @var (callable(mixed, string): array{success: bool, error: string})|null */
+    /** @var (callable(mixed, string): array{success: bool, error: string, cause?:Throwable|null})|null */
     private $sessionStatementRunner;
 
     /**
      * @param ABJ_404_Solution_Logging|(callable(): (ABJ_404_Solution_Logging|null))|null $logger
-     * @param (callable(mixed, string): array{success: bool, error: string})|null $sessionStatementRunner
+     * @param (callable(mixed, string): array{success: bool, error: string, cause?:Throwable|null})|null $sessionStatementRunner
      *   Optional connection adapter for database drop-ins whose handle is not
      *   mysqli or PDO. The ordinary WordPress path needs no adapter.
      */
@@ -55,7 +55,7 @@ final class ABJ_404_Solution_DatabaseMetadataLockWaitGuard {
     /**
      * @param object $wpdb Active WordPress database handle or compatible drop-in.
      * @param array{description: string, operation: callable(): mixed} $request
-     * @return array{status: 'completed'|'setup_failed', value: mixed, error: string}
+     * @return array{status: 'completed'|'setup_failed', value: mixed, error: string, cause:Throwable|null}
      */
     public function runWithBoundedWait($wpdb, array $request): array {
         $description = $request['description'];
@@ -70,6 +70,7 @@ final class ABJ_404_Solution_DatabaseMetadataLockWaitGuard {
                 'status' => 'setup_failed',
                 'value' => null,
                 'error' => $error,
+                'cause' => null,
             );
         }
 
@@ -81,7 +82,7 @@ final class ABJ_404_Solution_DatabaseMetadataLockWaitGuard {
         if (!$setup['success']) {
             $this->restoreLastError($wpdb, $setup['error']);
             $this->warnSetupFailure($description, $setup['error']);
-            return array('status' => 'setup_failed', 'value' => null, 'error' => $setup['error']);
+            return array('status' => 'setup_failed', 'value' => null, 'error' => $setup['error'], 'cause' => $setup['cause'] ?? null);
         }
 
         // Keep an existing stricter host policy rather than widening it to the
@@ -100,7 +101,7 @@ final class ABJ_404_Solution_DatabaseMetadataLockWaitGuard {
             ));
             $this->restoreLastError($wpdb, $setup['error']);
             $this->warnSetupFailure($description, $setup['error']);
-            return array('status' => 'setup_failed', 'value' => null, 'error' => $setup['error']);
+            return array('status' => 'setup_failed', 'value' => null, 'error' => $setup['error'], 'cause' => $setup['cause'] ?? null);
         }
 
         try {
@@ -120,7 +121,7 @@ final class ABJ_404_Solution_DatabaseMetadataLockWaitGuard {
             'savedVariable' => $savedVariable,
             'description' => $description,
         ));
-        return array('status' => 'completed', 'value' => $value, 'error' => $operationError);
+        return array('status' => 'completed', 'value' => $value, 'error' => $operationError, 'cause' => null);
     }
 
     /**
@@ -167,7 +168,7 @@ final class ABJ_404_Solution_DatabaseMetadataLockWaitGuard {
 
     /**
      * @param mixed $connection
-     * @return array{success: bool, error: string}
+     * @return array{success: bool, error: string, cause?:Throwable|null}
      */
     private function runSessionStatement($connection, string $sql): array {
         try {
@@ -208,7 +209,8 @@ final class ABJ_404_Solution_DatabaseMetadataLockWaitGuard {
         } catch (Throwable $t) {
             return array(
                 'success' => false,
-                'error' => get_class($t) . ': ' . $t->getMessage(),
+                'error' => $t->getMessage(),
+                'cause' => $t,
             );
         }
 

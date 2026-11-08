@@ -42,7 +42,12 @@ class ABJ_404_Solution_GscOAuthHandler {
 
         if ($code === '') {
             $gsc->oauthStore()->setLastOAuthError(__('Authorization was denied or cancelled.', '404-solution'));
-            wp_safe_redirect(admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options'));
+            $destination = admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options');
+            if (is_callable(array('ABJ_404_Solution_RedirectLoopGuard', 'permitsDestination'))
+                && !ABJ_404_Solution_RedirectLoopGuard::permitsDestination($destination)) {
+                self::refuseRedirect($destination);
+            }
+            wp_safe_redirect($destination);
             exit;
         }
 
@@ -51,7 +56,12 @@ class ABJ_404_Solution_GscOAuthHandler {
         if ($error !== '') {
             $gsc->oauthStore()->setLastOAuthError($error);
         }
-        wp_safe_redirect(admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options'));
+        $destination = admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options');
+        if (is_callable(array('ABJ_404_Solution_RedirectLoopGuard', 'permitsDestination'))
+            && !ABJ_404_Solution_RedirectLoopGuard::permitsDestination($destination)) {
+            self::refuseRedirect($destination);
+        }
+        wp_safe_redirect($destination);
         exit;
     }
 
@@ -73,7 +83,12 @@ class ABJ_404_Solution_GscOAuthHandler {
         $error = self::payloadString($payload, 'abj404_gsc_error');
         if ($error !== '') {
             $gsc->oauthStore()->setLastOAuthError($error);
-            wp_safe_redirect(admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options'));
+            $destination = admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options');
+            if (is_callable(array('ABJ_404_Solution_RedirectLoopGuard', 'permitsDestination'))
+                && !ABJ_404_Solution_RedirectLoopGuard::permitsDestination($destination)) {
+                self::refuseRedirect($destination);
+            }
+            wp_safe_redirect($destination);
             exit;
         }
 
@@ -83,13 +98,23 @@ class ABJ_404_Solution_GscOAuthHandler {
 
         if ($accessToken === '') {
             $gsc->oauthStore()->setLastOAuthError(__('No access token received from authorization.', '404-solution'));
-            wp_safe_redirect(admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options'));
+            $destination = admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options');
+            if (is_callable(array('ABJ_404_Solution_RedirectLoopGuard', 'permitsDestination'))
+                && !ABJ_404_Solution_RedirectLoopGuard::permitsDestination($destination)) {
+                self::refuseRedirect($destination);
+            }
+            wp_safe_redirect($destination);
             exit;
         }
 
         $gsc->oauthStore()->storeCentralizedTokens($accessToken, $refreshToken, $expiresIn);
 
-        wp_safe_redirect(admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options'));
+        $destination = admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options');
+        if (is_callable(array('ABJ_404_Solution_RedirectLoopGuard', 'permitsDestination'))
+            && !ABJ_404_Solution_RedirectLoopGuard::permitsDestination($destination)) {
+            self::refuseRedirect($destination);
+        }
+        wp_safe_redirect($destination);
         exit;
     }
 
@@ -186,7 +211,29 @@ class ABJ_404_Solution_GscOAuthHandler {
         $gsc    = new ABJ_404_Solution_GoogleSearchConsole($logger);
         $gsc->oauthStore()->revokeAuthorization();
 
-        wp_safe_redirect(admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options'));
+        $destination = admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options');
+        if (is_callable(array('ABJ_404_Solution_RedirectLoopGuard', 'permitsDestination'))
+            && !ABJ_404_Solution_RedirectLoopGuard::permitsDestination($destination)) {
+            self::refuseRedirect($destination);
+        }
+        wp_safe_redirect($destination);
         exit;
+    }
+
+    /**
+     * Answer an AJAX redirect refusal with the existing loop diagnostic.
+     *
+     * All callers are registered on admin-ajax actions. Keeping the response
+     * as wp_die preserves WordPress's endpoint error shape and avoids the
+     * empty `0` body that a bare return produces.
+     *
+     * @param string $destination Destination that the loop guard refused.
+     * @return void
+     */
+    private static function refuseRedirect(string $destination): void {
+        $message = ABJ_404_Solution_WPNotices::redirectRefusalMessage($destination);
+        // WordPress's status table omits 508, so wp_die alone leaves HTTP 200.
+        status_header(508, 'Loop Detected');
+        wp_die(esc_html($message), '', array('response' => 508));
     }
 }

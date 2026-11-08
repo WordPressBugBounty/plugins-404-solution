@@ -56,6 +56,12 @@ class ABJ_404_Solution_DataServiceRegistration {
                 $rollup
             );
         });
+        $container->set('stats_rollup', function($c) {
+            $lock = new ABJ_404_Solution_StatsRefreshLock($c->get('db_core'));
+            $reads = new ABJ_404_Solution_StatsReadRepository($c->get('db_core'), $c->get('logs_repository'), $c->get('logging'), $lock);
+            $snapshots = new ABJ_404_Solution_StatsDashboardSnapshotCache($c->get('logging'));
+            return new ABJ_404_Solution_StatsRollupService($c->get('db_core'), $snapshots, $reads, $c->get('logging'));
+        });
         $container->set('stats_repository', function($c) {
             return new ABJ_404_Solution_StatsRepository(
                 $c->get('db_core'), $c->get('logs_repository'),
@@ -75,6 +81,10 @@ class ABJ_404_Solution_DataServiceRegistration {
         });
         $container->set('view_read_service', function($c) use ($daoModuleDeps) {
             return self::createViewReadService($c, $daoModuleDeps);
+        });
+        $container->set('admin_table_reader', function() {
+            return new ABJ_404_Solution_AdminTableReadRepository(
+                static fn(): ABJ_404_Solution_DatabaseCore => abj_service('db_core'));
         });
         $container->set('data_access', function($c) {
             return new ABJ_404_Solution_DataAccess(new ABJ_404_Solution_DataAccessDependencies(array(
@@ -183,7 +193,7 @@ class ABJ_404_Solution_DataServiceRegistration {
         $container->set('term_ngram_coverage_policy', function($c) {
             return new ABJ_404_Solution_TermNGramCoveragePolicy(
                 $c->get('ngram_filter'),
-                $c->get('content_repository'),
+                $c->get('published_terms_provider'),
                 $c->get('logging')
             );
         });

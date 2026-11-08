@@ -16,6 +16,8 @@ class ABJ_404_Solution_ImportService {
 
     const IMPORT_PROGRESS_OPTION = 'abj404_import_progress';
     const IMPORT_PROGRESS_CHECKPOINT_INTERVAL = 50;
+    /** Bound continuous graph ownership while retaining per-row persistence. */
+    const MUTATION_BATCH_ROWS = 50;
 
     /** @var ABJ_404_Solution_RedirectsRepositoryInterface */
     private $redirectsRepository;
@@ -111,14 +113,13 @@ class ABJ_404_Solution_ImportService {
         try {
             $hashResult = hash_file('sha256', $tmpName);
             $contentHash = ($dryRun || !is_string($hashResult)) ? '' : $hashResult;
-            $runState = $this->applyResumeProgress($contentHash, $dryRun, $this->emptyRunState());
+            $runState = $this->initialRunState($contentHash, $dryRun);
 
             $delimiter = $this->parser->detectCsvDelimiterFromFile($file_handle);
             rewind($file_handle);
-            $runState = $this->processFileRows(
+            $this->processFileRows(
                 $file_handle,
                 $delimiter,
-                $this->stateInt($runState, 'resume_from'),
                 $dryRun,
                 $overwriteExisting,
                 $contentHash,
@@ -128,8 +129,9 @@ class ABJ_404_Solution_ImportService {
             fclose($file_handle);
         }
 
-        if (isset($runState['abort_message']) && is_string($runState['abort_message'])) {
-            return $runState['abort_message'];
+        $abortMessage = $runState->abortMessage();
+        if ($abortMessage !== null) {
+            return $abortMessage;
         }
 
         if (!$dryRun) {
@@ -140,135 +142,88 @@ class ABJ_404_Solution_ImportService {
     }
 
     /**
-     * @return array<string, mixed>
-     */
-    private function emptyRunState(): array {
-        return array(
-            'issues' => array(),
-            'processed' => 0,
-            'valid' => 0,
-            'invalid' => 0,
-            'overwritten' => 0,
-            'resume_from' => 0,
-        );
-    }
-
-    /**
+     * A fresh run, or one resumed from the checkpoint of an interrupted upload
+     * of the same file content. Dry runs never resume.
+     *
      * @param string $contentHash
      * @param bool $dryRun
-     * @param array<string, mixed> $state
-     * @return array<string, mixed>
+     * @return ABJ_404_Solution_ImportRunState
      */
-    private function applyResumeProgress(string $contentHash, bool $dryRun, array $state): array {
+    private function initialRunState(string $contentHash, bool $dryRun): ABJ_404_Solution_ImportRunState {
         if ($dryRun) {
-            return $state;
+            return ABJ_404_Solution_ImportRunState::fresh();
         }
 
         $existingProgress = $this->progressStore->getResumeProgress($contentHash);
-        if ($existingProgress === null) {
-            return $state;
-        }
-
-        $resumeFrom = ABJ_404_Solution_ImportProgressStore::progressInt($existingProgress, 'rows_processed', 0);
-        $state['resume_from'] = $resumeFrom;
-        $state['processed'] = ABJ_404_Solution_ImportProgressStore::progressInt($existingProgress, 'processed_count', $resumeFrom);
-        $state['valid'] = ABJ_404_Solution_ImportProgressStore::progressInt($existingProgress, 'valid_count', 0);
-        $state['invalid'] = ABJ_404_Solution_ImportProgressStore::progressInt($existingProgress, 'invalid_count', 0);
-        $state['overwritten'] = ABJ_404_Solution_ImportProgressStore::progressInt($existingProgress, 'overwritten_count', 0);
-        if (isset($existingProgress['issues']) && is_array($existingProgress['issues'])) {
-            /** @var array<int, string> $persistedIssues */
-            $persistedIssues = $existingProgress['issues'];
-            $state['issues'] = $persistedIssues;
-        }
-        return $state;
+        return $existingProgress === null
+            ? ABJ_404_Solution_ImportRunState::fresh()
+            : ABJ_404_Solution_ImportRunState::fromProgress($existingProgress);
     }
 
     /**
      * @param resource $fileHandle
      * @param string $delimiter
-     * @param int $resumeFromDataRow
      * @param bool $dryRun
      * @param bool $overwriteExisting
      * @param string $contentHash
-     * @param array<string, mixed> $state
-     * @return array<string, mixed>
+     * @param ABJ_404_Solution_ImportRunState $state
+     * @return void
      */
-    private function processFileRows($fileHandle, string $delimiter, int $resumeFromDataRow,
-                                     bool $dryRun, bool $overwriteExisting, string $contentHash,
-                                     array $state): array {
-        $headerColumns = null;
-        $dataRowsSeen = 0;
-        while (($row = fgetcsv($fileHandle, 0, $delimiter, '"', '\\')) !== false) {
-            $data = $this->normalizeCsvRow($row);
-
-            if ($this->isBlankCsvRow($data)) {
-                continue;
-            }
-
-            if ($headerColumns === null && $this->parser->isCompatibleImportHeaderRow($data)) {
-                $headerColumns = $this->parser->normalizeImportHeaders($data);
-                continue;
-            }
-
-            if ($dataRowsSeen < $resumeFromDataRow) {
+    private function processFileRows($fileHandle, string $delimiter, bool $dryRun,
+                                     bool $overwriteExisting, string $contentHash,
+                                     ABJ_404_Solution_ImportRunState $state): void {
+        $rows = $this->parser->readRows($fileHandle, $delimiter, $state->resumeFrom());
+        $batchError = $this->runImportBatches($rows, function (array $batch) use ($dryRun, $overwriteExisting, $contentHash, $state): bool {
+            foreach ($batch as $entry) {
+                $dataArray = $entry['data'];
+                $dataRowsSeen = $entry['index'];
+                if (isset($dataArray['error'])) { $state->abort($dataArray['error']); return false; }
+                if ($this->isRepeatedHeaderDataRow($dataArray)) { continue; }
+                $this->processDataArray(
+                    $dataArray, $dataRowsSeen, $dryRun, $overwriteExisting, $contentHash, $state
+                );
                 $dataRowsSeen++;
-                continue;
+                if (!$dryRun && ($dataRowsSeen % self::IMPORT_PROGRESS_CHECKPOINT_INTERVAL) === 0) {
+                    $this->persistCheckpoint($contentHash, $dataRowsSeen, $state);
+                }
+                if ($state->abortMessage() !== null) { return false; }
             }
-
-            $dataArray = $this->mapCsvDataRow($data, $headerColumns);
-            if (isset($dataArray['error'])) {
-                $state['abort_message'] = $dataArray['error'];
-                return $state;
-            }
-
-            if ($this->isRepeatedHeaderDataRow($dataArray)) {
-                $dataRowsSeen++;
-                continue;
-            }
-
-            $state = $this->processDataArray(
-                $dataArray, $dataRowsSeen, $dryRun, $overwriteExisting, $contentHash, $state
-            );
-            $dataRowsSeen++;
-
-            if (!$dryRun && ($dataRowsSeen % self::IMPORT_PROGRESS_CHECKPOINT_INTERVAL) === 0) {
-                $this->persistCheckpoint($contentHash, $dataRowsSeen, $state);
-            }
-            if (isset($state['abort_message'])) {
-                return $state;
-            }
-        }
-
-        return $state;
+            return true;
+        }, $dryRun);
+        if ($batchError !== '') { $state->abort($batchError); }
     }
 
     /**
-     * @param array<int, string|null>|false|null $row
-     * @return array<int, string>
+     * Prefetch a bounded batch before ownership, then persist its rows individually.
+     * File parsing, including long blank runs, never holds the graph mutex.
+     * @param \Generator<int,array{index:int,data:array<string,string>}> $rows
+     * @param callable(array<int,array{index:int,data:array<string,string>}>):bool $operation False stops the file.
      */
-    private function normalizeCsvRow($row): array {
-        if (!is_array($row)) {
-            return array();
+    public function runImportBatches(\Generator $rows, callable $operation, bool $dryRun = false): string {
+        while ($rows->valid()) {
+            $batch = array();
+            for ($row = 0; $row < self::MUTATION_BATCH_ROWS && $rows->valid(); $row++, $rows->next()) {
+                $batch[] = $rows->current();
+            }
+            $continue = false;
+            $error = $this->runWithImportBatch(function () use ($operation, $batch, &$continue): void {
+                $continue = $operation($batch);
+            }, $dryRun);
+            if ($error !== '') { return $error; }
+            if (!$continue) { break; }
         }
-        return array_map(function($v) {
-            return trim((string)$v);
-        }, $row);
-    }
-
-    /** @param array<int, string> $data @return bool */
-    private function isBlankCsvRow(array $data): bool {
-        return count($data) === 1 && $data[0] === '';
+        return '';
     }
 
     /**
-     * @param array<int, string> $data
-     * @param array<int, string|null>|null $headerColumns
-     * @return array<string, string>
+     * Dry runs retain ordinary read semantics; real rows keep their own admission fences.
+     * @param callable():void $operation Bounded file batch.
      */
-    private function mapCsvDataRow(array $data, $headerColumns): array {
-        return $headerColumns !== null
-            ? $this->parser->mapImportRowByHeaders($data, $headerColumns)
-            : $this->parser->mapImportRowWithoutHeaders($data);
+    private function runWithImportBatch(callable $operation, bool $dryRun = false): string {
+        if ($dryRun) { $operation(); return ''; }
+        $repository = $this->redirectsRepository;
+        if ($repository instanceof ABJ_404_Solution_DataAccess) { $repository = $repository->getRedirectsRepo(); }
+        return $repository->runWithImportBatch($operation);
     }
 
     /**
@@ -286,26 +241,25 @@ class ABJ_404_Solution_ImportService {
      * @param bool $dryRun
      * @param bool $overwriteExisting
      * @param string $contentHash
-     * @param array<string, mixed> $state
-     * @return array<string, mixed>
+     * @param ABJ_404_Solution_ImportRunState $state
+     * @return void
      */
     private function processDataArray(array $dataArray, int $dataRowsSeen, bool $dryRun,
                                       bool $overwriteExisting, string $contentHash,
-                                      array $state): array {
+                                      ABJ_404_Solution_ImportRunState $state): void {
         try {
-            $state['processed'] = $this->stateInt($state, 'processed') + 1;
+            $state->beginRow();
             $wasOverwrite = $this->wouldOverwriteExisting($dataArray, $overwriteExisting);
             $dataArray['__line_number'] = (string)($dataRowsSeen + 1);
-            $issues = $this->rowProcessor->loadDataArrayFromFile($dataArray, $dryRun, $overwriteExisting);
-            return $this->accountForRowIssues($state, $issues, $wasOverwrite);
+            $issues = $this->rowProcessor->importRow($dataArray, $dryRun, $overwriteExisting);
+            $state->recordRowOutcome($issues, $wasOverwrite);
         } catch (\Throwable $e) {
             $this->recordPausedImport($contentHash, $dataRowsSeen, $state, $dryRun, $e);
-            $state['abort_message'] = sprintf(
+            $state->abort(sprintf(
                 __('Import paused at row %1$d. %2$d redirect(s) imported so far. Re-upload the same file to resume from row %1$d.', '404-solution'),
                 $dataRowsSeen + 1,
-                $this->stateInt($state, 'valid')
-            );
-            return $state;
+                $state->valid()
+            ));
         }
     }
 
@@ -324,44 +278,22 @@ class ABJ_404_Solution_ImportService {
     }
 
     /**
-     * @param array<string, mixed> $state
-     * @param array<int, string> $issues
-     * @param bool $wasOverwrite
-     * @return array<string, mixed>
-     */
-    private function accountForRowIssues(array $state, array $issues, bool $wasOverwrite): array {
-        if (count($issues) > 0) {
-            $state['invalid'] = $this->stateInt($state, 'invalid') + 1;
-        } else {
-            $state['valid'] = $this->stateInt($state, 'valid') + 1;
-            if ($wasOverwrite) {
-                $state['overwritten'] = $this->stateInt($state, 'overwritten') + 1;
-            }
-        }
-        $state['issues'] = array_merge($this->stateIssues($state), $issues);
-        return $state;
-    }
-
-    /**
      * @param string $contentHash
      * @param int $dataRowsSeen
-     * @param array<string, mixed> $state
+     * @param ABJ_404_Solution_ImportRunState $state
      * @param bool $dryRun
      * @param Throwable $e
      * @return void
      */
-    private function recordPausedImport(string $contentHash, int $dataRowsSeen, array $state,
+    private function recordPausedImport(string $contentHash, int $dataRowsSeen, ABJ_404_Solution_ImportRunState $state,
                                         bool $dryRun, \Throwable $e): void {
         if (!$dryRun) {
-            $this->progressStore->persistImportProgress($contentHash, array(
-                'rows_processed'    => $dataRowsSeen,
-                'processed_count'   => max(0, $this->stateInt($state, 'processed') - 1),
-                'valid_count'       => $this->stateInt($state, 'valid'),
-                'invalid_count'     => $this->stateInt($state, 'invalid'),
-                'overwritten_count' => $this->stateInt($state, 'overwritten'),
-                'issues'            => $this->stateIssues($state),
-                'last_error'        => $e->getMessage(),
-                'paused_at'         => abj_clock()->now(),
+            $this->progressStore->persistImportProgress($contentHash, array_merge(
+                $state->progressSnapshot($dataRowsSeen, max(0, $state->processed() - 1)),
+                array(
+                    'last_error' => $e->getMessage(),
+                    'paused_at'  => abj_clock()->now(),
+                )
             ));
         }
         $this->logger->warn(sprintf(
@@ -375,68 +307,45 @@ class ABJ_404_Solution_ImportService {
     /**
      * @param string $contentHash
      * @param int $dataRowsSeen
-     * @param array<string, mixed> $state
+     * @param ABJ_404_Solution_ImportRunState $state
      * @return void
      */
-    private function persistCheckpoint(string $contentHash, int $dataRowsSeen, array $state): void {
-        $this->progressStore->persistImportProgress($contentHash, array(
-            'rows_processed'    => $dataRowsSeen,
-            'processed_count'   => $this->stateInt($state, 'processed'),
-            'valid_count'       => $this->stateInt($state, 'valid'),
-            'invalid_count'     => $this->stateInt($state, 'invalid'),
-            'overwritten_count' => $this->stateInt($state, 'overwritten'),
-            'issues'            => $this->stateIssues($state),
-        ));
+    private function persistCheckpoint(string $contentHash, int $dataRowsSeen, ABJ_404_Solution_ImportRunState $state): void {
+        $this->progressStore->persistImportProgress(
+            $contentHash,
+            $state->progressSnapshot($dataRowsSeen, $state->processed())
+        );
     }
 
     /**
-     * @param array<string, mixed> $state
+     * @param ABJ_404_Solution_ImportRunState $state
      * @param bool $dryRun
      * @param bool $overwriteExisting
      * @return string
      */
-    private function formatImportResult(array $state, bool $dryRun, bool $overwriteExisting): string {
-        $issues = $this->stateIssues($state);
+    private function formatImportResult(ABJ_404_Solution_ImportRunState $state, bool $dryRun, bool $overwriteExisting): string {
+        $issues = $state->issueSummary()->messages($dryRun ? 20 : 100);
         if ($dryRun) {
             $msg = sprintf(
                 __('Dry run complete. Valid redirects: %d. Invalid rows: %d. Total rows processed: %d.', '404-solution'),
-                $this->stateInt($state, 'valid'),
-                $this->stateInt($state, 'invalid'),
-                $this->stateInt($state, 'processed')
+                $state->valid(),
+                $state->invalid(),
+                $state->processed()
             );
             return count($issues) > 0
-                ? $msg . ' ' . __('Preview issues:', '404-solution') . ' ' . implode(", <BR/>\n", array_slice($issues, 0, 20))
+                ? $msg . ' ' . __('Preview issues:', '404-solution') . ' ' . implode(", <BR/>\n", $issues)
                 : $msg;
         }
         if (count($issues) > 0) {
             return __('Error:', '404-solution') . ' ' . implode(", <BR/>\n", $issues);
         }
-        if ($overwriteExisting && $this->stateInt($state, 'overwritten') > 0) {
+        if ($overwriteExisting && $state->overwritten() > 0) {
             return sprintf(
                 __('The file seems to have loaded okay. %d existing redirect(s) were overwritten. Please check the redirects page.', '404-solution'),
-                $this->stateInt($state, 'overwritten')
+                $state->overwritten()
             );
         }
         return __('The file seems to have loaded okay. Please check the redirects page.', '404-solution');
-    }
-
-    /**
-     * @param array<string, mixed> $state
-     * @param string $key
-     * @return int
-     */
-    private function stateInt(array $state, string $key): int {
-        $value = $state[$key] ?? 0;
-        return ABJ_404_Solution_ExactInteger::readOr($value, 0, 0);
-    }
-
-    /**
-     * @param array<string, mixed> $state
-     * @return array<int, string>
-     */
-    private function stateIssues(array $state): array {
-        $issues = $state['issues'] ?? array();
-        return is_array($issues) ? array_values(array_filter($issues, 'is_string')) : array();
     }
 
     /**
@@ -446,7 +355,7 @@ class ABJ_404_Solution_ImportService {
      * @return array<int, string>
      */
     function loadDataArrayFromFile($dataArray, $dryRun = false, $overwriteExisting = false): array {
-        return $this->rowProcessor->loadDataArrayFromFile($dataArray, $dryRun, $overwriteExisting);
+        return $this->rowProcessor->importRow($dataArray, $dryRun, $overwriteExisting);
     }
 
     /**

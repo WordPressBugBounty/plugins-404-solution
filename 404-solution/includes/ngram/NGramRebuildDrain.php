@@ -84,6 +84,18 @@ class ABJ_404_Solution_NGramRebuildDrain {
      */
     public function drain(int $totalRows, string $context): array {
         $offset = $this->progress->cursor();
+        if ($offset < 0 || ($totalRows > 0 && $offset >= $totalRows)) {
+            // A cursor at or past the end of the CURRENT set at the start of a
+            // tick was never earned by this walk: the tick that reaches the end
+            // publishes completion and resets the cursor in the same call. It
+            // is left over from a different, larger set (an older release, a
+            // truncated permalink cache, a restored options table), so it says
+            // nothing about which rows are built. Trusting it published a
+            // half-built cache as complete with zero rows rebuilt; restart the
+            // walk instead, which is idempotent for rows already built.
+            $offset = 0;
+            $this->progress->setCursor($offset);
+        }
         $batchesProcessed = 0;
         $processed = 0;
         $success = 0;

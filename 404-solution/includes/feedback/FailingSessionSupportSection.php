@@ -53,9 +53,15 @@ final class ABJ_404_Solution_FailingSessionSupportSection {
      * @param array{status: string, ids: array<int, string>, records: int, outcomes: array<string, bool>} $clientAttempts
      */
     public static function compose(array $clientAttempts, string $clickSessionId): string {
-        if (!class_exists('ABJ_404_Solution_FailingSessionEvidence')) {
-            return 'Failing-session diagnostics unavailable: ABJ_404_Solution_FailingSessionEvidence'
-                . ' could not be loaded on this install, so per-session verdicts were not computed here.';
+        foreach (array(
+            ABJ_404_Solution_FailingSessionEvidence::class,
+            ABJ_404_Solution_AjaxTraceJournalReader::class,
+            ABJ_404_Solution_DiagnosticJournalExcerpt::class,
+        ) as $requiredClass) {
+            if (!class_exists($requiredClass)) {
+                return 'Failing-session diagnostics unavailable: ' . $requiredClass
+                    . ' could not be loaded on this install, so per-session verdicts were not computed here.';
+            }
         }
         try {
             $clientFailingIds = self::clientFailingIds($clientAttempts);
@@ -77,8 +83,8 @@ final class ABJ_404_Solution_FailingSessionSupportSection {
      */
     private static function diagnosticSources(): array {
         $sources = array();
-        if (class_exists('ABJ_404_Solution_AjaxRequestTrace')) {
-            $sources[] = ABJ_404_Solution_AjaxTraceJournal::supportCollectionSource();
+        if (class_exists('ABJ_404_Solution_AjaxTraceJournalReader')) {
+            $sources[] = ABJ_404_Solution_AjaxTraceJournalReader::supportCollectionSource();
         }
         if (class_exists('ABJ_404_Solution_CheckpointJournalReader')) {
             $sources[] = ABJ_404_Solution_CheckpointJournalReader::supportCollectionSource();

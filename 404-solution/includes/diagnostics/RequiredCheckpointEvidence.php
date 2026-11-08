@@ -11,8 +11,49 @@ if (!defined('ABSPATH')) {
  * sample, or a completed browser report even though each is the only record
  * carrying its discriminator fields. This policy reserves one complete record
  * for every such evidence class before the remaining byte budget is ranked.
+ *
+ * The reservation is not free: the reader charges it to the checkpoint budget
+ * ahead of the ranked failing-request groups. Each reserved record therefore
+ * carries a tier saying what is lost if it has to be dropped, and the reader
+ * drops from the least valuable tier up (see
+ * ABJ_404_Solution_RequiredCheckpointEvidenceBudget). The tiers are declared here
+ * because this class owns what each record means.
  */
 final class ABJ_404_Solution_RequiredCheckpointEvidence {
+
+    /**
+     * Dropped last: a corrupt sample proves the sink was reached, and an
+     * unmatched intent is the only record naming the checkpoint a killed
+     * worker was about to write. An unmatched intent is removed from ranking
+     * once reserved, so dropping it here loses it outright; that is why this
+     * tier is admitted before every other and newest first (the interrupted
+     * worker's intent is the newest). It is still subject to the byte
+     * allowance: a journal that lost its ordinary writes has one unmatched
+     * intent per checkpoint, and a count set by the sink cannot be exempt from
+     * a ceiling that protects the ranked section.
+     */
+    const TIER_PROTECTED = 0;
+
+    /**
+     * State of an operation that has not finished: the active-operation
+     * breadcrumb, the armed durable record, an unmatched start, the last query
+     * probe of a request whose timeline never closed. These name the culprit.
+     */
+    const TIER_UNRESOLVED = 1;
+
+    /** The latest complete record of each discriminator identity (census, row progress, ...). */
+    const TIER_IDENTITY = 2;
+
+    /** The last full boundary of each request that never terminated. */
+    const TIER_BOUNDARY = 3;
+
+    /**
+     * A completed start/end pair, kept as a positive control that a normal
+     * operation looks like this. The one tier whose absence loses no
+     * failure evidence, so it is the first to go. A unit of two: half a pair
+     * would read as an unmatched start.
+     */
+    const TIER_EXEMPLAR = 4;
 
     /**
      * Latest complete record for every required evidence identity.
@@ -21,8 +62,26 @@ final class ABJ_404_Solution_RequiredCheckpointEvidence {
      * @return array<int, string>
      */
     public static function select(array $lines): array {
-        if (class_exists('ABJ_404_Solution_ActiveOperationBreadcrumbs')) {
-            $lines = ABJ_404_Solution_ActiveOperationBreadcrumbs::compactSupportLines($lines);
+        $selected = array();
+        foreach (self::selectUnits($lines) as $unit) {
+            foreach ($unit['lines'] as $line) {
+                $selected[] = $line;
+            }
+        }
+        return array_values(array_unique($selected));
+    }
+
+    /**
+     * The same selection as select(), grouped into units that are kept or
+     * dropped whole, each labelled with its tier. Output order is the order
+     * the lines read best in; priority is the tier, not the position.
+     *
+     * @param array<int, string> $lines JSONL lines, oldest first.
+     * @return array<int, array{tier: int, lines: array<int, string>}>
+     */
+    public static function selectUnits(array $lines): array {
+        if (class_exists('ABJ_404_Solution_ActiveOperationBreadcrumbState')) {
+            $lines = ABJ_404_Solution_ActiveOperationBreadcrumbState::compactSupportLines($lines);
         }
         $operationState = array();
         foreach (array_reverse($lines) as $line) {
@@ -35,31 +94,70 @@ final class ABJ_404_Solution_RequiredCheckpointEvidence {
                 $operationState[$operationKey] = array('line' => $line, 'record' => $record);
             }
         }
-        $required = array_merge(
-            ABJ_404_Solution_MalformedCheckpointEvidence::select($lines),
-            ABJ_404_Solution_RequiredCheckpointIdentityEvidence::select($lines)
-        );
+        $units = array();
+        foreach (ABJ_404_Solution_MalformedCheckpointEvidence::select($lines) as $line) {
+            $units[] = self::unit(self::TIER_PROTECTED, array($line));
+        }
+        foreach (ABJ_404_Solution_RequiredCheckpointIdentityEvidence::select($lines) as $line) {
+            $units[] = self::unit(self::TIER_IDENTITY, array($line));
+        }
         foreach ($operationState as $latest) {
             $record = $latest['record'];
             $line = $latest['line'];
             if (self::isReservedActiveOperation($record)) {
-                $required[] = $line;
+                $units[] = self::unit(self::TIER_UNRESOLVED, array($line));
             }
         }
         foreach (self::reservedDurableOperationLines($lines) as $line) {
-            $required[] = $line;
+            $units[] = self::unit(self::TIER_UNRESOLVED, array($line));
         }
-        foreach (self::unmatchedOperationLines($lines) as $line) {
-            $required[] = $line;
+        foreach (self::operationEvidenceUnits($lines) as $unit) {
+            $units[] = $unit;
+        }
+        foreach (self::unmatchedQueryLines($lines) as $line) {
+            $units[] = self::unit(self::TIER_UNRESOLVED, array($line));
         }
         foreach (ABJ_404_Solution_CheckpointIntentCorrelation::unmatchedIntentLines($lines)
             as $line) {
-            $required[] = $line;
+            $units[] = self::unit(self::TIER_PROTECTED, array($line));
         }
         foreach (self::lastFullBoundaryLinesForIncompleteRequests($lines) as $line) {
-            $required[] = $line;
+            $units[] = self::unit(self::TIER_BOUNDARY, array($line));
         }
-        return array_values(array_unique($required));
+        return self::withoutRepeatedLines($units);
+    }
+
+    /**
+     * @param array<int, string> $lines
+     * @return array{tier: int, lines: array<int, string>}
+     */
+    private static function unit(int $tier, array $lines): array {
+        return array('tier' => $tier, 'lines' => $lines);
+    }
+
+    /**
+     * A line reserved by two rules is kept once, by the first rule in output
+     * order; a unit left with no lines disappears.
+     *
+     * @param array<int, array{tier: int, lines: array<int, string>}> $units
+     * @return array<int, array{tier: int, lines: array<int, string>}>
+     */
+    private static function withoutRepeatedLines(array $units): array {
+        $seen = array();
+        $distinct = array();
+        foreach ($units as $unit) {
+            $fresh = array();
+            foreach ($unit['lines'] as $line) {
+                if (!isset($seen[$line])) {
+                    $seen[$line] = true;
+                    $fresh[] = $line;
+                }
+            }
+            if ($fresh !== array()) {
+                $distinct[] = self::unit($unit['tier'], $fresh);
+            }
+        }
+        return $distinct;
     }
 
     /**
@@ -150,36 +248,23 @@ final class ABJ_404_Solution_RequiredCheckpointEvidence {
     }
 
     /**
-     * Starts whose matching completion never reached disk.
+     * Reserved operation evidence derived from the manifest's start/end pairs,
+     * oldest start first.
      *
-     * The start/end pairs to reserve are DERIVED from the decisive-record
-     * manifest, not hardcoded here: every operation family the manifest marks
-     * `reserve` (row-render, rate-limit backend/cache, option persistence,
-     * option-hook callback) is preserved by the same request_id + operation_id
-     * matching. Enrolling a new decisive record in the manifest extends this
-     * reservation automatically, which is the structural fix for the recurring
-     * "emitted but un-reserved" gap. The query timeline keeps its own start /
-     * clear semantics (a summary with open_query === null cancels the reserve).
-     *
-     * @param array<int, string> $lines
-     * @return array<int, string>
-     */
-    private static function unmatchedOperationLines(array $lines): array {
-        return array_merge(
-            self::unmatchedReservedStartLines($lines),
-            self::unmatchedQueryLines($lines)
-        );
-    }
-
-    /**
-     * Reserved operation starts (from the manifest) whose matching end never
-     * reached disk. Each family's start/end pair is matched by request_id +
-     * operation_id; an end removes its start, so what remains is the hung set.
+     * Every unmatched start remains reserved, as an unresolved single. A
+     * completed operation is an exemplar pair: only the latest pair in each
+     * request/family namespace is kept, so bounded support can identify a
+     * normal callback or operation without reserving every routine pair, and
+     * the pair is one unit so trimming can never leave a start that looks
+     * unmatched. Matching remains request + operation ID + start-event
+     * namespace; orphan and cross-family/cross-request ends cannot close a
+     * start. Repeated operation IDs keep the most recent start, as the prior
+     * collector did.
      *
      * @param array<int, string> $lines
-     * @return array<int, string>
+     * @return array<int, array{tier: int, lines: array<int, string>}>
      */
-    private static function unmatchedReservedStartLines(array $lines): array {
+    private static function operationEvidenceUnits(array $lines): array {
         $startEvents = array();
         $endToStart = array();
         foreach (ABJ_404_Solution_DecisiveRecordManifest::reservedOperationPairs() as $pair) {
@@ -188,7 +273,9 @@ final class ABJ_404_Solution_RequiredCheckpointEvidence {
         }
 
         $openStarts = array();
-        foreach ($lines as $line) {
+        $openMeta = array();
+        $completedByFamilyRequest = array();
+        foreach ($lines as $index => $line) {
             $record = json_decode($line, true);
             if (!is_array($record)) {
                 continue;
@@ -203,12 +290,39 @@ final class ABJ_404_Solution_RequiredCheckpointEvidence {
                 continue;
             }
             if ($isStart) {
-                $openStarts[$key] = $line;
-            } else {
+                $requestId = is_scalar($record['request_id'] ?? null)
+                    ? (string)$record['request_id'] : '';
+                $openStarts[$key] = array('index' => $index, 'line' => $line);
+                $openMeta[$key] = array(
+                    'family' => $event,
+                    'request_id' => $requestId,
+                );
+                continue;
+            }
+            if (isset($openStarts[$key], $openMeta[$key])) {
+                $meta = $openMeta[$key];
+                $familyRequest = $meta['family'] . '|' . $meta['request_id'];
+                $completedByFamilyRequest[$familyRequest] = array(
+                    'start' => $openStarts[$key],
+                    'end' => array('index' => $index, 'line' => $line),
+                );
                 unset($openStarts[$key]);
+                unset($openMeta[$key]);
             }
         }
-        return array_values($openStarts);
+
+        $byStartIndex = array();
+        foreach ($openStarts as $start) {
+            $byStartIndex[$start['index']] = self::unit(self::TIER_UNRESOLVED, array($start['line']));
+        }
+        foreach ($completedByFamilyRequest as $pair) {
+            $byStartIndex[$pair['start']['index']] = self::unit(
+                self::TIER_EXEMPLAR,
+                array($pair['start']['line'], $pair['end']['line'])
+            );
+        }
+        ksort($byStartIndex, SORT_NUMERIC);
+        return array_values($byStartIndex);
     }
 
     /**

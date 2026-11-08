@@ -276,10 +276,13 @@ class ABJ_404_Solution_View_SettingsSections extends ABJ_404_Solution_ViewCompon
             ? date('Y/m/d', $timeToDisplay) . ' ' . date('h:i:s', $timeToDisplay) . '&nbsp;' . date('A', $timeToDisplay)
             : 'N/A';
         $adminEmail = get_option('admin_email');
+        // Both readers answer -1 when their query failed or timed out.
+        $logBytes = $this->viewReadService->getLogDiskUsage();
+        $logRows = $this->viewReadService->getLogsCount(0);
 
         return array(
-            'logCurrentSizeDiskUsage' => (string)round($this->viewReadService->getLogDiskUsage() / (1024 * 1000), 2),
-            'logCurrentRowCount' => (string)$this->viewReadService->getLogsCount(0),
+            'logCurrentSizeDiskUsage' => $logBytes >= 0 ? (string)round($logBytes / (1024 * 1000), 2) : 'N/A',
+            'logCurrentRowCount' => $logRows >= 0 ? (string)$logRows : 'N/A',
             'earliestLogDate' => $earliestLogDate,
             'default_wordpress_admin_email' => is_string($adminEmail) ? $adminEmail : '',
         );
@@ -297,7 +300,7 @@ class ABJ_404_Solution_View_SettingsSections extends ABJ_404_Solution_ViewCompon
             require_once dirname(__DIR__) . '/ajax/Ajax_PrivacyDelete.php';
         }
 
-        $rawToken = get_option(ABJ_404_Solution_FeedbackSiteTokenStore::TOKEN_OPTION, '');
+        $rawToken = ABJ_404_Solution_OptionShapeRead::scalar(ABJ_404_Solution_FeedbackSiteTokenStore::TOKEN_OPTION, '');
         $hasToken = is_string($rawToken) && $rawToken !== '';
         $exportNonce = wp_create_nonce(ABJ_404_Solution_Ajax_PrivacyExport::NONCE_ACTION);
         $deleteNonce = wp_create_nonce(ABJ_404_Solution_Ajax_PrivacyDelete::NONCE_ACTION);

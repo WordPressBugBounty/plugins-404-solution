@@ -148,6 +148,15 @@ class ABJ_404_Solution_SuggestionPublisher {
 		return true;
 	}
 
+	/**
+	 * Preserve the preceding release's producer API for retained SpellChecker instances.
+	 * @param string $requestedURL Preceding release's requested URL.
+	 * @return bool False declines the retired loopback; a reader opens its own job.
+	 */
+	public function triggerAsyncSuggestions(string $requestedURL): bool {
+		return false;
+	}
+
 	/** @return array{key: string, owner: string}|null */
 	private function acquireStateLock(string $normalizedURL): ?array {
 		$key = ABJ_404_Solution_SuggestionTransient::lockKeyForNormalizedUrl($normalizedURL);

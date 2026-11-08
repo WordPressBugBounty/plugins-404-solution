@@ -94,23 +94,24 @@ interface ABJ_404_Solution_ViewReadServiceInterface {
 
     /**
      * @param int $logID
-     * @return int
+     * @param array<string, mixed> $tableOptions Internal strict-read and timeout options.
+     * @return int Count, or -1 when a non-strict read could not determine it.
      */
-    public function getLogsCount($logID);
+    public function getLogsCount($logID, array $tableOptions = array());
 
     /**
      * The raw rows of the redirect export query, streamed one at a time.
-     * Null when the query could not run; an empty iterable when it ran and
+     * WP_Error preserves the database failure; an empty iterable when it ran and
      * found no redirects.
      *
-     * @return iterable<int, array<string, mixed>>|null
+     * @return iterable<int, array<string, mixed>>|WP_Error
      */
-    public function redirectsExportRows(): ?iterable;
+    public function redirectsExportRows();
 
     /** @return iterable<int, array<string, mixed>> */
     public function getRedirectsWithRegEx();
 
-    /** @return array<int, array<string, mixed>> */
+    /** @return iterable<int, array<string, mixed>> */
     public function getManualRedirectsWithRegexMetachars();
 
     /**

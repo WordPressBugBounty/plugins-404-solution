@@ -58,13 +58,13 @@ if (!function_exists('abj404_load_textdomain_if_needed')) {
 
 if (!function_exists('abj404_maybe_refresh_runtime_integrity_cache')) {
 	/**
-	 * Refresh runtime integrity cache at most once per TTL window.
+	 * Refresh the admin-only runtime integrity cache at most once per TTL window.
 	 *
 	 * @param int $ttlSeconds
 	 * @return void
 	 */
 	function abj404_maybe_refresh_runtime_integrity_cache($ttlSeconds = 43200) {
-		if (!is_admin()) {
+		if (!is_admin() || !abj404_current_user_is_plugin_admin()) {
 			return;
 		}
 

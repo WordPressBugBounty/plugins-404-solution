@@ -3,23 +3,43 @@
  *
  * Foreground actions issue independent table, counts, and pagination requests
  * in priority order, with at most one database-bound request in flight. Each
- * response updates its own DOM section. The transport module owns finite
- * transient retry; this module owns visible state, last-write-wins protection,
- * loading overlay lifetime, callbacks, and background detect-only telemetry.
+ * normal response updates its own DOM section. A complete degraded response
+ * ends its chain so another part cannot overwrite its bounded controls.
+ * The transport module owns finite transient retry; this module owns visible
+ * state, last-write-wins protection, loading overlay lifetime, callbacks, and
+ * background detect-only telemetry.
+ *
+ * options.onSettled, when given, runs exactly once per call after the whole
+ * request has stopped doing work, whatever the outcome: every part applied,
+ * a part failed terminally, the request was superseded or skipped, or it was
+ * never sent. Unlike onComplete/onError it does not describe the table part;
+ * it marks the moment nothing this call started is still in flight, which is
+ * what the admin ready signal (includes/js/adminReady.js) waits for.
  *
  * Globals defined: paginationLinksChange, abj404CollapseEmptyPaginationStrips.
  */
 
+/**
+ * @param {Element} triggerItem
+ * @param {object} [options]
+ * @returns {void}
+ */
 function paginationLinksChange(triggerItem, options) {
     options = options || {};
+    var settle = abj404PaginationSettleOnce(options);
     var req = abj404BuildPaginationRequest(triggerItem, options);
     if (req === null) {
+        settle();
         return;
     }
 
     if (req.isDetectOnlyBackground && isDetectOnlyRefreshInFlight()) {
-        if (typeof options.onComplete === 'function') {
-            options.onComplete({ hasUpdate: false, skipped: true });
+        try {
+            if (typeof options.onComplete === 'function') {
+                options.onComplete({ hasUpdate: false, skipped: true });
+            }
+        } finally {
+            settle();
         }
         return;
     }
@@ -32,19 +52,42 @@ function paginationLinksChange(triggerItem, options) {
     abj404RecordPaginationRequestStart(req);
 
     if (req.isDetectOnlyBackground) {
-        abj404RunDetectOnlyPaginationRequest(req, options);
+        abj404RunDetectOnlyPaginationRequest(req, options, settle);
         return;
     }
     if (req.isBackgroundRefresh) {
-        if (typeof options.onComplete === 'function') {
-            options.onComplete({ skippedReplace: true });
+        try {
+            if (typeof options.onComplete === 'function') {
+                options.onComplete({ skippedReplace: true });
+            }
+        } finally {
+            settle();
         }
         return;
     }
 
     hideRefreshAvailablePill();
     var removeLoadingOverlay = abj404ShowPaginationLoadingOverlay(req);
-    abj404RunProgressivePaginationRequest(req, options, removeLoadingOverlay);
+    abj404RunProgressivePaginationRequest(req, options, removeLoadingOverlay, settle);
+}
+
+/**
+ * Build the once-only onSettled caller for one paginationLinksChange call.
+ *
+ * @param {object} options
+ * @returns {function(): void}
+ */
+function abj404PaginationSettleOnce(options) {
+    var settled = false;
+    return function() {
+        if (settled) {
+            return;
+        }
+        settled = true;
+        if (typeof options.onSettled === 'function') {
+            options.onSettled();
+        }
+    };
 }
 
 /** @param {object} req @returns {void} */
@@ -95,23 +138,29 @@ function abj404ShowPaginationLoadingOverlay(req) {
  * @param {object} req
  * @param {object} options
  * @param {function(): void} removeLoadingOverlay
+ * @param {function(): void} settle Once-only onSettled caller.
  * @returns {void}
  */
-function abj404RunProgressivePaginationRequest(req, options, removeLoadingOverlay) {
+function abj404RunProgressivePaginationRequest(req, options, removeLoadingOverlay, settle) {
     var parts = Array.isArray(req.parts) ? req.parts : ['table', 'counts', 'pagination'];
     var runPart = function(partIndex) {
         if (partIndex >= parts.length || abj404PaginationRequestIsSuperseded(req)) {
+            settle();
             return;
         }
         var part = parts[partIndex];
         abj404RequestPaginationPart(req, part, {
             shouldAbort: function() { return abj404PaginationRequestIsSuperseded(req); },
             onAbort: function(abortedPart) {
-                if (abortedPart === 'table') {
-                    removeLoadingOverlay();
-                    if (typeof options.onComplete === 'function') {
-                        options.onComplete({ skippedReplace: true, superseded: true });
+                try {
+                    if (abortedPart === 'table') {
+                        removeLoadingOverlay();
+                        if (typeof options.onComplete === 'function') {
+                            options.onComplete({ skippedReplace: true, superseded: true });
+                        }
                     }
+                } finally {
+                    settle();
                 }
             },
             onSuccess: function(result, successfulPart) {
@@ -127,21 +176,38 @@ function abj404RunProgressivePaginationRequest(req, options, removeLoadingOverla
                         // fallible response-application callback.
                         removeLoadingOverlay();
                     }
+                    if (!responseApplied) {
+                        // The chain stops here (superseded, failed to
+                        // apply, or a callback threw).
+                        settle();
+                    }
                 }
                 if (responseApplied) {
-                    runPart(partIndex + 1);
+                    if (abj404PaginationResponseIsDegraded(result)) {
+                        settle();
+                    } else {
+                        runPart(partIndex + 1);
+                    }
                 }
             },
             onTerminalError: function(jqXHR, textStatus, errorThrown, failedPart, retryCount) {
+                var failureHandled = false;
                 try {
                     abj404HandlePaginationPartFailure(
-                        req, options, failedPart, jqXHR, textStatus, errorThrown, retryCount
+                        req, options, {
+                            part: failedPart, jqXHR: jqXHR, textStatus: textStatus,
+                            errorThrown: errorThrown, retryCount: retryCount
+                        }
                     );
+                    failureHandled = true;
                 } finally {
                     if (failedPart === 'table') {
                         // Error presentation, diagnostics, and extension
                         // callbacks are all fallible boundaries.
                         removeLoadingOverlay();
+                    }
+                    if (!failureHandled) {
+                        settle();
                     }
                 }
                 runPart(partIndex + 1);
@@ -189,17 +255,17 @@ function abj404HandlePaginationPartSuccess(req, options, part, result) {
         abj404HandlePaginationPartFailure(
             req,
             options,
-            part,
             {
-                status: 200,
-                responseJSON: {
-                    success: false,
-                    data: { message: 'Client response application failed: ' + cause }
-                }
-            },
-            'clienterror',
-            cause,
-            0
+                part: part,
+                jqXHR: {
+                    status: 200,
+                    responseJSON: {
+                        success: false,
+                        data: { message: 'Client response application failed: ' + cause }
+                    }
+                },
+                textStatus: 'clienterror', errorThrown: cause, retryCount: 0
+            }
         );
         return false;
     }
@@ -220,15 +286,17 @@ function abj404HandlePaginationPartSuccess(req, options, part, result) {
 /**
  * @param {object} req
  * @param {object} options
- * @param {string} part
- * @param {object} jqXHR
- * @param {string} textStatus
- * @param {string} errorThrown
+ * @param {{part: string, jqXHR: object, textStatus: string, errorThrown: string, retryCount: number}} failure
  * @returns {void}
  */
 function abj404HandlePaginationPartFailure(
-    req, options, part, jqXHR, textStatus, errorThrown, retryCount
+    req, options, failure
 ) {
+    var part = failure.part;
+    var jqXHR = failure.jqXHR;
+    var textStatus = failure.textStatus;
+    var errorThrown = failure.errorThrown;
+    var retryCount = failure.retryCount;
     jQuery('.abj404-refresh-status').text('');
     if (part === 'pagination') {
         abj404CollapseEmptyPaginationStrips();
@@ -315,37 +383,64 @@ function abj404PaginationErrorMeta(req, parsed, textStatus, errorThrown) {
     };
 }
 
-/** @param {object} req @param {object} options @returns {void} */
-function abj404RunDetectOnlyPaginationRequest(req, options) {
+/**
+ * @param {object} req
+ * @param {object} options
+ * @param {function(): void} settle Once-only onSettled caller.
+ * @returns {void}
+ */
+function abj404RunDetectOnlyPaginationRequest(req, options, settle) {
     abj404RequestPaginationPart(req, 'table', {
         onSuccess: function(result) {
             setDetectOnlyRefreshInFlight(false);
-            var hasUpdate = result && typeof result.hasUpdate === 'boolean'
-                ? !!result.hasUpdate
-                : hasBackgroundRefreshUpdateWithBaseline(result, req.baselineComparison);
-            if (typeof options.onComplete === 'function') {
-                options.onComplete({ hasUpdate: hasUpdate });
+            try {
+                var hasUpdate = result && typeof result.hasUpdate === 'boolean'
+                    ? !!result.hasUpdate
+                    : hasBackgroundRefreshUpdateWithBaseline(result, req.baselineComparison);
+                if (typeof options.onComplete === 'function') {
+                    options.onComplete({ hasUpdate: hasUpdate });
+                }
+                abj404FinishPaginationBackgroundTelemetry(req, 200, result, '', hasUpdate);
+            } finally {
+                settle();
             }
-            abj404FinishPaginationBackgroundTelemetry(req, 200, result, '', hasUpdate);
         },
         onTerminalError: function(jqXHR, textStatus, errorThrown, part, retryCount) {
             setDetectOnlyRefreshInFlight(false);
-            var errorCtx = {
-                baseUrl: req.baseUrl, action: req.action, subpage: req.subpage,
-                part: 'table', isBackgroundRefresh: true,
-                requestId: req.requestId, retryCount: retryCount,
-                requestStartedAt: req.requestStartedAt, ajaxTimeoutMs: req.ajaxTimeoutMs,
-                attemptTimeline: abj404PaginationAttemptTimeline(req)
-            };
-            var parsed = abj404HandlePaginationAjaxError(errorCtx, jqXHR, textStatus, errorThrown);
-            if (typeof options.onError === 'function') {
-                options.onError(abj404PaginationErrorMeta(req, parsed, textStatus, errorThrown));
+            try {
+                abj404FinishDetectOnlyPaginationFailure(
+                    req, options, {
+                        jqXHR: jqXHR, textStatus: textStatus,
+                        errorThrown: errorThrown, retryCount: retryCount
+                    }
+                );
+            } finally {
+                settle();
             }
-            abj404FinishPaginationBackgroundTelemetry(
-                req, parsed.status || 0, null, textStatus || errorThrown || 'ajax-error', false
-            );
         }
     });
+}
+
+/** @returns {void} */
+function abj404FinishDetectOnlyPaginationFailure(req, options, failure) {
+    var jqXHR = failure.jqXHR;
+    var textStatus = failure.textStatus;
+    var errorThrown = failure.errorThrown;
+    var retryCount = failure.retryCount;
+    var errorCtx = {
+        baseUrl: req.baseUrl, action: req.action, subpage: req.subpage,
+        part: 'table', isBackgroundRefresh: true,
+        requestId: req.requestId, retryCount: retryCount,
+        requestStartedAt: req.requestStartedAt, ajaxTimeoutMs: req.ajaxTimeoutMs,
+        attemptTimeline: abj404PaginationAttemptTimeline(req)
+    };
+    var parsed = abj404HandlePaginationAjaxError(errorCtx, jqXHR, textStatus, errorThrown);
+    if (typeof options.onError === 'function') {
+        options.onError(abj404PaginationErrorMeta(req, parsed, textStatus, errorThrown));
+    }
+    abj404FinishPaginationBackgroundTelemetry(
+        req, parsed.status || 0, null, textStatus || errorThrown || 'ajax-error', false
+    );
 }
 
 /** @returns {void} */

@@ -44,22 +44,29 @@ interface ABJ_404_Solution_LogReadQueryInterface {
 
     /**
      * @param string $specificURL
+     * @param array<string, mixed> $tableOptions Internal timeout options.
      * @return array<int, array<string, mixed>>
+     * @throws ABJ_404_Solution_ViewQueryFailureException When the read is unavailable.
      */
-    public function getLogsIDandURL($specificURL = '');
+    public function getLogsIDandURL($specificURL = '', array $tableOptions = array());
 
     /**
      * @param string $specificURL
      * @param string|int $limitResults
+     * @param array<string, mixed> $tableOptions Internal timeout options.
      * @return array<int, array<string, mixed>>
+     * @throws ABJ_404_Solution_ViewQueryFailureException When the read is unavailable.
      */
-    public function getLogsIDandURLLike($specificURL, $limitResults);
+    public function getLogsIDandURLLike($specificURL, $limitResults, array $tableOptions = array());
 
     /**
      * @param array<string, mixed> $tableOptions orderby, paged, perpage, etc.
      * @return array<int, array<string, mixed>>
      */
     public function getLogRecords($tableOptions);
+
+    /** Whether the latest getLogRecords() call returned a compatibility fallback after a failed read. */
+    public function lastLogRecordsReadWasIncomplete(): bool;
 
     /**
      * @param int $days Number of days (default 30, clamped to 1-90)

@@ -90,22 +90,11 @@ class ABJ_404_Solution_RedirectDispatcher {
         }
 
         $redirectUrl = isset($redirect['url']) && is_string($redirect['url']) ? $redirect['url'] : '';
-        $redirectFinalDest = isset($redirect['final_dest']) && is_scalar($redirect['final_dest']) ? (string)$redirect['final_dest'] : '';
         $redirectCode = isset($redirect['code']) && is_scalar($redirect['code']) ? (int)$redirect['code'] : 0;
-        $redirectId = isset($redirect['id']) && is_scalar($redirect['id']) ? (string)$redirect['id'] : '0';
 
-        if ($redirectCode === 410) {
-            $trace->add('Result', 'Responded with 410 Gone', $redirectUrl);
-            $this->writeHit($redirectUrl, '410', $matchReason, null, $trace->getSteps());
-            $this->notFoundResponse->forceRedirect('', 410);
-            return false;
-        }
-
-        if ($redirectCode === 451) {
-            $trace->add('Result', 'Responded with 451 Unavailable For Legal Reasons', $redirectUrl);
-            $this->writeHit($redirectUrl, '451', $matchReason, null, $trace->getSteps());
-            $this->notFoundResponse->forceRedirect('', 451);
-            return false;
+        $terminal = $this->dispatchTerminalStatus($redirectCode, $redirectUrl, $matchReason, $trace);
+        if ($terminal !== null) {
+            return $terminal;
         }
 
         if ($redirect['type'] == ABJ404_TYPE_404_DISPLAYED) {
@@ -116,31 +105,7 @@ class ABJ_404_Solution_RedirectDispatcher {
             return true;
         }
 
-        $isRedirectToCustom404Page = false;
-        if ($redirect['type'] == $this->typePost()) {
-            $options = $this->getOptions();
-            $dest404pageRaw = isset($options['dest404page']) ? $options['dest404page'] : null;
-            $dest404page = is_string($dest404pageRaw) ? $dest404pageRaw : null;
-
-            if ($dest404page !== null && $this->notFoundResponse->thereIsAUserSpecified404Page($dest404page)) {
-                $dest404Parts = explode('|', $dest404page);
-                $custom404Id = isset($dest404Parts[0]) ? (int)$dest404Parts[0] : 0;
-                if ($custom404Id > 0 && $redirect['final_dest'] == $custom404Id) {
-                    $isRedirectToCustom404Page = true;
-                }
-            }
-
-            if (!$isRedirectToCustom404Page) {
-                $destPage = $this->callWpFunction('get_post', array($redirect['final_dest']), null);
-                $hasShortcode = false;
-                if (is_object($destPage) && property_exists($destPage, 'post_content') && is_string($destPage->post_content)) {
-                    $hasShortcode = (bool)$this->callWpFunction('has_shortcode', array($destPage->post_content, ABJ404_SHORTCODE_NAME), false);
-                }
-                if ($hasShortcode) {
-                    $isRedirectToCustom404Page = true;
-                }
-            }
-        }
+        $isRedirectToCustom404Page = $this->isRedirectToCustom404Page($redirect);
 
         if ($isRedirectToCustom404Page) {
             $this->previousRequestCookieTracker->setCookieWithPreviousRequest();
@@ -151,60 +116,130 @@ class ABJ_404_Solution_RedirectDispatcher {
             // the redirect, including ones that never follow it or render it.
         }
 
-        if ($redirect['type'] == ABJ404_TYPE_EXTERNAL) {
+        return $this->dispatchResolvedTarget($redirect, array(
+            'requestedURL' => $requestedURL,
+            'matchReason' => $matchReason,
+            'isRedirectToCustom404Page' => $isRedirectToCustom404Page,
+        ), $trace);
+    }
+
+    /** @return bool|null */
+    private function dispatchTerminalStatus(int $code, string $url, string $reason, ABJ_404_Solution_FrontendPipelineTrace $trace) {
+        if ($code !== 410 && $code !== 451) {
+            return null;
+        }
+        $label = $code === 410 ? 'Gone' : 'Unavailable For Legal Reasons';
+        $trace->add('Result', 'Responded with ' . $code . ' ' . $label, $url);
+        $this->writeHit($url, (string)$code, $reason, null, $trace->getSteps());
+        $this->notFoundResponse->forceRedirect('', $code);
+        return false;
+    }
+
+    /** @param array<string, mixed> $redirect */
+    private function isRedirectToCustom404Page(array $redirect): bool {
+        if (($redirect['type'] ?? null) != $this->typePost()) {
+            return false;
+        }
+        $options = $this->getOptions();
+        $dest404pageRaw = $options['dest404page'] ?? null;
+        $dest404page = is_string($dest404pageRaw) ? $dest404pageRaw : null;
+        if ($dest404page !== null && $this->notFoundResponse->thereIsAUserSpecified404Page($dest404page)) {
+            $dest404Parts = explode('|', $dest404page);
+            $custom404Id = isset($dest404Parts[0]) ? (int)$dest404Parts[0] : 0;
+            if ($custom404Id > 0 && ($redirect['final_dest'] ?? null) == $custom404Id) {
+                return true;
+            }
+        }
+        $destPage = $this->callWpFunction('get_post', array($redirect['final_dest'] ?? ''), null);
+        if (!is_object($destPage) || !property_exists($destPage, 'post_content') || !is_string($destPage->post_content)) {
+            return false;
+        }
+        return (bool)$this->callWpFunction('has_shortcode', array($destPage->post_content, ABJ404_SHORTCODE_NAME), false);
+    }
+
+    /**
+     * Normalize stored fields at the resolved-target boundary, retaining legacy defaults.
+     *
+     * @param array<string, mixed> $redirect
+     * @return array{url: string, final_dest: string, code: int, query_mode: ?string, id: string, type_key: string}
+     */
+    private function normalizeResolvedRedirect(array $redirect): array {
+        return array(
+            'url' => is_string($redirect['url'] ?? null) ? $redirect['url'] : '',
+            'final_dest' => is_scalar($redirect['final_dest'] ?? null) ? (string)$redirect['final_dest'] : '',
+            'code' => is_scalar($redirect['code'] ?? null) ? (int)$redirect['code'] : 0,
+            'query_mode' => ABJ_404_Solution_QueryStringHelper::storedQueryMode($redirect),
+            'id' => is_scalar($redirect['id'] ?? null) ? (string)$redirect['id'] : '0',
+            'type_key' => is_scalar($redirect['type'] ?? null) ? (string)$redirect['type'] : '',
+        );
+    }
+
+    /**
+     * Emit a resolved row using named request context; stored fields come only from the row.
+     *
+     * @param array<string, mixed> $redirect
+     * @param array{requestedURL: string, matchReason: string, isRedirectToCustom404Page: bool} $context
+     */
+    private function dispatchResolvedTarget(array $redirect, array $context, ABJ_404_Solution_FrontendPipelineTrace $trace): bool {
+        $requestedURL = $context['requestedURL'];
+        $matchReason = $context['matchReason'];
+        $isRedirectToCustom404Page = $context['isRedirectToCustom404Page'];
+        $target = $this->normalizeResolvedRedirect($redirect);
+        $redirectUrl = $target['url'];
+        $redirectFinalDest = $target['final_dest'];
+        $redirectCode = $target['code'];
+        $queryMode = $target['query_mode'];
+        $redirectId = $target['id'];
+        $redirectTypeKey = $target['type_key'];
+
+        if (($redirect['type'] ?? null) == ABJ404_TYPE_EXTERNAL) {
             $trace->add('Result', 'Redirected to external URL', $redirectFinalDest);
             $this->writeHit($redirectUrl, $redirectFinalDest, 'external', null, $trace->getSteps());
-            $this->notFoundResponse->forceRedirect($redirectFinalDest, $redirectCode);
-            exit;
+            return $this->notFoundResponse->forceRedirect($redirectFinalDest, $redirectCode, -1, $requestedURL, false, $queryMode);
         }
-
         $finalDestRaw = trim($redirectFinalDest);
-        $redirectTypeInt = is_scalar($redirect['type']) ? (int)$redirect['type'] : 0;
+        $redirectTypeInt = (int)$redirectTypeKey;
         if ($finalDestRaw === '' && $redirectTypeInt !== ABJ404_TYPE_HOME && $redirectTypeInt !== ABJ404_TYPE_404_DISPLAYED) {
-            $this->logger->warn('Redirect destination missing. Sending request to 404 page instead. Redirect ID: ' . $redirectId);
-            $trace->add('Result', 'Showed 404 page - redirect destination missing', 'rule #' . $redirectId);
-            $this->writeHit($redirectUrl, '404', $matchReason . ' (missing destination)', null, $trace->getSteps());
-            $this->telemetry->emitBenchmarkHeadersIfEnabled();
-            $this->notFoundResponse->sendTo404Page($requestedURL, 'missing redirect destination');
-            return true;
+            return $this->showInvalidRedirect(array(
+                'requestedURL' => $requestedURL,
+                'logReason' => $matchReason . ' (missing destination)',
+                'redirectUrl' => $redirectUrl,
+                'redirectId' => $redirectId,
+                'responseReason' => 'missing redirect destination',
+            ), $trace);
         }
-
-        $key = $redirectFinalDest . '|' . (is_scalar($redirect['type']) ? (string)$redirect['type'] : '');
+        $key = $redirectFinalDest . '|' . $redirectTypeKey;
         $permalink = ABJ_404_Solution_PermalinkResolver::permalinkInfoToArray($key, 0);
-
-        $finalLink = (is_array($permalink) && array_key_exists('link', $permalink))
-            ? $permalink['link']
-            : '';
+        $finalLink = is_array($permalink) && array_key_exists('link', $permalink) ? $permalink['link'] : '';
         if (!is_string($finalLink) || trim($finalLink) === '' || $finalLink === 'dunno') {
-            $this->logger->warn('Resolved permalink is empty/invalid. Sending request to 404 page instead. Redirect ID: ' . $redirectId);
-            $trace->add('Result', 'Showed 404 page - redirect destination invalid', 'rule #' . $redirectId);
-            $this->writeHit($redirectUrl, '404', $matchReason . ' (invalid destination)', null, $trace->getSteps());
-            $this->telemetry->emitBenchmarkHeadersIfEnabled();
-            $this->notFoundResponse->sendTo404Page($requestedURL, 'invalid redirect destination');
-            return true;
+            return $this->showInvalidRedirect(array(
+                'requestedURL' => $requestedURL,
+                'logReason' => $matchReason . ' (invalid destination)',
+                'redirectUrl' => $redirectUrl,
+                'redirectId' => $redirectId,
+                'responseReason' => 'invalid redirect destination',
+            ), $trace);
         }
-
         $redirectedTo = esc_url($finalLink);
         $urlParts = parse_url($redirectedTo);
         if (is_array($urlParts) && array_key_exists('path', $urlParts)) {
             $redirectedTo = $urlParts['path'];
         }
-
         $trace->add('Result', 'Redirected (' . $redirectCode . ')', $redirectedTo);
         $this->writeHit($redirectUrl, $redirectedTo, $matchReason, null, $trace->getSteps());
+        return $this->notFoundResponse->forceRedirect($finalLink, $redirectCode, -1, $requestedURL, $isRedirectToCustom404Page, $queryMode);
+    }
 
-        $sendTo404Page = $this->notFoundResponse->forceRedirect(
-            $finalLink,
-            $redirectCode,
-            -1,
-            $requestedURL,
-            $isRedirectToCustom404Page
-        );
-
-        if ($sendTo404Page) {
-            return true;
-        }
-        exit;
+    /**
+     * @param array{requestedURL: string, logReason: string, redirectUrl: string, redirectId: string, responseReason: string} $context
+     */
+    private function showInvalidRedirect(array $context, ABJ_404_Solution_FrontendPipelineTrace $trace): bool {
+        $this->logger->warn('Resolved permalink is empty/invalid. Sending request to 404 page instead. Redirect ID: ' . $context['redirectId']);
+        $trace->add('Result', 'Showed 404 page - redirect destination invalid', 'rule #' . $context['redirectId']);
+        $this->writeHit($context['redirectUrl'], '404', $context['logReason'], null, $trace->getSteps());
+        $this->telemetry->emitBenchmarkHeadersIfEnabled();
+        $this->notFoundResponse->sendTo404Page($context['requestedURL'], $context['responseReason']);
+        return true;
     }
 
     /**
@@ -221,7 +256,7 @@ class ABJ_404_Solution_RedirectDispatcher {
         $lookupStart = abj_clock()->nowFloat();
         $regexPermalink = $this->spellChecker->getPermalinkUsingRegEx($requestedURL, $options);
         $this->telemetry->recordRedirectLookupTiming($lookupStart);
-        if (!empty($regexPermalink)) {
+        if (!empty($regexPermalink) && empty($regexPermalink['last_error'])) {
             $regexMatchingUrl = isset($regexPermalink['matching_regex']) && is_string($regexPermalink['matching_regex']) ? $regexPermalink['matching_regex'] : '';
             $regexLink = isset($regexPermalink['link']) && is_string($regexPermalink['link']) ? $regexPermalink['link'] : '';
             $regexAction = isset($regexPermalink['link']) && is_string($regexPermalink['link']) ? $regexPermalink['link'] : '';
@@ -238,12 +273,11 @@ class ABJ_404_Solution_RedirectDispatcher {
                 $regexLink,
                 $regexCode,
                 $regexType,
-                $requestedURL
+                $requestedURL,
+                false,
+                ABJ_404_Solution_QueryStringHelper::storedQueryMode($regexPermalink)
             );
-            if ($sentTo404Page) {
-                return true;
-            }
-            exit;
+            return $sentTo404Page;
         }
         $trace->add('Regex rules', 'No match');
         return false;
@@ -316,7 +350,7 @@ class ABJ_404_Solution_RedirectDispatcher {
                     // Legacy audit marker for source-inspection tests: this->dao->logRedirectHit($requestedURL, $spLink, 'single page'
                     $this->writeHit($requestedURL, $spLink, 'single page', null, $trace->getSteps());
                     $this->notFoundResponse->forceRedirect(esc_url($spLink), (int)$spDefaultRedirect);
-                    exit;
+                    return;
                 }
             }
         }

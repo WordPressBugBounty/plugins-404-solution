@@ -5,6 +5,9 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/../repositories/SiteResourceLock.php';
+require_once __DIR__ . '/../services/OptionCacheInvalidator.php';
+
 /**
  * Raised when a setup wizard presentation asset cannot be loaded.
  */
@@ -37,7 +40,7 @@ class ABJ_404_Solution_SetupWizard {
         }
 
         // AJAX handler for skip/close (no page reload needed)
-        add_action('wp_ajax_abj404_dismiss_setup_wizard', array(__CLASS__, 'handleAjaxDismiss'));
+        add_action(ABJ_404_Solution_PluginAjaxActions::hook('abj404_dismiss_setup_wizard'), array(__CLASS__, 'handleAjaxDismiss'));
 
         // Enqueue assets and output modal on 404 Solution pages
         add_action('admin_enqueue_scripts', array(__CLASS__, 'enqueueAssets'));
@@ -112,22 +115,109 @@ class ABJ_404_Solution_SetupWizard {
         $action = self::submittedAction($_POST);
         $answers = ABJ_404_Solution_SetupWizardAnswerPolicy::answersFromRequest($_POST);
 
-        // All actions mark setup as complete
-        ABJ_404_Solution_SetupWizardOptionStore::markCompleteToday();
-
         // If user clicked "Save & Get Started", apply their settings
         if ($action === 'save') {
-            $options = ABJ_404_Solution_SetupWizardAnswerPolicy::applyToOptions(
-                ABJ_404_Solution_SetupWizardOptionStore::loadPluginOptions(),
-                $answers,
-                ABJ_404_Solution_SetupWizardOptionStore::adminEmail()
-            );
-            ABJ_404_Solution_SetupWizardOptionStore::savePluginOptions($options);
+            $repository = abj_service('options_repository');
+            $checkedWriter = is_callable(array($repository, 'getRawSettingsSnapshot'))
+                && is_callable(array($repository, 'updateOptionsChecked'));
+            if (!$checkedWriter) {
+                wp_die(
+                    esc_html__('Settings could not be saved because the checked storage writer is unavailable. Reload this page and try again.', '404-solution') . ' [ABJ404_SETTINGS_WRITER_UNAVAILABLE]',
+                    esc_html__('Error', '404-solution'), array('response' => 503, 'back_link' => true)
+                );
+            }
+            $lock = new ABJ_404_Solution_SiteResourceLock('initialization');
+            if (!$lock->acquire()) {
+                wp_die(
+                    esc_html__('Settings could not be saved because another update is in progress. Reload this page and try again.', '404-solution') . ' [ABJ404_SETTINGS_WRITE_BUSY]',
+                    esc_html__('Error', '404-solution'), array('response' => 409, 'back_link' => true)
+                );
+            }
+            try {
+                $saved = self::saveAnswersChecked($repository, $answers, $lock);
+                if ($saved) {
+                    // Completion is durable only after the checked settings write.
+                    ABJ_404_Solution_SetupWizardOptionStore::markCompleteToday();
+                }
+            } finally {
+                $lock->release();
+            }
+            // wp_die terminates PHP without running finally. Respond only
+            // after the connection-owned lock has been released.
+            if (!$saved) {
+                wp_die(
+                    esc_html__('Settings could not be saved. Reload this page and try again.', '404-solution') . ' [ABJ404_SETTINGS_SAVE_REFUSED]',
+                    esc_html__('Error', '404-solution'), array('response' => 409, 'back_link' => true)
+                );
+            }
+        } else {
+            ABJ_404_Solution_SetupWizardOptionStore::markCompleteToday();
         }
 
         $redirect_url = ABJ_404_Solution_SetupWizardAnswerPolicy::redirectPath($answers);
-        wp_safe_redirect(admin_url($redirect_url));
+        $destination = admin_url($redirect_url);
+        if (!ABJ_404_Solution_RedirectLoopGuard::permitsDestination($destination)) {
+            ABJ_404_Solution_WPNotices::respondToRedirectRefusal($destination);
+            // Keep rendering this admin page. The guard queues the existing
+            // plugin notice so the refusal is visible without a new surface.
+            return;
+        }
+        wp_safe_redirect($destination);
         exit;
+    }
+
+    /**
+     * Apply answers only against the exact settings snapshot which produced them.
+     * This operation returns refusal so its caller can release the lock before responding.
+     * @param ABJ_404_Solution_PluginLogicOptionsResolver $repository
+     * @param array{q1:string,q2:string,q3:string} $answers
+     */
+    private static function saveAnswersChecked($repository, array $answers,
+        ABJ_404_Solution_SiteResourceLock $lock): bool {
+        ABJ_404_Solution_OptionCacheInvalidator::site('abj404_settings');
+        if (is_callable(array($repository, 'clearCache'))) {
+            call_user_func(array($repository, 'clearCache'));
+        }
+        // Keep the answer base and raw compare authority paired. The
+        // options read may repair/default-persist the row while the
+        // lock is held, so reload once when its exact bytes change.
+        $before = $repository->getRawSettingsSnapshot();
+        $options = ABJ_404_Solution_SetupWizardOptionStore::loadPluginOptions();
+        $expected = $repository->getRawSettingsSnapshot();
+        if (!self::sameRawSettingsSnapshot($before, $expected)) {
+            if (is_callable(array($repository, 'clearCache'))) {
+                call_user_func(array($repository, 'clearCache'));
+            }
+            ABJ_404_Solution_OptionCacheInvalidator::site('abj404_settings');
+            $before = $expected;
+            $options = ABJ_404_Solution_SetupWizardOptionStore::loadPluginOptions();
+            $expected = $repository->getRawSettingsSnapshot();
+            if (!self::sameRawSettingsSnapshot($before, $expected)) {
+                return false;
+            }
+        }
+        $options = ABJ_404_Solution_SetupWizardAnswerPolicy::applyToOptions(
+            $options, $answers, ABJ_404_Solution_SetupWizardOptionStore::adminEmail()
+        );
+        try {
+            $saved = $repository->updateOptionsChecked($options, $expected, $lock);
+        } catch (Throwable $e) {
+            abj_service('logging')->warn('Setup settings write refused: ' . $e->getMessage());
+            $saved = false;
+        }
+        if ($saved !== true) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * @param array{status:string,value:string} $left
+     * @param array{status:string,value:string} $right
+     */
+    private static function sameRawSettingsSnapshot(array $left, array $right): bool {
+        return isset($left['status'], $left['value'], $right['status'], $right['value'])
+            && $left['status'] === $right['status'] && $left['value'] === $right['value'];
     }
 
     /**

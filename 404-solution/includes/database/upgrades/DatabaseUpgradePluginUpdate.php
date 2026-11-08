@@ -119,7 +119,7 @@ class ABJ_404_Solution_DatabaseUpgradePluginUpdate extends ABJ_404_Solution_Data
         );
 
         // DAO-bypass-approved: One-shot path-relativization migration; already prepared (multi-line CASE with prefix args), wpdb->query for rows-affected return; tightly mocked in DatabaseMigrationTest
-        $updateResult = $wpdb->query($updateQuery);
+        $updateResult = ABJ_404_Solution_DatabaseDriverCall::query($wpdb, $updateQuery);
 
         // Check for errors
         if ($updateResult === false) {

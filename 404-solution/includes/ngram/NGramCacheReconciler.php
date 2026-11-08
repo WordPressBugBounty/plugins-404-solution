@@ -320,36 +320,43 @@ class ABJ_404_Solution_NGramCacheReconciler {
 
         $this->logger->infoMessage("Found " . count($orphanedPosts) . " orphaned post ngram entries. Deleting...");
 
-        $deleted = 0;
-        $errors = 0;
-        foreach ($orphanedPosts as $entry) {
-            if (!is_object($entry)) {
-                continue;
-            }
-            /** @var object{id: int, type: string} $entry */
-            $entryId = (int)$entry->id;
-            $entryType = (string)$entry->type;
-            $deleteResult = $this->dbCore->queryAndGetResults(
-                "DELETE FROM {$ngramTable} WHERE id = %d AND type = %s",
-                ['query_params' => [$entryId, $entryType]]
-            );
+        $deletion = $this->deleteOrphanedPosts($ngramTable, $orphanedPosts);
+        $deleted = $deletion['deleted'];
+        $errors = $deletion['errors'];
+        $uncertain = $deletion['uncertain'];
 
-            $deleteError = isset($deleteResult['last_error']) && is_string($deleteResult['last_error']) ? $deleteResult['last_error'] : '';
-            if ($deleteError !== '') {
-                if (!$this->dbCore->errorClassifier()->classifyAndHandleInfrastructureError($deleteError)) {
-                    $this->logger->errorMessage("Failed to delete orphaned post ngram entry ID {$entryId}: " . $deleteError);
-                }
-                $errors++;
-            } else {
-                $deleted++;
-            }
-        }
-
-        if ($deleted > 0) {
+        if ($deleted > 0 || $uncertain) {
             $this->invalidateCoverageCaches();
         }
 
         return ['deleted' => $deleted, 'errors' => $errors];
+    }
+
+    /**
+     * @param array<int,mixed> $entries
+     * @return array{deleted:int,errors:int,uncertain:bool}
+     */
+    private function deleteOrphanedPosts(string $ngramTable, array $entries): array {
+        $deleted = 0; $errors = 0; $uncertain = false;
+        foreach ($entries as $entry) {
+            if (!is_object($entry)) { continue; }
+            /** @var object{id:int,type:string} $entry */
+            $entryId = (int)$entry->id; $entryType = (string)$entry->type;
+            $result = $this->dbCore->queryAndGetResults("DELETE FROM {$ngramTable} WHERE id = %d AND type = %s",
+                array('query_params' => array($entryId, $entryType)));
+            $error = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
+            $failed = $error !== '' || !array_key_exists('query_succeeded', $result)
+                || $result['query_succeeded'] !== true
+                || (array_key_exists('timed_out', $result) && $result['timed_out'] !== false);
+            if ($failed) {
+                if (!$this->dbCore->errorClassifier()->classifyAndHandleInfrastructureError($error)) {
+                    $this->logger->errorMessage("Failed to delete orphaned post ngram entry ID {$entryId}: "
+                        . ($error !== '' ? $error : 'query did not confirm success.'));
+                }
+                $errors++; $uncertain = true;
+            } else { $deleted++; }
+        }
+        return array('deleted' => $deleted, 'errors' => $errors, 'uncertain' => $uncertain);
     }
 
     /**

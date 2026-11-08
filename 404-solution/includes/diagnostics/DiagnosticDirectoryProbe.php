@@ -50,39 +50,66 @@ final class ABJ_404_Solution_DiagnosticDirectoryProbe {
                 . ABJ_404_Solution_PhpRuntimeCapabilityAdapter::processToken() . '.tmp';
             $payload = 'abj404-selftest-' . $requestId;
 
-            $handle = @fopen($path, 'wb');
+            $open = ABJ_404_Solution_HostFilesystemCall::fopen($path, 'wb');
+            self::reportFilesystemWarning('self-test create', $open['warning']);
+            $handle = $open['result'];
             if ($handle === false) {
                 self::recordStep($requestId, false, 'create');
                 return;
             }
-            $written = @fwrite($handle, $payload);
-            $flushed = @fflush($handle);
-            @fclose($handle);
+            $write = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($handle, $payload) { return fwrite($handle, $payload); }
+            );
+            self::reportFilesystemWarning('self-test append', $write['warning']);
+            $written = $write['result'];
+            $flush = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($handle) { return fflush($handle); }
+            );
+            self::reportFilesystemWarning('self-test flush', $flush['warning']);
+            $flushed = $flush['result'];
+            $close = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($handle) { return fclose($handle); }
+            );
+            self::reportFilesystemWarning('self-test close', $close['warning']);
             if ($written === false || !$flushed) {
                 self::recordStep($requestId, false, 'append_flush');
                 return;
             }
 
-            $size = @filesize($path);
+            $sizeResult = ABJ_404_Solution_HostFilesystemCall::filesize($path);
+            self::reportFilesystemWarning('self-test stat', $sizeResult['warning']);
+            $size = $sizeResult['result'];
             if (!is_int($size) || $size !== strlen($payload)) {
                 self::recordStep($requestId, false, 'stat', array('size' => $size));
                 return;
             }
 
-            $globMatches = @glob($directory . self::FILE_PREFIX . '*');
+            $globResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($directory) { return glob($directory . self::FILE_PREFIX . '*'); }
+            );
+            self::reportFilesystemWarning('self-test glob', $globResult['warning']);
+            $globMatches = $globResult['result'];
             $globCount = is_array($globMatches) ? count($globMatches) : 0;
             if ($globCount < 1) {
                 self::recordStep($requestId, false, 'glob', array('glob_count' => $globCount));
                 return;
             }
 
-            $readBack = @file_get_contents($path);
+            $readResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($path) { return file_get_contents($path); }
+            );
+            self::reportFilesystemWarning('self-test read', $readResult['warning']);
+            $readBack = $readResult['result'];
             if ($readBack !== $payload) {
                 self::recordStep($requestId, false, 'read');
                 return;
             }
 
-            if (!@unlink($path)) {
+            $delete = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($path) { return unlink($path); }
+            );
+            self::reportFilesystemWarning('self-test delete', $delete['warning']);
+            if (!$delete['result']) {
                 self::recordStep($requestId, false, 'delete');
                 return;
             }
@@ -107,7 +134,17 @@ final class ABJ_404_Solution_DiagnosticDirectoryProbe {
      */
     private static function recordStep(string $requestId, bool $ok, string $step,
             array $extra = array()): void {
+        if (!$ok && in_array($step, array('resolve_directory', 'create', 'append_flush', 'exception'), true)
+                && class_exists('ABJ_404_Solution_RequestFailureFrame', false)) {
+            ABJ_404_Solution_RequestFailureFrame::storageFailed();
+        }
         ABJ_404_Solution_AjaxCheckpointLogger::record($requestId, 'selftest',
             array_merge(array('ok' => $ok, 'step' => $step), $extra));
+    }
+
+    private static function reportFilesystemWarning(string $operation, ?string $warning): void {
+        if ($warning !== null && $warning !== '' && function_exists('abj404_logPhpFallback')) {
+            abj404_logPhpFallback('logger-internal', $operation . ': ' . $warning);
+        }
     }
 }

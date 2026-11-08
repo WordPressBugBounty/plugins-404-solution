@@ -210,7 +210,7 @@ class ABJ_404_Solution_View_Redirects extends ABJ_404_Solution_ViewComponent {
         $formRows .= $this->editFormPresenter()->buildFieldRowHtml('code', esc_html__('Redirect Type', '404-solution'), $typeGridHtml);
 
         // Build advanced options (dates + conditions).
-        $advancedOptions = $this->buildAdvancedOptionsHtml($content['startDate'], $content['endDate']);
+        $advancedOptions = $this->buildAdvancedOptionsHtml($content['startDate'], $content['endDate'], ABJ_404_Solution_QueryStringHelper::storedQueryMode($content['redirect']), $content['redirectUrl'] !== '');
 
         // Compose the page using the shell template.
         $cancelUrl = $this->editFormPresenter()->buildCancelUrl($context['sourcePage'], $context['filter'], $context['orderby'], $context['order']);
@@ -380,14 +380,14 @@ class ABJ_404_Solution_View_Redirects extends ABJ_404_Solution_ViewComponent {
      * @param string $endDate ISO date for "Active Until", or empty.
      * @return string
      */
-    private function buildAdvancedOptionsHtml(string $startDate, string $endDate): string {
+    private function buildAdvancedOptionsHtml(string $startDate, string $endDate, ?string $queryMode = null, bool $showQueryMode = true): string {
         $redirectId = 0;
         $rawId = $_GET['id'] ?? ($_POST['id'] ?? null);
         if (is_scalar($rawId) && $this->f->regexMatch('[0-9]+', (string)$rawId)) {
             $redirectId = absint((string)$rawId);
         }
         $hasExistingConditions = ($redirectId > 0) && !empty($this->redirectsRepository->getRedirectConditions($redirectId));
-        $hasAdvancedValues = ($startDate !== '' || $endDate !== '' || $hasExistingConditions);
+        $hasAdvancedValues = ($startDate !== '' || $endDate !== '' || $hasExistingConditions || $queryMode !== null);
         $openAttr = $hasAdvancedValues ? ' open' : '';
 
         ob_start();
@@ -398,7 +398,9 @@ class ABJ_404_Solution_View_Redirects extends ABJ_404_Solution_ViewComponent {
             $startDate,
             $endDate,
             $conditionsHtml,
-            $openAttr !== ''
+            $openAttr !== '',
+            $queryMode,
+            $showQueryMode
         );
     }
     

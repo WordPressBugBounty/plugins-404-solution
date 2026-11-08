@@ -207,15 +207,63 @@ final class ABJ_404_Solution_RequestEnvironmentFingerprint {
 
     /** @return array<string, mixed> */
     private function fileFingerprint(string $role, string $path): array {
-        $isFile = @is_file($path);
+        $empty = array('role' => $role, 'path' => $path, 'hash' => null,
+            'mtime' => null, 'inode' => null, 'size' => null);
+        $isFileResult = ABJ_404_Solution_HostFilesystemCall::isFile($path);
+        if ($isFileResult['warning'] !== null) {
+            $this->reportFileFingerprintWarning($role, $path, 'is_file', $isFileResult['warning']);
+            return $empty;
+        }
+        $isFile = (bool)$isFileResult['result'];
+        if (!$isFile) {
+            return $empty;
+        }
+        $hashResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($path) { return md5_file($path); }
+        );
+        if ($hashResult['warning'] !== null) {
+            $this->reportFileFingerprintWarning($role, $path, 'md5_file', $hashResult['warning']);
+        }
+        $mtimeResult = ABJ_404_Solution_HostFilesystemCall::filemtime($path);
+        if ($mtimeResult['warning'] !== null) {
+            $this->reportFileFingerprintWarning($role, $path, 'filemtime', $mtimeResult['warning']);
+        }
+        $inodeResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($path) { return fileinode($path); }
+        );
+        if ($inodeResult['warning'] !== null) {
+            $this->reportFileFingerprintWarning($role, $path, 'fileinode', $inodeResult['warning']);
+        }
+        $sizeResult = ABJ_404_Solution_HostFilesystemCall::filesize($path);
+        if ($sizeResult['warning'] !== null) {
+            $this->reportFileFingerprintWarning($role, $path, 'filesize', $sizeResult['warning']);
+        }
         return array(
             'role' => $role,
             'path' => $path,
-            'hash' => $isFile ? @md5_file($path) : null,
-            'mtime' => $isFile ? @filemtime($path) : null,
-            'inode' => $isFile ? @fileinode($path) : null,
-            'size' => $isFile ? @filesize($path) : null,
+            'hash' => $hashResult['warning'] === null && is_string($hashResult['result'])
+                ? $hashResult['result'] : null,
+            'mtime' => $mtimeResult['warning'] === null && is_int($mtimeResult['result'])
+                ? $mtimeResult['result'] : null,
+            'inode' => $inodeResult['warning'] === null && is_int($inodeResult['result'])
+                ? $inodeResult['result'] : null,
+            'size' => $sizeResult['warning'] === null && is_int($sizeResult['result'])
+                ? $sizeResult['result'] : null,
         );
+    }
+
+    private function reportFileFingerprintWarning(
+        string $role,
+        string $path,
+        string $operation,
+        string $warning
+    ): void {
+        if (function_exists('abj404_logPhpFallback')) {
+            abj404_logPhpFallback(
+                'request-environment',
+                $role . ' ' . $operation . ' failed for ' . $path . ': ' . $warning
+            );
+        }
     }
 
     /**

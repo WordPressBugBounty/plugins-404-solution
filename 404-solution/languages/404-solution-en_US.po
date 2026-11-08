@@ -225,6 +225,9 @@ msgstr "* Use an asterisk (*) to match \"any pattern.\""
 msgid "404 Page Suggestions"
 msgstr "404 Page Suggestions"
 
+msgid "404 Suggestions"
+msgstr "404 Suggestions"
+
 msgid "404 URL marked as %s successfully!"
 msgstr "404 URL marked as %s successfully!"
 
@@ -2087,6 +2090,9 @@ msgstr "redirects"
 msgid "Showing %1$d-%2$d of %3$d %4$s"
 msgstr "Showing %1$d-%2$d of %3$d %4$s"
 
+msgid "Showing a limited set of matching records while sorting and search are being prepared. The full list returns automatically."
+msgstr "Showing a limited set of matching records while sorting and search are being prepared. The full list returns automatically."
+
 msgid "Redirects will appear here once created."
 msgstr "Redirects will appear here once created."
 
@@ -3781,6 +3787,9 @@ msgstr "Preparing table data in the background."
 msgid "Preparing the redirects view table. Please wait."
 msgstr "Preparing the redirects view table. Please wait."
 
+msgid "Preparing the redirects table."
+msgstr "Preparing the redirects table."
+
 #: includes/DataAccessTrait_ViewQueriesStaged.php
 msgid "(404 page)"
 msgstr "(404 page)"
@@ -4593,3 +4602,154 @@ msgstr "Timed-out requests"
 #: includes/view/ShortcodeSuggestionsPresenter.php:260
 msgid "Show suggested pages"
 msgstr "Show suggested pages"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Query strings"
+msgstr "Query strings"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Routing parameters, pass query (default)"
+msgstr "Routing parameters, pass query (default)"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Exact URL, pass query"
+msgstr "Exact URL, pass query"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Routing parameters, discard query"
+msgstr "Routing parameters, discard query"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Path only, pass query"
+msgstr "Path only, pass query"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Choose how missing pages are handled. You can change these settings later in Options."
+msgstr "Choose how missing pages are handled. You can change these settings later in Options."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Redirect to the closest match (recommended)"
+msgstr "Redirect to the closest match (recommended)"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "When no close match is found, show a 404 page that suggests similar pages."
+msgstr "When no close match is found, show a 404 page that suggests similar pages."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Show a 404 page that suggests similar pages"
+msgstr "Show a 404 page that suggests similar pages"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Visitors are never redirected automatically. Redirects you create yourself still work."
+msgstr "Visitors are never redirected automatically. Redirects you create yourself still work."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Missing URLs are listed under Captured 404s so you can create redirects for them."
+msgstr "Missing URLs are listed under Captured 404s so you can create redirects for them."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Missing URLs are not recorded. This does not change how visitors are redirected."
+msgstr "Missing URLs are not recorded. This does not change how visitors are redirected."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Email me about missing pages?"
+msgstr "Email me about missing pages?"
+
+#. translators: %d is the number of captured 404 URLs that triggers an email.
+#: includes/admin/SetupWizardPresenter.php
+#, php-format
+msgid "Yes, email me when %d or more 404s have been captured (recommended)"
+msgstr "Yes, email me when %d or more 404s have been captured (recommended)"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Checked weekly. The email is sent to the site administrator."
+msgstr "Checked weekly. The email is sent to the site administrator."
+
+#. translators: %s is the site administrator's email address.
+#: includes/admin/SetupWizardPresenter.php
+#, php-format
+msgid "Checked weekly. The email is sent to %s."
+msgstr "Checked weekly. The email is sent to %s."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Email alerts need the list of missing pages, so they are off while logging is off."
+msgstr "Email alerts need the list of missing pages, so they are off while logging is off."
+
+#: includes/redirects/RedirectChainWalker.php
+#, php-format
+msgid "Redirect loop: %s. Choose a destination outside this loop."
+msgstr ""
+
+#: includes/redirects/RedirectChainWalker.php
+#, php-format
+msgid "Redirect not saved: the redirect loop check could not run (%s)."
+msgstr ""
+
+#: includes/php/wordpress/WPNotices.php
+msgid "A redirect loop was stopped:"
+msgstr ""
+
+#: includes/php/wordpress/WPNotices.php
+#, php-format
+msgid "A redirect loop was stopped: %s. Edit these rules in Page Redirects."
+msgstr ""
+
+#: includes/view/View_Shared.php
+msgid "Sorting by this column is being prepared. It becomes available automatically."
+msgstr "Sorting by this column is being prepared. It becomes available automatically."
+
+#: includes/redirects/RedirectChainWalker.php
+msgid "Reload this page and try again. If the error continues, send this message to support."
+msgstr "Reload this page and try again. If the error continues, send this message to support."
+
+#: includes/repositories/RedirectConditionsRepository.php
+msgid "The redirect conditions table is unavailable; conditions were not saved. [ABJ404_CONDITIONS_TABLE_UNAVAILABLE]"
+msgstr "The redirect conditions table is unavailable; conditions were not saved. [ABJ404_CONDITIONS_TABLE_UNAVAILABLE]"
+
+#: includes/redirects/RedirectWriteAdmissionPolicy.php
+#: includes/repositories/RedirectLifecycleService.php
+#: includes/repositories/RedirectWriteService.php
+#, php-format
+msgid "A live row already owns this source URL: %s [ABJ404_SOURCE_CONFLICT] Edit or move the existing redirect to the trash before trying again."
+msgstr "A live row already owns this source URL: %s [ABJ404_SOURCE_CONFLICT] Edit or move the existing redirect to the trash before trying again."
+#: includes/core/PluginLogicSettingsUpdate.php:159
+#: includes/core/SetupWizard.php:125
+msgid "Settings could not be saved because the checked storage writer is unavailable. Reload this page and try again."
+msgstr "Settings could not be saved because the checked storage writer is unavailable. Reload this page and try again."
+
+#: includes/core/PluginLogicSettingsUpdate.php:165
+#: includes/core/SetupWizard.php:132
+msgid "Settings could not be saved because another update is in progress. Reload this page and try again."
+msgstr "Settings could not be saved because another update is in progress. Reload this page and try again."
+
+#: includes/core/PluginLogicSettingsUpdate.php:182
+#: includes/core/SetupWizard.php:153
+msgid "Settings could not be saved. Reload this page and try again."
+msgstr "Settings could not be saved. Reload this page and try again."
+#: includes/ajax/Ajax_RestoreDefaults.php:76
+msgid "Settings could not be restored because the checked storage writer is unavailable."
+msgstr "Settings could not be restored because the checked storage writer is unavailable."
+
+#: includes/ajax/Ajax_RestoreDefaults.php:82
+msgid "Settings could not be restored because another update is in progress."
+msgstr "Settings could not be restored because another update is in progress."
+
+#: includes/ajax/Ajax_RestoreDefaults.php:99
+msgid "Settings could not be restored. Reload this page and try again."
+msgstr "Settings could not be restored. Reload this page and try again."
+
+#. translators: %d = number of import issue details not displayed.
+#: includes/import/ImportIssueSummary.php
+#, php-format
+msgid "Additional import issues omitted: %d."
+msgstr "Additional import issues omitted: %d."
+
+#. translators: %s = legacy plugin redirect table name.
+#: includes/repositories/PluginUpdateMetadataRepository.php
+#, php-format
+msgid "[ABJ404-IMPORT-SOURCE-NOT-FOUND] Legacy Redirectioner source table \"%s\" was not found; no records were imported. Confirm that the legacy redirects are present in this WordPress installation before retrying the import."
+msgstr "[ABJ404-IMPORT-SOURCE-NOT-FOUND] Legacy Redirectioner source table \"%s\" was not found; no records were imported. Confirm that the legacy redirects are present in this WordPress installation before retrying the import."
+
+#: includes/import/ForeignSourceQueryGateway.php
+msgid "The database did not confirm a successful source read. Check the source plugin data and database connection before retrying."
+msgstr "The database did not confirm a successful source read. Check the source plugin data and database connection before retrying."

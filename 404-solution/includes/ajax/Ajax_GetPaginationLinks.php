@@ -9,8 +9,8 @@ if (!defined('ABSPATH')) {
  * captured, and logs tables: fetches the subpage-specific table HTML, status
  * tab counts, pagination links, and the current data signature for client
  * change detection. The single-table denorm read (denorm Step 3b) is always
- * serveable, so there is no view-build gate: the table is rendered
- * synchronously on every request. All exceptions route through
+ * serveable. Identical overlapping requests share a bounded response flight;
+ * followers release their worker immediately. All exceptions route through
  * handlePaginationLinksException for a consistent diagnostics envelope.
  *
  * This class owns the request boundary only: reading and normalizing the input,
@@ -115,7 +115,7 @@ class ABJ_404_Solution_Ajax_GetPaginationLinks {
             ABJ_404_Solution_RequestPhaseTimeline::stamp('auth');
             ABJ_404_Solution_SameSiteRequestCensus::markAuthorized();
 
-            // The first attempt stays on the zero-write fast path. A browser
+            // First-attempt diagnostics stay on the zero-write fast path. A browser
             // retry means the user already observed a transient failure, so
             // arm the durable flight recorder now that nonce and admin access
             // have been proved. Never trust raw retryCount before this point.
@@ -134,6 +134,7 @@ class ABJ_404_Solution_Ajax_GetPaginationLinks {
                 return;
             }
             ABJ_404_Solution_AjaxStageDiagnostics::beginRequest($context);
+            ABJ_404_Solution_AdminTableResponseParts::beginRead();
             if (ABJ_404_Solution_AjaxClientReportBeaconResponder::respondIfReportOnly($requestId)) {
                 return;
             }
@@ -155,52 +156,37 @@ class ABJ_404_Solution_Ajax_GetPaginationLinks {
             /** @var ABJ_404_Solution_View $view */
             $view = ABJ_404_Solution_AjaxAdminEndpointSupport::resolveViewInstance($abj404view);
 
-            // Background detect-only refresh: a "did anything change?" poll the
-            // client fires every ~30s while the admin is idle. It must NOT do the
-            // foreground work -- table HTML render, status-count aggregates, and
-            // the two pagination-link builds. For the redirects / captured tabs
-            // we compute ONLY the table-data signature off the same one-page read
-            // a full render uses (so the signature still matches), and return
-            // {tableSignature, hasUpdate}. The logs tab keeps the full path
-            // (bounded, append-only; not the constant-write pressure case).
-            if ($detectOnly && ABJ_404_Solution_AdminTableResponseParts::canComputeCheapSignature($subpage)
-                    && is_object($view) && method_exists($view, 'computeTableDataSignature')) {
-                $tableSignature = (string)ABJ_404_Solution_AjaxStageDiagnostics::runStage(
-                    $context,
-                    'detectOnlySignature',
-                    static function () use ($view, $subpage) {
-                        return $view->computeTableDataSignature(
-                            $subpage, ABJ_404_Solution_AdminTableResponseParts::queryBudgetOptions(true));
-                    }
-                );
-                $data = array(
-                    'tableSignature' => $tableSignature,
-                    'hasUpdate' => ABJ_404_Solution_AdminTableResponseParts::hasSignatureUpdate(
-                        $currentSignature, $tableSignature),
-                    'requestId' => $requestId,
-                    'retryCount' => $retryCount,
-                );
-                ABJ_404_Solution_AjaxStageDiagnostics::finishRequest('complete');
-                ABJ_404_Solution_AjaxAdminEndpointSupport::markAjaxResponseSent();
-                ABJ_404_Solution_AjaxAdminEndpointSupport::getAndClearAjaxBufferedOutput();
-                ABJ_404_Solution_AjaxResponseEmitter::sendJsonResponseAndExit($data, 200);
-                return;
+            $token = (string)$requestReader->getPostOrGetSanitize('flightToken', '');
+            if ($token !== '' && preg_match('/^[0-9a-f]{64}$/D', $token) !== 1) {
+                throw new ABJ_404_Solution_ViewQueryFailureException('Invalid flightToken.', array(
+                    'code' => 'TABLE_FLIGHT_TOKEN', 'hint' => 'Start a new table request.'));
             }
-
-            $data = ABJ_404_Solution_AdminTableResponseParts::build(
-                array(
-                    'part' => $part,
-                    'subpage' => $subpage,
-                    'view' => $view,
-                    'viewReadService' => $viewReadService,
-                ),
-                $context
+            // Resolve once, then pin the renderer to these same effective
+            // options. Omitted sort/page inputs cannot collide with a different
+            // saved preference, and another request cannot change this build.
+            $tableOptions = $abj404logic->settingsUpdate()->getTableOptions((string)$subpage);
+            $user = wp_get_current_user();
+            $userFields = get_object_vars($user);
+            $capabilities = is_array($userFields['allcaps'] ?? null) ? $userFields['allcaps'] : array();
+            ksort($capabilities);
+            $identity = array(
+                'version' => 1, 'blog' => get_current_blog_id(), 'user' => $context['user_id'],
+                'access' => $capabilities, 'session' => wp_get_session_token(), 'locale' => get_locale(),
+                'page' => $page, 'subpage' => $subpage, 'part' => $part, 'options' => $tableOptions,
+                'detectOnly' => $detectOnly, 'cacheMode' => $cacheMode, 'currentSignature' => $currentSignature,
             );
-            if ($detectOnly && isset($data['tableSignature'])) {
-                $tableSignature = is_scalar($data['tableSignature']) ? (string)$data['tableSignature'] : '';
-                $data['hasUpdate'] = ABJ_404_Solution_AdminTableResponseParts::hasSignatureUpdate(
-                    $currentSignature, $tableSignature);
-            }
+            $flight = new ABJ_404_Solution_AdminTableFlight();
+            $data = $flight->admitOrReplayResponse($identity, array('token' => $token,
+                'started_at' => self::requestStartForFlight()),
+                static function () use ($part, $subpage, $view, $viewReadService, $detectOnly,
+                    $currentSignature, $tableOptions, &$context): array {
+                    return ABJ_404_Solution_AdminTableResponseParts::buildForMode(array(
+                        'part' => $part, 'subpage' => $subpage, 'view' => $view,
+                        'viewReadService' => $viewReadService, 'tableOptions' => $tableOptions,
+                        'detectOnly' => $detectOnly, 'currentSignature' => $currentSignature,
+                        'queryTimeoutSeconds' => ABJ_404_Solution_AdminTableResponseParts::queryBudgetOptions($detectOnly)['_abj404_query_timeout'],
+                    ), $context);
+                });
             $data['requestId'] = $requestId;
             $data['retryCount'] = $retryCount;
 
@@ -217,6 +203,18 @@ class ABJ_404_Solution_Ajax_GetPaginationLinks {
             );
             return;
         }
+    }
+
+    /** @return float A valid request-start anchor for the table flight. */
+    private static function requestStartForFlight(): float {
+        $requestStart = $_SERVER['REQUEST_TIME_FLOAT'] ?? null;
+        if (!is_int($requestStart) && !is_float($requestStart)) {
+            return abj_clock()->nowFloat();
+        }
+        if (!is_finite($requestStart) || $requestStart <= 0) {
+            return abj_clock()->nowFloat();
+        }
+        return (float)$requestStart;
     }
 
     private static function normalizeCacheMode(string $cacheModeRaw): string {

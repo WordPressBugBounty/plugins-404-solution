@@ -24,27 +24,21 @@ class ABJ_404_Solution_DatabaseQueryRecoveryPolicy {
     /** @var ABJ_404_Solution_Logging */
     private $logger;
 
-    /** @var ABJ_404_Solution_DatabaseWpdbResultHarvester */
-    private $resultHarvester;
-
     /** @var ABJ_404_Solution_DatabaseQueryDiagnostics */
     private $queryDiagnostics;
 
     /**
      * @param ABJ_404_Solution_DatabaseCore $core
      * @param ABJ_404_Solution_Logging $logger
-     * @param ABJ_404_Solution_DatabaseWpdbResultHarvester $resultHarvester
      * @param ABJ_404_Solution_DatabaseQueryDiagnostics $queryDiagnostics
      */
     public function __construct(
         ABJ_404_Solution_DatabaseCore $core,
         $logger,
-        ABJ_404_Solution_DatabaseWpdbResultHarvester $resultHarvester,
         ABJ_404_Solution_DatabaseQueryDiagnostics $queryDiagnostics
     ) {
         $this->core = $core;
         $this->logger = $logger;
-        $this->resultHarvester = $resultHarvester;
         $this->queryDiagnostics = $queryDiagnostics;
     }
 
@@ -216,7 +210,7 @@ class ABJ_404_Solution_DatabaseQueryRecoveryPolicy {
             $retried = $tracer->traceAttempt(
                 $retryBranch,
                 $retryReason,
-                fn(): array => $this->executeWpdbQuery($query, $resultType, $producesRows)
+                fn(): array => $this->core->queryExecutor()->executeWpdbQuery($query, $resultType, $producesRows)
             );
             $result = array_merge($result, $retried);
         });
@@ -315,7 +309,7 @@ class ABJ_404_Solution_DatabaseQueryRecoveryPolicy {
             $retried = $tracer->traceAttempt(
                 'deadlock',
                 'deadlock_or_lock_timeout',
-                fn(): array => $this->executeWpdbQuery($query, $resultType, $producesRows)
+                fn(): array => $this->core->queryExecutor()->executeWpdbQuery($query, $resultType, $producesRows)
             );
             $result = array_merge($result, $retried);
             $lastError = $this->lastErrorFromResult($result);
@@ -324,12 +318,14 @@ class ABJ_404_Solution_DatabaseQueryRecoveryPolicy {
                     'deadlock',
                     'notice_update',
                     function () use ($lastError): void {
-                        $this->core->noticeState()->setPluginDbNotice(
-                            'lock_timeout',
-                            function_exists('__') ? __('A database lock wait timeout occurred. If this persists, contact your host - another process may be holding a long-running lock.', '404-solution') : 'A database lock wait timeout occurred. If this persists, contact your host - another process may be holding a long-running lock.',
-                            function_exists('__') ? __('A database lock wait timeout occurred. This is usually caused by another process holding a table lock on your database. It may resolve itself automatically, or contact your hosting provider if it persists.', '404-solution') : 'A database lock wait timeout occurred. This is usually caused by another process holding a table lock on your database. It may resolve itself automatically, or contact your hosting provider if it persists.',
-                            $lastError
-                        );
+                        ABJ_404_Solution_DeferredTranslation::whenReady(function () use ($lastError): void {
+                            $this->core->noticeState()->setPluginDbNotice(
+                                'lock_timeout',
+                                __('A database lock wait timeout occurred. If this persists, contact your host - another process may be holding a long-running lock.', '404-solution'),
+                                __('A database lock wait timeout occurred. This is usually caused by another process holding a table lock on your database. It may resolve itself automatically, or contact your hosting provider if it persists.', '404-solution'),
+                                $lastError
+                            );
+                        });
                     }
                 );
             }
@@ -420,26 +416,6 @@ class ABJ_404_Solution_DatabaseQueryRecoveryPolicy {
                 );
             });
         }
-    }
-
-    /**
-     * @param string $query
-     * @param 'OBJECT'|'OBJECT_K'|'ARRAY_A'|'ARRAY_N' $resultType
-     * @param bool $producesRows
-     * @return array<string, mixed>
-     */
-    private function executeWpdbQuery(string $query, string $resultType, bool $producesRows): array {
-        global $wpdb;
-        if ($producesRows) {
-            // DAO-bypass-approved: Recovery retry executes the original SQL outside DAO routing to avoid recursion.
-            $result = array('rows' => $wpdb->get_results($query, $resultType));
-        } else {
-            // DAO-bypass-approved: Recovery retry executes the original SQL outside DAO routing to avoid recursion.
-            $wpdb->query($query);
-            $result = array('rows' => array());
-        }
-        $this->resultHarvester->harvestWpdbResult($result);
-        return $result;
     }
 
     /**

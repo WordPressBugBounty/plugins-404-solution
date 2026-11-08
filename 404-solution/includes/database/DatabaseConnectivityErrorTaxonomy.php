@@ -87,6 +87,7 @@ class ABJ_404_Solution_DatabaseConnectivityErrorTaxonomy {
         }
         return (strpos($errorText, '3024') !== false ||
             strpos($errorText, '1969') !== false ||
+            stripos($errorText, 'maximum statement execution time exceeded') !== false ||
             stripos($errorText, 'max_execution_time') !== false ||
             stripos($errorText, 'max_statement_time') !== false);
     }

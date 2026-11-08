@@ -4,6 +4,9 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/../repositories/SiteResourceLock.php';
+require_once __DIR__ . '/../repositories/LegacySuggestionPageRecovery.php';
+
 /**
  * Manages the auto-created "Page Not Found" system page used by 404 Solution
  * when the "Suggest similar pages" behavior is selected.
@@ -14,11 +17,17 @@ if (!defined('ABSPATH')) {
  *
  * The page is tagged with post meta _abj404_system_page = 1 so the plugin can
  * find it reliably.
+ *
+ * What is shown to people about the page (deleted-page notice, editor notices,
+ * front-end banner) is SystemPageNotices; this class owns the page itself.
  */
 class ABJ_404_Solution_SystemPage {
 
     /** Post meta key used to identify the system page. */
-    const META_KEY = '_abj404_system_page';
+    const META_KEY = ABJ_404_Solution_LegacySuggestionPageRecovery::META_KEY;
+
+    /** SEO-plugin noindex metadata shared by created and recovered pages. */
+    private const NOINDEX_META = ABJ_404_Solution_LegacySuggestionPageRecovery::NOINDEX_META;
 
     /** @var self|null */
     private static $instance = null;
@@ -58,6 +67,7 @@ class ABJ_404_Solution_SystemPage {
             'posts_per_page' => 1,
             'fields'         => 'ids',
             'no_found_rows'  => true,
+            'cache_results'  => false,
         ));
 
         if (!empty($pages) && is_array($pages)) {
@@ -87,23 +97,6 @@ class ABJ_404_Solution_SystemPage {
      * @return int The page ID, or 0 on failure.
      */
     public function ensureSystemPage(): int {
-        $existingId = $this->getSystemPageId();
-
-        if ($existingId > 0 && get_post_status($existingId) === 'publish') {
-            return $existingId;
-        }
-
-        // If the page exists but is trashed/drafted, try to republish it
-        if ($existingId > 0) {
-            $result = wp_update_post(array(
-                'ID'          => $existingId,
-                'post_status' => 'publish',
-            ), true);
-            if (!is_wp_error($result)) {
-                return $existingId;
-            }
-        }
-
         return $this->createSystemPage();
     }
 
@@ -117,33 +110,74 @@ class ABJ_404_Solution_SystemPage {
     }
 
     /**
-     * Create a fresh system page with the shortcode.
+     * Find and publish the system page, or create it once with the shortcode.
      *
-     * @return int The new page ID, or 0 on failure.
+     * @return int The published page ID, or 0 on failure.
      */
     public function createSystemPage(): int {
+        $lock = new ABJ_404_Solution_SiteResourceLock('initialization');
+        if (!$lock->acquire()) { return 0; }
+        try {
+            // Setup, first reads and recreation all arbitrate at this boundary.
+            // Suppress cached query results taken before another creator committed.
+            $existingId = $this->getSystemPageId();
+            if ($existingId > 0) {
+                if (get_post_status($existingId) === 'publish') { return $existingId; }
+                // If the page exists but is trashed/drafted, try to republish it.
+                $result = wp_update_post(array('ID' => $existingId, 'post_status' => 'publish'), true);
+                return !is_wp_error($result) && (int)$result > 0 ? $existingId : 0;
+            }
+            return $this->insertSystemPage();
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /** @return int ID of the new page; called only while creation is locked. */
+    private function insertSystemPage(): int {
         $title = __('Page Not Found', '404-solution');
 
-        $pageId = wp_insert_post(array(
-            'post_title'   => $title,
-            'post_content' => '[abj404_solution_page_suggestions]',
-            'post_status'  => 'publish',
-            'post_type'    => 'page',
-            'post_author'  => get_current_user_id() ?: 1,
-            'comment_status' => 'closed',
-            'ping_status'    => 'closed',
-        ), true);
+        try {
+            $pageId = wp_insert_post(array(
+                'post_title'   => $title,
+                'post_content' => '[abj404_solution_page_suggestions]',
+                'post_status'  => 'publish',
+                'post_type'    => 'page',
+                'post_author'  => get_current_user_id() ?: 1,
+                'comment_status' => 'closed',
+                'ping_status'    => 'closed',
+                // WordPress writes meta_input before post-save callbacks. Publish
+                // identity and noindex metadata before those callbacks can find us.
+                'meta_input' => array_merge(array(self::META_KEY => '1'), self::NOINDEX_META),
+            ), true);
+        } catch (Throwable $failure) {
+            // A post-save callback can throw after core committed our post and
+            // meta_input. Recover that identified page under the same lock,
+            // without letting boot-time logging publish a fallback settings row.
+            abj404_logPhpFallback('system-page-creation', 'WordPress insertion interrupted by '
+                . get_class($failure) . ' (code ' . $failure->getCode() . ') at '
+                . $failure->getFile() . ':' . $failure->getLine() . ': ' . $failure->getMessage());
+            $pageId = $this->getSystemPageId();
+        }
 
-        if (is_wp_error($pageId)) {
+        if (is_wp_error($pageId) || (int) $pageId <= 0) {
+            $detail = is_object($pageId) && method_exists($pageId, 'get_error_message')
+                ? $pageId->get_error_message() : 'WordPress returned no post ID';
+            abj404_logPhpFallback('system-page-creation', 'Could not insert suggestion page: ' . $detail);
             return 0;
         }
 
-        // Tag with system page meta
-        update_post_meta($pageId, self::META_KEY, '1');
-
-        // Exclude from sitemaps
-        update_post_meta($pageId, '_yoast_wpseo_meta-robots-noindex', '1');
-        update_post_meta($pageId, 'rank_math_robots', array('noindex'));
+        // Metadata writes can be declined independently of the post INSERT.
+        // Judge the durable end state, not update_post_meta's changed-byte flag.
+        if (!(new ABJ_404_Solution_LegacySuggestionPageRecovery())->persistPageMetadata((int)$pageId, array_merge(array(self::META_KEY => '1'), self::NOINDEX_META))) {
+            abj404_logPhpFallback('system-page-creation', 'Metadata incomplete for new page ' . (int)$pageId
+                . '; rolling back the incomplete suggestion destination.');
+            $deleted = wp_delete_post((int)$pageId, true);
+            if (!$deleted) {
+                abj404_logPhpFallback('system-page-creation', 'Could not roll back new page ' . (int)$pageId);
+            }
+            return 0;
+        }
 
         return (int) $pageId;
     }
@@ -191,7 +225,7 @@ class ABJ_404_Solution_SystemPage {
             $options['dest404page'] = '0|' . ABJ404_TYPE_404_DISPLAYED;
             abj_service('options_repository')->updateOptions($options);
 
-            set_transient('abj404_system_page_deleted', '1', DAY_IN_SECONDS);
+            set_transient(ABJ_404_Solution_SystemPageNotices::DELETED_TRANSIENT, '1', DAY_IN_SECONDS);
         }
     }
 
@@ -230,39 +264,6 @@ class ABJ_404_Solution_SystemPage {
     }
 
     /**
-     * Hook: admin_notices on plugin settings page - show notice if system page was deleted.
-     *
-     * @return void
-     */
-    public static function maybeShowDeletedPageNotice(): void {
-        if (get_transient('abj404_system_page_deleted') !== '1') {
-            return;
-        }
-
-        // Only show on our plugin's settings page
-        $page = ABJ_404_Solution_RequestInputNormalizer::readText($_GET, array('name' => 'page'));
-        if ($page !== ABJ404_PP) {
-            return;
-        }
-
-        $settingsUrl = admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options');
-        $recreateUrl = wp_nonce_url(
-            add_query_arg('abj404_recreate_system_page', '1', $settingsUrl),
-            'abj404_recreate_system_page'
-        );
-
-        $tpl = ABJ_404_Solution_FileSystemService::readFileContents(
-            dirname(__DIR__) . '/html/systemPageDeletedAdminNotice.html'
-        );
-        $body = esc_html__('Your 404 suggestion page was deleted.', '404-solution')
-            . ' <a href="' . esc_url($recreateUrl) . '">' . esc_html__('Recreate it', '404-solution') . '</a>'
-            . ' ' . esc_html__('or choose a different option below.', '404-solution');
-        echo strtr($tpl, ['{message_with_link}' => $body]);
-
-        delete_transient('abj404_system_page_deleted');
-    }
-
-    /**
      * Hook: admin_init - handle the recreate system page action.
      *
      * @return void
@@ -296,28 +297,17 @@ class ABJ_404_Solution_SystemPage {
 
         // Redirect back to settings page (without the action param)
         $settingsUrl = admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options');
-        wp_safe_redirect($settingsUrl);
-        exit;
-    }
-
-    /**
-     * Hook: edit_form_after_title - show admin notice when editing the system page.
-     *
-     * @param \WP_Post $post
-     * @return void
-     */
-    public static function showEditorNotice($post): void {
-        if (!self::isSystemPage($post->ID)) {
+        if (is_callable(array('ABJ_404_Solution_RedirectLoopGuard', 'permitsDestination'))
+            && !ABJ_404_Solution_RedirectLoopGuard::permitsDestination($settingsUrl)) {
+            if (is_callable(array('ABJ_404_Solution_WPNotices', 'respondToRedirectRefusal'))) {
+                ABJ_404_Solution_WPNotices::respondToRedirectRefusal($settingsUrl);
+            }
+            // Keep rendering the current admin page; the guard's existing
+            // notice path explains the refused destination.
             return;
         }
-
-        $settingsUrl = admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options');
-        $tpl = ABJ_404_Solution_FileSystemService::readFileContents(
-            dirname(__DIR__) . '/html/systemPageEditorNotice.html'
-        );
-        $body = esc_html__('This page is used by 404 Solution to display suggested pages to visitors.', '404-solution')
-            . ' <a href="' . esc_url($settingsUrl) . '">' . esc_html__('Learn more', '404-solution') . '</a>';
-        echo strtr($tpl, ['{message_with_link}' => $body]);
+        wp_safe_redirect($settingsUrl);
+        exit;
     }
 
     /**
@@ -356,83 +346,6 @@ class ABJ_404_Solution_SystemPage {
     }
 
     /**
-     * Hook: template_redirect - show admin-only banner when system page is deleted
-     * and an admin visits a 404 page.
-     *
-     * @return void
-     */
-    public static function maybeShowAdminFrontend404Banner(): void {
-        if (!is_404()) {
-            return;
-        }
-
-        if (!is_user_logged_in() || !ABJ_404_Solution_PluginAdminAccessPolicy::currentUserCanAccessPluginAdmin()) {
-            return;
-        }
-
-        // Check if behavior was 'suggest' but page was deleted
-        if (get_transient('abj404_system_page_deleted') !== '1') {
-            return;
-        }
-
-        $settingsUrl = admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options');
-
-        add_action('wp_footer', function() use ($settingsUrl) {
-            /* allow-hardcoded-color: wp_footer front-end banner; admin theme vars are not loaded on the public site */
-            $tpl = ABJ_404_Solution_FileSystemService::readFileContents(
-                dirname(__DIR__) . '/html/systemPageAdminFrontend404Banner.html'
-            );
-            echo strtr($tpl, [
-                '{message}'        => esc_html__('Your 404 Solution suggestion page was deleted. Visitors are seeing this default 404 page instead.', '404-solution'),
-                '{settings_url}'   => esc_url($settingsUrl),
-                '{settings_label}' => esc_html__('Go to settings', '404-solution'),
-            ]);
-        });
-    }
-
-    /**
-     * Hook: enqueue_block_editor_assets - show notice in the block editor when editing the system page.
-     *
-     * Uses the wp.data notices store to create an info notice at the top of the block editor.
-     *
-     * @return void
-     */
-    public static function enqueueBlockEditorNotice(): void {
-        $screen = function_exists('get_current_screen') ? get_current_screen() : null;
-        if (!$screen || $screen->base !== 'post') {
-            return;
-        }
-
-        // Check if the current post is the system page.
-        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-        $postId = isset($_GET['post']) ? (int) $_GET['post'] : 0;
-        if (!$postId || !self::isSystemPage($postId)) {
-            return;
-        }
-
-        $settingsUrl = admin_url('options-general.php?page=' . ABJ404_PP . '&subpage=abj404_options');
-        $message = esc_html__('This page is used by 404 Solution to display suggested pages to visitors.', '404-solution');
-        $linkText = esc_html__('Learn more', '404-solution');
-
-        wp_add_inline_script('wp-edit-post', sprintf(
-            'wp.domReady(function(){' .
-            'wp.data.dispatch("core/notices").createNotice("info",%s+%s,{id:"abj404-system-page-notice",isDismissible:false,' .
-            'actions:[{label:%s,url:%s}]});' .
-            '});',
-            // Encoded through ABJ_404_Solution_JsonResponseEncoder rather than
-            // wp_json_encode(): $message and $linkText are __() results, so a
-            // co-plugin hooked on `gettext` can make wp_json_encode() return
-            // false. sprintf('%s') renders false as '', and the emitted line
-            // becomes createNotice("info",+,{...}) -- a syntax error that takes
-            // the whole block editor script with it.
-            ABJ_404_Solution_JsonResponseEncoder::encode($message . ' ')->json(),
-            ABJ_404_Solution_JsonResponseEncoder::encode('')->json(),
-            ABJ_404_Solution_JsonResponseEncoder::encode($linkText)->json(),
-            ABJ_404_Solution_JsonResponseEncoder::encode($settingsUrl)->json()
-        ));
-    }
-
-    /**
      * Register all WordPress hooks for system page management.
      *
      * @return void
@@ -443,16 +356,16 @@ class ABJ_404_Solution_SystemPage {
         add_action('wp_trash_post', array(__CLASS__, 'onPostDeleteOrTrash'));
 
         // Admin notices
-        add_action('admin_notices', array(__CLASS__, 'maybeShowDeletedPageNotice'));
+        add_action('admin_notices', array(ABJ_404_Solution_SystemPageNotices::class, 'maybeShowDeletedPageNotice'));
 
         // Recreate action
         add_action('admin_init', array(__CLASS__, 'handleRecreateAction'));
 
         // Editor notice (classic editor)
-        add_action('edit_form_after_title', array(__CLASS__, 'showEditorNotice'));
+        add_action('edit_form_after_title', array(ABJ_404_Solution_SystemPageNotices::class, 'showEditorNotice'));
 
         // Editor notice (block editor / Gutenberg)
-        add_action('enqueue_block_editor_assets', array(__CLASS__, 'enqueueBlockEditorNotice'));
+        add_action('enqueue_block_editor_assets', array(ABJ_404_Solution_SystemPageNotices::class, 'enqueueBlockEditorNotice'));
 
         // Exclude from sitemaps (WordPress 5.5+ native robots)
         add_filter('wp_robots', array(__CLASS__, 'addNoindexToSystemPage'));
@@ -461,6 +374,6 @@ class ABJ_404_Solution_SystemPage {
         add_filter('wp_page_menu_args', array(__CLASS__, 'excludeFromPageMenu'));
 
         // Admin-only frontend 404 banner
-        add_action('template_redirect', array(__CLASS__, 'maybeShowAdminFrontend404Banner'));
+        add_action('template_redirect', array(ABJ_404_Solution_SystemPageNotices::class, 'maybeShowAdminFrontend404Banner'));
     }
 }

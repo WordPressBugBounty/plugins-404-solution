@@ -2,12 +2,12 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ReportBody",
   "description": "Telemetry report posted by the 404 Solution WP plugin. Covers all report_type values: error, heartbeat, uninstall, support_request.",
-  "$comment": "OWNER: 404-solution-server, contracts/schemas/report.schema.json. This exact file is byte-identical in both repos, so it says \"404-solution-server\" rather than \"this repo\". VENDORED COPY: 404-solution (the plugin repo), contracts/schemas/report.schema.json. Why 404-solution-server owns it: this file is compiled directly as the Fastify body schema by src/routes/reports.js, so this is the only copy whose constraints can actually reject a request; the plugin copy is a pre-flight convenience. The server is also the side that can be deployed on demand, while the plugin ships to thousands of sites that update on their own schedule, so a constraint must exist here before any plugin may rely on it. Note on debug_log_evidence.additionalProperties: it is true on purpose. src/server.js sets AJV removeAdditional: false so unknown body fields are preserved into the environment column rather than stripped, which means a closed sub-object does not merely ignore an unrecognised subfield, it 400s the whole report. Since a rejected error report falls back to emailing the developer, closing this object would turn the next additive plugin change into an inbox flood. The bounds below (maxLength, maximum, enum, required, minimum) are what this schema enforces; the field list is deliberately open. Change protocol: (1) edit this copy only, never the vendored one; (2) deploy the server before shipping a plugin that depends on the change, because an un-upgraded server rejects what it does not model (note the const-valued version fields, including debug_log_evidence.schema_version: a plugin that bumps one before this schema is deployed gets HTTP 400); (3) keep edits additive, so add properties and never remove, repurpose or redefine an existing one; (4) run npm run generate:types to refresh report.d.ts; (5) copy this file verbatim to the vendored path, then update EXPECTED_SHA256 in tests/report-schema-drift.test.js here and in tests-js/report-schema-drift.test.js in the plugin. Those two pins are what make a one-sided edit fail loudly. Do not add non-standard root keywords to this file: AJV strict mode (Fastify 5) throws at route build time on any unknown keyword, so this standard $comment is the only place such notes may live.",
+  "$comment": "OWNER: 404-solution-server, contracts/schemas/report.schema.json. This exact file is byte-identical in both repos, so it says \"404-solution-server\" rather than \"this repo\". VENDORED COPY: 404-solution (the plugin repo), contracts/schemas/report.schema.json. Why 404-solution-server owns it: this file is compiled directly as the Fastify body schema by src/routes/reports.js, so this is the only copy whose constraints can actually reject a request; the plugin copy is a pre-flight convenience. The server is also the side that can be deployed on demand, while the plugin ships to thousands of sites that update on their own schedule, so a constraint must exist here before any plugin may rely on it. Note on debug_log_evidence.additionalProperties: it is true on purpose. src/server.js sets AJV removeAdditional: false so unknown body fields are preserved into the environment column rather than stripped, which means a closed sub-object does not merely ignore an unrecognised subfield, it 400s the whole report. Since a rejected error report falls back to emailing the developer, closing this object would turn the next additive plugin change into an inbox flood. The root payload_schema_version enum accepts deployed versions 1, 2, 3, and 4. Version 3 adds the optional, counts-only ajax_failure_counts window to heartbeat reports and debug_log_excerpt to error reports. Version 4 is additive and models optional environment diagnostics, including bounded runbook absence markers, while preserving open maps and the empty-array unavailable fallback. The ajax_failure_counts object is deliberately closed and has fixed action/phase names so identifiers cannot enter through its labels; its nested schema_version is const-valued and must be deployed before any plugin sends it. The bounds below (maxLength, maximum, enum, required, minimum) are what this schema enforces. Change protocol: (1) edit this copy only, never the vendored one; (2) deploy the server before shipping a plugin that depends on the change, because an un-upgraded server rejects what it does not model; (3) keep edits additive, so add properties and never remove, repurpose or redefine an existing one; (4) run npm run generate:types to refresh report.d.ts; (5) copy this file verbatim to the vendored path, then update EXPECTED_SHA256 in tests/report-schema-drift.test.js here and in tests-js/report-schema-drift.test.js in the plugin. Those two pins are what make a one-sided edit fail loudly. Do not add non-standard root keywords to this file: AJV strict mode (Fastify 5) throws at route build time on any unknown keyword, so this standard $comment is the only place such notes may live.",
   "type": "object",
   "required": ["plugin_version", "db_type"],
   "additionalProperties": true,
   "properties": {
-    "payload_schema_version": { "type": "integer", "const": 2 },
+    "payload_schema_version": { "type": "integer", "enum": [1, 2, 3, 4] },
     "plugin_version": { "type": "string", "minLength": 1, "maxLength": 32 },
     "wp_version": { "type": "string", "maxLength": 32 },
     "php_version": { "type": "string", "maxLength": 32 },
@@ -96,6 +96,126 @@
             "panel": { "type": "string" },
             "matched_marker": { "type": "string" }
           }
+        },
+        "mysql_globals": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "max_statement_time": { "type": "number", "minimum": 0 },
+                "version_comment": { "type": "string", "maxLength": 256 }
+              }
+            },
+            { "type": "array", "maxItems": 0 }
+          ]
+        },
+        "mysql_session_probe": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "max_statement_time": { "type": "number", "minimum": 0 }
+              }
+            },
+            { "type": "array", "maxItems": 0 }
+          ]
+        },
+        "mysql_runbook_absent": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["scope", "variable", "reason"],
+            "properties": {
+              "scope": { "type": "string", "enum": ["global", "session"] },
+              "variable": {
+                "type": "string",
+                "enum": [
+                  "innodb_buffer_pool_size",
+                  "max_statement_time",
+                  "tmp_table_size",
+                  "max_heap_table_size",
+                  "version_comment"
+                ]
+              },
+              "reason": { "type": "string", "maxLength": 64 }
+            }
+          }
+        },
+        "index_definition_drift_count": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "index_definition_drift_count_error": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "php_output_handler": {
+          "type": ["string", "null"],
+          "maxLength": 256
+        },
+        "php_memory_limit": {
+          "type": ["string", "null"],
+          "maxLength": 256
+        },
+        "php_ini_absent": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["directive", "reason"],
+            "properties": {
+              "directive": {
+                "type": "string",
+                "enum": [
+                  "zlib.output_compression",
+                  "output_handler",
+                  "opcache.enable",
+                  "memory_limit"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "enum": ["directive_unavailable", "function_unavailable", "invalid_value"]
+              }
+            }
+          }
+        },
+        "opcache_settings": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "enable": { "type": ["boolean", "null"] }
+              }
+            },
+            { "type": "array", "maxItems": 0 }
+          ]
+        },
+        "wp_cron_mode": {
+          "type": "string",
+          "enum": ["wp_cron", "disabled"]
+        },
+        "object_cache_backend": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "dropin_class": { "type": ["string", "null"], "maxLength": 256 },
+                "dropin_class_error": {
+                  "type": "string",
+                  "enum": ["not_loaded", "invalid_class_name"]
+                }
+              }
+            },
+            { "type": "array", "maxItems": 0 }
+          ]
         }
       }
     },
@@ -167,6 +287,56 @@
         "error_excerpt_in_debug_log": { "type": "boolean" },
         "error_line_number": { "type": "integer", "minimum": -1 },
         "total_evidence_bytes": { "type": "integer", "minimum": 0, "maximum": 262144 }
+      }
+    },
+    "ajax_failure_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "window_started_at",
+        "window_ended_at",
+        "total_events",
+        "actions"
+      ],
+      "properties": {
+        "schema_version": { "type": "integer", "const": 1 },
+        "window_started_at": { "type": "integer", "minimum": 0 },
+        "window_ended_at": { "type": "integer", "minimum": 0 },
+        "total_events": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+        "actions": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["action", "client_timeouts", "stranded_by_phase", "max_age_ms"],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": ["ajaxUpdatePaginationLinks", "ajaxRefreshHealthBar", "other"]
+              },
+              "client_timeouts": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+              "stranded_by_phase": {
+                "type": "object",
+                "maxProperties": 7,
+                "propertyNames": {
+                  "enum": [
+                    "boot",
+                    "handler",
+                    "response_encode",
+                    "ob_drain",
+                    "detach",
+                    "shutdown",
+                    "unrecorded"
+                  ]
+                },
+                "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 2147483647 }
+              },
+              "max_age_ms": { "type": "integer", "minimum": 0, "maximum": 2147483647 }
+            }
+          }
+        }
       }
     },
 

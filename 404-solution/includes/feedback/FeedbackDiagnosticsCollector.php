@@ -37,10 +37,10 @@ class ABJ_404_Solution_FeedbackDiagnosticsCollector {
     public function collect(string $type): array {
         $payload = array();
 
-        $payload['published_posts_count'] = $this->tryInt(function () { return $this->countPublishedPosts(); });
-        $payload['published_pages_count'] = $this->tryInt(function () { return $this->countPublishedPages(); });
-        $payload['categories_count']      = $this->tryInt(function () { return $this->countCategories(); });
-        $payload['tags_count']            = $this->tryInt(function () { return $this->countTags(); });
+        $payload['published_posts_count'] = $this->tryInt('published_posts_count', function () { return $this->countPublishedPosts(); });
+        $payload['published_pages_count'] = $this->tryInt('published_pages_count', function () { return $this->countPublishedPages(); });
+        $payload['categories_count']      = $this->tryInt('categories_count', function () { return $this->countCategories(); });
+        $payload['tags_count']            = $this->tryInt('tags_count', function () { return $this->countTags(); });
 
         $redirects = $this->statusCountsWithState(
             'getRedirectStatusCountsResult', 'getRedirectStatusCounts'
@@ -65,21 +65,51 @@ class ABJ_404_Solution_FeedbackDiagnosticsCollector {
         $payload['captured_404s_trashed_count'] = $this->pluckInt($capturedCounts, 'trash');
         $payload['captured_404s_status_counts_state'] = $captured['state'];
 
-        $payload['log_entries_count']     = $this->tryInt(function () { return $this->logEntriesCount(); });
-        $payload['log_table_size_bytes']  = $this->tryInt(function () { return $this->logTableSizeBytes(); });
+        $payload['log_entries_count']     = $this->tryInt('log_entries_count', function () { return $this->logEntriesCount(); });
+        $payload['log_table_size_bytes']  = $this->tryInt('log_table_size_bytes', function () { return $this->logTableSizeBytes(); });
         $payload += $this->debugLogReportFields($type);
 
         return $payload;
     }
 
-    private function tryInt(callable $fn): ?int {
+    /**
+     * Run one count lookup. A failed lookup and a "could not determine"
+     * answer both ship as null, the value the report schema reserves for an
+     * unknown count; neither may fail the payload.
+     *
+     * @param string $field Payload field the count fills, for the log line.
+     */
+    private function tryInt(string $field, callable $fn): ?int {
         try {
             $v = $fn();
-            return is_int($v) ? $v : null;
         } catch (\Throwable $e) {
-            ABJ_404_Solution_FeedbackTransportLog::log('warn', 'FeedbackDiagnosticsCollector count lookup failed: ' . $e->getMessage());
+            ABJ_404_Solution_FeedbackTransportLog::log('warn',
+                'FeedbackDiagnosticsCollector count lookup failed for ' . $field . ': ' . $e->getMessage());
             return null;
         }
+        return is_int($v) ? self::knownCount($field, $v) : null;
+    }
+
+    /**
+     * The single owner of the unknown-count rule. The read layer answers
+     * "could not determine" with a negative count (LogsMetricsReader returns
+     * -1 when a count or size query fails or times out). Copied into the
+     * payload, that sentinel violates report.schema.json's minimum of 0 and
+     * FeedbackPayloadSchemaGuard::assert() refuses the whole report, so a site
+     * with a failing log query could send no error report, heartbeat or
+     * support request at all. A negative count is unknown: report it as null.
+     *
+     * @param string $field Payload field or map key, for the log line.
+     * @param int $count The count as the read layer reported it.
+     * @return int|null The count, or null when the reader could not determine it.
+     */
+    private static function knownCount(string $field, int $count): ?int {
+        if ($count >= 0) {
+            return $count;
+        }
+        ABJ_404_Solution_FeedbackTransportLog::log('warn',
+            'FeedbackDiagnosticsCollector ' . $field . ' could not be determined (reader answered ' . $count . '); reporting it as unknown');
+        return null;
     }
 
     private function tryString(callable $fn): string {
@@ -122,7 +152,7 @@ class ABJ_404_Solution_FeedbackDiagnosticsCollector {
             return null;
         }
         $v = $map[$key];
-        return is_scalar($v) ? (int)$v : null;
+        return is_scalar($v) ? self::knownCount($key, (int)$v) : null;
     }
 
     private function countPublishedPosts(): int {
@@ -261,7 +291,16 @@ class ABJ_404_Solution_FeedbackDiagnosticsCollector {
             'over_hundred_hits' => 0,
         );
         foreach ($buckets as $key => $_default) {
-            $buckets[$key] = $this->pluckInt($histogram, $key) ?? 0;
+            if (!array_key_exists($key, $histogram)) {
+                continue;
+            }
+            $count = $this->pluckInt($histogram, $key);
+            if ($count === null) {
+                // One uncounted bucket makes the distribution unknown;
+                // shipping it as 0 would misstate how the hits are spread.
+                return null;
+            }
+            $buckets[$key] = $count;
         }
         return $buckets;
     }
@@ -308,14 +347,8 @@ class ABJ_404_Solution_FeedbackDiagnosticsCollector {
         if (!is_scalar($v)) {
             throw new \RuntimeException('getLogDiskUsage returned unexpected shape');
         }
-        $bytes = (int)$v;
-        if ($bytes < 0) {
-            // -1 is the documented "query failed / unknown" sentinel from
-            // LogsMetricsReader::getLogDiskUsage(). Map to null via tryInt()
-            // so the feedback payload matches its schema (minimum: 0 | null).
-            throw new \RuntimeException('getLogDiskUsage unknown (query failed)');
-        }
-        return $bytes;
+        // A -1 "query failed" answer is mapped to null by knownCount().
+        return (int)$v;
     }
 
     /**

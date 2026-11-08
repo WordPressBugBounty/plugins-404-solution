@@ -55,6 +55,17 @@ class ABJ_404_Solution_AdminAssetEnqueuer {
             ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('jquery-effects-highlight');
             ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('jquery-color');
 
+            // The admin ready signal: fires the public wp.hooks action
+            // 'abj404.adminReady' once this screen's handlers are bound and its
+            // first asynchronous render has settled (see the module comment).
+            // Loaded ahead of the page scripts so their ready code can hold it.
+            ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-admin-ready',
+                ABJ404_URL . 'includes/js/adminReady.js', array('jquery', 'wp-hooks'));
+            wp_localize_script('abj404-admin-ready', 'abj404AdminReadyContext', array(
+                'page' => ABJ404_PP,
+                'subpage' => $isEditPage ? 'abj404_edit' : $subpage,
+            ));
+
             ABJ_404_Solution_WPUtils::my_wp_enq_scrpt('abj404-admin-ajax',
                 ABJ404_URL . 'includes/js/abj404-admin-ajax.js', array('jquery'));
 
@@ -326,11 +337,15 @@ class ABJ_404_Solution_AdminAssetEnqueuer {
                 'abj404-view-updater-transport-telemetry',
                 'abj404-view-updater-transport-telemetry-delivery',
                 'abj404-view-updater-client-build-registry', 'abj404-admin-ajax'));
+        $enq('abj404-view-updater-table-flight',
+            $vuBase . 'view_updater_table_flight.js',
+            array('abj404-view-updater-client-build-registry'));
         $enq('abj404-view-updater-pagination-transport',
             $vuBase . 'view_updater_pagination_transport.js',
             array('jquery', 'abj404-view-updater-nonce-refresh',
                 'abj404-view-updater-transport-telemetry',
-                'abj404-view-updater-transport-telemetry-delivery', 'abj404-view-updater-client-build-registry'));
+                'abj404-view-updater-transport-telemetry-delivery',
+                'abj404-view-updater-client-build-registry', 'abj404-view-updater-table-flight'));
         $enq('abj404-view-updater-lazy-backfill',
             $vuBase . 'view_updater_lazy_backfill.js',
             array('jquery', 'abj404-view-updater-nonce-refresh'));

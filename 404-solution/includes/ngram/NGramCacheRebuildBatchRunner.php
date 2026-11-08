@@ -5,9 +5,8 @@ if (!defined('ABSPATH')) {
 }
 
 require_once __DIR__ . '/NGramRebuildProgressState.php';
-require_once __DIR__ . '/NGramRescheduleFailureReport.php';
 require_once __DIR__ . '/NGramRebuildDrain.php';
-require_once __DIR__ . '/NGramRebuildRetryPolicy.php';
+require_once __DIR__ . '/NGramRebuildChainRearmer.php';
 
 /**
  * Runs the N-gram cache rebuild: one bounded chunk of batches per WP-Cron
@@ -36,15 +35,6 @@ require_once __DIR__ . '/NGramRebuildRetryPolicy.php';
  */
 class ABJ_404_Solution_NGramCacheRebuildBatchRunner {
 
-    /**
-     * WP-Cron hook this runner reschedules itself on. The canonical
-     * definition lives on the cron adapter that owns hook names
-     * (ABJ_404_Solution_CronScheduler::HOOK_REBUILD_NGRAM_CACHE); the literal
-     * is repeated here so the Pattern 8 coordination-key audit can see the
-     * key in the file that enqueues it.
-     */
-    const REBUILD_CRON_HOOK = 'abj404_rebuild_ngram_cache_hook';
-
     /** @var ABJ_404_Solution_DatabaseCore */
     private $dbCore;
 
@@ -63,23 +53,17 @@ class ABJ_404_Solution_NGramCacheRebuildBatchRunner {
     /** @var ABJ_404_Solution_NGramNetworkOptionStore */
     private $optionStore;
 
-    /** @var ABJ_404_Solution_CronScheduler */
-    private $cronScheduler;
-
     /** @var ABJ_404_Solution_NGramRebuildProgressState */
     private $progress;
-
-    /** @var ABJ_404_Solution_NGramRescheduleFailureReport */
-    private $rescheduleFailureReport;
 
     /**
      * Owns the whole answer to "when, and whether, does the chain come back
      * after a failed tick". This runner decides WHAT happened; it does not
      * decide what a failure is worth waiting for.
      *
-     * @var ABJ_404_Solution_NGramRebuildRetryPolicy
+     * @var ABJ_404_Solution_NGramRebuildChainRearmer
      */
-    private $retryPolicy;
+    private $rearmer;
 
     /** @var ABJ_404_Solution_NetworkSitesRepository|null Built on first use. */
     private $networkSites = null;
@@ -123,16 +107,12 @@ class ABJ_404_Solution_NGramCacheRebuildBatchRunner {
         // to the same collaborator that could be read inconsistently.
         $this->dbCore = $runtime->dbCore();
         $this->logger = $runtime->logger();
-        $this->cronScheduler = $runtime->cronScheduler();
         $this->optionStore = $optionStore;
         $this->progress = new ABJ_404_Solution_NGramRebuildProgressState($optionStore);
         $this->drain = new ABJ_404_Solution_NGramRebuildDrain(
             array($rebuilder, 'rebuildCache'), $this->progress);
-        $this->rescheduleFailureReport = new ABJ_404_Solution_NGramRescheduleFailureReport(
-            $runtime, $this->progress);
-        $this->retryPolicy = $retryPolicy instanceof ABJ_404_Solution_NGramRebuildRetryPolicy
-            ? $retryPolicy
-            : new ABJ_404_Solution_NGramRebuildRetryPolicy();
+        $this->rearmer = new ABJ_404_Solution_NGramRebuildChainRearmer(
+            $runtime, $this->progress, $retryPolicy);
     }
 
     /**
@@ -143,11 +123,11 @@ class ABJ_404_Solution_NGramCacheRebuildBatchRunner {
      * two layers in one method, and this exact count already had an
      * authoritative implementation.
      *
-     * @return int
+     * @return array{state:'read',count:int}|array{state:'failed',error:string}
      */
-    private function countPermalinkCacheRows(): int {
+    private function countPermalinkCacheRows(): array {
         $repository = new ABJ_404_Solution_PermalinkCacheRepository($this->dbCore);
-        return $repository->getPermalinkCacheCount();
+        return $repository->readPermalinkCacheCount();
     }
 
     /**
@@ -164,89 +144,6 @@ class ABJ_404_Solution_NGramCacheRebuildBatchRunner {
             $this->networkSites = new ABJ_404_Solution_NetworkSitesRepository($this->dbCore);
         }
         return $this->networkSites;
-    }
-
-    /**
-     * Reschedule the chain, reporting a refusal instead of dropping it.
-     *
-     * Every reschedule in this class goes through here. The single-site path
-     * used to check the return value and the multisite paths did not, so a
-     * WP-Cron refusal stranded a multisite rebuild silently -- the one failure
-     * mode where nothing else re-arms the chain.
-     *
-     * The offset the report needs is read from the cursor rather than passed
-     * alongside the delay: as adjacent int parameters the two were transposable
-     * at every call site, and a transposition would silently change both when
-     * the chain resumes and where it resumes from.
-     *
-     * @param int $delaySeconds
-     * @param array<int, mixed> $args
-     * @param float $progress Percent complete, for the report.
-     * @return void
-     */
-    private function rescheduleChain(int $delaySeconds, array $args, float $progress): void {
-        // Resolved to an absolute second here, then used TWICE: once to ask for
-        // the event and once to say what was asked for. The report used to
-        // rebuild both this timestamp and these args from what it could reach,
-        // and got both wrong on the multisite path -- see
-        // ABJ_404_Solution_NGramRescheduleFailureReport::report().
-        $timestamp = $this->cronScheduler->timestampAfter($delaySeconds);
-        if ($this->cronScheduler->scheduleSingleAt(self::REBUILD_CRON_HOOK, $timestamp, $args) === false) {
-            $this->rescheduleFailureReport->report(array(
-                'hookName' => self::REBUILD_CRON_HOOK,
-                'offset' => $this->progress->cursor(),
-                'progressPercent' => $progress,
-                'args' => $args,
-                'requestedTimestamp' => $timestamp,
-            ));
-        }
-    }
-
-    /**
-     * Arm the chain's next link at the cadence this tick earned, or report why
-     * it is not being armed at all.
-     *
-     * Every reschedule that follows a drain or a probe goes through here, which
-     * is the point: the delay used to be the literal 10 written out at four
-     * separate call sites, so there was no single place that could be taught to
-     * back off, and nothing anywhere asked whether the failure was one that
-     * retrying could fix.
-     *
-     * Two inputs, deliberately separate. The CADENCE comes from the consecutive
-     * failure count, so a tick that succeeded runs at the base interval however
-     * bad the last hour was. Whether to re-arm AT ALL comes from the failure
-     * text, so a statement the server has already rejected on its own terms is
-     * surfaced once instead of re-run until the failure budget runs out.
-     *
-     * A chain that is not re-armed is not a dead rebuild: the cache stays
-     * honestly uninitialized, and the next 404, daily reconcile or admin
-     * rebuild re-arms it through
-     * {@see ABJ_404_Solution_NGramCacheRebuildScheduler}.
-     *
-     * @param string $failureText What stopped this tick, or '' when nothing did.
-     *        Callers holding a drain outcome read it through
-     *        {@see ABJ_404_Solution_NGramRebuildDrain::failureTextOf()} rather
-     *        than testing the raw field, so every branch here and in the
-     *        callers agrees on what the absence of a failure looks like.
-     * @param array<int, mixed> $args Cron arguments for the next link.
-     * @param float $progress Percent complete, for the refusal report.
-     * @return void
-     */
-    private function rescheduleNextLink(string $failureText, array $args, float $progress): void {
-        if ($failureText !== '' && !$this->retryPolicy->isWorthRetrying($failureText)) {
-            $this->logger->errorMessage(
-                'N-gram cache rebuild stopped, because retrying cannot fix this: ' . $failureText
-                . ' The cache is left uninitialized so a later rebuild can resume it once the '
-                . 'underlying problem is corrected.'
-            );
-            return;
-        }
-
-        $this->rescheduleChain(
-            $this->retryPolicy->secondsUntilNextAttempt($this->progress->consecutiveFailures()),
-            $args,
-            $progress
-        );
     }
 
     /**
@@ -329,7 +226,7 @@ class ABJ_404_Solution_NGramCacheRebuildBatchRunner {
                 $failure = 'N-gram rebuild could not count the sites in this network; leaving the '
                     . 'walk unstarted.';
                 $this->recordBatchFailure($failure);
-                $this->rescheduleNextLink($failure, array(), 0.0);
+                $this->rearmer->rearm($failure, array(), 0.0);
                 return;
             }
             $this->progress->beginNetworkWalk($liveCount);
@@ -367,7 +264,7 @@ class ABJ_404_Solution_NGramCacheRebuildBatchRunner {
             // The reason carries the driver's own text, so a site table that
             // does not exist is distinguishable here from one that is briefly
             // unreachable, and only the second earns another probe.
-            $this->rescheduleNextLink($failure, array(), 0.0);
+            $this->rearmer->rearm($failure, array(), 0.0);
             return;
         }
 
@@ -386,7 +283,15 @@ class ABJ_404_Solution_NGramCacheRebuildBatchRunner {
         // and writing the wrong site. finally makes the unwind unconditional.
         switch_to_blog($currentSiteId);
         try {
-            $sitePages = $this->countPermalinkCacheRows();
+            $count = $this->countPermalinkCacheRows();
+            if ($count['state'] !== 'read') {
+                $failure = 'N-gram rebuild could not count permalink-cache rows for site '
+                    . $currentSiteId . ': ' . $count['error'] . '; holding the site cursor.';
+                $this->recordBatchFailure($failure);
+                $this->rearmer->rearm($failure, array(), 0.0);
+                return;
+            }
+            $sitePages = $count['count'];
 
             if ($sitePages == 0) {
                 $this->progress->advanceToNextSite($currentSiteId);
@@ -398,7 +303,7 @@ class ABJ_404_Solution_NGramCacheRebuildBatchRunner {
                 // retry policy: nothing failed here, this tick simply had no
                 // work, and a network of empty sites should be walked off in
                 // one burst rather than one cadence interval per empty site.
-                $this->rescheduleChain(0, array(), 100.0);
+                $this->rearmer->rearmAfter(0, array(), 100.0);
                 return;
             }
 
@@ -431,7 +336,7 @@ class ABJ_404_Solution_NGramCacheRebuildBatchRunner {
                 $this->progress->clearFailures();
             }
 
-            $this->rescheduleNextLink(
+            $this->rearmer->rearm(
                 ABJ_404_Solution_NGramRebuildDrain::failureTextOf($outcome),
                 array(),
                 $outcome['percent']
@@ -446,7 +351,15 @@ class ABJ_404_Solution_NGramCacheRebuildBatchRunner {
      * then either complete (mark initialized) or reschedule for the next chunk.
      */
     private function runSingleSiteBatch(): void {
-        $totalPages = $this->countPermalinkCacheRows();
+        $count = $this->countPermalinkCacheRows();
+        if ($count['state'] !== 'read') {
+            $failure = 'N-gram cache rebuild could not count permalink-cache rows: '
+                . $count['error'] . '; holding the rebuild cursor.';
+            $this->recordBatchFailure($failure);
+            $this->rearmer->rearm($failure, [$this->progress->cursor()], 0.0);
+            return;
+        }
+        $totalPages = $count['count'];
 
         if ($totalPages == 0) {
             $this->logger->debugMessage("No pages to process. Setting initialized flag.");
@@ -479,7 +392,7 @@ class ABJ_404_Solution_NGramCacheRebuildBatchRunner {
                 // pacing for the whole remainder of a healthy rebuild.
                 $this->progress->clearFailures();
             }
-            $this->rescheduleNextLink(
+            $this->rearmer->rearm(
                 ABJ_404_Solution_NGramRebuildDrain::failureTextOf($outcome),
                 [$outcome['offset']],
                 $outcome['percent']

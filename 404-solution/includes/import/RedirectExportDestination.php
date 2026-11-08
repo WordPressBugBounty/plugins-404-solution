@@ -20,7 +20,7 @@ if (!defined('ABSPATH')) {
  *     nginx, Cloudflare, Netlify, Vercel); a row with no destination to
  *     export yields null and is left out.
  *   - csvColumns(): the columns of one native CSV row; a row whose
- *     destination no longer resolves keeps the stored to_url.
+ *     destination no longer resolves keeps the stored destination id.
  *
  * Does NOT read the database and does NOT write files. See
  * ABJ_404_Solution_RedirectExportReader (rows) and
@@ -71,9 +71,10 @@ class ABJ_404_Solution_RedirectExportDestination {
      *
      * A post, category or tag destination is written as the URL the live
      * redirect sends visitors to (PermalinkResolver::internalDestinationUrl()),
-     * so the file names the page rather than a bare id; the importer reads a
-     * bare id as an external URL named after the number. When the destination
-     * no longer resolves, the query's own to_url (the stored id) is kept.
+     * so the file names the page rather than a bare id. When the destination
+     * no longer resolves, final_dest (the stored id) is kept instead of a
+     * possibly stale cached to_url; the importer pairs it with the native
+     * type column to preserve the post or term identity.
      *
      * @param array<string, mixed> $row One raw row of getRedirectsExport.sql,
      *        including its type_id, final_dest and cached_url columns.
@@ -92,6 +93,10 @@ class ABJ_404_Solution_RedirectExportDestination {
             );
             if ($resolved !== '') {
                 $toUrl = $resolved;
+            } elseif (in_array($typeId, array(ABJ404_TYPE_POST, ABJ404_TYPE_CAT, ABJ404_TYPE_TAG), true)) {
+                // The query's to_url can contain a stale cached post URL.
+                // Keep the stored id when the live destination is unavailable.
+                $toUrl = $finalDest;
             }
         }
 
@@ -103,6 +108,7 @@ class ABJ_404_Solution_RedirectExportDestination {
             self::csvField($row['type_wp'] ?? '', ''),
             self::csvField($row['engine'] ?? null, ''),
             self::csvField($row['code'] ?? null, '301'),
+            self::csvField($row['query_mode'] ?? null, ''),
         );
     }
 

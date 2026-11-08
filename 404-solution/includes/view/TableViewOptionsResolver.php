@@ -25,9 +25,6 @@ if (!defined('ABSPATH')) {
  */
 class ABJ_404_Solution_TableViewOptionsResolver {
 
-    /** @var ABJ_404_Solution_Functions */
-    private $f;
-
     /** @var callable|null */
     private $sanitizer;
 
@@ -57,14 +54,12 @@ class ABJ_404_Solution_TableViewOptionsResolver {
     private static $allowedOrderValues = ['ASC', 'DESC'];
 
     /**
-     * @param ABJ_404_Solution_Functions $f
      * @param callable|null $sanitizer Optional fn(array): array used to sanitize
      *                                 the resolved tableOptions. If null, falls
      *                                 back to the canonical sanitizer obtained
      *                                 via service lookup on first use.
      */
-    function __construct($f, $sanitizer = null) {
-        $this->f = $f;
+    function __construct($sanitizer = null) {
         $this->sanitizer = is_callable($sanitizer) ? $sanitizer : null;
     }
 
@@ -253,7 +248,7 @@ class ABJ_404_Solution_TableViewOptionsResolver {
     /** @return string */
     private function resolveFilterText(): string {
         $filterText = trim(ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('filterText', ''));
-        return $this->f->str_replace(array('*', '/', '$'), '', $filterText);
+        return $filterText;
     }
 
     /**

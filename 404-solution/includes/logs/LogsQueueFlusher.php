@@ -72,17 +72,7 @@ class ABJ_404_Solution_LogsQueueFlusher {
             global $wpdb;
             $tableName = $this->dbCore->doTableNameReplacements('{wp_abj404_logsv2}');
 
-            $columns = array_keys($queue[0]);
-            $validatedColumns = [];
-            foreach ($columns as $col) {
-                if (preg_match('/^[a-z_][a-z0-9_]*$/i', $col)) {
-                    $validatedColumns[] = $col;
-                }
-            }
-            $schemaColumns = $this->dbCore->tableNameResolver()->getTableColumnNames($tableName);
-            if (!empty($schemaColumns)) {
-                $validatedColumns = array_intersect($validatedColumns, $schemaColumns);
-            }
+            $validatedColumns = $this->insertColumns($queue[0], $tableName);
             if (empty($validatedColumns)) {
                 return;
             }
@@ -91,7 +81,7 @@ class ABJ_404_Solution_LogsQueueFlusher {
             $sanitizedEntries = [];
             foreach ($queue as $entry) {
                 $entryColumns = array_keys($entry);
-                $missingCols = array_diff($validatedColumns, $entryColumns);
+                $missingCols = array_diff($validatedColumns, array_merge($entryColumns, array('url_sort_key')));
                 if (!empty($missingCols)) {
                     continue;
                 }
@@ -111,7 +101,12 @@ class ABJ_404_Solution_LogsQueueFlusher {
             $prepared = $wpdb->prepare($sql, $flattenedValues);
             $this->dbCore->connectionManager()->resetForRetry();
             // DAO-bypass-approved: batch log insert must preserve same-handle last_error for recovery classification.
-            $result = $wpdb->query($prepared);
+            $result = ABJ_404_Solution_DatabaseDriverCall::query($wpdb, $prepared);
+            $this->recovery->clearLogsv2FullNoticeAfterWrite([
+                'result' => $result,
+                'rows_affected' => isset($wpdb->rows_affected) ? $wpdb->rows_affected : null,
+                'last_error' => isset($wpdb->last_error) ? $wpdb->last_error : null,
+            ]);
 
             if ($result === false && !empty($wpdb->last_error)) {
                 $batchDatabaseError = (string)$wpdb->last_error;
@@ -138,6 +133,25 @@ class ABJ_404_Solution_LogsQueueFlusher {
             $shutdownHookRegistered = false;
             $isFlushingLogQueue = false;
         }
+    }
+
+    /**
+     * Choose only syntactically valid, available columns. Sanitization owns the
+     * URL key, so queue producers need not know it; legacy schemas omit it.
+     * @param array<string,mixed> $entry
+     * @return array<int,string>
+     */
+    private function insertColumns(array $entry, string $tableName): array {
+        $columns = array();
+        foreach (array_keys($entry) as $column) {
+            if (preg_match('/^[a-z_][a-z0-9_]*$/i', $column)) { $columns[] = $column; }
+        }
+        $schema = $this->dbCore->tableNameResolver()->getTableColumnNames($tableName);
+        if ($schema !== array()) { $columns = array_intersect($columns, $schema); }
+        if (in_array('url_sort_key', $schema, true) && !in_array('url_sort_key', $columns, true)) {
+            $columns[] = 'url_sort_key';
+        }
+        return array_values($columns);
     }
 
     /**
@@ -187,7 +201,12 @@ class ABJ_404_Solution_LogsQueueFlusher {
             if ($trimmed) {
                 if ($this->dbCore->connectionManager()->resetForRetry($batchError)) {
                     // DAO-bypass-approved: table-full recovery retries the already-prepared batch on the same wpdb connection.
-                    $retryResult = $wpdb->query($prepared);
+                    $retryResult = ABJ_404_Solution_DatabaseDriverCall::query($wpdb, $prepared);
+                    $this->recovery->clearLogsv2FullNoticeAfterWrite([
+                        'result' => $retryResult,
+                        'rows_affected' => isset($wpdb->rows_affected) ? $wpdb->rows_affected : null,
+                        'last_error' => isset($wpdb->last_error) ? $wpdb->last_error : null,
+                    ]);
                     if ($retryResult !== false) {
                         return;
                     }
@@ -203,7 +222,12 @@ class ABJ_404_Solution_LogsQueueFlusher {
             ->isCommandsOutOfSyncError($batchError);
         if ($commandsOutOfSync && $this->dbCore->connectionManager()->resetForRetry($batchError)) {
             // DAO-bypass-approved: centralized connection recovery drained error 2014 before this retry.
-            $retryResult = $wpdb->query($prepared);
+            $retryResult = ABJ_404_Solution_DatabaseDriverCall::query($wpdb, $prepared);
+            $this->recovery->clearLogsv2FullNoticeAfterWrite([
+                'result' => $retryResult,
+                'rows_affected' => isset($wpdb->rows_affected) ? $wpdb->rows_affected : null,
+                'last_error' => isset($wpdb->last_error) ? $wpdb->last_error : null,
+            ]);
             if ($retryResult !== false) {
                 $context = $this->recovery->getWpdbRecentQueryContextForLogs();
                 $suffix = ($context !== '') ? " | savequeries_context={$context}" : '';
@@ -231,6 +255,7 @@ class ABJ_404_Solution_LogsQueueFlusher {
         $successCount = 0;
         $failCount = 0;
         $failureDetails = [];
+        $lastSuccessfulWriteEvidence = null;
 
         foreach ($sanitizedEntries as $index => $entry) {
             $rowFormats = [];
@@ -251,7 +276,7 @@ class ABJ_404_Solution_LogsQueueFlusher {
             $singleSql = $wpdb->prepare($singleSqlTemplate, $rowValues);
             $connectionReady = $this->dbCore->connectionManager()->resetForRetry($batchError);
             // DAO-bypass-approved: row-level retry must preserve same-handle last_error for per-row recovery.
-            $singleResult = $connectionReady ? $wpdb->query((string)$singleSql) : false;
+            $singleResult = $connectionReady ? ABJ_404_Solution_DatabaseDriverCall::query($wpdb, (string)$singleSql) : false;
 
             if ($singleResult === false) {
                 $lastError = !empty($wpdb->last_error)
@@ -265,6 +290,11 @@ class ABJ_404_Solution_LogsQueueFlusher {
                 $failureDetails[] = ['index' => $index, 'error' => $lastError, 'payload' => $payload];
             } else {
                 $successCount++;
+                $lastSuccessfulWriteEvidence = [
+                    'result' => $singleResult,
+                    'rows_affected' => isset($wpdb->rows_affected) ? $wpdb->rows_affected : null,
+                    'last_error' => isset($wpdb->last_error) ? $wpdb->last_error : null,
+                ];
             }
         }
 
@@ -282,6 +312,9 @@ class ABJ_404_Solution_LogsQueueFlusher {
                 $this->logger->errorMessage("flushLogQueue recovery incomplete: {$successCount} inserted, {$failCount} failed. | batch_error=" . $batchError . " | failures=" . implode(' || ', $detailsParts) . $detailsSuffix . $contextSuffix);
             }
         } else {
+            if (is_array($lastSuccessfulWriteEvidence)) {
+                $this->recovery->clearLogsv2FullNoticeAfterWrite($lastSuccessfulWriteEvidence);
+            }
             $this->logger->warn("flushLogQueue batch INSERT failed but recovered: all {$successCount} entries inserted individually. | batch_error=" . $batchError);
         }
     }

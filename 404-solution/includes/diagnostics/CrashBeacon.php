@@ -4,6 +4,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/../core/RequestKind.php';
+
 /**
  * Immutable record of a fatal-error "crash beacon".
  *
@@ -58,6 +60,12 @@ final class ABJ_404_Solution_CrashBeacon {
     private $message;
     /** @var int epoch seconds. */
     private $capturedAt;
+    /** @var array<string, mixed>|null Original request primitives captured before fatal handling. */
+    private $failureFrame;
+    /** @var string|null Stable request kind captured before fatal handling. */
+    private $requestKind;
+    /** @var string|null Sanitized admin-ajax action, when applicable. */
+    private $requestAction;
 
     /**
      * @param string $pluginVersion
@@ -74,6 +82,9 @@ final class ABJ_404_Solution_CrashBeacon {
         $this->line = $line;
         $this->message = $message;
         $this->capturedAt = $capturedAt;
+        $this->failureFrame = null;
+        $this->requestKind = null;
+        $this->requestAction = null;
     }
 
     /**
@@ -84,15 +95,16 @@ final class ABJ_404_Solution_CrashBeacon {
      * @param string $pluginVersion ABJ404_VERSION.
      * @param string $pluginRoot ABJ404_PATH (a define; no allocation) used to make the path plugin-relative.
      * @param int    $now epoch seconds (pass time() directly in the OOM path; do not load the clock service).
+     * @param array<string,mixed>|null $requestContext Named request context with optional failure_frame, request_kind, request_action.
      * @return self
      */
-    public static function fromLastError(array $lasterror, string $pluginVersion, string $pluginRoot, int $now): self {
+    public static function fromLastError(array $lasterror, string $pluginVersion, string $pluginRoot, int $now, ?array $requestContext = null): self {
         $type = isset($lasterror['type']) && is_scalar($lasterror['type']) ? (int)$lasterror['type'] : 0;
         $file = isset($lasterror['file']) && is_string($lasterror['file']) ? $lasterror['file'] : '';
         $line = isset($lasterror['line']) && is_scalar($lasterror['line']) ? (int)$lasterror['line'] : 0;
         $rawMsg = isset($lasterror['message']) && is_string($lasterror['message']) ? $lasterror['message'] : '';
 
-        return new self(
+        $beacon = new self(
             $pluginVersion,
             $type,
             self::toPluginRelative($file, $pluginRoot),
@@ -100,6 +112,8 @@ final class ABJ_404_Solution_CrashBeacon {
             self::lightRedact($rawMsg),
             $now
         );
+        $beacon->applyRequestContext($requestContext);
+        return $beacon;
     }
 
     /**
@@ -159,7 +173,7 @@ final class ABJ_404_Solution_CrashBeacon {
      * @return array<string,mixed> serializable form (the on-disk contract).
      */
     public function toArray(): array {
-        return array(
+        $record = array(
             'beacon_schema_version' => self::SCHEMA_VERSION,
             'plugin_version' => $this->pluginVersion,
             'error_type' => $this->errorType,
@@ -168,6 +182,11 @@ final class ABJ_404_Solution_CrashBeacon {
             'message' => $this->message,
             'captured_at' => $this->capturedAt,
         );
+        $frame = $this->failureFrame();
+        if ($frame !== null) { $record['failure_frame'] = $frame; }
+        if ($this->requestKind !== null) { $record['request_kind'] = $this->requestKind; }
+        if ($this->requestAction !== null) { $record['request_action'] = $this->requestAction; }
+        return $record;
     }
 
     /**
@@ -190,7 +209,7 @@ final class ABJ_404_Solution_CrashBeacon {
         if ($ver !== self::SCHEMA_VERSION) {
             return null;
         }
-        return new self(
+        $beacon = new self(
             isset($data['plugin_version']) && is_scalar($data['plugin_version']) ? (string)$data['plugin_version'] : '',
             isset($data['error_type']) && is_scalar($data['error_type']) ? (int)$data['error_type'] : 0,
             isset($data['file']) && is_scalar($data['file']) ? (string)$data['file'] : '',
@@ -198,6 +217,53 @@ final class ABJ_404_Solution_CrashBeacon {
             isset($data['message']) && is_scalar($data['message']) ? (string)$data['message'] : '',
             isset($data['captured_at']) && is_scalar($data['captured_at']) ? (int)$data['captured_at'] : 0
         );
+        $beacon->applyRequestContext(self::requestContextFromStoredRecord($data), true);
+        return $beacon;
+    }
+
+    /**
+     * Decode only the optional context fields from a stored beacon record.
+     *
+     * @param array<mixed, mixed> $data
+     * @return array{failure_frame: mixed, request_kind: string|null, request_action: string|null}
+     */
+    private static function requestContextFromStoredRecord(array $data): array {
+        return array(
+            'failure_frame' => $data['failure_frame'] ?? null,
+            'request_kind' => isset($data['request_kind']) && is_scalar($data['request_kind'])
+                ? (string)$data['request_kind'] : null,
+            'request_action' => isset($data['request_action']) && is_scalar($data['request_action'])
+                ? (string)$data['request_action'] : null,
+        );
+    }
+
+    /** @param mixed $context */
+    private function applyRequestContext($context, bool $normalizeFailureFrame = false): void {
+        if (!is_array($context)) {
+            return;
+        }
+        $rawFrame = $context['failure_frame'] ?? null;
+        if (!is_array($rawFrame)) {
+            $this->failureFrame = null;
+        } else {
+            $frame = array_filter($rawFrame, static function ($key): bool {
+                return is_string($key);
+            }, ARRAY_FILTER_USE_KEY);
+            $this->failureFrame = $normalizeFailureFrame
+                ? (class_exists('ABJ_404_Solution_RequestFailureFrame')
+                    ? ABJ_404_Solution_RequestFailureFrame::normalize($frame) : null)
+                : $frame;
+        }
+        $this->requestKind = self::normalizeRequestKind($context['request_kind'] ?? null);
+        $requestAction = $context['request_action'] ?? null;
+        $this->requestAction = $this->requestKind === ABJ_404_Solution_RequestKind::KIND_ADMIN_AJAX
+            ? ABJ_404_Solution_RequestKind::sanitizeAjaxAction($requestAction) : null;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function failureFrame(): ?array {
+        return $this->failureFrame !== null && class_exists('ABJ_404_Solution_RequestFailureFrame', false)
+            ? ABJ_404_Solution_RequestFailureFrame::normalize($this->failureFrame) : null;
     }
 
     /** @return string */
@@ -228,6 +294,29 @@ final class ABJ_404_Solution_CrashBeacon {
     /** @return int */
     public function capturedAt(): int {
         return $this->capturedAt;
+    }
+
+    /** @return string|null */
+    public function requestKind(): ?string {
+        return $this->requestKind;
+    }
+
+    /** @return string|null */
+    public function requestAction(): ?string {
+        return $this->requestAction;
+    }
+
+    /** @param mixed $kind @return string|null */
+    private static function normalizeRequestKind($kind): ?string {
+        if (!is_string($kind)) { return null; }
+        $allowed = array(
+            ABJ_404_Solution_RequestKind::KIND_ADMIN_AJAX,
+            ABJ_404_Solution_RequestKind::KIND_REST,
+            ABJ_404_Solution_RequestKind::KIND_CRON,
+            ABJ_404_Solution_RequestKind::KIND_ADMIN_PAGE,
+            ABJ_404_Solution_RequestKind::KIND_FRONT_END,
+        );
+        return in_array($kind, $allowed, true) ? $kind : null;
     }
 
     /**

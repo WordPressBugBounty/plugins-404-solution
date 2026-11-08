@@ -17,15 +17,15 @@ class ABJ_404_Solution_Ajax_EngineProfiles {
     /** @return void */
     public static function registerActions(): void {
         ABJ_404_Solution_WPUtils::safeAddAction(
-            'wp_ajax_abj404_engine_profiles_list',
+            ABJ_404_Solution_PluginAjaxActions::hook('abj404_engine_profiles_list'),
             'ABJ_404_Solution_Ajax_EngineProfiles::handleList'
         );
         ABJ_404_Solution_WPUtils::safeAddAction(
-            'wp_ajax_abj404_engine_profiles_save',
+            ABJ_404_Solution_PluginAjaxActions::hook('abj404_engine_profiles_save'),
             'ABJ_404_Solution_Ajax_EngineProfiles::handleSave'
         );
         ABJ_404_Solution_WPUtils::safeAddAction(
-            'wp_ajax_abj404_engine_profiles_delete',
+            ABJ_404_Solution_PluginAjaxActions::hook('abj404_engine_profiles_delete'),
             'ABJ_404_Solution_Ajax_EngineProfiles::handleDelete'
         );
     }
@@ -105,9 +105,11 @@ class ABJ_404_Solution_Ajax_EngineProfiles {
             }
         }
 
-        $resultId = ABJ_404_Solution_EngineProfileResolver::getInstance()->saveProfile($req->toResolverPayload());
+        $resolver = ABJ_404_Solution_EngineProfileResolver::getInstance();
+        $resultId = $resolver->saveProfile($req->toResolverPayload());
 
         if ($resultId === false) {
+            $dbError = self::readLastWriteError($resolver);
             $logger = abj_service('logging');
             if ($logger !== null) {
                 $logger->warn('Ajax_EngineProfiles::handleSave: saveProfile() returned false. id=' . $req->getId() .
@@ -117,8 +119,6 @@ class ABJ_404_Solution_Ajax_EngineProfiles {
             // Surface the wpdb-reported failure so the admin can self-diagnose
             // (table missing, column-count mismatch, deadlock, full disk, etc.)
             // instead of seeing only a canned "Failed to save" message.
-            global $wpdb;
-            $dbError = isset($wpdb->last_error) && is_string($wpdb->last_error) ? $wpdb->last_error : '';
             $framing = __('Failed to save engine profile.', '404-solution');
             $message = $dbError !== '' ? $framing . ' (DB error: ' . $dbError . ')' : $framing;
             wp_send_json_error(['message' => $message]);
@@ -147,8 +147,10 @@ class ABJ_404_Solution_Ajax_EngineProfiles {
             return; // @phpstan-ignore deadCode.unreachable
         }
 
-        $ok = ABJ_404_Solution_EngineProfileResolver::getInstance()->deleteProfile($id);
+        $resolver = ABJ_404_Solution_EngineProfileResolver::getInstance();
+        $ok = $resolver->deleteProfile($id);
         if (!$ok) {
+            $dbError = self::readLastWriteError($resolver);
             $logger = abj_service('logging');
             if ($logger !== null) {
                 $logger->warn('Ajax_EngineProfiles::handleDelete: deleteProfile(' . (int)$id .
@@ -158,8 +160,6 @@ class ABJ_404_Solution_Ajax_EngineProfiles {
             // instead of seeing only a canned "Failed to delete" message. When
             // the resolver returns false because the row simply wasn't there,
             // last_error is empty and the framing message stands on its own.
-            global $wpdb;
-            $dbError = isset($wpdb->last_error) && is_string($wpdb->last_error) ? $wpdb->last_error : '';
             $framing = __('Failed to delete engine profile.', '404-solution');
             $message = $dbError !== '' ? $framing . ' (DB error: ' . $dbError . ')' : $framing;
             wp_send_json_error(['message' => $message]);
@@ -167,5 +167,22 @@ class ABJ_404_Solution_Ajax_EngineProfiles {
         }
 
         wp_send_json_success(['id' => $id]);
+    }
+
+    /**
+     * Read the write failure without calling an accessor a previous release
+     * does not have. A present accessor owns the answer even when it is blank;
+     * only the missing-capability branch may use the legacy mutable wpdb value.
+     *
+     * @param object $resolver
+     * @return string
+     */
+    private static function readLastWriteError($resolver): string {
+        if (method_exists($resolver, 'getLastWriteError')) {
+            return trim((string)$resolver->getLastWriteError());
+        }
+        global $wpdb;
+        return isset($wpdb->last_error) && is_string($wpdb->last_error)
+            ? trim($wpdb->last_error) : '';
     }
 }

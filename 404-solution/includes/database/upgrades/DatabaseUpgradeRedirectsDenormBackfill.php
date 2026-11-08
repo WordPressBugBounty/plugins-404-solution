@@ -44,6 +44,19 @@ if (!defined('ABSPATH')) {
  */
 class ABJ_404_Solution_DatabaseUpgradeRedirectsDenormBackfill extends ABJ_404_Solution_DatabaseUpgradeComponent {
 
+    /** @var string One owner record shared by browser, deferred, and daily drains. */
+    private const BACKFILL_LOCK_KEY = 'redirects_denorm_backfill';
+
+    /** @var bool Whether this instance already owns the shared deferred-pass lock. */
+    private $backfillLockHeld = false;
+
+    /** @return ABJ_404_Solution_SynchronizationUtils */
+    private function backfillSynchronizer(): ABJ_404_Solution_SynchronizationUtils {
+        return $this->syncUtils instanceof ABJ_404_Solution_SynchronizationUtils
+            ? $this->syncUtils
+            : abj_service('sync_utils');
+    }
+
     /**
      * Resolve the four derived columns for any redirect rows still carrying the
      * dest_for_view IS NULL sentinel, one chunk at a time.
@@ -67,35 +80,72 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsDenormBackfill extends ABJ_404_So
      * @return int Number of redirect rows resolved in this invocation.
      */
     public function backfillRedirectsDenormColumns(?float $deadlineFloat = null): int {
-        global $wpdb;
-        if (!isset($wpdb)) {
+        if ($this->backfillLockHeld) {
+            return $this->runDenormBackfillBody($deadlineFloat);
+        }
+
+        $sync = $this->backfillSynchronizer();
+        $owner = $sync->synchronizerAcquireLockTry(self::BACKFILL_LOCK_KEY);
+        if (empty($owner)) {
+            $this->logger->debugMessage('backfillRedirectsDenormColumns: another denorm pass owns the lock; skipping.');
             return 0;
         }
-        $redirectsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
 
-        // SHOW TABLES existence probe, same shape as the canonical-url backfill.
-        // Routing through queryAndGetResults would log a benign "table doesn't
-        // exist" error on freshly-installed sites before the create-tables flow
-        // has run.
-        // DAO-bypass-approved: schema existence probe, see comment above.
-        $found = $wpdb->get_var("SHOW TABLES LIKE '" . esc_sql($redirectsTable) . "'");
-        if ($found !== $redirectsTable) {
+        try {
+            $this->backfillLockHeld = true;
+            return $this->runDenormBackfillBody($deadlineFloat);
+        } finally {
+            $this->backfillLockHeld = false;
+            $sync->synchronizerReleaseLock($owner, self::BACKFILL_LOCK_KEY);
+        }
+    }
+
+    /**
+     * Execute the main denorm drain without acquiring the shared owner record.
+     *
+     * The public single-drain entrypoint and the deferred three-drain entrypoint
+     * both use this body so the deferred pass can hold one lock for all of its
+     * work without self-deadlocking.
+     *
+     * @param ?float $deadlineFloat
+     * @return int
+     */
+    private function runDenormBackfillBody(?float $deadlineFloat = null): int {
+        $redirectsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
+        if ($this->redirectsTableExists($redirectsTable) !== true) {
             return 0;
         }
         if ($this->columnExists($redirectsTable, 'dest_for_view') !== true) {
             return 0;
         }
 
-        $chunkSize = (int)$this->getRedirectsDenormBackfillChunkSize();
-        if ($chunkSize < 1) {
-            $chunkSize = 1;
-        }
+        $batchSizer = new ABJ_404_Solution_DatabaseMaintenanceBatchSizer(array(
+            'initial_size' => (int)$this->getRedirectsDenormBackfillChunkSize(),
+            'maximum_size' => 5000,
+            'maximum_sparse_size' => 1000,
+        ));
         $start = abj_clock()->nowFloat();
         $deadline = $deadlineFloat ?? ($start + (float)$this->getRedirectsDenormBackfillTimeBudgetSec());
         $totalResolved = 0;
+        if (is_callable(array(ABJ_404_Solution_RedirectsDenormChunkResolver::class, 'forPass'))) {
+            $resolveChunk = ABJ_404_Solution_RedirectsDenormChunkResolver::forPass(
+                $this->dbCore, $this->logger, $redirectsTable, false
+            );
+        } else {
+            // An in-flight plugin request may retain the older resolver API.
+            $dbCore = $this->dbCore;
+            $logger = $this->logger;
+            $resolveChunk = static function (array $ids) use ($dbCore, $logger, $redirectsTable): bool {
+                return ABJ_404_Solution_RedirectsDenormChunkResolver::resolveChunk(
+                    $dbCore, $logger, $redirectsTable, $ids, false
+                );
+            };
+        }
 
         while (abj_clock()->nowFloat() < $deadline) {
-            $ids = $this->fetchNextBackfillChunkIds($redirectsTable, $chunkSize);
+            $iterationStart = abj_clock()->nowFloat();
+            $requestedLimit = $batchSizer->limit();
+            $ids = $this->fetchNextBackfillChunkIds($redirectsTable, $requestedLimit);
             if ($ids === null) {
                 // Read error already warned about; stop so we don't spin.
                 return $totalResolved;
@@ -103,7 +153,10 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsDenormBackfill extends ABJ_404_So
             if (empty($ids)) {
                 break;
             }
-            if (!$this->resolveDenormColumnsForIds($redirectsTable, $ids)) {
+            $fetchedCount = count($ids);
+            $ids = $batchSizer->boundedIds($ids);
+            $lastChunk = $fetchedCount < $requestedLimit && count($ids) === $fetchedCount;
+            if (!$resolveChunk($ids)) {
                 return $totalResolved;
             }
             $this->writeCursorOption(
@@ -111,7 +164,8 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsDenormBackfill extends ABJ_404_So
                 (int)max($ids)
             );
             $totalResolved += count($ids);
-            if (count($ids) < $chunkSize) {
+            $batchSizer->observe($ids, abj_clock()->nowFloat() - $iterationStart);
+            if ($lastChunk) {
                 break;
             }
         }
@@ -142,15 +196,105 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsDenormBackfill extends ABJ_404_So
      *
      * @param ?float $timeBudgetSec Wall-clock budget for the shared pass. When
      *   null, uses REDIRECTS_DENORM_BACKFILL_TIME_BUDGET_SEC.
-     * @return void
+     * @return int Rows written across all drains (0 when another pass owns the lock).
      */
-    public function runDeferredDenormBackfillPass(?float $timeBudgetSec = null): void {
-        $budget = $timeBudgetSec ?? (float)$this->getRedirectsDenormBackfillTimeBudgetSec();
-        $deadline = abj_clock()->nowFloat() + $budget;
-        $this->backfillRedirectsDenormColumns($deadline);
-        $sortKey = $this->upgrades()->redirectsSortKeyBackfillUpgrade();
-        $sortKey->backfillRedirectsDestSortKey($deadline);
-        $sortKey->backfillRedirectsUrlSortKey($deadline);
+    public function runDeferredDenormBackfillPass(?float $timeBudgetSec = null): int {
+        $sync = $this->backfillSynchronizer();
+        $owner = $sync->synchronizerAcquireLockTry(self::BACKFILL_LOCK_KEY);
+        if (empty($owner)) {
+            $this->logger->debugMessage('runDeferredDenormBackfillPass: another denorm pass owns the lock; skipping.');
+            return 0;
+        }
+
+        try {
+            $budget = $timeBudgetSec ?? (float)$this->getRedirectsDenormBackfillTimeBudgetSec();
+            $deadline = abj_clock()->nowFloat() + $budget;
+            $this->backfillLockHeld = true;
+            $written = $this->backfillRedirectsDenormColumns($deadline);
+            $sortKey = $this->upgrades()->redirectsSortKeyBackfillUpgrade();
+            $written += $sortKey->backfillRedirectsDestSortKey($deadline);
+            $written += $sortKey->backfillRedirectsUrlSortKey($deadline);
+            // Initial rows receive canonical_url in the same atomic write as
+            // their other derived fields. Repair older completed rows with
+            // canonical holes under this same owner and remaining deadline.
+            $remaining = max(0.0, $deadline - abj_clock()->nowFloat());
+            $written += $this->upgrades()->canonicalUrlBackfillUpgrade()->backfillRedirectsCanonicalUrl($remaining);
+            return $written;
+        } finally {
+            $this->backfillLockHeld = false;
+            $sync->synchronizerReleaseLock($owner, self::BACKFILL_LOCK_KEY);
+        }
+    }
+
+    /**
+     * Whether any drain of {@see runDeferredDenormBackfillPass()} still has
+     * rows to write, read from the rows themselves (never from a cursor).
+     *
+     * Each check is the drain's own selector or completion contract:
+     * `dest_for_view IS NULL` and `canonical_url IS NULL` are index seeks
+     * (idx_dest_for_view_id, idx_canonical_url); the two narrow sort keys use
+     * their latch, which only a probe of the rows sets and every upgrade
+     * revalidates. A missing table or column means that drain has nothing it
+     * can do yet. An unreadable probe reports pending: an unread backlog is
+     * never an empty one.
+     */
+    public function hasDeferredBacklog(): bool {
+        $table = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
+        $tableExists = $this->redirectsTableExists($table);
+        if ($tableExists !== true) {
+            return $tableExists === null;
+        }
+        foreach (array('dest_for_view', 'canonical_url') as $column) {
+            $exists = $this->columnExists($table, $column);
+            if ($exists === null || ($exists && $this->anyRowHasNull($table, $column))) {
+                return true;
+            }
+        }
+        foreach (array('dest_sort_key', 'url_sort_key') as $column) {
+            $latch = ABJ_404_Solution_RedirectsDenormColumnSql::sortKeyBackfillLatchOption($column);
+            if ($latch !== '' && ABJ_404_Solution_OptionShapeRead::scalar($latch) !== '1'
+                    && $this->columnExists($table, $column) !== false) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** True=present, false=confirmed absent, null=unreadable metadata. */
+    private function redirectsTableExists(string $redirectsTable): ?bool {
+        global $wpdb;
+        if (!isset($wpdb)) {
+            return null;
+        }
+        $result = $this->dbCore->queryAndGetResults('SHOW TABLES LIKE %s', array(
+            'query_params' => array($redirectsTable), 'log_errors' => false));
+        if (($result['query_succeeded'] ?? null) !== true || ($result['last_error'] ?? null) !== ''
+                || (array_key_exists('timed_out', $result) && $result['timed_out'] !== false)
+                || !is_array($result['rows'] ?? null)) {
+            return null;
+        }
+        $found = false;
+        foreach ($result['rows'] as $row) {
+            if (!is_array($row) || !is_string($name = reset($row))) {
+                return null;
+            }
+            // LIKE's underscores can match other tables; require the exact name.
+            $found = $found || $name === $redirectsTable;
+        }
+        return $found;
+    }
+
+    /** One LIMIT 1 seek; a failed read counts as a remaining row. */
+    private function anyRowHasNull(string $table, string $column): bool {
+        $result = $this->dbCore->queryAndGetResults(
+            'SELECT id FROM ' . $table . ' WHERE ' . $column . ' IS NULL LIMIT 1');
+        $lastError = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
+        if (($result['query_succeeded'] ?? null) !== true
+                || (array_key_exists('timed_out', $result) && $result['timed_out'] !== false)
+                || $lastError !== '' || !array_key_exists('rows', $result) || !is_array($result['rows'])) {
+            return true;
+        }
+        return $result['rows'] !== array();
     }
 
     /**
@@ -189,51 +333,24 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsDenormBackfill extends ABJ_404_So
             " WHERE id > " . (int)$afterId . " AND dest_for_view IS NULL ORDER BY id ASC LIMIT " . $chunkSize
         );
         $lastError = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
-        if ($lastError !== '') {
+        if (($result['query_succeeded'] ?? null) !== true
+                || (array_key_exists('timed_out', $result) && $result['timed_out'] !== false)
+                || $lastError !== '' || !array_key_exists('rows', $result) || !is_array($result['rows'])) {
             $this->logger->warn("backfillRedirectsDenormColumns: stopping after read error: " . $lastError);
             return null;
         }
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+        $rows = $result['rows'];
         $ids = array();
         foreach ($rows as $row) {
             $id = is_array($row)
                 ? ABJ_404_Solution_ExactInteger::read($row['id'] ?? null, 1)
                 : null;
-            if ($id !== null) {
-                $ids[] = $id;
+            if ($id === null) {
+                return null;
             }
+            $ids[] = $id;
         }
         return $ids;
-    }
-
-    /**
-     * Populate the four derived columns for an explicit list of redirect ids.
-     *
-     * dest_for_view + published_status are resolved per redirect type, mirroring
-     * staged-build stages S4-S8. Any row whose type matches none of those stages
-     * is caught by a final UPDATE so the chunk always drains (no row keeps the
-     * dest_for_view IS NULL sentinel). logshits + last_used are rolled up from
-     * the wp_abj404_logs_hits rollup by canonical URL (NOT raw logsv2: report.md
-     * Finding 2) when that rollup table exists.
-     *
-     * @param string         $redirectsTable
-     * @param array<int, int> $ids
-     * @return bool True if the chunk resolved cleanly, false if a write errored.
-     */
-    private function resolveDenormColumnsForIds(string $redirectsTable, array $ids): bool {
-        // Delegate the per-chunk write (per-type dest/published statements plus
-        // the logs_hits rollup) to the shared resolver, the single source of
-        // truth the Step 3d nightly reconcile also uses so the two bulk-write
-        // paths can never drift. $recompute = false: the catch-all guards on the
-        // dest_for_view IS NULL sentinel, which keeps the chunk draining and the
-        // backlog probe converging.
-        return ABJ_404_Solution_RedirectsDenormChunkResolver::resolveChunk(
-            $this->dbCore,
-            $this->logger,
-            $redirectsTable,
-            $ids,
-            false
-        );
     }
 
     /**
@@ -299,7 +416,9 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsDenormBackfill extends ABJ_404_So
             ", ALGORITHM=INPLACE, LOCK=NONE";
         $result = $this->dbCore->queryAndGetResults($inplaceQuery,
             array('log_too_slow' => false, 'log_errors' => false));
-        if (empty($result['last_error'])) {
+        if (($result['query_succeeded'] ?? null) === true
+                && ($result['last_error'] ?? null) === ''
+                && (!array_key_exists('timed_out', $result) || $result['timed_out'] === false)) {
             $this->logger->infoMessage("Added denorm columns to {$redirectsTable} " .
                 "(ALGORITHM=INPLACE, LOCK=NONE): " . $addClause);
             return;
@@ -323,7 +442,9 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsDenormBackfill extends ABJ_404_So
         $bareQuery = "ALTER TABLE " . $redirectsTable . " " . $addClause;
         $bare = $this->dbCore->queryAndGetResults($bareQuery,
             array('log_too_slow' => false));
-        if (empty($bare['last_error'])) {
+        if (($bare['query_succeeded'] ?? null) === true
+                && ($bare['last_error'] ?? null) === ''
+                && (!array_key_exists('timed_out', $bare) || $bare['timed_out'] === false)) {
             $this->logger->infoMessage("Added denorm columns to {$redirectsTable} " .
                 "(bare ALTER fallback): " . $addClause);
         }

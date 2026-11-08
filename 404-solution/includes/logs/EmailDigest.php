@@ -84,7 +84,7 @@ class ABJ_404_Solution_EmailDigest {
      */
     public function generateDigestHTML(array $topCaptured, array $stats, string $dateRange = '', bool $rollupAvailable = true): string {
         if ($dateRange === '') {
-            $dateRange = date('Y-m-d', abj_clock()->now());
+            $dateRange = ABJ_404_Solution_SiteLocalTimestamp::format('Y-m-d', abj_clock()->now());
         }
 
         $adminUrl = function_exists('admin_url')
@@ -197,7 +197,12 @@ class ABJ_404_Solution_EmailDigest {
             $rawUrl  = isset($row['url']) && is_string($row['url']) ? $row['url'] : '';
             $urlText = esc_html($rawUrl);
             $hits    = isset($row['logshits']) ? intval(is_scalar($row['logshits']) ? $row['logshits'] : 0) : 0;
-            $created = isset($row['created']) ? date('Y-m-d', intval(is_scalar($row['created']) ? $row['created'] : 0)) : '';
+            $created = isset($row['created'])
+                ? ABJ_404_Solution_SiteLocalTimestamp::format(
+                    'Y-m-d',
+                    intval(is_scalar($row['created']) ? $row['created'] : 0)
+                )
+                : '';
 
             $rowBg   = ($rowIndex % 2 === 0) ? '#f8fafc' : '#ffffff';
 
@@ -321,7 +326,7 @@ class ABJ_404_Solution_EmailDigest {
             return 'Digest skipped: no captured 404s to report.';
         }
 
-        $dateRange = date('Y-m-d', abj_clock()->now());
+        $dateRange = ABJ_404_Solution_SiteLocalTimestamp::format('Y-m-d', abj_clock()->now());
         $body = $this->generateDigestHTML($topCaptured, $stats, $dateRange, $rollupAvailable);
 
         $subject = sprintf(

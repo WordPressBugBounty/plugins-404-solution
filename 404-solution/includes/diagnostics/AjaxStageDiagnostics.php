@@ -32,6 +32,7 @@ class ABJ_404_Solution_AjaxStageDiagnostics {
     public static function beginRequest(array $context): void {
         $requestId = ABJ_404_Solution_AjaxDiagnosticRequestPolicy::diagnosticRequestId($context);
         if ($requestId === '') {
+            ABJ_404_Solution_ClientTransportReport::retainFailure($context);
             unset($GLOBALS['abj404_ajax_request_trace']);
             return;
         }
@@ -45,6 +46,7 @@ class ABJ_404_Solution_AjaxStageDiagnostics {
         // failure land in one file joined by request id even when the admin
         // never sends a support request.
         ABJ_404_Solution_ClientTransportReport::journal($requestId);
+        ABJ_404_Solution_ClientTransportReport::retainFailure($context);
 
         $traceContext = array(
             'request_id' => $requestId,
@@ -109,6 +111,7 @@ class ABJ_404_Solution_AjaxStageDiagnostics {
 
     /** Finish and detach the current request trace, wrapped in a trace_finish checkpoint pair. */
     public static function finishRequest(string $status = 'complete'): void {
+        ABJ_404_Solution_RequestFailureFrame::finish($status);
         $requestId = self::currentRequestIdForCheckpoints();
         self::recordRequestPhase($requestId, 'trace_finish');
         $trace = self::activeTrace();
@@ -178,6 +181,8 @@ class ABJ_404_Solution_AjaxStageDiagnostics {
             $context = array();
         }
         $diagnostics = self::getStageDiagnostics($stage);
+        ABJ_404_Solution_RequestFailureFrame::stage((string)$stage);
+        ABJ_404_Solution_SameSiteRequestCensus::checkpoint();
         $context['stage'] = $stage;
         $context['query_label'] = $diagnostics['query_label'];
         $context['what_happening'] = $diagnostics['what_happening'];

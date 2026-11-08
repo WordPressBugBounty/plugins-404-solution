@@ -76,6 +76,20 @@ class ABJ_404_Solution_DatabaseQueryTimeoutManager {
      * @return bool
      */
     public function queryProducesResultRows(string $query): bool {
+        return in_array($this->queryStatementCommand($query), array(
+            'SELECT', 'SHOW', 'EXPLAIN', 'DESCRIBE', 'DESC',
+        ), true);
+    }
+
+    /**
+     * Return the leading SQL command after the same conservative comment and
+     * timeout-wrapper stripping used by queryProducesResultRows().
+     *
+     * @param string $query
+     * @return string Uppercase command, or an empty string when it is not
+     *   safely parseable.
+     */
+    public function queryStatementCommand(string $query): string {
         $stripped = (string)preg_replace('/^\s*(?:\/\*[\s\S]*?\*\/\s*)+/', '', $query);
         $stripped = (string)preg_replace(
             '/^\s*SET\s+STATEMENT\s+\w+\s*=\s*\d+\s+FOR\s+/i',
@@ -85,7 +99,10 @@ class ABJ_404_Solution_DatabaseQueryTimeoutManager {
         );
         // Strip nested leading comments inside the SET STATEMENT wrapper too.
         $stripped = (string)preg_replace('/^\s*(?:\/\*[\s\S]*?\*\/\s*)+/', '', $stripped);
-        return preg_match('/^\s*(SELECT|SHOW|EXPLAIN|DESCRIBE|DESC)\s/i', $stripped) === 1;
+        if (preg_match('/^\s*([A-Za-z]+)\b/', $stripped, $matches) !== 1) {
+            return '';
+        }
+        return strtoupper($matches[1]);
     }
 
     /**
@@ -141,11 +158,14 @@ class ABJ_404_Solution_DatabaseQueryTimeoutManager {
             && function_exists('mysqli_get_server_info')
             && $wpdb->dbh instanceof \mysqli
                 ? 'mysqli_server_info'
-                : 'wpdb_db_version';
+                : (method_exists($wpdb, 'db_server_info') ? 'wpdb_server_info' : 'wpdb_db_version');
         $detect = static function () use ($wpdb): bool {
             if (isset($wpdb->dbh) && function_exists('mysqli_get_server_info')
                     && $wpdb->dbh instanceof \mysqli) {
                 $dbVersion = mysqli_get_server_info($wpdb->dbh);
+            } elseif (method_exists($wpdb, 'db_server_info')) {
+                // db_version() strips the MariaDB identity from this raw value.
+                $dbVersion = $wpdb->db_server_info() ?? '';
             } else {
                 /** @var wpdb $wpdb */
                 $dbVersion = $wpdb->db_version() ?? '';
@@ -387,8 +407,6 @@ class ABJ_404_Solution_DatabaseQueryTimeoutManager {
             . 'unsupported capability for one hour.'
         );
 
-        global $wpdb;
-        /** @var wpdb $wpdb */
         $retryError = isset($result['last_error']) && is_scalar($result['last_error'])
             ? (string)$result['last_error']
             : '';
@@ -411,24 +429,10 @@ class ABJ_404_Solution_DatabaseQueryTimeoutManager {
         // Re-route classification past any leading comments and the (now-absent)
         // wrapper. Using queryProducesResultRows on the unwrapped query keeps
         // the routing correct for INSERT/UPDATE/DELETE/DDL.
-        // SET STATEMENT wrapper-rejection recovery is a DAO-internal primitive
-        // (parallel to attemptMissingTableRepairAndRetry). It must call
-        // $wpdb directly: re-routing through queryAndGetResults() would
-        // re-enter the same SET STATEMENT detection path, deepening the call
-        // stack on every retry. Per-bypass approval markers are inline below.
+        // Run one native attempt through the executor, retaining its metadata-lock
+        // guard without re-entering queryAndGetResults() or recovery decisions.
         $unwrappedProducesRows = $this->queryProducesResultRows($unwrapped);
-        $retry = function () use ($wpdb, $unwrapped, $resultType, $unwrappedProducesRows): array {
-            if ($unwrappedProducesRows) {
-                // DAO-bypass-approved: SET STATEMENT wrapper-rejection retry primitive.
-                $retried = array('rows' => $wpdb->get_results($unwrapped, $resultType));
-            } else {
-                // DAO-bypass-approved: SET STATEMENT wrapper-rejection retry primitive.
-                $wpdb->query($unwrapped);
-                $retried = array('rows' => array());
-            }
-            $this->core->resultHarvester()->harvestWpdbResult($retried);
-            return $retried;
-        };
+        $retry = fn(): array => $this->core->queryExecutor()->executeWpdbQuery($unwrapped, $resultType, $unwrappedProducesRows);
         $retried = $tracer === null
             ? $retry()
             : $tracer->traceAttempt(

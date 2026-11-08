@@ -5,10 +5,13 @@ if (!defined('ABSPATH')) {
 }
 
 require_once __DIR__ . '/LogsHitsRollupServiceInterface.php';
+require_once __DIR__ . '/LogsReadResult.php';
 require_once __DIR__ . '/LogsHitsCanonicalUrlJoinHelper.php';
 require_once __DIR__ . '/LogsHitsTableRebuilder.php';
 require_once __DIR__ . '/LogsHitsRebuildLock.php';
 require_once __DIR__ . '/LogsHitsRollupStallWatchdog.php';
+require_once __DIR__ . '/LogsHitsRebuildProgress.php';
+require_once __DIR__ . '/LogsHitsTableMetadata.php';
 
 /**
  * wp_abj404_logs_hits rollup lifecycle (existence checks, scheduling,
@@ -18,6 +21,8 @@ require_once __DIR__ . '/LogsHitsRollupStallWatchdog.php';
  * Extracted from LogsRepository under M201. LogsRepository now forwards
  * the rollup-related interface methods to this service. Internal log read
  * and write paths reach the rollup via LogsRepository's facade as well.
+ *
+ * @phpstan-import-type State from ABJ_404_Solution_LogsHitsRebuildProgress
  */
 class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHitsRollupServiceInterface {
 
@@ -83,6 +88,12 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
     /** @var ABJ_404_Solution_LogsHitsRollupStallWatchdog */
     private $stallWatchdog;
 
+    /** @var ABJ_404_Solution_LogsHitsRebuildProgress */
+    private $progress;
+
+    /** @var ABJ_404_Solution_LogsHitsTableMetadata */
+    private $metadata;
+
     /**
      * @param ABJ_404_Solution_DatabaseCore $dbCore
      * @param ABJ_404_Solution_Logging|null $logging
@@ -101,6 +112,8 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
             ? $rebuildHealth
             : $this->resolveRebuildHealthState();
         $this->noticeState = $noticeState !== null ? $noticeState : $dbCore->noticeState();
+        $this->progress = new ABJ_404_Solution_LogsHitsRebuildProgress($this->logger);
+        $this->metadata = new ABJ_404_Solution_LogsHitsTableMetadata($dbCore, $this->logger);
         $this->rebuildLock = new ABJ_404_Solution_LogsHitsRebuildLock($dbCore);
         $this->joinHelper = new ABJ_404_Solution_LogsHitsCanonicalUrlJoinHelper($dbCore);
         $this->rebuilder = new ABJ_404_Solution_LogsHitsTableRebuilder(
@@ -108,7 +121,7 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
             $this->logger,
             $this->rebuildHealth,
             $this->joinHelper,
-            array($this->rebuildLock, 'renew')
+            array($this->rebuildLock, 'checkAndRenew')
         );
         $this->stallWatchdog = new ABJ_404_Solution_LogsHitsRollupStallWatchdog(
             $this->noticeState,
@@ -119,7 +132,8 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
                     ? $this->createRedirectsForViewHitsTable()
                     : false;
             },
-            $this->logger
+            array('logger' => $this->logger,
+                'hasPendingRebuild' => function (): bool { return $this->progress->hasPending(); })
         );
     }
 
@@ -160,6 +174,7 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
 
     /** @inheritDoc */
     public function hitsTableNeedsRebuild() {
+        if ($this->progress->hasPending()) { return true; }
         $storedMaxId = $this->getStoredMaxLogId();
         $currentMaxId = $this->getMaxLogId();
         if ($currentMaxId != $storedMaxId) { $this->logger->debugMessage(__FUNCTION__ . " rebuild=yes (max_id changed: stored=$storedMaxId, current=$currentMaxId)"); return true; }
@@ -174,110 +189,10 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
         $rawRefreshedFlag = $this->noticeState->getRuntimeFlag(self::HITS_TABLE_LAST_REFRESHED_FLAG);
         $runtimeRefreshedAt = is_scalar($rawRefreshedFlag) ? (int)$rawRefreshedFlag : 0;
         $runtimeRefreshedAt = $runtimeRefreshedAt > 0 ? $runtimeRefreshedAt : null;
-        $schemaTimestamp = $this->readSchemaFreshnessEpoch();
+        $schemaTimestamp = $this->metadata->freshnessEpoch();
         if ($schemaTimestamp === null) { return $runtimeRefreshedAt; }
         if ($runtimeRefreshedAt !== null && $runtimeRefreshedAt > $schemaTimestamp) { return $runtimeRefreshedAt; }
         return $schemaTimestamp;
-    }
-
-    /**
-     * The rollup table's own creation instant, as a true UTC epoch, read from
-     * information_schema.
-     *
-     * The server is asked for UNIX_TIMESTAMP(create_time) rather than
-     * create_time itself, because create_time is DISPLAYED in the MySQL session
-     * timezone: one instant reads as "2026-08-13 21:52:51" at +00:00 and
-     * "2026-08-14 06:52:51" at +09:00. Only the epoch form is timezone-invariant,
-     * and it is the form the caller needs, since it compares this against
-     * abj_clock()->now(), a true UTC epoch.
-     *
-     * @return int|null Epoch seconds, or null when the server has no usable
-     *                  answer (no such table, or the read was refused and the
-     *                  fallback could not date it either).
-     */
-    private function readSchemaFreshnessEpoch(): ?int {
-        $query = "SELECT UNIX_TIMESTAMP(create_time) AS create_time_epoch FROM information_schema.tables WHERE table_name = '{wp_abj404_logs_hits}' AND table_schema = DATABASE()";
-        $query = $this->dbCore->doTableNameReplacements($query);
-        $results = $this->dbCore->queryAndGetResults($query);
-        if ($results['rows'] == null || empty($results['rows'])) {
-            // Rows AND an error means the read was refused (restricted grants
-            // on managed hosts), which is the only case worth a second attempt.
-            return empty($results['last_error']) ? null : $this->readStatusFallbackFreshnessEpoch();
-        }
-        $hitsRows = is_array($results['rows']) ? $results['rows'] : array();
-        $row = is_array($hitsRows[0] ?? null) ? array_change_key_case($hitsRows[0]) : array();
-        $createTimeEpoch = $row['create_time_epoch'] ?? null;
-        if (!is_numeric($createTimeEpoch)) { return null; }
-        $schemaTimestamp = (int)$createTimeEpoch;
-        return $schemaTimestamp > 0 ? $schemaTimestamp : null;
-    }
-
-    /**
-     * The same instant read through SHOW TABLE STATUS, for hosts that refuse
-     * information_schema. Prefers Update_time, which InnoDB leaves NULL until
-     * the table is written, and falls back to Create_time.
-     *
-     * @return int|null Epoch seconds, or null when the row carries no usable date.
-     */
-    private function readStatusFallbackFreshnessEpoch(): ?int {
-        $statusRow = $this->getLogsHitsTableStatusRow();
-        $dateValue = is_array($statusRow) ? ($statusRow['update_time'] ?? ($statusRow['create_time'] ?? '')) : '';
-        if (!is_string($dateValue) || $dateValue === '') { return null; }
-        return $this->mysqlDatetimeToEpoch($dateValue);
-    }
-
-    /**
-     * Convert a datetime string the database server just rendered back into a
-     * true UTC epoch, using that same server's session timezone.
-     *
-     * SHOW TABLE STATUS cannot be wrapped in an expression the way
-     * information_schema's create_time can, so its Create_time / Update_time
-     * arrive here as a string already rendered in the MySQL session timezone
-     * (normally SYSTEM, i.e. the DB host's OS timezone). Handing that string to
-     * PHP's strtotime() would re-read it in PHP's default timezone, which
-     * WordPress pins to UTC -- two systems rendering and parsing the same
-     * instant under different implicit timezones, which puts the rollup age out
-     * by the server's whole UTC offset. Asking the server to convert its own
-     * rendering keeps interpretation on the side that produced it, so the two
-     * cannot disagree.
-     *
-     * @param string $mysqlDatetime A datetime as rendered by the server.
-     * @return int|null Epoch seconds, or null when the server cannot convert it
-     *                  (unparseable, zero date, or a failed conversion query).
-     */
-    private function mysqlDatetimeToEpoch(string $mysqlDatetime): ?int {
-        $results = $this->dbCore->queryAndGetResults(
-            "SELECT UNIX_TIMESTAMP(%s) AS `epoch`",
-            array('query_params' => array($mysqlDatetime), 'log_errors' => false)
-        );
-        $rows = isset($results['rows']) && is_array($results['rows']) ? $results['rows'] : array();
-        $row = is_array($rows[0] ?? null) ? array_change_key_case($rows[0]) : array();
-        $epoch = $row['epoch'] ?? null;
-        if (!is_numeric($epoch)) { return null; }
-        $epoch = (int)$epoch;
-        return $epoch > 0 ? $epoch : null;
-    }
-
-    /** @return array<string, mixed> */
-    private function getLogsHitsTableStatusRow() {
-        $tableName = $this->dbCore->doTableNameReplacements('{wp_abj404_logs_hits}');
-        // The name is BOUND by the executor (`query_params`) after its `{token}` pass over the template.
-        $results = $this->dbCore->queryAndGetResults(
-            "SHOW TABLE STATUS LIKE %s",
-            array('query_params' => array($tableName), 'log_errors' => false)
-        );
-        if (!is_array($results['rows']) || empty($results['rows']) || !is_array($results['rows'][0])) { return array(); }
-        // Lower-cased explicitly rather than through array_change_key_case(),
-        // which is typed as preserving the input's (here unknown) key type and
-        // so cannot satisfy this method's declared string-keyed contract.
-        // MySQL and MariaDB disagree on the case of SHOW TABLE STATUS column
-        // names, which is the whole reason the keys are normalized at all
-        // (defensive philosophy #5, case-insensitive metadata access).
-        $row = array();
-        foreach ($results['rows'][0] as $column => $value) {
-            $row[strtolower((string)$column)] = $value;
-        }
-        return $row;
     }
 
     // =========================================================================
@@ -299,49 +214,126 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
             $this->logger->debugMessage(__FUNCTION__ . " skipped because rebuild health gate is closed.");
             return false;
         }
-        if ($this->noticeState->shouldSkipNonEssentialDbWrites()) { $this->logger->debugMessage(__FUNCTION__ . " skipped due to temporary DB write cooldown."); return false; }
-        if (!$this->rebuildLock->acquire()) { $this->logger->debugMessage(__FUNCTION__ . " skipped because rebuild lock is already held."); return false; }
+        // CLI callbacks have an invocation boundary, not the SAPI's process
+        // start instant. Web callbacks share their original request deadline,
+        // including the time spent rendering before shutdown detached it.
+        $budget = new ABJ_404_Solution_LogsHitsRebuildBudget(abj_clock(), array(
+            'request_started_at' => PHP_SAPI === 'cli' ? null : ($_SERVER['REQUEST_TIME_FLOAT'] ?? null),
+        ));
         try {
-            $maxLogIdSnapshot = $this->getMaxLogId();
-            $minLogId = $this->getMinLogId();
-            $result = $this->rebuilder->rebuildAndSwap($minLogId, $maxLogIdSnapshot);
+            if ($this->noticeState->shouldSkipNonEssentialDbWrites()) { $this->logger->debugMessage(__FUNCTION__ . " skipped due to temporary DB write cooldown."); return false; }
+            if (!$this->rebuildLock->acquire()) { $this->logger->debugMessage(__FUNCTION__ . " skipped because rebuild lock is already held."); return false; }
+            $result = $this->runRebuildSlice($budget);
+            if ($result['pending']) {
+                $state = $result['state'];
+                $state['status'] = 'ready';
+                $this->checkpointRebuild($state);
+                $this->armRebuildContinuation();
+            }
             if (!$result['refreshed']) {
                 return false;
             }
+            $this->checkpointRebuild($result['state']);
             $this->noticeState->setRuntimeFlag(self::HITS_TABLE_LAST_REFRESHED_FLAG, abj_clock()->now(), 86400);
             $this->stallWatchdog->clearStallState();
-            $this->writeBackDenormHitsColumns();
+            $this->renewRebuildLease();
+            $this->progress->clear();
             return true;
+        } catch (ABJ_404_Solution_LogsHitsRebuildYield $e) {
+            // Admission/recovery can exhaust the request before a SQL unit
+            // starts. Preserve its checkpoint and arm the same continuation.
+            // A yield is the healthy liveness signal of a budgeted drain, not
+            // a failure: it is recorded as a durable INFO line (a WARN would
+            // read as a fault on every healthy slice, and a debug line is lost
+            // while debug_mode is off).
+            $this->logger->infoMessage('Logs-hits rebuild yielded before a SQL unit started (code '
+                . $e->getCode() . '): ' . $e->getMessage()
+                . ' Checkpoint preserved; continuation armed.');
+            $this->armRebuildContinuation();
+            return false;
         } catch (Throwable $e) {
             // The rebuild engine self-handles its own SQL/Throwable failures and
-            // signals them via the return value; reaching here means a post-swap
-            // bookkeeping step (freshness flag, staleness clear, denorm write-back)
-            // threw. Return false rather than letting the exception escape the
-            // cron / shutdown listener.
-            $this->logger->errorMessage(__FUNCTION__ . " post-rebuild step failed: " . $e->getMessage(), $e instanceof \Exception ? $e : null);
+            // signals them via the return value; reaching here means an
+            // admission check or bookkeeping step (freshness flag, staleness
+            // clear, denorm write-back) threw. Return false rather than letting
+            // the exception escape the cron / shutdown listener.
+            $this->logger->warn(__FUNCTION__ . ' rebuild coordination failed: '
+                . get_class($e) . ' (' . $e->getCode() . '): ' . $e->getMessage());
+            if ($this->progress->hasPending()) {
+                $this->armRebuildContinuation();
+            }
             return false;
         } finally {
-            $this->rebuildLock->release();
+            try {
+                $this->rebuildLock->release();
+            } finally {
+                if ($this->rebuildHealth !== null) {
+                    $this->rebuildHealth->endExpensiveRebuildAttempt();
+                }
+            }
         }
     }
 
     /**
-     * After a successful rollup rebuild, push the freshly rolled-up hit count +
-     * last-used timestamp from wp_abj404_logs_hits back onto the redirects rows
-     * (Denorm Step 3c). This keeps the STORED logshits / last_used columns -
-     * which order the full off-page result set - current in real time instead of
-     * waiting for the nightly reconcile. Delegated to the denorm maintenance
-     * service, resolved lazily so a minimal wiring (or a context where the
-     * service is unregistered) degrades to a no-op rather than fataling.
-     *
-     * @return void
+     * Adopt only an intentionally yielded generation. A dead worker's private
+     * scratch is discarded; an already-published generation instead resumes
+     * its idempotent derived-column fan-out.
+     * @return array{refreshed:bool,pending:bool,state:State,elapsed_time:float,error:string}
      */
-    private function writeBackDenormHitsColumns(): void {
-        $maintenance = new ABJ_404_Solution_RedirectsDenormMaintenanceService(
-            $this->dbCore,
-            $this->logger
-        );
-        $maintenance->writeBackLogsHitsColumns();
+    private function runRebuildSlice(ABJ_404_Solution_LogsHitsRebuildBudget $budget): array {
+        $state = $this->progress->read();
+        $afterPublication = $state !== null
+            && in_array($state['phase'], array('denormalize', 'cleanup', 'complete'), true);
+        if ($state !== null && ($state['status'] === 'running' || $afterPublication)) {
+            if ($this->rebuilder->isPublishedGeneration($state, $budget)) {
+                if (!$afterPublication) { $state['phase'] = 'denormalize'; }
+            } else {
+                if ($afterPublication) {
+                    $this->logger->warn('Logs-hits checkpoint has no matching published generation; rebuilding its snapshot.');
+                }
+                $this->rebuilder->discard($state, $budget);
+                $state = null;
+            }
+        }
+        if ($state === null) {
+            // Snapshot acquisition is rebuild work too. Defer before either
+            // bounded aggregate if admission or the preceding read used up
+            // this callback's scheduling window.
+            $budget->timeoutSeconds();
+            $maxId = $this->getMaxLogId();
+            $budget->timeoutSeconds();
+            $minId = $this->getMinLogId();
+            $state = $this->progress->start(array('min_log_id' => $minId, 'max_log_id' => $maxId,
+                'chunk_size' => $this->rebuilder->getHitsRebuildChunkSize($maxId - $minId)));
+        }
+        $state['status'] = 'running';
+        $this->checkpointRebuild($state);
+        return $this->rebuilder->rebuildAndSwap($state['min_log_id'], $state['max_log_id'], array(
+            'state' => $state, 'budget' => $budget,
+            'checkpoint' => Closure::fromCallable(array($this, 'checkpointRebuild')),
+        ));
+    }
+
+    /** @param State $state */
+    private function checkpointRebuild(array $state): void {
+        $this->renewRebuildLease();
+        $this->progress->write($state);
+        $this->renewRebuildLease();
+    }
+
+    /** Fence checkpoint writes and publication bookkeeping against a new owner. */
+    private function renewRebuildLease(): void {
+        if (!$this->rebuildLock->checkAndRenew()) {
+            throw new RuntimeException('Logs-hits coordinator lost its exclusive lease.', 409);
+        }
+    }
+
+    /** Schedule an actual continuation without replacing an overdue cron event. */
+    private function armRebuildContinuation(): void {
+        $scheduler = abj_cron_scheduler();
+        if (!$scheduler->scheduleSingleIfMissing(self::UPDATE_LOGS_HITS_TABLE_HOOK, 5)) {
+            $this->logger->warn('Could not schedule logs-hits rebuild continuation: ' . $scheduler->lastFailureDetail());
+        }
     }
 
     // =========================================================================
@@ -349,30 +341,7 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
     // =========================================================================
 
     /** @inheritDoc */
-    public function logsHitsTableExists() {
-        $query = "SELECT 1 FROM information_schema.tables WHERE table_name = '{wp_abj404_logs_hits}' AND table_schema = DATABASE() LIMIT 1";
-        $query = $this->dbCore->doTableNameReplacements($query);
-        $results = $this->dbCore->queryAndGetResults($query);
-        if ($results['rows'] != null && !empty($results['rows'])) { return true; }
-        if (!empty($results['last_error'])) { return $this->logsHitsTableExistsViaShowTables(); }
-        return false;
-    }
-
-    /** @return bool */
-    private function logsHitsTableExistsViaShowTables(): bool {
-        $tableName = $this->dbCore->doTableNameReplacements('{wp_abj404_logs_hits}');
-        // The name is BOUND by the executor (`query_params`) after its `{token}` pass over the template.
-        $fallback = $this->dbCore->queryAndGetResults(
-            "SHOW TABLES LIKE %s",
-            array('query_params' => array($tableName), 'log_errors' => false)
-        );
-        if (empty($fallback['rows'])) { return false; }
-        $fbRows = is_array($fallback['rows']) ? $fallback['rows'] : array();
-        $firstRow = isset($fbRows[0]) ? $fbRows[0] : null;
-        if (!is_array($firstRow)) { return false; }
-        $value = reset($firstRow);
-        return ((string)$value === (string)$tableName);
-    }
+    public function logsHitsTableExists() { return $this->metadata->exists(); }
 
     /** @inheritDoc */
     public function scheduleHitsTableRebuild(): void {
@@ -419,12 +388,10 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
         // allow-unbounded-select: MAX(id) aggregate; returns a single row
         $query = "SELECT MAX(id) FROM {wp_abj404_logsv2}";
         $query = $this->dbCore->doTableNameReplacements($query);
-        $results = $this->dbCore->queryAndGetResults($query);
-        $resultRows = is_array($results['rows']) ? $results['rows'] : array();
-        if (empty($resultRows)) { return 0; }
-        $row = $resultRows[0];
-        $maxId = is_array($row) ? array_values($row)[0] : (array_values((array)$row)[0] ?? 0);
-        return (int)($maxId ?? 0);
+        $results = $this->dbCore->queryAndGetResults($query, array(
+            'timeout' => ABJ_404_Solution_LogsHitsRebuildBudget::MAX_TIMEOUT_SECONDS,
+        ));
+        return (new ABJ_404_Solution_LogsReadResult($results, 'getMaxLogId'))->integerAggregate(true);
     }
 
     /** @inheritDoc */
@@ -432,31 +399,14 @@ class ABJ_404_Solution_LogsHitsRollupService implements ABJ_404_Solution_LogsHit
         // allow-unbounded-select: MIN(id) aggregate; returns a single row
         $query = "SELECT MIN(id) FROM {wp_abj404_logsv2}";
         $query = $this->dbCore->doTableNameReplacements($query);
-        $results = $this->dbCore->queryAndGetResults($query);
-        $resultRows = is_array($results['rows']) ? $results['rows'] : array();
-        if (empty($resultRows)) { return 0; }
-        $row = $resultRows[0];
-        $minId = is_array($row) ? array_values($row)[0] : (array_values((array)$row)[0] ?? 0);
-        return ABJ_404_Solution_ExactInteger::readOr($minId, 0, 0);
+        $results = $this->dbCore->queryAndGetResults($query, array(
+            'timeout' => ABJ_404_Solution_LogsHitsRebuildBudget::MAX_TIMEOUT_SECONDS,
+        ));
+        return (new ABJ_404_Solution_LogsReadResult($results, 'getMinLogId'))->integerAggregate(true);
     }
 
     /** @inheritDoc */
-    public function getStoredMaxLogId() {
-        $query = "SELECT table_comment FROM information_schema.tables WHERE table_name = '{wp_abj404_logs_hits}' AND table_schema = DATABASE()";
-        $query = $this->dbCore->doTableNameReplacements($query);
-        $results = $this->dbCore->queryAndGetResults($query);
-        $storedRows = is_array($results['rows']) ? $results['rows'] : array();
-        if (empty($storedRows)) {
-            if (!empty($results['last_error'])) { $statusRow = $this->getLogsHitsTableStatusRow(); $commentFromStatus = $statusRow['comment'] ?? ''; if ($commentFromStatus !== '') { $parts = explode('|', is_string($commentFromStatus) ? $commentFromStatus : ''); if (count($parts) >= 2) { return (int)$parts[1]; } } }
-            return 0;
-        }
-        $row = is_array($storedRows[0] ?? null) ? $storedRows[0] : array();
-        $row = array_change_key_case($row);
-        $comment = $row['table_comment'] ?? '';
-        $parts = explode('|', is_string($comment) ? $comment : '');
-        if (count($parts) >= 2) { return (int)$parts[1]; }
-        return 0;
-    }
+    public function getStoredMaxLogId() { return $this->metadata->storedMaxLogId(); }
 
     /** @inheritDoc */
     public function getLogsHitsTableLastScheduledAt() { $rawTsFlag2 = $this->noticeState->getRuntimeFlag(self::HITS_TABLE_LAST_SCHEDULED_FLAG); $ts = is_scalar($rawTsFlag2) ? (int)$rawTsFlag2 : 0; return $ts > 0 ? $ts : null; }

@@ -214,6 +214,13 @@ class ABJ_404_Solution_View_Shared extends ABJ_404_Solution_ViewComponent {
 	 * @return string
 	 */
 	public function pendingSortTooltipText(string $orderby, $viewReadService): string {
+		$reader = abj_service_optional('admin_table_reader');
+		if ($orderby !== '' && $reader instanceof ABJ_404_Solution_AdminTableReadRepository && $reader->isDegraded()) {
+			return __('Showing a limited set of matching records while sorting and search are being prepared. The full list returns automatically.', '404-solution');
+		}
+		if ($reader instanceof ABJ_404_Solution_AdminTableReadRepository && $reader->sortIsPending($orderby)) {
+			return __('Sorting by this column is being prepared. It becomes available automatically.', '404-solution');
+		}
 		if ($viewReadService === null) {
 			return '';
 		}

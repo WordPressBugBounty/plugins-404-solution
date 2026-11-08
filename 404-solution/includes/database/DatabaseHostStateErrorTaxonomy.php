@@ -25,6 +25,17 @@ class ABJ_404_Solution_DatabaseHostStateErrorTaxonomy {
      * or optimistic certification advances. This data table is the single
      * vocabulary for both warning severity and DAO retry policy.
      *
+     * The last three entries come from the wsrep-lib provider status
+     * vocabulary (provider::to_string()), which MariaDB wraps as "Error while
+     * appending streaming replication fragment(provider status: %s)" for every
+     * commit and fragment failure (sql/wsrep_thd.h). Of its twelve statuses
+     * only cluster membership, certification and brute-force abort clear on
+     * their own; size limits, refused statements and a broken provider must
+     * stay visible. 'primary component' covers every spelling of the
+     * membership state: "Not connected to Primary Component" (MariaDB
+     * 10.11.19), "Not synced with a Primary Component" (current wsrep-lib) and
+     * "non-Primary component".
+     *
      * @var array<int, string>
      */
     private const RETRYABLE_GALERA_MARKERS = array(
@@ -33,8 +44,9 @@ class ABJ_404_Solution_DatabaseHostStateErrorTaxonomy {
         'cluster conflict',
         'wsrep has not yet prepared node for application use',
         'node is not ready for application use',
-        'non-primary component',
-        'non primary component',
+        'primary component',
+        'certification failed',
+        'transaction was bf aborted',
     );
 
     /** @var ABJ_404_Solution_Functions */

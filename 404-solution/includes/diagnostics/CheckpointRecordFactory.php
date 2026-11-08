@@ -166,6 +166,12 @@ final class ABJ_404_Solution_CheckpointRecordFactory {
         }
         if (is_string($intent['reason'] ?? null) && $intent['reason'] !== '') {
             $details['intent_reason'] = $intent['reason'];
+            // A host that withholds its temp directory leaves the ordinary
+            // uploads journal usable. Preserve the skipped independent sink
+            // as a warning there, without resolving WordPress paths inside it.
+            if ($intent['reason'] === 'temp_directory_unavailable') {
+                $details['intent_level'] = 'warning';
+            }
         }
         return $details;
     }

@@ -108,6 +108,27 @@ final class ABJ_404_Solution_HookInstrumentationRegistry {
     }
 
     /**
+     * Is this WP_Hook entry still exactly what the registration installed: the
+     * wrapper in place of the original, or the original with its marker closure
+     * registered beside it? The one definition of "installed", shared by the
+     * staleness sweep and the per-entry walk.
+     *
+     * @param Registration $registration
+     * @param mixed $entry The entry under the registration's id.
+     * @param array<array-key, mixed> $entries Every entry at the registration's priority.
+     */
+    public static function isInstalled(array $registration, $entry, array $entries): bool {
+        $callback = is_array($entry) ? ($entry['function'] ?? null) : null;
+        if ($registration['mode'] === 'wrapper') {
+            return $callback === $registration['wrapper'];
+        }
+        $beforeEntry = $entries[$registration['before_id']] ?? null;
+        return $callback === $registration['original']
+            && is_array($beforeEntry)
+            && ($beforeEntry['function'] ?? null) === $registration['before'];
+    }
+
+    /**
      * Is this WP_Hook entry's callable one of the closures we installed?
      *
      * @param mixed $callback

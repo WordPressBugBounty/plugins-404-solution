@@ -13,11 +13,49 @@
  *   findJsonSchemaFiles(dir)                       -> string[] of *.schema.json paths
  *   fileContainsAnnotation(filePath, id, name?)    -> boolean
  *   fileContainsParityAnnotation(filePath, id)     -> boolean
+ *   defaultServerContractsDir(checkoutRoot)        -> string
  */
-// allow-no-test-found: file-IO layer of the contract-validation CLI gate; it is the data-access half of validate-contracts.js (its only consumer) and is exercised whenever that gate runs over the real contracts/schemas tree. There is no isolated JS unit spec because it only wraps fs/path reads, with no business logic to assert in isolation.
+// allow-no-test-found: shared filesystem/repository adapter covered through the real CLI in tests-js/contract-validator.test.js, including linked worktrees, missing owners, drift, and explicit overrides.
 
 const fs = require("fs");
 const path = require("path");
+const { spawnSync } = require("child_process");
+
+/** A repository lookup failed; retain Git's diagnostic and the explicit remedy. */
+class ContractOwnerPathError extends Error {
+  constructor(detail, cause) {
+    super(`Cannot discover the canonical contract checkout: ${detail}`, { cause });
+    this.name = "ContractOwnerPathError";
+    this.code = "CONTRACT_OWNER_PATH";
+    this.hint = "Repair the checkout's Git metadata or set ABJ404_SERVER_CONTRACTS_DIR.";
+  }
+}
+
+/**
+ * Locate the owning repository beside Git's primary checkout, including when
+ * this gate runs from a linked landing worktree. Source exports without Git
+ * metadata retain the ordinary sibling-clone layout. Never search for another
+ * matching copy: missing or divergent owning files must still fail validation.
+ * @param {string} checkoutRoot Absolute path to the checkout containing the gate.
+ * @returns {string} Absolute path to the server's contracts directory.
+ */
+function defaultServerContractsDir(checkoutRoot) {
+  let primary = path.resolve(checkoutRoot);
+  if (pathExists(path.join(primary, ".git"))) {
+    const result = spawnSync("git", ["worktree", "list", "--porcelain", "-z"], {
+      cwd: primary, encoding: "utf8", timeout: 5000,
+    });
+    const first = (result.stdout || "").split("\0")[0];
+    if (result.error || result.status !== 0 || !first.startsWith("worktree ")) {
+      throw new ContractOwnerPathError(
+        result.error?.message || result.stderr?.trim() || `git worktree list exited ${result.status}`,
+        result.error
+      );
+    }
+    primary = first.slice("worktree ".length);
+  }
+  return path.resolve(primary, "..", "404-solution-server", "contracts");
+}
 
 function fileExists(p) {
   try {
@@ -71,6 +109,7 @@ function fileContainsParityAnnotation(filePath, contractId) {
 }
 
 module.exports = {
+  defaultServerContractsDir,
   fileExists,
   pathExists,
   filesEqual,

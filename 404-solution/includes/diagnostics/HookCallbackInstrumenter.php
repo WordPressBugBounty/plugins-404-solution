@@ -4,6 +4,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// allow-no-test-found: exercised through real AJAX hook dispatch in tests/OptionPersistenceTracerTest.php, tests/AjaxHookCallbackAttributionTest.php, and tests/TableRendererPreludeTracerTest.php; overlapping scopes are pinned directly in tests/HookCallbackInstrumenterOverlapTest.php
 /**
  * Reversible WP_Hook callback instrumentation that preserves signatures.
  *
@@ -16,8 +17,6 @@ if (!defined('ABSPATH')) {
  * which could overwrite a callback's by-reference mutation.
  *
  * Registry mutation is lifecycle-traced here; callers own callback records.
- *
- * allow-no-test-found: exercised through real AJAX hook dispatch in tests/OptionPersistenceTracerTest.php, tests/AjaxHookCallbackAttributionTest.php, and tests/TableRendererPreludeTracerTest.php
  *
  * @phpstan-type CallbackIdentity array{callback: string, source: string, has_reference: bool}
  * The registration shapes are defined by the class that stores them, so a
@@ -49,6 +48,19 @@ final class ABJ_404_Solution_HookCallbackInstrumenter {
 
     /** @var ABJ_404_Solution_HookInstrumentationLifecycleTracer */
     private $lifecycleTracer;
+
+    /**
+     * Counts completed restore() calls. A wrapper records only while the
+     * generation it was built in is still current: two instrumenters can hold
+     * one hook at once, and when the inner one wraps the outer one's wrapper
+     * the outer restore() cannot put the original back (the entry is no longer
+     * its own). The wrapper then outlives its scope inside the inner one's
+     * restored "original", and must stop recording rather than journal calls
+     * made by later code, shutdown callbacks included.
+     *
+     * @var int
+     */
+    private $generation = 0;
 
     /**
      * @param callable(string, string, int, CallbackIdentity, int): TToken $start
@@ -186,17 +198,11 @@ final class ABJ_404_Solution_HookCallbackInstrumenter {
                 $this->registry->forget($key);
                 continue;
             }
-            $entry = $entries[$registration['id']] ?? null;
-            $callback = is_array($entry) ? ($entry['function'] ?? null) : null;
-            $beforeEntry = $registration['mode'] === 'marker'
-                ? ($entries[$registration['before_id']] ?? null)
-                : null;
-            $valid = $registration['mode'] === 'wrapper'
-                ? $callback === $registration['wrapper']
-                : $callback === $registration['original']
-                    && is_array($beforeEntry)
-                    && ($beforeEntry['function'] ?? null) === $registration['before'];
-            if ($valid) {
+            if (ABJ_404_Solution_HookInstrumentationRegistry::isInstalled(
+                $registration,
+                $entries[$registration['id']] ?? null,
+                $entries
+            )) {
                 continue;
             }
             if ($registration['mode'] === 'marker') {
@@ -211,6 +217,9 @@ final class ABJ_404_Solution_HookCallbackInstrumenter {
      * Restore wrappers and remove markers without overwriting foreign changes.
      */
     public function restore(bool $scopeCompleted = true): void {
+        // Wrappers that cannot be taken out of the registry (see $generation)
+        // become pass-throughs from this moment on.
+        $this->generation++;
         foreach ($this->registry->all() as $registration) {
             $lifecycleToken = $this->lifecycleTracer->begin('restore', $registration['hook']);
             $lifecycleToken = $this->lifecycleTracer->advance(
@@ -291,7 +300,11 @@ final class ABJ_404_Solution_HookCallbackInstrumenter {
                 $result[$id] = $entry;
                 continue;
             }
-            if ($this->isInstalledEntry($hookName, $priority, (string)$id, $entry, $entries)) {
+            $registration = $this->registry->get(
+                ABJ_404_Solution_HookInstrumentationRegistration::key($hookName, $priority, (string)$id)
+            );
+            if ($registration !== null
+                && ABJ_404_Solution_HookInstrumentationRegistry::isInstalled($registration, $entry, $entries)) {
                 $result[$id] = $entry;
                 continue;
             }
@@ -310,6 +323,8 @@ final class ABJ_404_Solution_HookCallbackInstrumenter {
                 $result[$id] = $entry;
                 continue;
             }
+            // A WP_Hook entry is keyed 'function' and 'accepted_args'.
+            $fields = array_filter($entry, 'is_string', ARRAY_FILTER_USE_KEY);
             $identity = ABJ_404_Solution_HookCallbackIdentity::describe($callback);
             if ($identity['has_reference']) {
                 $this->addMarkedEntry(
@@ -318,7 +333,7 @@ final class ABJ_404_Solution_HookCallbackInstrumenter {
                     $hookName,
                     $priority,
                     (string)$id,
-                    $entry,
+                    $fields,
                     $callback,
                     $identity,
                     $callbackOrdinal
@@ -330,7 +345,7 @@ final class ABJ_404_Solution_HookCallbackInstrumenter {
                 $hookName,
                 $priority,
                 (string)$id,
-                $entry,
+                $fields,
                 $callback,
                 $identity,
                 $callbackOrdinal
@@ -338,32 +353,6 @@ final class ABJ_404_Solution_HookCallbackInstrumenter {
             $counts['callbacks_wrapped']++;
         }
         return $result;
-    }
-
-    /**
-     * @param mixed $entry
-     * @param array<array-key, mixed> $entries
-     */
-    private function isInstalledEntry(
-        string $hook,
-        int $priority,
-        string $id,
-        $entry,
-        array $entries
-    ): bool {
-        $key = ABJ_404_Solution_HookInstrumentationRegistration::key($hook, $priority, $id);
-        $registration = $this->registry->get($key);
-        if ($registration === null || !is_array($entry)) {
-            return false;
-        }
-        $callback = $entry['function'] ?? null;
-        if ($registration['mode'] === 'wrapper') {
-            return $callback === $registration['wrapper'];
-        }
-        $beforeEntry = $entries[$registration['before_id']] ?? null;
-        return $callback === $registration['original']
-            && is_array($beforeEntry)
-            && ($beforeEntry['function'] ?? null) === $registration['before'];
     }
 
     /** @param callable $callback */
@@ -388,7 +377,11 @@ final class ABJ_404_Solution_HookCallbackInstrumenter {
         array $identity,
         int $ordinal
     ): array {
-        $wrapper = function (...$args) use ($hook, $priority, $callback, $identity, $ordinal) {
+        $generation = $this->generation;
+        $wrapper = function (...$args) use ($hook, $priority, $callback, $identity, $ordinal, $generation) {
+            if ($generation !== $this->generation) {
+                return call_user_func_array($callback, $args);
+            }
             $actualHook = self::actualHook($hook, $args);
             $token = call_user_func($this->start, $hook, $actualHook, $priority, $identity, $ordinal);
             $result = call_user_func_array($callback, $args);
@@ -427,11 +420,16 @@ final class ABJ_404_Solution_HookCallbackInstrumenter {
         array $identity,
         int $ordinal
     ): void {
+        $generation = $this->generation;
         $before = function ($value = null, ...$args) use (
             $hook,
             $priority,
-            $identity, $ordinal
+            $identity, $ordinal,
+            $generation
         ) {
+            if ($generation !== $this->generation) {
+                return $value;
+            }
             $actualHook = self::actualHook($hook, array_merge(array($value), $args));
             $token = call_user_func($this->start, $hook, $actualHook, $priority, $identity, $ordinal);
             if ($token !== null) {

@@ -33,20 +33,18 @@ class ABJ_404_Solution_WPUtils {
 		if (array_key_exists($tag, self::$actionsAlreadyAdded)) {
 			// we already saw the action. check if they're the same.
 			$shouldError = true;
-			if (array_key_exists($tag, self::$actionsAlreadyAdded)) {
-				$functionAlreadyAdded = self::$actionsAlreadyAdded[$tag];
-				// Callables stored here are always arrays ([class/object, method])
-				$existingArr = is_array($functionAlreadyAdded) ? $functionAlreadyAdded : array($functionAlreadyAdded);
-				$newArr = is_array($function_to_add) ? $function_to_add : array($function_to_add);
-				$differences = array_udiff($existingArr, $newArr,
-					array(self::class, 'compareAjaxActionArrays'));
+			$functionAlreadyAdded = self::$actionsAlreadyAdded[$tag];
+			// Callables stored here are always arrays ([class/object, method])
+			$existingArr = is_array($functionAlreadyAdded) ? $functionAlreadyAdded : array($functionAlreadyAdded);
+			$newArr = is_array($function_to_add) ? $function_to_add : array($function_to_add);
+			$differences = array_udiff($existingArr, $newArr,
+				array(self::class, 'compareAjaxActionArrays'));
 
-				// any differences mean we accidentally registered the same action to do
-				// two different things. If the differences are 0 then we've accidentally registered
-				// the same action multiple times.
-				if (empty($differences)) {
-					$shouldError = false;
-				}
+			// any differences mean we accidentally registered the same action to do
+			// two different things. If the differences are 0 then we've accidentally registered
+			// the same action multiple times.
+			if (empty($differences)) {
+				$shouldError = false;
 			}
 			
 			if ($shouldError) {
@@ -176,9 +174,9 @@ class ABJ_404_Solution_WPUtils {
     }
 	
 	/** Set the version to the file date/time.
-	 * @param string $handle
+	 * @param non-empty-string $handle
 	 * @param string $src
-	 * @param array<int, string> $deps
+	 * @param array<int, non-empty-string> $deps
 	 * @param string|bool $ver
 	 * @param bool $in_footer
 	 * @return void

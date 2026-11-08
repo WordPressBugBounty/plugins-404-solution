@@ -14,6 +14,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/DatabaseNoticeRecoveryPolicy.php';
+
 class ABJ_404_Solution_DatabaseSqlErrorReporter {
 
     /** @var ABJ_404_Solution_DatabaseCore */
@@ -22,13 +24,29 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
     /** @var ABJ_404_Solution_Logging */
     private $logger;
 
+    /** @var ABJ_404_Solution_DatabaseNoticeRecoveryPolicy */
+    private $noticeRecoveryPolicy;
+
     /**
      * @param ABJ_404_Solution_DatabaseCore $core
      * @param ABJ_404_Solution_Logging $logger
+     * @param ABJ_404_Solution_DatabaseNoticeRecoveryPolicy|null $noticeRecoveryPolicy
      */
-    public function __construct(ABJ_404_Solution_DatabaseCore $core, $logger) {
+    public function __construct(
+        ABJ_404_Solution_DatabaseCore $core,
+        $logger,
+        ?ABJ_404_Solution_DatabaseNoticeRecoveryPolicy $noticeRecoveryPolicy = null
+    ) {
         $this->core = $core;
         $this->logger = $logger;
+        $this->noticeRecoveryPolicy = $noticeRecoveryPolicy
+            ?? new ABJ_404_Solution_DatabaseNoticeRecoveryPolicy(
+                $core->noticeState(),
+                $core->queryTimeoutManager(),
+                function () use ($core): bool {
+                    return $core->errorClassifier()->isQuotaCooldownActive();
+                }
+            );
     }
 
     /**
@@ -180,7 +198,7 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
     }
 
     /**
-     * Handle final SQL reporting and stale-notice cleanup after recovery.
+     * Handle final SQL reporting and cause-specific notice recovery.
      *
      * @param string $query
      * @param array<string, mixed> $result
@@ -211,15 +229,18 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
             $lastError = isset($result['last_error']) && is_scalar($result['last_error'])
                 ? (string)$result['last_error'] : '';
             if ($lastError === '') {
+                $this->noticeRecoveryPolicy->observeQueryResult($query, $result);
                 return;
             }
 
             if (!$this->shouldReportFinalError($lastError, $ignoreErrorStrings)) {
+                $this->noticeRecoveryPolicy->observeQueryResult($query, $result);
                 return;
             }
 
             if ($this->isInfrastructureSqlError($lastError)) {
                 $this->logger->warn("Server-side DB issue (handled): " . $lastError);
+                $this->noticeRecoveryPolicy->observeQueryResult($query, $result);
                 return;
             }
 
@@ -229,9 +250,11 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
             // so demoting only one of them would still email the developer.
             if ($this->isRedundantSchemaChangeError($lastError)) {
                 $this->logger->warn("Schema change was already applied (handled): " . $lastError);
+                $this->noticeRecoveryPolicy->observeQueryResult($query, $result);
                 return;
             }
 
+            $this->noticeRecoveryPolicy->observeQueryResult($query, $result);
             $this->logDetailedFinalSqlError($query, $lastError, $timer);
             return;
         }
@@ -242,9 +265,7 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
                     $sqlInfo);
         }
 
-        if ($lastError === '') {
-            $this->clearRecoveredServerSideNoticeIfNeeded();
-        }
+        $this->noticeRecoveryPolicy->observeQueryResult($query, $result);
     }
 
     /**
@@ -330,7 +351,7 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
             "@@sql_big_selects as sql_big_selects, " .
             "@@character_set_database as character_set_database";
         // DAO-bypass-approved: SQL-error diagnostics must read server variables without recursive DAO error handling.
-        $someMySQLVariables = $wpdb->get_results($extraDataQuery, ARRAY_A);
+        $someMySQLVariables = ABJ_404_Solution_DatabaseDriverCall::getResults($wpdb, $extraDataQuery, ARRAY_A);
         $variables = print_r($someMySQLVariables, true);
 
         $sqlInfo = $this->core->queryDiagnostics()->sqlForErrorLog($query);
@@ -343,19 +364,4 @@ class ABJ_404_Solution_DatabaseSqlErrorReporter {
                 ", stripped_query: " . $strippedQuery);
     }
 
-    /** @return void */
-    private function clearRecoveredServerSideNoticeIfNeeded(): void {
-        if (!$this->core->noticeState()->isServerSideIssueNoted() && !$this->core->noticeState()->isServerSideIssueChecked()) {
-            $this->core->noticeState()->markServerSideIssueChecked();
-            $existing = $this->core->noticeState()->getRuntimeFlag('abj404_plugin_db_notice');
-            $excludedTypes = array('stale_permalink_cache', 'missing_table');
-            if (is_array($existing) && !empty($existing['type'])
-                && !in_array($existing['type'], $excludedTypes, true)) {
-                $this->core->noticeState()->markServerSideIssueNoted();
-            }
-        }
-        if ($this->core->noticeState()->isServerSideIssueNoted() && !$this->core->noticeState()->isWriteBlockActive() && !$this->core->errorClassifier()->isQuotaCooldownActive()) {
-            $this->core->noticeState()->clearServerSideDbNotice();
-        }
-    }
 }

@@ -89,6 +89,18 @@ final class ABJ_404_Solution_RestApiResponsePresenter {
     }
 
     /**
+     * Preserve unknown counts until the first durable publication exists.
+     * @param array<string,mixed> $snapshot
+     */
+    public function statsPending(array $snapshot): \WP_REST_Response {
+        $state = ($snapshot['state'] ?? 'pending') === 'unavailable' ? 'unavailable' : 'pending';
+        $data = array('state' => $state, 'generation' => $snapshot['generation'] ?? '',
+            'redirects' => null, 'captured' => null);
+        if (isset($snapshot['error'])) { $data['error'] = $snapshot['error']; }
+        return new \WP_REST_Response($data, $state === 'unavailable' ? 503 : 202);
+    }
+
+    /**
      * @param array<string, mixed> $source
      */
     private function scalarInt(array $source, string $key): int {
@@ -138,12 +150,15 @@ final class ABJ_404_Solution_RestApiResponsePresenter {
         ), 200);
     }
 
-    public function createFailed(): \WP_Error {
-        return new \WP_Error('create_failed', __('Failed to create redirect.', '404-solution'), array('status' => 500));
+    public function createFailed(string $message = ''): \WP_Error {
+        $message = $message !== '' ? $message : __('Failed to create redirect.', '404-solution');
+        return new \WP_Error('create_failed', $message, array('status' => 500));
     }
 
     public function updateFailed(string $errorCode): \WP_Error {
-        return new \WP_Error('update_failed', $this->messageForRedirectUpdateError($errorCode), array('status' => 500));
+        $message = strpos($errorCode, 'Redirect loop:') === 0
+            ? $errorCode : $this->messageForRedirectUpdateError($errorCode);
+        return new \WP_Error('update_failed', $message, array('status' => 500));
     }
 
     public function trashFailed(string $error): \WP_Error {

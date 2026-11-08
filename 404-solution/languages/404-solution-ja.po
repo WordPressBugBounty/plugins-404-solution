@@ -201,6 +201,9 @@ msgstr "* アスタリスク（*）を使用して「任意のパターン」と
 msgid "404 Page Suggestions"
 msgstr "404ページの提案"
 
+msgid "404 Suggestions"
+msgstr "404の提案"
+
 msgid "404 URL marked as %s successfully!"
 msgstr "404 URLを%sとして正常にマークしました！"
 
@@ -2065,6 +2068,9 @@ msgstr "リダイレクト"
 msgid "Showing %1$d-%2$d of %3$d %4$s"
 msgstr "%3$d件中 %1$d～%2$d件を表示"
 
+msgid "Showing a limited set of matching records while sorting and search are being prepared. The full list returns automatically."
+msgstr "並べ替えと検索の準備中は、一致するレコードの一部を表示しています。完全な一覧は自動的に再表示されます。"
+
 msgid "Redirects will appear here once created."
 msgstr "リダイレクトが作成されるとここに表示されます。"
 
@@ -3751,6 +3757,9 @@ msgstr "バックグラウンドでテーブルデータを準備しています
 msgid "Preparing the redirects view table. Please wait."
 msgstr "リダイレクト一覧表を準備しています。お待ちください。"
 
+msgid "Preparing the redirects table."
+msgstr "リダイレクト一覧を準備しています。"
+
 #: includes/DataAccessTrait_ViewQueriesStaged.php
 msgid "(404 page)"
 msgstr "(404ページ)"
@@ -4559,3 +4568,154 @@ msgstr "時間切れになったリクエスト"
 #: includes/view/ShortcodeSuggestionsPresenter.php:260
 msgid "Show suggested pages"
 msgstr "おすすめのページを表示"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Query strings"
+msgstr "クエリ文字列"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Routing parameters, pass query (default)"
+msgstr "ルーティングパラメータで照合し、クエリを引き継ぐ（既定）"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Exact URL, pass query"
+msgstr "完全一致のURLで照合し、クエリを引き継ぐ"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Routing parameters, discard query"
+msgstr "ルーティングパラメータで照合し、クエリを破棄する"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Path only, pass query"
+msgstr "パスのみで照合し、クエリを引き継ぐ"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Choose how missing pages are handled. You can change these settings later in Options."
+msgstr "見つからないページの扱い方を選んでください。この設定はあとからオプションで変更できます。"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Redirect to the closest match (recommended)"
+msgstr "最も近いページにリダイレクトする（推奨）"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "When no close match is found, show a 404 page that suggests similar pages."
+msgstr "近いページが見つからない場合は、似たページを提案する404ページを表示します。"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Show a 404 page that suggests similar pages"
+msgstr "似たページを提案する404ページを表示する"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Visitors are never redirected automatically. Redirects you create yourself still work."
+msgstr "訪問者が自動的にリダイレクトされることはありません。ご自身で作成したリダイレクトは引き続き機能します。"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Missing URLs are listed under Captured 404s so you can create redirects for them."
+msgstr "見つからないURLはキャプチャされた404に一覧表示されるので、それらのリダイレクトを作成できます。"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Missing URLs are not recorded. This does not change how visitors are redirected."
+msgstr "見つからないURLは記録されません。訪問者のリダイレクトの動作は変わりません。"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Email me about missing pages?"
+msgstr "見つからないページについてメールで通知しますか？"
+
+#. translators: %d is the number of captured 404 URLs that triggers an email.
+#: includes/admin/SetupWizardPresenter.php
+#, php-format
+msgid "Yes, email me when %d or more 404s have been captured (recommended)"
+msgstr "はい、404が%d件以上キャプチャされたらメールを送る（推奨）"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Checked weekly. The email is sent to the site administrator."
+msgstr "毎週確認されます。メールはサイト管理者に送信されます。"
+
+#. translators: %s is the site administrator's email address.
+#: includes/admin/SetupWizardPresenter.php
+#, php-format
+msgid "Checked weekly. The email is sent to %s."
+msgstr "毎週確認されます。メールは%sに送信されます。"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Email alerts need the list of missing pages, so they are off while logging is off."
+msgstr "メール通知には見つからないページの一覧が必要なため、記録がオフの間はオフになります。"
+
+#: includes/redirects/RedirectChainWalker.php
+#, php-format
+msgid "Redirect loop: %s. Choose a destination outside this loop."
+msgstr "リダイレクトループ: %s。このループの外にあるリダイレクト先を選択してください。"
+
+#: includes/redirects/RedirectChainWalker.php
+#, php-format
+msgid "Redirect not saved: the redirect loop check could not run (%s)."
+msgstr "リダイレクトは保存されませんでした。リダイレクトループの確認を実行できませんでした（%s）。"
+
+#: includes/php/wordpress/WPNotices.php
+msgid "A redirect loop was stopped:"
+msgstr "リダイレクトループを停止しました:"
+
+#: includes/php/wordpress/WPNotices.php
+#, php-format
+msgid "A redirect loop was stopped: %s. Edit these rules in Page Redirects."
+msgstr "リダイレクトループを停止しました: %s。ページリダイレクトでこれらのルールを編集してください。"
+
+#: includes/view/View_Shared.php
+msgid "Sorting by this column is being prepared. It becomes available automatically."
+msgstr "この列による並べ替えを準備しています。準備ができると自動的に利用可能になります。"
+
+#: includes/redirects/RedirectChainWalker.php
+msgid "Reload this page and try again. If the error continues, send this message to support."
+msgstr "このページを再読み込みして、もう一度お試しください。エラーが続く場合は、このメッセージをサポートに送信してください。"
+
+#: includes/repositories/RedirectConditionsRepository.php
+msgid "The redirect conditions table is unavailable; conditions were not saved. [ABJ404_CONDITIONS_TABLE_UNAVAILABLE]"
+msgstr "リダイレクト条件テーブルを利用できないため、条件は保存されませんでした。[ABJ404_CONDITIONS_TABLE_UNAVAILABLE]"
+
+#: includes/redirects/RedirectWriteAdmissionPolicy.php
+#: includes/repositories/RedirectLifecycleService.php
+#: includes/repositories/RedirectWriteService.php
+#, php-format
+msgid "A live row already owns this source URL: %s [ABJ404_SOURCE_CONFLICT] Edit or move the existing redirect to the trash before trying again."
+msgstr "このソース URL はすでに有効な行で使用されています: %s [ABJ404_SOURCE_CONFLICT] もう一度試す前に、既存のリダイレクトを編集するかゴミ箱に移動してください。"
+#: includes/core/PluginLogicSettingsUpdate.php:159
+#: includes/core/SetupWizard.php:125
+msgid "Settings could not be saved because the checked storage writer is unavailable. Reload this page and try again."
+msgstr "検証済みの保存機能を利用できないため、設定を保存できませんでした。このページを再読み込みして、もう一度お試しください。"
+
+#: includes/core/PluginLogicSettingsUpdate.php:165
+#: includes/core/SetupWizard.php:132
+msgid "Settings could not be saved because another update is in progress. Reload this page and try again."
+msgstr "別の更新が進行中のため、設定を保存できませんでした。このページを再読み込みして、もう一度お試しください。"
+
+#: includes/core/PluginLogicSettingsUpdate.php:182
+#: includes/core/SetupWizard.php:153
+msgid "Settings could not be saved. Reload this page and try again."
+msgstr "設定を保存できませんでした。このページを再読み込みして、もう一度お試しください。"
+#: includes/ajax/Ajax_RestoreDefaults.php:76
+msgid "Settings could not be restored because the checked storage writer is unavailable."
+msgstr "検証済みの保存機能を利用できないため、設定を復元できませんでした。"
+
+#: includes/ajax/Ajax_RestoreDefaults.php:82
+msgid "Settings could not be restored because another update is in progress."
+msgstr "別の更新が進行中のため、設定を復元できませんでした。"
+
+#: includes/ajax/Ajax_RestoreDefaults.php:99
+msgid "Settings could not be restored. Reload this page and try again."
+msgstr "設定を復元できませんでした。このページを再読み込みして、もう一度お試しください。"
+
+#. translators: %d = number of import issue details not displayed.
+#: includes/import/ImportIssueSummary.php
+#, php-format
+msgid "Additional import issues omitted: %d."
+msgstr "表示を省略したその他のインポートの問題: %d 件。"
+
+#. translators: %s = legacy plugin redirect table name.
+#: includes/repositories/PluginUpdateMetadataRepository.php
+#, php-format
+msgid "[ABJ404-IMPORT-SOURCE-NOT-FOUND] Legacy Redirectioner source table \"%s\" was not found; no records were imported. Confirm that the legacy redirects are present in this WordPress installation before retrying the import."
+msgstr "[ABJ404-IMPORT-SOURCE-NOT-FOUND] Legacy Redirectioner の元テーブル「%s」が見つからないため、レコードはインポートされませんでした。再試行する前に、この WordPress 環境に以前のリダイレクトが存在することを確認してください。"
+
+#: includes/import/ForeignSourceQueryGateway.php
+msgid "The database did not confirm a successful source read. Check the source plugin data and database connection before retrying."
+msgstr "データベースでソースの読み取り成功を確認できませんでした。再試行する前に、ソースプラグインのデータとデータベース接続を確認してください。"

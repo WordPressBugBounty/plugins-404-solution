@@ -55,14 +55,19 @@ class ABJ_404_Solution_TrashLinkActionHandler {
             return __('Error: Bad trash operation specified.', '404-solution');
         }
 
-        $id = absint($_GET['id']);
-        $message = $this->parent->getRedirectsRepo()->moveRedirectsToTrash($id, $trash);
+        $id = ABJ_404_Solution_ExactInteger::read($_GET['id'] ?? null, 1);
+        if ($id === null) { return __('Error:', '404-solution') . ' Invalid redirect ID.'; }
+        $subpage = isset($_GET['subpage']) ? sanitize_text_field(wp_unslash($_GET['subpage'])) : '';
+        $filter = isset($_GET['filter']) ? intval($_GET['filter']) : 0;
+        $capturedRestore = $trash == 0 && $subpage === 'abj404_captured' && $filter === ABJ404_TRASH_FILTER;
+        try {
+            $message = $capturedRestore
+                ? $this->restoreCapturedRedirect($id)
+                : $this->parent->getRedirectsRepo()->moveRedirectsToTrash($id, $trash);
+        } catch (ABJ_404_Solution_RedirectCycleException $e) {
+            return __('Error:', '404-solution') . ' ' . esc_html($e->getMessage());
+        }
         if ($message == "") {
-            $subpage = isset($_GET['subpage']) ? sanitize_text_field(wp_unslash($_GET['subpage'])) : '';
-            $filter = isset($_GET['filter']) ? intval($_GET['filter']) : 0;
-            if ($trash == 0 && $subpage === 'abj404_captured' && $filter === ABJ404_TRASH_FILTER) {
-                $this->parent->getRedirectsRepo()->updateRedirectTypeStatus($id, (string)ABJ404_STATUS_CAPTURED);
-            }
             if ($trash == 1) {
                 return __('Redirect moved to trash successfully!', '404-solution');
             }
@@ -72,6 +77,16 @@ class ABJ_404_Solution_TrashLinkActionHandler {
         if ($trash == 1) {
             return __('Error: Unable to move redirect to trash.', '404-solution');
         }
-        return __('Error: Unable to move redirect from trash.', '404-solution');
+        return __('Error:', '404-solution') . ' ' . esc_html($message);
+    }
+
+    /** Restore both captured fields only when the repository exposes the atomic capability. */
+    private function restoreCapturedRedirect(int $id): string {
+        $repository = $this->parent->getRedirectsRepo();
+        if (!method_exists($repository, 'restoreRedirect') || !is_callable(array($repository, 'restoreRedirect'))) {
+            return 'Atomic redirect restore is unavailable for this repository.';
+        }
+        $message = $repository->restoreRedirect(array('id' => $id, 'status' => ABJ404_STATUS_CAPTURED));
+        return is_string($message) ? $message : 'Atomic redirect restore returned an invalid response (' . gettype($message) . ').';
     }
 }

@@ -5,6 +5,12 @@ if (!defined('ABSPATH')) {
 }
 
 require_once __DIR__ . '/CrashBeacon.php';
+// The shutdown path must not depend on the plugin autoloader or service
+// container. FileSystemService and HostFilesystemCall are pure static
+// capability boundaries, so load them explicitly while the healthy boot path
+// is still available.
+require_once dirname(__DIR__) . '/core/FileSystemService.php';
+require_once dirname(__DIR__) . '/core/HostFilesystemCall.php';
 
 /**
  * Persists at most one pending ABJ_404_Solution_CrashBeacon to a small JSON file
@@ -33,6 +39,9 @@ class ABJ_404_Solution_CrashBeaconStore {
      *  bloated by a corrupted write or an unrelated process; a real beacon is a
      *  few hundred bytes. */
     const MAX_READ_BYTES = 8192;
+
+    /** A short-write stream may make at most one progress call per bounded byte. */
+    const MAX_WRITE_ATTEMPTS = self::MAX_READ_BYTES + 1;
 
     /** @var string absolute path to the beacon file. */
     private $filePath;
@@ -68,7 +77,9 @@ class ABJ_404_Solution_CrashBeaconStore {
 
     /** @return bool */
     public function exists(): bool {
-        return @is_file($this->filePath);
+        $result = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(function () { return is_file($this->filePath); });
+        self::reportFilesystemWarning('crash-beacon exists', $result['warning']);
+        return (bool)$result['result'];
     }
 
     /**
@@ -79,7 +90,14 @@ class ABJ_404_Solution_CrashBeaconStore {
      * @return int|null
      */
     public function modifiedAt(): ?int {
-        $m = @filemtime($this->filePath);
+        $exists = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(function () { return is_file($this->filePath); });
+        self::reportFilesystemWarning('crash-beacon modifiedAt existence check', $exists['warning']);
+        if (!$exists['result']) {
+            return null;
+        }
+        $mtime = ABJ_404_Solution_HostFilesystemCall::filemtime($this->filePath);
+        self::reportFilesystemWarning('crash-beacon modifiedAt stat', $mtime['warning']);
+        $m = $mtime['result'];
         return $m === false ? null : (int)$m;
     }
 
@@ -96,16 +114,103 @@ class ABJ_404_Solution_CrashBeaconStore {
     public function recordIfAbsent(ABJ_404_Solution_CrashBeacon $beacon): bool {
         $json = json_encode($beacon->toArray(), JSON_UNESCAPED_SLASHES);
         if (!is_string($json)) {
+            $this->logWriteFailure('encode_failed');
             return false;
         }
-        $handle = @fopen($this->filePath, 'xb');
+        $length = strlen($json);
+        if ($length < 1 || $length > self::MAX_READ_BYTES) {
+            $this->logWriteFailure('size_out_of_bounds');
+            return false;
+        }
+        $open = ABJ_404_Solution_HostFilesystemCall::fopen($this->filePath, 'xb');
+        $handle = $open['result'];
         if ($handle === false) {
+            // A create-only open is also the duplicate gate. Do not warn for
+            // the ordinary first-crash-wins case; an absent path points to a
+            // genuine storage failure worth exposing to the PHP fallback log.
+            $duplicateCheck = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(function () { return is_file($this->filePath); });
+            if (!$duplicateCheck['result']) {
+                $this->logWriteFailure('open_failed', $open['warning'] ?? $duplicateCheck['warning']);
+            }
             return false;
         }
-        $written = @fwrite($handle, $json);
-        @fflush($handle);
-        @fclose($handle);
-        return $written !== false;
+
+        $write = $this->writeBeaconBody($handle, $json, $length);
+        $writeComplete = $write['complete'];
+        $writeWarning = $write['warning'];
+
+        $flush = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($handle) { return fflush($handle); }
+        );
+        $flushComplete = $flush['result'];
+        $close = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($handle) { return fclose($handle); }
+        );
+        $closeComplete = $close['result'];
+        $writeWarning = $writeWarning ?? ($flush['warning'] ?? $close['warning']);
+        if (!$writeComplete || $flushComplete !== true || $closeComplete !== true) {
+            $this->logWriteFailure(
+                !$writeComplete ? 'write_failed' : ($flushComplete !== true ? 'flush_failed' : 'close_failed'),
+                $writeWarning
+            );
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * @param resource $handle
+     * @return array{complete:bool,warning:?string}
+     */
+    private function writeBeaconBody($handle, string $json, int $length): array {
+        $offset = 0;
+        $attempts = 0;
+        $warning = null;
+        while ($offset < $length && $attempts < self::MAX_WRITE_ATTEMPTS) {
+            $remaining = substr($json, $offset);
+            $write = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($handle, $remaining) { return fwrite($handle, $remaining); }
+            );
+            if ($write['warning'] !== null) {
+                $warning = $write['warning'];
+            }
+            $attempts++;
+            $written = $write['result'];
+            if (!is_int($written) || $written <= 0 || $written > strlen($remaining)) {
+                return array('complete' => false, 'warning' => $warning);
+            }
+            $offset += $written;
+        }
+        return array('complete' => $offset === $length, 'warning' => $warning);
+    }
+
+    /**
+     * Last-resort breadcrumb for a storage failure. This path must never call
+     * the plugin logger or any outbound transport while handling a fatal.
+     *
+     * @param string $reason
+     * @return void
+     */
+    private function logWriteFailure(string $reason, ?string $warning = null): void {
+        if (!function_exists('abj404_logPhpFallback')) {
+            return;
+        }
+        try {
+            $message = 'crash-beacon write_failed: ' . $reason;
+            if ($warning !== null && $warning !== '') {
+                $message .= ' (' . $warning . ')';
+            }
+            @abj404_logPhpFallback('fatal-handler-fallback', $message);
+        } catch (\Throwable $e) {
+            // The plugin fallback itself may be unavailable during shutdown.
+            // Preserve its failure class and code through the independent PHP
+            // error-log sink without recursively invoking the same helper.
+            $loggingClass = get_class($e);
+            $loggingCode = (string)$e->getCode();
+            ABJ_404_Solution_PhpRuntimeCapabilityAdapter::writeErrorLog('404 Solution: crash-beacon write_failed: ' . $reason
+                . ' (logging_error_class=' . $loggingClass
+                . ', logging_error_code=' . $loggingCode . ') [fatal-handler-fallback]');
+        }
     }
 
     /**
@@ -123,14 +228,20 @@ class ABJ_404_Solution_CrashBeaconStore {
      * @return array{beacon: ABJ_404_Solution_CrashBeacon|null, status: string}
      */
     public function read(): array {
-        if (!@is_file($this->filePath)) {
+        $exists = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(function () { return is_file($this->filePath); });
+        self::reportFilesystemWarning('crash-beacon read existence check', $exists['warning']);
+        if (!$exists['result']) {
             return array('beacon' => null, 'status' => 'absent');
         }
-        $size = @filesize($this->filePath);
+        $sizeResult = ABJ_404_Solution_HostFilesystemCall::filesize($this->filePath);
+        self::reportFilesystemWarning('crash-beacon read size', $sizeResult['warning']);
+        $size = $sizeResult['result'];
         if ($size === false || $size > self::MAX_READ_BYTES) {
             return array('beacon' => null, 'status' => 'oversized');
         }
-        $raw = @file_get_contents($this->filePath);
+        $read = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(function () { return file_get_contents($this->filePath); });
+        self::reportFilesystemWarning('crash-beacon read contents', $read['warning']);
+        $raw = $read['result'];
         if (!is_string($raw) || $raw === '') {
             return array('beacon' => null, 'status' => 'unreadable');
         }
@@ -149,8 +260,17 @@ class ABJ_404_Solution_CrashBeaconStore {
 
     /** Remove the pending beacon file (idempotent). @return void */
     public function clear(): void {
-        if (@is_file($this->filePath)) {
-            @unlink($this->filePath);
+        $exists = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(function () { return is_file($this->filePath); });
+        self::reportFilesystemWarning('crash-beacon clear existence check', $exists['warning']);
+        if ($exists['result']) {
+            $unlink = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(function () { return unlink($this->filePath); });
+            self::reportFilesystemWarning('crash-beacon clear', $unlink['warning']);
+        }
+    }
+
+    private static function reportFilesystemWarning(string $operation, ?string $warning): void {
+        if ($warning !== null && $warning !== '' && function_exists('abj404_logPhpFallback')) {
+            abj404_logPhpFallback('logger-internal', $operation . ': ' . $warning);
         }
     }
 }

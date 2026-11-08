@@ -423,9 +423,10 @@ class ABJ_404_Solution_PostEditorIntegration {
      *
      * @param int $post_id Post ID
      * @param array<string, mixed> $options Plugin options
+     * @param bool $consumeOverride Whether to consume the one-shot Gutenberg override
      * @return bool Whether to create redirect
      */
-    public static function shouldCreateRedirect($post_id, $options) {
+    public static function shouldCreateRedirect($post_id, $options, bool $consumeOverride = true) {
         // Check Quick Edit / Classic Editor POST data
         if (isset($_POST['abj404_create_redirect'])) {
             // Verify nonce for Quick Edit
@@ -458,7 +459,9 @@ class ABJ_404_Solution_PostEditorIntegration {
         $meta = get_post_meta($post_id, '_abj404_create_redirect', true);
         if ($meta !== '' && $meta !== null) {
             // Clear the meta after reading (one-time use per edit session)
-            delete_post_meta($post_id, '_abj404_create_redirect');
+            if ($consumeOverride) {
+                delete_post_meta($post_id, '_abj404_create_redirect');
+            }
             return $meta === '1';
         }
 

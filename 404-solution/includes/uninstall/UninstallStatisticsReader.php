@@ -20,13 +20,13 @@ class ABJ_404_Solution_UninstallStatisticsReader {
         $tableName = $this->redirectsTableName();
 
         // DAO-bypass-approved: Diagnostic table-existence probe for redirect-count display
-        $tableExists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $tableName)) === $tableName;
+        $tableExists = ABJ_404_Solution_DatabaseDriverCall::getVar($wpdb, $wpdb->prepare("SHOW TABLES LIKE %s", $tableName)) === $tableName;
         if (!$tableExists) {
             return 0;
         }
 
         // DAO-bypass-approved: Diagnostic count for uninstall-modal preview
-        $count = $wpdb->get_var("SELECT COUNT(*) FROM $tableName WHERE status != " . ABJ404_STATUS_TRASH);
+        $count = ABJ_404_Solution_DatabaseDriverCall::getVar($wpdb, "SELECT COUNT(*) FROM $tableName WHERE status != " . ABJ404_STATUS_TRASH);
         return $count ? intval($count) : 0;
     }
 
@@ -34,8 +34,8 @@ class ABJ_404_Solution_UninstallStatisticsReader {
      * @return array{
      *     redirects: array{all:int,manual:int,auto:int,regex:int,trash:int},
      *     captured: array{all:int,captured:int,ignored:int,later:int,trash:int},
-     *     log_count: int,
-     *     log_table_size_mb: int|float,
+     *     log_count: int|null,
+     *     log_table_size_mb: int|float|null,
      *     debug_file_size_mb: int|float,
      *     _errors?: list<string>
      * }
@@ -83,11 +83,20 @@ class ABJ_404_Solution_UninstallStatisticsReader {
                 );
             }
 
-            $stats['log_count'] = $viewRead->getLogsCount(0);
+            // Both readers answer -1 when their query failed or timed out:
+            // that is an unknown value (null), never a count or a size.
+            $logCount = (int)$viewRead->getLogsCount(0);
+            $stats['log_count'] = $logCount >= 0 ? $logCount : null;
+            if ($logCount < 0) {
+                $stats['_errors'][] = 'getLogsCount: the log count could not be determined';
+            }
 
-            $logTableSizeBytes = $viewRead->getLogDiskUsage();
+            $logTableSizeBytes = (int)$viewRead->getLogDiskUsage();
             if ($logTableSizeBytes > 0) {
                 $stats['log_table_size_mb'] = round($logTableSizeBytes / (1024 * 1024), 2);
+            } elseif ($logTableSizeBytes < 0) {
+                $stats['log_table_size_mb'] = null;
+                $stats['_errors'][] = 'getLogDiskUsage: the log table size could not be determined';
             }
 
             if (class_exists('ABJ_404_Solution_Logging')) {

@@ -84,7 +84,7 @@ class ABJ_404_Solution_Ajax_SupportRequest {
      */
     public static function init(): void {
         $me = self::getInstance();
-        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404_support_request',
+        ABJ_404_Solution_WPUtils::safeAddAction(ABJ_404_Solution_PluginAjaxActions::hook('abj404_support_request'),
             array($me, 'handleRequest'));
     }
 
@@ -154,6 +154,7 @@ class ABJ_404_Solution_Ajax_SupportRequest {
         $debugLogExcerpt = ABJ_404_Solution_SupportEvidenceExcerpt::assemble(array(
             'telemetry' => self::readClientTelemetry(),
             'session_id' => self::readClientSessionId(),
+            'reported_attempt_id' => ABJ_404_Solution_AjaxRequestLedger::normalizeId($_POST['reportedAttemptId'] ?? '', ''),
         ));
 
         $extras = array(

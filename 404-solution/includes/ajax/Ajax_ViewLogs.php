@@ -33,6 +33,21 @@ class ABJ_404_Solution_Ajax_ViewLogs {
             $_GET, array('name' => 'term')));
         $term = substr($term, 0, 100);
 
+        self::sendJson(self::autocompletePayload($logsRepository, $feedback, $term), 200);
+    }
+
+    /**
+     * The autocomplete items for a log URL term, or the single error item that
+     * tells the admin why the lookup failed. A failed read is surfaced in the
+     * dropdown with the failure's own message, never an empty list that would
+     * read as "no matches". The query executor has already logged the failure.
+     *
+     * @param ABJ_404_Solution_LogsRepository $logsRepository
+     * @param ABJ_404_Solution_Ajax_SearchFeedback $feedback
+     * @param string $term
+     * @return array<int, array<string, mixed>>
+     */
+    private static function autocompletePayload($logsRepository, $feedback, $term) {
         $suggestion = array();
         $suggestion['label'] = __('(Show All Logs)', '404-solution');
         $suggestion['category'] = 'Special';
@@ -40,12 +55,18 @@ class ABJ_404_Solution_Ajax_ViewLogs {
         $specialSuggestion = array();
         $specialSuggestion[] = $suggestion;
 
-        $rows = $logsRepository->getLogsIDandURLLike($term, ABJ404_MAX_AJAX_DROPDOWN_SIZE);
+        try {
+            $rows = $logsRepository->getLogsIDandURLLike(
+                $term,
+                ABJ404_MAX_AJAX_DROPDOWN_SIZE,
+                ABJ_404_Solution_AdminTableResponseParts::queryBudgetOptions()
+            );
+        } catch (ABJ_404_Solution_ViewQueryFailureException $failure) {
+            return ABJ_404_Solution_Ajax_SearchFeedback::autocompleteErrorItem($failure->getMessage());
+        }
         $results = self::formatLogResults($rows);
         $suggestions = $feedback->provideSearchFeedback($results, $term);
-        $suggestions = array_merge($specialSuggestion, $suggestions);
-
-        self::sendJson($suggestions, 200);
+        return array_merge($specialSuggestion, $suggestions);
     }
 
     /**

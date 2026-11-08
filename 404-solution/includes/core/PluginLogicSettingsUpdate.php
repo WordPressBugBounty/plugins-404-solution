@@ -14,6 +14,8 @@ require_once __DIR__ . '/../policies/SettingsRegexPatternPolicy.php';
 require_once __DIR__ . '/../policies/SettingsRetentionPolicy.php';
 require_once __DIR__ . '/../policies/SettingsSuggestionPolicy.php';
 require_once __DIR__ . '/../policies/SettingsWordPressPolicy.php';
+require_once __DIR__ . '/../repositories/SiteResourceLock.php';
+require_once __DIR__ . '/../services/OptionCacheInvalidator.php';
 
 /** Signals a miswired settings persistence dependency. */
 class ABJ_404_Solution_SettingsPersistenceException extends \RuntimeException {}
@@ -149,9 +151,53 @@ class ABJ_404_Solution_PluginLogicSettingsUpdate {
             return $this->successResult($returnData);
         }
 
-        $options = $this->loadCurrentOptions();
-        $message = $this->applySettingsSections($options, $_POST);
-        $this->persistOptions($options);
+        $repository = abj_service('options_repository');
+        $checkedWriter = is_callable(array($repository, 'getRawSettingsSnapshot'))
+            && is_callable(array($repository, 'updateOptionsChecked'));
+        if (!$checkedWriter) {
+            return $this->settingsRequestFailure(503,
+                __('Settings could not be saved because the checked storage writer is unavailable. Reload this page and try again.', '404-solution') . ' [ABJ404_SETTINGS_WRITER_UNAVAILABLE]');
+        }
+        $expected = null;
+        $lock = new ABJ_404_Solution_SiteResourceLock('initialization');
+        if (!$lock->acquire()) {
+            return $this->settingsRequestFailure(409,
+                __('Settings could not be saved because another update is in progress. Reload this page and try again.', '404-solution') . ' [ABJ404_SETTINGS_WRITE_BUSY]');
+        }
+        try {
+            ABJ_404_Solution_OptionCacheInvalidator::site('abj404_settings');
+            if (is_callable(array($repository, 'clearCache'))) {
+                call_user_func(array($repository, 'clearCache'));
+            }
+            // Bind the form base to the exact raw row which produced it. A
+            // getOptions() read may normalize/default-persist, so if its raw
+            // authority changes, discard that object and load once more from
+            // the new exact row before accepting a checked write.
+            $before = call_user_func(array($repository, 'getRawSettingsSnapshot'));
+            $options = $this->loadCurrentOptions();
+            $expected = call_user_func(array($repository, 'getRawSettingsSnapshot'));
+            if (!$this->sameRawSnapshot($before, $expected)) {
+                if (is_callable(array($repository, 'clearCache'))) {
+                    call_user_func(array($repository, 'clearCache'));
+                }
+                ABJ_404_Solution_OptionCacheInvalidator::site('abj404_settings');
+                $before = $expected;
+                $options = $this->loadCurrentOptions();
+                $expected = call_user_func(array($repository, 'getRawSettingsSnapshot'));
+                if (!$this->sameRawSnapshot($before, $expected)) {
+                    throw new ABJ_404_Solution_SettingsPersistenceException(
+                        'Settings changed while establishing the form write authority.');
+                }
+            }
+            $message = $this->applySettingsSections($options, $_POST);
+            $this->persistOptions($options, $expected, $lock);
+        } catch (Throwable $e) {
+            $this->logger->warn('Settings persistence refused: ' . $e->getMessage());
+            return $this->settingsRequestFailure(409,
+                __('Settings could not be saved. Reload this page and try again.', '404-solution') . ' [ABJ404_SETTINGS_SAVE_REFUSED]');
+        } finally {
+            $lock->release();
+        }
 
         return $this->successResult($this->settingsSaveData($message));
     }
@@ -218,12 +264,24 @@ class ABJ_404_Solution_PluginLogicSettingsUpdate {
     }
 
     /**
+     * @param array{status:string,value:string} $left
+     * @param array{status:string,value:string} $right
+     */
+    private function sameRawSnapshot(array $left, array $right): bool {
+        return isset($left['status'], $left['value'], $right['status'], $right['value'])
+            && $left['status'] === $right['status'] && $left['value'] === $right['value'];
+    }
+
+    /**
      * Sanitize and persist options, then refresh the permalink cache.
      *
      * @param array<string, mixed> $options
+     * @param array{status:string,value:string}|null $expected
+     * @param ABJ_404_Solution_SiteResourceLock|null $lock
      * @return array<string, mixed>
      */
-    private function persistOptions(array $options): array {
+    private function persistOptions(array $options, ?array $expected = null,
+        ?ABJ_404_Solution_SiteResourceLock $lock = null): array {
         $excludedPages = isset($options['excludePages[]']) ? $options['excludePages[]'] : '';
 
         $newOptions = $this->sanitizePostData($options, true);
@@ -233,10 +291,17 @@ class ABJ_404_Solution_PluginLogicSettingsUpdate {
         $newOptions['excludePages[]'] = is_string($excludedPages) ? $excludedPages : '';
 
         $repository = abj_service('options_repository');
-        if (!is_callable(array($repository, 'updateOptions'))) {
-            throw new ABJ_404_Solution_SettingsPersistenceException('Options repository cannot persist settings options.');
+        if (!is_callable(array($repository, 'updateOptionsChecked'))) {
+            throw new ABJ_404_Solution_SettingsPersistenceException('Checked options repository cannot persist settings options.');
         }
-        call_user_func(array($repository, 'updateOptions'), $newOptions);
+        if ($expected === null || $lock === null) {
+            throw new ABJ_404_Solution_SettingsPersistenceException('Checked settings write lacked its lock or raw snapshot.');
+        }
+        $saved = call_user_func(array($repository, 'updateOptionsChecked'), $newOptions, $expected, $lock);
+        if ($saved !== true) {
+            throw new ABJ_404_Solution_SettingsPersistenceException(
+                'The settings row or selected destination changed before the save completed.');
+        }
 
         $permalinkCache = abj_service('permalink_cache');
         if (!is_callable(array($permalinkCache, 'updatePermalinkCache'))) {
@@ -360,7 +425,6 @@ class ABJ_404_Solution_PluginLogicSettingsUpdate {
         if ($this->tableViewOptionsResolver === null) {
             $self = $this;
             $this->tableViewOptionsResolver = new ABJ_404_Solution_TableViewOptionsResolver(
-                $this->f,
                 function (array $tableOptions) use ($self) {
                     return $self->sanitizePostData($tableOptions);
                 }

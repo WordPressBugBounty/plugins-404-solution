@@ -142,7 +142,7 @@ abstract class ABJ_404_Solution_DatabaseUpgradeComponent {
         if ($option === '' || !function_exists('get_option')) {
             return 0;
         }
-        $raw = get_option($option, 0);
+        $raw = ABJ_404_Solution_OptionShapeRead::scalar($option, 0);
         return max(0, is_scalar($raw) ? (int)$raw : 0);
     }
 
@@ -254,6 +254,94 @@ abstract class ABJ_404_Solution_DatabaseUpgradeComponent {
         }
 
         return array_values(array_unique($prefixes));
+    }
+
+    /**
+     * Find candidate prefixes that have a separate WordPress core options
+     * table. A live options table is the tenant boundary for a second install
+     * sharing this database. A plugin-only prefix is the retired-migration
+     * shape; a prefix with core options is never adopted on heuristics alone.
+     *
+     * An unreadable or malformed options table is blocked rather than treated
+     * as absent. This keeps the content-match heuristic from becoming an
+     * authority when the core-table probe cannot answer safely.
+     *
+     * @param array<int|string, int|string> $candidatePrefixes Prefixes from table-map keys.
+     * @return array<int, string>
+     */
+    protected function getForeignWordPressOptionsPrefixes(array $candidatePrefixes): array {
+        global $wpdb;
+
+        $dbName = is_object($wpdb) && isset($wpdb->dbname) && is_scalar($wpdb->dbname)
+            ? (string)$wpdb->dbname : '';
+        if ($dbName === '') {
+            return array_values(array_map('strval', $candidatePrefixes));
+        }
+
+        $foreign = array();
+
+        foreach ($candidatePrefixes as $candidatePrefix) {
+            $prefix = strtolower((string)$candidatePrefix);
+            if ($prefix === '' || preg_match('/^[a-z0-9_]+$/', $prefix) !== 1) {
+                $foreign[] = $prefix;
+                continue;
+            }
+
+            $optionsTable = $prefix . 'options';
+            $tableResult = $this->dbCore->queryAndGetResults(
+                'SELECT table_name FROM information_schema.tables '
+                . 'WHERE table_schema = %s AND table_name = %s',
+                array('query_params' => array($dbName, $optionsTable))
+            );
+            if (!$this->upgradeQuerySucceeded($tableResult)
+                    || !is_array($tableResult['rows'] ?? null)) {
+                $foreign[] = $prefix;
+                continue;
+            }
+
+            if ($tableResult['rows'] === array()) {
+                continue;
+            }
+
+            $tableFound = false;
+            foreach ($tableResult['rows'] as $row) {
+                if (!is_array($row)) {
+                    $foreign[] = $prefix;
+                    continue 2;
+                }
+                $tableNameKeyFound = false;
+                foreach ($row as $key => $value) {
+                    if (strtolower((string)$key) !== 'table_name') {
+                        continue;
+                    }
+                    $tableNameKeyFound = true;
+                    if (!is_scalar($value) || strtolower((string)$value) !== $optionsTable) {
+                        $foreign[] = $prefix;
+                        continue 2;
+                    }
+                    $tableFound = true;
+                    break;
+                }
+                if (!$tableNameKeyFound) {
+                    $foreign[] = $prefix;
+                    continue 2;
+                }
+            }
+            if (!$tableFound) {
+                continue;
+            }
+            $foreign[] = $prefix;
+        }
+
+        return array_values(array_unique($foreign));
+    }
+
+    /** @param mixed $result */
+    private function upgradeQuerySucceeded($result): bool {
+        return is_array($result)
+            && ($result['query_succeeded'] ?? null) === true
+            && ($result['last_error'] ?? null) === ''
+            && (!array_key_exists('timed_out', $result) || $result['timed_out'] === false);
     }
 
 }

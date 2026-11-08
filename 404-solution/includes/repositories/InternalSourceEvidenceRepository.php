@@ -173,7 +173,7 @@ class ABJ_404_Solution_InternalSourceEvidenceRepository {
             . " WHERE requested_url IN (" . $placeholders . ")"
             . " AND referrer IS NOT NULL AND referrer != ''"
             . " GROUP BY requested_url, referrer"
-            . " ORDER BY requested_url ASC, hit_count DESC, last_seen DESC"
+            . " ORDER BY requested_url ASC, hit_count DESC, last_seen DESC, referrer ASC"
             . " LIMIT " . self::MAX_AGGREGATE_ROWS;
 
         $result = $this->db->queryAndGetResults($query, array('query_params' => $cleanUrls));

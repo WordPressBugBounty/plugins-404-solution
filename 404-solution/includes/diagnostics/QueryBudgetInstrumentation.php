@@ -39,6 +39,9 @@ class ABJ_404_Solution_QueryBudgetInstrumentation {
     /** Default per-query budget in milliseconds — same as the cumulative cap. */
     const DEFAULT_QUERY_BUDGET_MS = 25000;
 
+    /** Maximum number of recorded query timings included in a violation entry. */
+    private const QUERY_TIMING_LIMIT = 20;
+
     /** @var bool|null Lazily resolved enabled flag. */
     private static $enabled = null;
 
@@ -85,14 +88,31 @@ class ABJ_404_Solution_QueryBudgetInstrumentation {
             self::$logDir = '';
             return null;
         }
-        if (!is_dir($dir)) {
-            $made = @mkdir($dir, 0755, true);
-            if (!$made && !is_dir($dir)) {
+        // allow-silent-error: the operator-chosen log directory may be outside open_basedir; denial leaves instrumentation disabled (null), which is the documented result.
+        $directoryExists = ABJ_404_Solution_HostFilesystemCall::isDir($dir);
+        if (!$directoryExists['result']) {
+            $madeResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($dir) { return mkdir($dir, 0755, true); }
+            );
+            $made = $madeResult['result'];
+            if ($madeResult['warning'] !== null) {
+                abj404_logPhpFallback('logger-internal', 'Query budget log directory could not be created: '
+                    . $dir . ' (' . $madeResult['warning'] . ')');
+            }
+            $directoryStillExists = ABJ_404_Solution_HostFilesystemCall::isDir($dir);
+            if (!$made && !$directoryStillExists['result']) { // allow-silent-error: same open_basedir denial as the probe above; recorded as logDir() === null.
                 self::$logDir = '';
                 return null;
             }
         }
-        if (!is_writable($dir)) {
+        $writableResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($dir) { return is_writable($dir); }
+        );
+        if ($writableResult['warning'] !== null) {
+            abj404_logPhpFallback('logger-internal', 'Query budget log directory writability check warned: '
+                . $dir . ' (' . $writableResult['warning'] . ')');
+        }
+        if ($writableResult['warning'] !== null || !$writableResult['result']) {
             self::$logDir = '';
             return null;
         }
@@ -228,7 +248,13 @@ class ABJ_404_Solution_QueryBudgetInstrumentation {
         }
         // file_put_contents with FILE_APPEND | LOCK_EX is concurrency-safe
         // across Playwright worker processes.
-        @file_put_contents($path, $line . "\n", FILE_APPEND | LOCK_EX);
+        $written = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($path, $line) { return file_put_contents($path, $line . "\n", FILE_APPEND | LOCK_EX); }
+        );
+        if ($written['warning'] !== null) {
+            abj404_logPhpFallback('logger-internal', 'Query budget violation log could not be written: '
+                . $path . ' (' . $written['warning'] . ')');
+        }
     }
 
     /**
@@ -264,6 +290,22 @@ class ABJ_404_Solution_QueryBudgetInstrumentation {
         if (empty($perQueryViolations) && !$cumulativeViolation) {
             return null;
         }
+        $rankedQueries = self::$state['queries'];
+        usort($rankedQueries, static function (array $left, array $right): int {
+            if ($left['elapsed_ms'] !== $right['elapsed_ms']) {
+                return $left['elapsed_ms'] > $right['elapsed_ms'] ? -1 : 1;
+            }
+            return strcmp($left['sql'], $right['sql']);
+        });
+        $timingEntries = array();
+        foreach (array_slice($rankedQueries, 0, self::QUERY_TIMING_LIMIT) as $query) {
+            $timingEntries[] = array(
+                'sql' => $query['sql'],
+                'elapsed_ms' => round($query['elapsed_ms'], 2),
+                'timeout_s' => $query['timeout_s'],
+            );
+        }
+
         return array(
             'ts' => gmdate('Y-m-d\TH:i:s\Z', abj_clock()->now()),
             'uri' => self::currentRequestUri(),
@@ -272,6 +314,13 @@ class ABJ_404_Solution_QueryBudgetInstrumentation {
             'query_count' => count(self::$state['queries']),
             'cumulative_violation' => $cumulativeViolation,
             'violations' => $perQueryViolations,
+            'query_timings' => array(
+                'version' => 1,
+                'kind' => 'query-budget-timings',
+                'limit' => self::QUERY_TIMING_LIMIT,
+                'omitted_count' => max(0, count($rankedQueries) - self::QUERY_TIMING_LIMIT),
+                'entries' => $timingEntries,
+            ),
         );
     }
 

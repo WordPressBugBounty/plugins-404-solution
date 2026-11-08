@@ -56,7 +56,9 @@ final class ABJ_404_Solution_HostFilesystemPressureProbe {
             : (defined('ABSPATH') ? rtrim((string)ABSPATH, '/\\') . '/wp-content' : '');
         if ($contentDirectory !== '') {
             $paths['wordpress_uploads'] = $contentDirectory . '/uploads';
-            if (is_dir($contentDirectory . '/cache')) {
+            // allow-silent-error: wp-content/cache is an optional host-managed directory; absence or an open_basedir denial just leaves it out of the probe set.
+            $cacheDirectory = ABJ_404_Solution_HostFilesystemCall::isDir($contentDirectory . '/cache');
+            if ($cacheDirectory['result']) {
                 $paths['wordpress_cache'] = $contentDirectory . '/cache';
             }
         }
@@ -85,13 +87,28 @@ final class ABJ_404_Solution_HostFilesystemPressureProbe {
             ), '');
         }
         $path = rtrim($path, '/\\');
-        if (!is_dir($path)) {
+        // allow-silent-error: a probed host path can be outside open_basedir; the denial is reported below as the not_directory finding instead of as a PHP warning.
+        $directoryCheck = ABJ_404_Solution_HostFilesystemCall::isDir($path);
+        self::reportFilesystemWarning('filesystem probe directory check', $directoryCheck['warning']);
+        if (!$directoryCheck['result']) {
             return self::unavailable('not_directory', array(
                 'is_dir(' . $path . ')' => 'not_directory',
             ), $path);
         }
-        $freeBytes = ABJ_404_Solution_PhpRuntimeCapabilityAdapter::diskFreeSpace($path);
-        $totalBytes = ABJ_404_Solution_PhpRuntimeCapabilityAdapter::diskTotalSpace($path);
+        $freeResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($path) {
+                return ABJ_404_Solution_PhpRuntimeCapabilityAdapter::diskFreeSpace($path);
+            }
+        );
+        self::reportFilesystemWarning('filesystem probe free space', $freeResult['warning']);
+        $freeBytes = $freeResult['result'];
+        $totalResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($path) {
+                return ABJ_404_Solution_PhpRuntimeCapabilityAdapter::diskTotalSpace($path);
+            }
+        );
+        self::reportFilesystemWarning('filesystem probe total space', $totalResult['warning']);
+        $totalBytes = $totalResult['result'];
 
         return array(
             'status' => 'available',
@@ -105,36 +122,72 @@ final class ABJ_404_Solution_HostFilesystemPressureProbe {
     /** @return array<string, mixed> */
     private static function createWriteProbe(string $path): array {
         $attemptedPaths = array();
-        if (!is_writable($path)) {
+        $writableResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($path) { return is_writable($path); }
+        );
+        self::reportFilesystemWarning('filesystem probe writability check', $writableResult['warning']);
+        if (!$writableResult['result']) {
             return self::unavailable('directory_not_writable', array(
                 'is_writable(' . $path . ')' => 'false',
             ));
         }
         $attemptedPaths['is_writable(target_directory)'] = 'true';
-        $sentinel = @tempnam($path, 'abj404-pressure-');
+        $tempResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($path) { return tempnam($path, 'abj404-pressure-'); }
+        );
+        self::reportFilesystemWarning('filesystem probe create', $tempResult['warning']);
+        $sentinel = $tempResult['result'];
         if (!is_string($sentinel)) {
             $attemptedPaths['tempnam(target_directory)'] = 'failed';
             return self::unavailable('create_failed', $attemptedPaths);
         }
         $attemptedPaths['tempnam(target_directory)'] = 'created';
-        $targetDirectory = realpath($path);
-        $createdDirectory = realpath(dirname($sentinel));
+        $targetResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($path) { return realpath($path); }
+        );
+        self::reportFilesystemWarning('filesystem probe target realpath', $targetResult['warning']);
+        $targetDirectory = $targetResult['result'];
+        $createdResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($sentinel) { return realpath(dirname($sentinel)); }
+        );
+        self::reportFilesystemWarning('filesystem probe created realpath', $createdResult['warning']);
+        $createdDirectory = $createdResult['result'];
         if ($targetDirectory === false || $createdDirectory !== $targetDirectory) {
-            @unlink($sentinel);
+            $cleanup = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($sentinel) { return unlink($sentinel); }
+            );
+            self::reportFilesystemWarning('filesystem probe fallback cleanup', $cleanup['warning']);
             $attemptedPaths['realpath(created_directory)'] = 'outside_target';
             return self::unavailable('create_fell_back_outside_target', $attemptedPaths);
         }
         $attemptedPaths['realpath(created_directory)'] = 'target_match';
-        $handle = @fopen($sentinel, 'wb');
+        $openResult = ABJ_404_Solution_HostFilesystemCall::fopen($sentinel, 'wb');
+        self::reportFilesystemWarning('filesystem probe open', $openResult['warning']);
+        $handle = $openResult['result'];
         if ($handle === false) {
-            @unlink($sentinel);
+            $cleanup = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($sentinel) { return unlink($sentinel); }
+            );
+            self::reportFilesystemWarning('filesystem probe open cleanup', $cleanup['warning']);
             $attemptedPaths['fopen(sentinel)'] = 'failed';
             return self::unavailable('open_failed', $attemptedPaths);
         }
         $attemptedPaths['fopen(sentinel)'] = 'opened';
-        $bytesWritten = @fwrite($handle, 'x');
-        $closed = @fclose($handle);
-        $removed = @unlink($sentinel);
+        $writeResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($handle) { return fwrite($handle, 'x'); }
+        );
+        self::reportFilesystemWarning('filesystem probe write', $writeResult['warning']);
+        $bytesWritten = $writeResult['result'];
+        $closeResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($handle) { return fclose($handle); }
+        );
+        self::reportFilesystemWarning('filesystem probe close', $closeResult['warning']);
+        $closed = $closeResult['result'];
+        $removeResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($sentinel) { return unlink($sentinel); }
+        );
+        self::reportFilesystemWarning('filesystem probe cleanup', $removeResult['warning']);
+        $removed = $removeResult['result'];
         $attemptedPaths['fwrite(sentinel)'] = 'bytes_written:' . (string)$bytesWritten;
         $attemptedPaths['fclose(sentinel)'] = $closed ? 'true' : 'false';
         $attemptedPaths['unlink(sentinel)'] = $removed ? 'true' : 'false';
@@ -173,6 +226,12 @@ final class ABJ_404_Solution_HostFilesystemPressureProbe {
     private static function reportFailure(string $message): void {
         if (function_exists('abj404_logPhpFallback')) {
             abj404_logPhpFallback('host-pressure', $message);
+        }
+    }
+
+    private static function reportFilesystemWarning(string $operation, ?string $warning): void {
+        if ($warning !== null && $warning !== '' && function_exists('abj404_logPhpFallback')) {
+            abj404_logPhpFallback('logger-internal', $operation . ': ' . $warning);
         }
     }
 }

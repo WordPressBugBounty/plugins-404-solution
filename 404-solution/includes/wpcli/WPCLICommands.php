@@ -56,7 +56,8 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
             isset($assocArgs['from']) ? trim((string)$assocArgs['from']) : '',
             isset($assocArgs['to']) ? trim((string)$assocArgs['to']) : '',
             isset($assocArgs['code']) ? (int)$assocArgs['code'] : 301,
-            isset($assocArgs['regex'])
+            isset($assocArgs['regex']),
+            array('query_mode' => $assocArgs['query-mode'] ?? null)
         ));
     }
 
@@ -93,7 +94,8 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
             $statsRepository = ABJ_404_Solution_StatsRepositoryResolver::resolve(__CLASS__);
         }
         $snapshot = $statsRepository->getStatsDashboardSnapshot(false);
-        $data = is_array($snapshot['data']) ? $snapshot['data'] : array();
+        if ($this->presentStatsSnapshotStatus($snapshot)) { return; }
+        $data = $snapshot['data'];
 
         /** @var array<string, mixed> $dataAsStrMap */
         $dataAsStrMap = $data;
@@ -115,6 +117,29 @@ class ABJ_404_Solution_WPCLICommands extends \WP_CLI_Command {
             ),
             'fields' => array('metric', 'count'),
         ));
+    }
+
+    /**
+     * Surface availability and error identity before rendering any metric rows.
+     * @param array{data:array<string,mixed>,generation?:string,error?:array{code:int|string,message:string}} $snapshot
+     * @return bool True when no publication exists to render.
+     */
+    private function presentStatsSnapshotStatus(array $snapshot): bool {
+        if (isset($snapshot['error'])) {
+            $error = $snapshot['error'];
+            $message = 'Statistics unavailable: ' . $error['message'] . ' (' . $error['code'] . ')';
+            if ($snapshot['data'] === array()) {
+                $this->presenter()->present(array('type' => 'error', 'message' => $message));
+                return true;
+            }
+            $this->presenter()->present(array('type' => 'content', 'content' => '',
+                'warnings' => array($message)));
+        }
+        if ($snapshot['data'] !== array()) { return false; }
+        $generation = $snapshot['generation'] ?? '';
+        $this->presenter()->present(array('type' => 'line', 'message' => 'Statistics pending: '
+            . ($generation !== '' ? $generation : 'awaiting first publication')));
+        return true;
     }
 
     /**

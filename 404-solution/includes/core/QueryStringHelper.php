@@ -107,6 +107,89 @@ class ABJ_404_Solution_QueryStringHelper {
     }
 
     /**
+     * Canonical request identity: retain only WordPress public routing vars.
+     * The query_vars filter includes names registered by plugins without
+     * mutating WP::public_query_vars. Without a registry, retain the full URL
+     * rather than collapse distinct routes during early boot.
+     *
+     * @param string $url Site-relative source URL.
+     * @return string Path with sorted routing parameters, no fragment.
+     */
+    public function routingKey(string $url): string {
+        global $wp;
+        if (!is_object($wp) || !isset($wp->public_query_vars) || !is_array($wp->public_query_vars)) {
+            return $url;
+        }
+        $names = apply_filters('query_vars', $wp->public_query_vars);
+        if (!is_array($names)) {
+            return $url;
+        }
+        $parts = explode('?', explode('#', $url, 2)[0], 2);
+        $query = array();
+        parse_str($parts[1] ?? '', $query);
+        $names = array_filter($names, 'is_string');
+        $query = array_intersect_key($query, array_fill_keys($names, true));
+        $sorted = $this->sortQueryString(array('query' => http_build_query($query)));
+        return $parts[0] . ($sorted === '' ? '' : '?' . $sorted);
+    }
+
+    /**
+     * Parse the persisted query-mode vocabulary. Empty CSV/form values mean
+     * the nullable default; malformed or unknown writes must be refused.
+     * Unknown stored values are only eligible for existing exact lookups.
+     *
+     * @param mixed $mode
+     * @return string|null
+     * @throws InvalidArgumentException
+     */
+    public static function queryMode($mode): ?string {
+        if ($mode === null || $mode === '') {
+            return null;
+        }
+        if (!is_string($mode) || !in_array($mode, array('exact', 'ignore', 'pass'), true)) {
+            throw new InvalidArgumentException('Invalid query_mode; expected null, exact, ignore, or pass.');
+        }
+        return $mode;
+    }
+
+    /**
+     * Read a stored policy without coercing unknown future values into a wider match.
+     * @param array<string, mixed> $row
+     * @return string|null
+     */
+    public static function storedQueryMode(array $row): ?string {
+        $mode = $row['query_mode'] ?? null;
+        return is_string($mode) ? $mode : null;
+    }
+
+    /**
+     * Canonical identity for a source under its query policy. Regex patterns
+     * themselves are never passed here; their request subjects may be.
+     */
+    public function redirectSourceKey(string $url, ?string $mode, bool $generated = false): string {
+        if ($mode === 'pass') { return explode('?', $url, 2)[0]; }
+        if ($mode === 'ignore' || ($mode === null && $generated)) { return $this->routingKey($url); }
+        return $url;
+    }
+
+    /**
+     * Decode native or Redirection import policy before a row can be written.
+     * @param array<string, mixed> $row
+     * @param bool $redirection Omitted Redirection flags mean exact.
+     * @return string|null
+     */
+    public static function importQueryMode(array $row, bool $redirection = false): ?string {
+        if (array_key_exists('query_mode', $row)) { return self::queryMode($row['query_mode']); }
+        $rawData = $row['match_data'] ?? null;
+        if ($rawData === null || $rawData === '') { return $redirection ? 'exact' : null; }
+        $data = is_string($rawData) ? json_decode($rawData, true) : $rawData;
+        if (!is_array($data)) { throw new InvalidArgumentException('Invalid match_data JSON.'); }
+        $source = $data['source'] ?? $data;
+        if (!is_array($source)) { throw new InvalidArgumentException('Invalid match_data source.'); }
+        return self::queryMode($source['flag_query'] ?? 'exact');
+    }
+
+    /**
      * Remove the page-ID arg ('p', which would cause a 404 on the
      * destination otherwise) and any plugin-owned control arg in
      * REMOVED_QUERY_ARG_KEYS from a query string. Used both for redirect

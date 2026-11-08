@@ -18,11 +18,12 @@ require_once __DIR__ . '/../database/DatabaseInfrastructureErrorTaxonomy.php';
  * reasons about all three inline is two concerns in one method. Keeping them
  * here also means the whole delay curve is exercisable without driving cron.
  *
- * The failure mode this exists to prevent is NOT a busy-wait. rescheduleChain()
- * enqueues a WP-Cron event, it does not sleep. It is that a database outage
- * used to produce a fresh cron event every ten seconds for the entire duration
- * of the outage, each one re-running the same failing probe, on hosts where
- * cron is already the constrained resource. Two things bound that here:
+ * The failure mode this exists to prevent is NOT a busy-wait.
+ * ABJ_404_Solution_NGramRebuildChainRearmer::rearmAfter() enqueues a WP-Cron
+ * event, it does not sleep. It is that a database outage used to produce a
+ * fresh cron event every ten seconds for the entire duration of the outage,
+ * each one re-running the same failing probe, on hosts where cron is already
+ * the constrained resource. Two things bound that here:
  *
  *   1. Consecutive failures cost progressively more, up to a ceiling. The
  *      curve resets the moment a tick succeeds, so one bad tick cannot slow a

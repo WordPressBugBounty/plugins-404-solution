@@ -52,13 +52,19 @@ class ABJ_404_Solution_WPCLIRedirectCommandService {
      * @param string $to
      * @param int $code
      * @param bool $regex
+     * @param array{query_mode?: mixed} $options
      * @return array<string, mixed>
      */
-    public function createRedirect(string $from, string $to, int $code, bool $regex): array {
+    public function createRedirect(string $from, string $to, int $code, bool $regex, array $options = array()): array {
         if ($from === '') {
             return $this->error('--from is required.');
         }
 
+        try {
+            $queryMode = ABJ_404_Solution_QueryStringHelper::queryMode($options['query_mode'] ?? null);
+        } catch (InvalidArgumentException $e) {
+            return $this->error($e->getMessage());
+        }
         $warnings = array();
         if ($from[0] !== '/' && !preg_match('#^https?://#i', $from)) {
             $warnings[] = "--from '{$from}' does not start with '/'. Incoming requests are matched against the path (e.g. /old-page), so this redirect may never fire.";
@@ -88,18 +94,28 @@ class ABJ_404_Solution_WPCLIRedirectCommandService {
         }
 
         $status = $regex ? (string)ABJ404_STATUS_REGEX : (string)ABJ404_STATUS_MANUAL;
-        $insertedId = abj_service('redirects_repository')->setupRedirect(
-            ABJ_404_Solution_RedirectSpec::fromArray(array(
-                'fromURL' => $from,
-                'status' => $status,
-                'type' => $type,
-                'finalDest' => $dest,
-                'code' => (string)$code,
-                'disabled' => 0,
-                'engine' => 'wp-cli',
-            ))
-        );
+        try {
+            $insertedId = abj_service('redirects_repository')->setupRedirect(
+                ABJ_404_Solution_RedirectSpec::fromArray(array(
+                    'fromURL' => $from,
+                    'status' => $status,
+                    'type' => $type,
+                    'finalDest' => $dest,
+                    'code' => (string)$code,
+                    'disabled' => 0,
+                    'engine' => 'wp-cli',
+                    'query_mode' => $queryMode,
+                ))
+            );
+        } catch (ABJ_404_Solution_RedirectCycleException $e) {
+            return $this->error($e->getMessage(), $warnings);
+        }
         if (!$insertedId) {
+            $cycleError = method_exists(abj_service('redirects_repository'), 'getLastWriteError')
+                ? (string)abj_service('redirects_repository')->getLastWriteError() : '';
+            if ($cycleError !== '') {
+                return $this->error($cycleError, $warnings);
+            }
             return $this->error('Failed to create redirect. Check that the source URL is unique.', $warnings);
         }
 
@@ -132,7 +148,9 @@ class ABJ_404_Solution_WPCLIRedirectCommandService {
             $messages[] = "Resolved '{$idOrUrl}' to redirect ID {$id}.";
         }
 
-        $error = $redirectsRepository->moveRedirectsToTrash($id, 1);
+        $error = ctype_digit($idOrUrl)
+            ? $redirectsRepository->moveRedirectsToTrash($id, 1)
+            : $redirectsRepository->moveSourceRedirectsToTrash($id);
         if ($error !== '') {
             return $this->error("No redirect with ID {$id} found, or database error: {$error}", array(), $messages);
         }
@@ -169,6 +187,11 @@ class ABJ_404_Solution_WPCLIRedirectCommandService {
         $deleteError = isset($deleteResult['last_error']) && is_string($deleteResult['last_error']) ? $deleteResult['last_error'] : '';
         if ($deleteError !== '') {
             return $this->error('Database error: ' . $deleteError);
+        }
+        if (!array_key_exists('query_succeeded', $deleteResult) || $deleteResult['query_succeeded'] !== true
+                || (array_key_exists('timed_out', $deleteResult) && $deleteResult['timed_out'] !== false)) {
+            return $this->error('Database purge did not confirm success (query_unconfirmed). Deleting captured entries is safe to repeat: '
+                . 'check what remains with `wp abj404 list --status=captured`, then run the purge again.');
         }
 
         $deleted = isset($deleteResult['rows_affected']) && is_scalar($deleteResult['rows_affected'])
@@ -267,7 +290,7 @@ class ABJ_404_Solution_WPCLIRedirectCommandService {
         $output = array();
         foreach ($rows as $row) {
             if (is_array($row)) {
-                $output[] = $row;
+                $output[] = array_filter($row, 'is_string', ARRAY_FILTER_USE_KEY);
             }
         }
         return $output;

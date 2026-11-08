@@ -66,7 +66,7 @@ class ABJ_404_Solution_PermalinkResolver {
     /**
      * The URL an internal redirect destination (post, category or tag) points
      * at, or '' when the type is not internal or the destination no longer
-     * resolves (a deleted post, a deleted term).
+     * resolves (an unpublished or deleted post, a deleted term).
      *
      * Exporters use this so an exported rule points where the live redirect
      * points. A redirect's final_dest is a wp_posts.ID for a post redirect and
@@ -86,12 +86,19 @@ class ABJ_404_Solution_PermalinkResolver {
         if ($type !== ABJ404_TYPE_POST && $type !== ABJ404_TYPE_CAT && $type !== ABJ404_TYPE_TAG) {
             return '';
         }
-        if ($type === ABJ404_TYPE_POST && $cachedPostUrl !== '') {
-            return $cachedPostUrl;
-        }
         $idInt = ABJ_404_Solution_ExactInteger::read($finalDest, 1);
         if ($idInt === null) {
             return '';
+        }
+        if ($type === ABJ404_TYPE_POST) {
+            // A cached URL is not evidence that the destination is still live.
+            // Match getPermalinkFromURL.sql before trusting either URL source.
+            if (!in_array(get_post_status($idInt), array('publish', 'published'), true)) {
+                return '';
+            }
+            if ($cachedPostUrl !== '') {
+                return $cachedPostUrl;
+            }
         }
         $permalink = array('id' => $finalDest, 'type' => (string)$type, 'score' => 0,
             'status' => 'unknown', 'link' => '');

@@ -40,7 +40,7 @@ class ABJ_404_Solution_Ajax_SettingsModeToggle {
      */
     static function init(): void {
         $me = ABJ_404_Solution_Ajax_SettingsModeToggle::getInstance();
-        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404_toggle_settings_mode',
+        ABJ_404_Solution_WPUtils::safeAddAction(ABJ_404_Solution_PluginAjaxActions::hook('abj404_toggle_settings_mode'),
             array($me, 'handleModeToggle'));
     }
 
@@ -78,6 +78,8 @@ class ABJ_404_Solution_Ajax_SettingsModeToggle {
                 'message' => __('Settings mode updated', '404-solution')
             ));
         } else {
+            global $wpdb;
+            $dbError = isset($wpdb->last_error) && is_string($wpdb->last_error) ? trim($wpdb->last_error) : '';
             $logger = abj_service('logging');
             if ($logger !== null) {
                 $logger->warn('Ajax_SettingsModeToggle::handleModeToggle: setSettingsMode("' . $mode .
@@ -88,8 +90,6 @@ class ABJ_404_Solution_Ajax_SettingsModeToggle {
             // update_user_meta() returns false because the value is unchanged
             // rather than because of a DB error, last_error is empty and the
             // framing message stands alone.
-            global $wpdb;
-            $dbError = isset($wpdb->last_error) && is_string($wpdb->last_error) ? $wpdb->last_error : '';
             $framing = __('Failed to update settings mode', '404-solution');
             $message = $dbError !== '' ? $framing . ' (DB error: ' . $dbError . ')' : $framing;
             wp_send_json_error(array('message' => $message), 500);

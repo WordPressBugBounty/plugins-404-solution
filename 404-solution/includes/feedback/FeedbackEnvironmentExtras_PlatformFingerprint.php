@@ -170,17 +170,10 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_PlatformFingerprint {
                 }
             }
             foreach ((array)$checks['path'] as $p) {
-                // The panel-detection paths (/home/clp, /usr/local/cpanel, /opt/psa,
-                // /etc/runcloud, etc.) sit outside the open_basedir of most managed
-                // shared-hosting environments. is_dir() raises E_WARNING on every
-                // miss. The plugin's NormalErrorHandler reports those warnings
-                // (errfile is THIS file, which lives under the plugin folder), so
-                // the diagnostic that was supposed to be silent ends up in the
-                // admin error inbox as "ABJ404-SOLUTION Normal error handler error:
-                // errno: 2, errstr: is_dir(): open_basedir restriction in effect.".
-                // Suppress with @ since the probe is intentionally best-effort and
-                // a denial here means "not on this host", not a logic bug.
-                if (@is_dir($p)) { // allow-silent-error: open_basedir restriction surface; absence here is the answer, not a fault. See production reports 22-39 (4.1.18-4.1.19) flooding the inbox with "is_dir(): open_basedir restriction in effect" for /home/clp probes on p2p-game.com and similar CloudLinux-hosted sites.
+                // These marker paths can sit outside open_basedir. The typed
+                // gateway captures that expected denial locally so the warning
+                // retains its original cause without entering the site handler.
+                if ($this->probePanelMarkerDirectory($p)) {
                     return array('panel' => $panelKey, 'matched_marker' => 'path:' . $p);
                 }
             }
@@ -302,11 +295,57 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_PlatformFingerprint {
      */
     private function readProcSelfCgroup(): string {
         $path = '/proc/self/cgroup';
-        if (!@is_readable($path)) { // allow-silent-error: procfs is absent on non-Linux hosts and outside many open_basedir roots; absence is the answer, not a fault.
+        $readable = ABJ_404_Solution_HostFilesystemCall::isReadable($path);
+        if (!$readable['result']) {
+            if ($readable['warning'] !== null && $readable['warning'] !== '') {
+                $this->logHostMarkerWarning('procfs readability probe', $path, $readable['warning']);
+            }
             return '';
         }
-        $raw = @file_get_contents($path, false, null, 0, self::MAX_CGROUP_BYTES); // allow-silent-error: a readable-but-unreadable procfs entry means the marker is unavailable, which is the same finding as absence.
-        return is_string($raw) ? $raw : '';
+        if ($readable['warning'] !== null && $readable['warning'] !== '') {
+            $this->logHostMarkerWarning('procfs readability probe', $path, $readable['warning']);
+            return '';
+        }
+        $read = ABJ_404_Solution_HostFilesystemCall::fileGetContents($path, self::MAX_CGROUP_BYTES);
+        if ($read['warning'] !== null && $read['warning'] !== '') {
+            $this->logHostMarkerWarning('procfs cgroup read', $path, $read['warning']);
+            return '';
+        }
+        return is_string($read['result']) ? $read['result'] : '';
+    }
+
+    /**
+     * Check one static panel marker directory and retain any native warning
+     * locally without changing the PII-free fingerprint schema.
+     */
+    private function probePanelMarkerDirectory(string $path): bool {
+        $probe = ABJ_404_Solution_HostFilesystemCall::isDir($path);
+        if ($probe['warning'] !== null && $probe['warning'] !== '') {
+            $this->logHostMarkerWarning('panel marker directory probe', $path, $probe['warning']);
+            return false;
+        }
+        return $probe['result'] === true;
+    }
+
+    /** Check CloudLinux's optional alt-PHP marker without logging absence. */
+    private function probeAltPhpMarker(): bool {
+        $probe = ABJ_404_Solution_HostFilesystemCall::isDir('/opt/alt/php');
+        if ($probe['warning'] !== null && $probe['warning'] !== '') {
+            $this->logHostMarkerWarning('CloudLinux alt-PHP marker probe', '/opt/alt/php', $probe['warning']);
+            return false;
+        }
+        return $probe['result'] === true;
+    }
+
+    /**
+     * Keep warning text local to the existing feedback transport log. Static
+     * marker paths are not returned in the fingerprint payload.
+     */
+    private function logHostMarkerWarning(string $operation, string $path, string $warning): void {
+        ABJ_404_Solution_FeedbackTransportLog::log(
+            'warn',
+            $operation . ' failed for ' . $path . ': ' . $warning
+        );
     }
 
     /**
@@ -392,7 +431,7 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_PlatformFingerprint {
         }
         $altPhpPresent = array_key_exists('cloudlinux_alt_php_present', $runtime)
             ? $runtime['cloudlinux_alt_php_present'] === true
-            : @is_dir('/opt/alt/php'); // allow-silent-error: CloudLinux's alt-PHP directory is outside many open_basedir roots; denial means the marker is unavailable.
+            : $this->probeAltPhpMarker();
         if ($altPhpPresent) {
             // Report the marker name, never the absolute path that was probed.
             $markers[] = 'alt_php';

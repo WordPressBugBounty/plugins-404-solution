@@ -4,6 +4,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once dirname(__DIR__) . '/root-boot/EarlySettingsAccess.php';
+
 /**
  * AJAX failure-logging utilities used by the AJAX handler classes.
  */
@@ -148,7 +150,7 @@ class ABJ_404_Solution_AjaxFailureLogger {
         }
         $fallbackPath = $this->traceOperation(
             'fallback_path_resolution',
-            static fn() => ABJ404_PATH . 'abj404_debug_fallback.txt'
+            static fn() => abj404_getWritablePluginFallbackDir() . 'abj404_debug_fallback.txt'
         );
         $this->traceOperation(
             'fallback_write_flush_return',

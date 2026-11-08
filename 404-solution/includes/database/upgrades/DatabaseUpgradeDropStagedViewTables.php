@@ -106,7 +106,7 @@ class ABJ_404_Solution_DatabaseUpgradeDropStagedViewTables extends ABJ_404_Solut
             }
             // @utf8-audit: opt-out - $tableName is doTableNameReplacements() of a fixed internal placeholder (lowercase prefix + literal suffix); system-controlled, cannot contain invalid UTF-8.
             // DAO-bypass-approved: idempotent DROP TABLE IF EXISTS on a deprecated transient table guarded by a SHOW TABLES existence probe; routing through queryAndGetResults would surface a benign infrastructure warning on a write-blocked host even though the table is inert residue.
-            $result = $wpdb->query('DROP TABLE IF EXISTS `' . esc_sql($tableName) . '`');
+            $result = ABJ_404_Solution_DatabaseDriverCall::query($wpdb, 'DROP TABLE IF EXISTS `' . esc_sql($tableName) . '`');
             if ($result === false) {
                 // A write failed despite the write-block probe passing (e.g. a
                 // lock timeout). Inert residue, hosting-side cause: warn (not
@@ -146,7 +146,7 @@ class ABJ_404_Solution_DatabaseUpgradeDropStagedViewTables extends ABJ_404_Solut
         }
         // @utf8-audit: opt-out - $tableName is a fully-qualified, lowercase-prefixed plugin table name from doTableNameReplacements(); system-controlled, cannot contain invalid UTF-8.
         // DAO-bypass-approved: schema existence probe (SHOW TABLES); see method docblock.
-        $found = $wpdb->get_var("SHOW TABLES LIKE '" . esc_sql($tableName) . "'");
+        $found = ABJ_404_Solution_DatabaseDriverCall::getVar($wpdb, "SHOW TABLES LIKE '" . esc_sql($tableName) . "'");
         return $found === $tableName;
     }
 }

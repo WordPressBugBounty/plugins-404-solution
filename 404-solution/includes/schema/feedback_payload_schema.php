@@ -70,8 +70,8 @@ return (function (): array {
         // Plugin and request metadata
         'payload_schema_version' => [
             'type' => 'int',
-            'enum' => [2],
-            'description' => 'Additive feedback wire-contract version. Version 2 adds the optional plugin_settings diagnostic snapshot.',
+            'enum' => [4],
+            'description' => 'Additive feedback wire-contract version. Version 4 adds bounded server, index, PHP INI and WordPress runbook diagnostics with explicit absence reasons.',
         ],
         'plugin_version'  => ['type' => 'string', 'description' => 'ABJ404_VERSION at send time. Empty string is allowed only in early-boot test contexts.'],
         'report_type'     => ['type' => 'string', 'enum' => ['error', 'heartbeat', 'uninstall', 'support_request']],
@@ -206,6 +206,12 @@ return (function (): array {
     ];
 
     $errorExtras = [
+        'debug_log_excerpt' => ['type' => 'string', 'required' => false,
+            'description' => 'Bounded ranked AJAX failure evidence captured before journal rotation, with sanitized log context.'],
+        'request_kind'        => ['type' => 'string', 'enum' => ['admin-ajax', 'rest', 'cron', 'admin-page', 'front-end'], 'required' => false,
+            'description' => 'Request kind captured before a fatal crash beacon.'],
+        'request_action'      => ['type' => 'string', 'required' => false,
+            'description' => 'Sanitized admin-ajax action from a crash beacon. The fixed invalid placeholder is used when the input is unsafe or absent.'],
         'error_signature'      => ['type' => 'string'],
         'previously_sent_line' => ['type' => 'int'],
         'debug_log'            => [
@@ -221,6 +227,8 @@ return (function (): array {
     ];
 
     $heartbeatExtras = [
+        'ajax_failure_counts' => ['type' => 'object', 'required' => false,
+            'description' => 'Versioned PII-free failure counts by action and phase over the successfully acknowledged heartbeat window.'],
         'error_signature'      => ['type' => 'string'],
         'previously_sent_line' => ['type' => 'int'],
     ];

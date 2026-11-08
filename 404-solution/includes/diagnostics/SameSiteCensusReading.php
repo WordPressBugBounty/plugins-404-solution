@@ -20,6 +20,14 @@ if (!defined('ABSPATH')) {
  * every place that changes the census to remember to call a reset -- the
  * push-based version of that invalidation was a standing invitation to a stale
  * reading after some future third mutation site forgot.
+ *
+ * Disposing of leftovers (which rows count as abandoned, claiming and
+ * recording them) belongs to ABJ_404_Solution_SameSiteCensusReaper, which the
+ * nightly maintenance pass also runs over the whole registry, so a site whose
+ * administrator never opens a plugin screen is cleaned too; a reading is one
+ * more disposer, not the only one.
+ *
+ * @phpstan-import-type AgedEntry from ABJ_404_Solution_SameSiteCensusReaper
  */
 final class ABJ_404_Solution_SameSiteCensusReading {
 
@@ -154,22 +162,16 @@ final class ABJ_404_Solution_SameSiteCensusReading {
             ));
         }
 
+        // The failure mode a plain counter cannot survive: the request under
+        // investigation is precisely the one killed before it could
+        // deregister. An entry older than any request that could still be
+        // running is a leftover, not a competitor.
+        $split = ABJ_404_Solution_SameSiteCensusReaper::partition($registry['entries'], $now);
+        $stale = $split['stale'];
         $others = array();
-        $stale = array();
-        $live = 0;
+        $live = count($split['live']);
         $selfRegistered = false;
-        foreach ($registry['entries'] as $entry) {
-            $ageMs = max(0, $now - $entry['started_at_ms']);
-            if ($ageMs > ABJ_404_Solution_SameSiteRequestCensus::ENTRY_TTL_MS) {
-                // The failure mode a plain counter cannot survive: the request
-                // under investigation is precisely the one killed before it
-                // could deregister. An entry older than any request that could
-                // still be running is a leftover, not a competitor.
-                $entry['age_ms'] = $ageMs;
-                $stale[] = $entry;
-                continue;
-            }
-            $live++;
+        foreach ($split['live'] as $entry) {
             if ($entry['option_name'] === $ownEntry) {
                 $selfRegistered = true;
                 continue;
@@ -178,7 +180,7 @@ final class ABJ_404_Solution_SameSiteCensusReading {
                 'channel' => $entry['channel'],
                 'action' => $entry['action'],
                 'pid' => $entry['pid'],
-                'age_ms' => $ageMs,
+                'age_ms' => $entry['age_ms'],
                 // Which segment that request was inside when it last managed to
                 // say so. An age alone reports that a worker is stranded; the
                 // phase is what says where, and it is the difference between a
@@ -205,7 +207,7 @@ final class ABJ_404_Solution_SameSiteCensusReading {
      * when something was reaped, truncated when the read hit its ceiling.
      *
      * @param array<int, array<string, mixed>> $others
-     * @param array<int, array<string, mixed>> $stale Whole decoded rows, so the
+     * @param array<int, AgedEntry> $stale Whole decoded rows, so the
      *   account of a request that never deregistered survives its own deletion.
      * @return array<string, mixed>
      */
@@ -227,18 +229,15 @@ final class ABJ_404_Solution_SameSiteCensusReading {
         }
         if ($stale !== array()) {
             $sample['stale_seen'] = count($stale);
-            // Promote BEFORE deleting. A reaped row is a request that outlived
+            // Claimed, then promoted. A reaped row is a request that outlived
             // any plausible lifetime without deregistering -- the worst strand
             // on the site, and the one a bare DELETE would erase down to a
-            // count. See ABJ_404_Solution_StrandedRequestLedger.
-            $sample['stale_recorded'] = ABJ_404_Solution_StrandedRequestLedger::record($stale);
-            $optionNames = array();
-            foreach ($stale as $entry) {
-                if (isset($entry['option_name']) && is_string($entry['option_name'])) {
-                    $optionNames[] = $entry['option_name'];
-                }
-            }
-            $sample['stale_reaped'] = ABJ_404_Solution_SameSiteRequestRegistry::remove($optionNames);
+            // count. See ABJ_404_Solution_StrandedRequestLedger, and
+            // ABJ_404_Solution_SameSiteCensusReaper for why the claim comes
+            // first.
+            $disposed = ABJ_404_Solution_SameSiteCensusReaper::dispose($stale);
+            $sample['stale_recorded'] = $disposed['recorded'];
+            $sample['stale_reaped'] = $disposed['reaped'];
         }
         if ($truncated) {
             $sample['truncated'] = true;

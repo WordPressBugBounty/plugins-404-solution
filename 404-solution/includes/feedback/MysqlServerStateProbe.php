@@ -32,6 +32,35 @@ require_once __DIR__ . '/FeedbackTransportLog.php';
  */
 class ABJ_404_Solution_MysqlServerStateProbe {
 
+    private const RUNBOOK_VARIABLES = array('innodb_buffer_pool_size', 'tmp_table_size',
+        'max_heap_table_size', 'max_statement_time', 'version_comment');
+
+    /** @var array<string, array<string, string>> Invalid runbook rows, keyed by SHOW scope. */
+    private $variableErrors = array();
+
+    /**
+     * Absence reasons for the fixed SSH-runbook variables. No driver messages,
+     * unrequested variable names, or values can enter this diagnostic list.
+     *
+     * @param array<string, array{value: array<string, mixed>, error: string}> $observations
+     * @return array<int, array{scope: string, variable: string, reason: string}>
+     */
+    public function runbookAbsence(array $observations): array {
+        $absent = array();
+        foreach (array('global' => self::RUNBOOK_VARIABLES, 'session' => array('max_statement_time')) as $scope => $names) {
+            $observation = $observations[$scope];
+            $statement = 'SHOW ' . strtoupper($scope) . ' VARIABLES';
+            foreach ($names as $name) {
+                if (!array_key_exists($name, $observation['value'])) {
+                    $absent[] = array('scope' => $scope, 'variable' => $name,
+                        'reason' => $observation['error'] !== '' ? $observation['error']
+                            : ($this->variableErrors[$statement][$name] ?? 'not_reported'));
+                }
+            }
+        }
+        return $absent;
+    }
+
     /**
      * Fixed set of MySQL global variables relevant to view-build / temp-table
      * JOIN performance on Bruno-class hosts. One SHOW GLOBAL VARIABLES query,
@@ -49,6 +78,8 @@ class ABJ_404_Solution_MysqlServerStateProbe {
             'innodb_lock_wait_timeout',
             'tmp_table_size',
             'max_heap_table_size',
+            'max_statement_time',
+            'version_comment',
             'key_buffer_size',
             'max_allowed_packet',
             'sort_buffer_size',
@@ -91,6 +122,7 @@ class ABJ_404_Solution_MysqlServerStateProbe {
             'innodb_lock_wait_timeout',
             'tmp_table_size',
             'max_heap_table_size',
+            'max_statement_time',
             'slow_query_log',
             'long_query_time',
             'innodb_buffer_pool_size',
@@ -171,7 +203,7 @@ class ABJ_404_Solution_MysqlServerStateProbe {
         $rows = null;
         try {
             // DAO-bypass-approved: read-only probe of @@PROCESSLIST; no plugin tables involved.
-            $rows = $wpdb->get_results('SHOW PROCESSLIST', ARRAY_A);
+            $rows = ABJ_404_Solution_DatabaseDriverCall::getResults($wpdb, 'SHOW PROCESSLIST', ARRAY_A);
         } catch (\Throwable $e) {
             // allow-silent-catch: probe is best-effort; rethrow after restoring suppress so the outer tryInt records null
             ABJ_404_Solution_FeedbackTransportLog::log('warn', 'probeActiveConnectionCount failed: ' . $e->getMessage());
@@ -245,19 +277,22 @@ class ABJ_404_Solution_MysqlServerStateProbe {
      */
     private function fetchVariableRows(string $statement, array $names): array {
         global $wpdb;
-        if (!isset($wpdb) || !is_object($wpdb) || !method_exists($wpdb, 'get_results')) {
+        if (!isset($wpdb) || !is_object($wpdb) || !method_exists($wpdb, 'get_results') || !method_exists($wpdb, 'prepare')) {
             throw new \RuntimeException('wpdb unavailable for ' . $statement . ' probe');
         }
         $placeholders = implode(',', array_fill(0, count($names), '%s'));
         $prevSuppress = method_exists($wpdb, 'suppress_errors') ? $wpdb->suppress_errors(true) : false;
         try {
-            $prepared = $statement;
-            if (method_exists($wpdb, 'prepare')) {
-                // DAO-bypass-approved: server variable/status name list placeholder bind; no plugin-table writes possible.
-                $prepared = $wpdb->prepare($statement . " WHERE Variable_name IN ($placeholders)", $names);
+            // DAO-bypass-approved: server variable/status name list placeholder bind; no plugin-table writes possible.
+            $prepared = $wpdb->prepare($statement . " WHERE Variable_name IN ($placeholders)", $names);
+            if (!is_string($prepared) || $prepared === '') {
+                throw new \RuntimeException('invalid shape: ' . $statement . ' preparation failed');
             }
             // DAO-bypass-approved: read-only probe of server variables/status; no plugin tables involved.
-            $rows = $wpdb->get_results($prepared, ARRAY_A);
+            $rows = ABJ_404_Solution_DatabaseDriverCall::getResults($wpdb, $prepared, ARRAY_A);
+            if (!empty($wpdb->last_error)) {
+                throw new \RuntimeException($statement . ' SQL read failed: ' . (string)$wpdb->last_error);
+            }
         } finally {
             if (method_exists($wpdb, 'suppress_errors')) {
                 $wpdb->suppress_errors($prevSuppress);
@@ -267,20 +302,51 @@ class ABJ_404_Solution_MysqlServerStateProbe {
         if (!is_array($rows)) {
             throw new \RuntimeException($statement . ' returned non-array');
         }
+        return $this->allowlistedVariableValues(array_values($rows), $names, $statement);
+    }
+
+    /**
+     * Decode the server's name/value metadata without inventing missing
+     * values. All three SHOW probes share this case-insensitive allowlist.
+     *
+     * @param array<int, mixed> $rows
+     * @param array<int, string> $names
+     * @param string $statement The scope whose invalid rows this call records.
+     * @return array<string, string>
+     */
+    private function allowlistedVariableValues(array $rows, array $names, string $statement): array {
+        $this->variableErrors[$statement] = array();
+        $allowed = array_fill_keys(array_map('strtolower', $names), true);
         $out = array();
         foreach ($rows as $row) {
             if (!is_array($row)) { continue; }
-            $name = '';
-            $value = '';
-            foreach ($row as $k => $v) {
-                $klow = strtolower((string)$k);
-                if ($klow === 'variable_name' && is_scalar($v)) { $name = strtolower((string)$v); }
-                if ($klow === 'value' && is_scalar($v))         { $value = (string)$v; }
+            $fields = array_change_key_case($row, CASE_LOWER);
+            $name = isset($fields['variable_name']) && is_scalar($fields['variable_name'])
+                ? strtolower((string)$fields['variable_name']) : '';
+            if (!isset($allowed[$name])) { continue; }
+            $value = isset($fields['value']) && is_scalar($fields['value']) ? (string)$fields['value'] : null;
+            if ($value === null || !$this->runbookValueIsReadable(array('name' => $name, 'value' => $value))) {
+                $this->variableErrors[$statement][$name] = 'invalid_value';
+                continue;
             }
-            if ($name === '') { continue; }
             $out[$name] = $value;
         }
         return $out;
+    }
+
+    /**
+     * The bounded value contract for the runbook's fixed variable names.
+     * Other allowlisted server variables retain their existing scalar policy.
+     *
+     * @param array{name: string, value: string} $entry
+     * @return bool
+     */
+    private function runbookValueIsReadable(array $entry): bool {
+        $value = $entry['value'];
+        if (!in_array($entry['name'], self::RUNBOOK_VARIABLES, true)) { return true; }
+        return $entry['name'] === 'version_comment'
+            ? strlen($value) <= 256 && preg_match('/^[\x20-\x7E]*$/D', $value) === 1
+            : is_numeric($value) && is_finite((float)$value) && (float)$value >= 0;
     }
 
     /**
@@ -295,6 +361,10 @@ class ABJ_404_Solution_MysqlServerStateProbe {
     private function coerceNumericScalars(array $raw): array {
         $out = array();
         foreach ($raw as $name => $value) {
+            if ($name === 'version_comment') {
+                $out[$name] = $value;
+                continue;
+            }
             $integer = ABJ_404_Solution_ExactInteger::read($value, PHP_INT_MIN);
             if ($integer !== null) {
                 $out[$name] = $integer;

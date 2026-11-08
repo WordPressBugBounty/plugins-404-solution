@@ -18,7 +18,7 @@ class ABJ_404_Solution_OldPermalinkStructureStore {
      * @return array<int, array{structure: string, captured_at: int, source: string}>
      */
     public function getObservedStructures(): array {
-        $stored = function_exists('get_option') ? get_option(self::OPTION_NAME, array()) : array();
+        $stored = function_exists('get_option') ? ABJ_404_Solution_OptionShapeRead::arrayValue(self::OPTION_NAME, array()) : array();
         return $this->normalizeStoredOption($stored)['items'];
     }
 

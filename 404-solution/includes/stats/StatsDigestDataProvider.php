@@ -73,7 +73,7 @@ class ABJ_404_Solution_StatsDigestDataProvider {
         $rows = array();
         foreach ($rawRows as $row) {
             if (is_array($row)) {
-                $rows[] = $row;
+                $rows[] = array_filter($row, 'is_string', ARRAY_FILTER_USE_KEY);
             }
         }
         return $rows;
@@ -98,7 +98,7 @@ class ABJ_404_Solution_StatsDigestDataProvider {
                AND BINARY h.requested_url = BINARY
                    COALESCE(r.canonical_url, CONCAT('/', TRIM(BOTH '/' FROM r.url)))
             WHERE r.status = " . ABJ404_STATUS_CAPTURED . " AND r.disabled = 0
-            ORDER BY logshits DESC, r.url ASC
+            ORDER BY logshits DESC, r.url ASC, r.id ASC
             LIMIT " . $limit;
         return $this->dbCore->doTableNameReplacements($query);
     }

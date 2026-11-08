@@ -145,12 +145,8 @@ class ABJ_404_Solution_UserRequest {
         	}
         }
         
-        $queryString = '';
-        if (!array_key_exists('query', $urlParts) || @$urlParts['query'] == "") {
-            $queryString = '';
-        } else {
-            $queryString = $urlParts['query'];
-        }
+        $queryPart = $urlParts['query'] ?? null;
+        $queryString = is_string($queryPart) ? $queryPart : '';
         
         /** @var array<string, int|string> $urlPartsSafe */
         $urlPartsSafe = $urlParts;

@@ -125,6 +125,31 @@ function abj404_autoloader_read_classmap($mapFile, $refreshBytecode = false) {
 }
 }
 
+if (!function_exists('abj404_record_missing_file')) {
+/**
+ * Append a missing/corrupt plugin file path to the boot-state missing-files
+ * list. Centralizes the typed write to $GLOBALS['abj404_missing_files'] so
+ * callers (the autoloader, the boot sequence) don't each have to re-assert the
+ * global's array shape.
+ *
+ * Lives here, not in RuntimeHelpers.php, because the autoloader calls it from
+ * its missing-file branch and that branch must never depend on a file that
+ * 404-solution.php loads later: the plugin autoloads classes from the first
+ * boot waypoint on, so on a damaged install (the one case this branch exists
+ * for) the call would otherwise be an undefined-function fatal instead of the
+ * degraded admin page.
+ *
+ * @param string $path
+ * @return void
+ */
+function abj404_record_missing_file(string $path): void {
+	if (!isset($GLOBALS['abj404_missing_files']) || !is_array($GLOBALS['abj404_missing_files'])) {
+		$GLOBALS['abj404_missing_files'] = array();
+	}
+	$GLOBALS['abj404_missing_files'][] = $path;
+}
+}
+
 if (!function_exists('abj404_autoloader')) {
 /**
  * @param string $class

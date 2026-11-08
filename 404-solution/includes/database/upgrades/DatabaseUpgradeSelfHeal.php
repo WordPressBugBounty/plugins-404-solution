@@ -24,6 +24,179 @@ if (!defined('ABSPATH')) {
  */
 class ABJ_404_Solution_DatabaseUpgradeSelfHeal extends ABJ_404_Solution_DatabaseUpgradeComponent {
 
+    private const ADMIN_TABLE_REPAIR_QUEUE_TRANSIENT = 'abj404_admin_table_repair_queued';
+    private const ADMIN_TABLE_REPAIR_QUEUE_TTL = 60;
+    private const ADMIN_TABLE_REPAIR_LOCK = 'maintenance_pass';
+
+    /** @var ABJ_404_Solution_QueuedCronEventAdminContinuation|null One admission per request. */
+    private $adminTableRepairContinuation = null;
+
+    /**
+     * Queue the background repair requested by a bounded admin table read.
+     *
+     * @return bool True when the work is already queued or was scheduled.
+     */
+    public static function enqueueAdminTableRepair(): bool {
+        if (function_exists('get_transient') && get_transient(self::ADMIN_TABLE_REPAIR_QUEUE_TRANSIENT)) {
+            return true;
+        }
+
+        try {
+            $scheduler = abj_cron_scheduler();
+            $scheduled = $scheduler->scheduleSingleIfMissing(
+                ABJ_404_Solution_CronScheduler::HOOK_REPAIR_ADMIN_TABLES,
+                1
+            );
+            if (!$scheduled) {
+                self::logAdminTableRepairWarning(
+                    'Admin table repair enqueue failed: ' . $scheduler->lastFailureDetail()
+                );
+                return false;
+            }
+        } catch (Throwable $e) {
+            self::logAdminTableRepairWarning(
+                'Admin table repair enqueue failed: ' . get_class($e)
+                . ' code=' . (string)$e->getCode() . ' message=' . $e->getMessage()
+            );
+            return false;
+        }
+
+        if (function_exists('set_transient')) {
+            set_transient(self::ADMIN_TABLE_REPAIR_QUEUE_TRANSIENT, 1, self::ADMIN_TABLE_REPAIR_QUEUE_TTL);
+        }
+        return true;
+    }
+
+    /**
+     * Repair indexes and derived redirect data outside the foreground request.
+     * WP-Cron listener body: one tick, re-queued while it is still making
+     * progress on remaining rows.
+     *
+     * @return void
+     */
+    public function repairAdminTables(): void {
+        $lock = $this->syncUtils->synchronizerAcquireLockTry(self::ADMIN_TABLE_REPAIR_LOCK);
+        if ($lock === '') {
+            $this->scheduleAdminTableRepairContinuation();
+            return;
+        }
+
+        try {
+            $outcome = $this->repairAdminTablesLocked(null);
+            if (!$outcome['complete'] && $outcome['progressed']) {
+                $this->scheduleAdminTableRepairContinuation();
+            }
+        } catch (Throwable $e) {
+            $this->logger->warn(
+                'Admin table repair failed: ' . get_class($e)
+                . ' code=' . (string)$e->getCode() . ' message=' . $e->getMessage()
+            );
+            $this->scheduleAdminTableRepairContinuation(self::ADMIN_TABLE_REPAIR_QUEUE_TTL);
+        } finally {
+            $this->syncUtils->synchronizerReleaseLock($lock, self::ADMIN_TABLE_REPAIR_LOCK);
+        }
+    }
+
+    /**
+     * Ordinary admin views consume the queued repair when the site has proved
+     * WP-Cron is stalled, through the same lock and body as the cron listener.
+     *
+     * @return bool Whether this request registered the post-response slice.
+     */
+    public function armAdminTableRepairCronFallback(): bool {
+        if ($this->adminTableRepairContinuation === null) {
+            $this->adminTableRepairContinuation = new ABJ_404_Solution_QueuedCronEventAdminContinuation(array(
+                'hook' => ABJ_404_Solution_CronScheduler::HOOK_REPAIR_ADMIN_TABLES,
+                'lockKey' => self::ADMIN_TABLE_REPAIR_LOCK,
+                'label' => 'admin table repair',
+                'sync' => $this->syncUtils,
+                'clock' => abj_clock(),
+                'cron' => $this->cronScheduler !== null ? $this->cronScheduler : abj_cron_scheduler(),
+                'logger' => $this->logger,
+                'pending' => function (): bool { return $this->adminTableRepairPending(); },
+                'slice' => function (float $deadline): array { return $this->repairAdminTablesLocked($deadline); },
+                'describe' => function (): array {
+                    return array(
+                        'logs_url_sort_ready' => (new ABJ_404_Solution_LogsUrlSortRepository($this->dbCore))->isReady(),
+                        'denorm_backlog' => $this->upgrades()->redirectsDenormBackfillUpgrade()->hasDeferredBacklog(),
+                    );
+                },
+            ));
+        }
+        return $this->adminTableRepairContinuation->arm();
+    }
+
+    /**
+     * The repair body, run under ADMIN_TABLE_REPAIR_LOCK by its caller.
+     * Completion is read from the rows afterwards, never from a cursor.
+     *
+     * @param ?float $deadline Absolute clock deadline for the row drains; null
+     *   keeps the cron tick's own budgets.
+     * @return array{complete:bool,progressed:bool}
+     */
+    private function repairAdminTablesLocked(?float $deadline): array {
+        // Use the normal additive schema verifier before the index pass:
+        // dropped legacy columns must recover in the same background tick.
+        $logsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_logsv2}');
+        $logsDdl = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . '/../../sql/createLogTable.sql');
+        $this->upgrades()->schemaDiffUpgrade()->verifyColumns($logsTable, $logsDdl);
+        $this->upgrades()->indexesUpgrade()->createIndexes();
+        $logs = (new ABJ_404_Solution_LogsUrlSortRepository($this->dbCore))->backfill(
+            $deadline === null ? 5.0 : $this->secondsUntil($deadline));
+        $written = $this->upgrades()->redirectsDenormBackfillUpgrade()->runDeferredDenormBackfillPass(
+            $deadline === null ? null : $this->secondsUntil($deadline));
+        return array(
+            'complete' => !$this->adminTableRepairPending(),
+            'progressed' => $logs['updated'] > 0 || $written > 0,
+        );
+    }
+
+    /** Whether the rows still need any drain this repair runs. */
+    private function adminTableRepairPending(): bool {
+        return !(new ABJ_404_Solution_LogsUrlSortRepository($this->dbCore))->isReady()
+            || $this->upgrades()->redirectsDenormBackfillUpgrade()->hasDeferredBacklog();
+    }
+
+    private function secondsUntil(float $deadline): float {
+        return max(0.0, $deadline - abj_clock()->nowFloat());
+    }
+
+    /** @return void */
+    private function scheduleAdminTableRepairContinuation(int $delaySeconds = 1): void {
+        try {
+            $scheduler = $this->cronScheduler !== null ? $this->cronScheduler : abj_cron_scheduler();
+            if (!$scheduler->scheduleSingleIfMissing(
+                ABJ_404_Solution_CronScheduler::HOOK_REPAIR_ADMIN_TABLES, $delaySeconds
+            )) {
+                $this->logger->warn(
+                    'Admin table repair continuation failed: ' . $scheduler->lastFailureDetail()
+                );
+            }
+        } catch (Throwable $e) {
+            $this->logger->warn(
+                'Admin table repair continuation failed: ' . get_class($e)
+                . ' code=' . (string)$e->getCode() . ' message=' . $e->getMessage()
+            );
+        }
+    }
+
+    /** @param string $message @return void */
+    private static function logAdminTableRepairWarning(string $message): void {
+        try {
+            if (function_exists('abj_service')) {
+                $logger = abj_service('logging');
+                if (is_object($logger) && method_exists($logger, 'warn')) {
+                    $logger->warn($message);
+                    return;
+                }
+            }
+        } catch (Throwable $e) {
+            $message .= '; logger failure: ' . get_class($e)
+                . ' code=' . (string)$e->getCode() . ' message=' . $e->getMessage();
+        }
+        abj404_logPhpFallback('service-resolution-fallback', $message);
+    }
+
     /** @return void */
     public function runDailyInsuranceCheck() {
         // Always verify current site only
@@ -142,7 +315,7 @@ class ABJ_404_Solution_DatabaseUpgradeSelfHeal extends ABJ_404_Solution_Database
         foreach ($requiredTables as $tableName) {
             $fullTableName = $this->dbCore->tableNameResolver()->getPrefixedTableName($tableName);
             // DAO-bypass-approved: Schema-bootstrap inside repairMissingTables() -- runs before CREATE TABLE; routing through DAO would trigger the same missing-table auto-repair we are about to invoke ourselves (recursion)
-            $tableExists = $wpdb->get_var("SHOW TABLES LIKE '{$fullTableName}'");
+            $tableExists = ABJ_404_Solution_DatabaseDriverCall::getVar($wpdb, "SHOW TABLES LIKE '{$fullTableName}'");
 
             if (!$tableExists) {
                 $missingTables[] = $tableName;

@@ -58,24 +58,7 @@ class ABJ_404_Solution_UninstallCollationSnapshotPresenter {
             $targetEngine
         );
 
-        $prefix = $dbCore->tableNameResolver()->getLowercasePrefix();
-        if (is_object($wpdb) && method_exists($wpdb, 'esc_like')) {
-            $escapedPrefix = $wpdb->esc_like($prefix . 'abj404_');
-        } else {
-            $escapedPrefix = addcslashes($prefix . 'abj404_', '_%\\');
-        }
-
-        // DAO-bypass-approved: Diagnostic table enumeration needs SHOW TABLES metadata directly.
-        $rawTables = $wpdb->get_results(
-            // DAO-bypass-approved: prepare() is part of diagnostic SHOW TABLES metadata enumeration.
-            $wpdb->prepare("SHOW TABLES LIKE %s", $escapedPrefix . '%'),
-            ARRAY_N
-        );
-        $pluginTables = array();
-        foreach ($rawTables as $row) {
-            $fullName = $row[0];
-            $pluginTables[$fullName] = $fullName;
-        }
+        $pluginTables = $this->pluginTableNames($wpdb, $dbCore->tableNameResolver()->getLowercasePrefix());
 
         foreach ($pluginTables as $label => $tableName) {
             $tableInfo = $this->metadataReader->getTableInfo($tableName);
@@ -111,5 +94,36 @@ class ABJ_404_Solution_UninstallCollationSnapshotPresenter {
         }
 
         return implode("\n", $summaryLines);
+    }
+
+    /**
+     * The plugin's tables under one prefix, keyed by name, from SHOW TABLES.
+     *
+     * @param wpdb $wpdb
+     * @param string $prefix Lowercase table prefix.
+     * @return array<string, string>
+     */
+    private function pluginTableNames($wpdb, string $prefix): array {
+        if (is_object($wpdb) && method_exists($wpdb, 'esc_like')) {
+            $escapedPrefix = $wpdb->esc_like($prefix . 'abj404_');
+        } else {
+            $escapedPrefix = addcslashes($prefix . 'abj404_', '_%\\');
+        }
+
+        // DAO-bypass-approved: Diagnostic table enumeration needs SHOW TABLES metadata directly.
+        $rawTables = ABJ_404_Solution_DatabaseDriverCall::getResults($wpdb,
+            // DAO-bypass-approved: prepare() is part of diagnostic SHOW TABLES metadata enumeration.
+            $wpdb->prepare("SHOW TABLES LIKE %s", $escapedPrefix . '%'),
+            ARRAY_N
+        );
+        $pluginTables = array();
+        foreach (is_array($rawTables) ? $rawTables : array() as $row) {
+            $fullName = $row[0] ?? null;
+            if (is_string($fullName)) {
+                $pluginTables[$fullName] = $fullName;
+            }
+        }
+
+        return $pluginTables;
     }
 }

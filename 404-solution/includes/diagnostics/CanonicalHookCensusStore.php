@@ -17,7 +17,7 @@ final class ABJ_404_Solution_CanonicalHookCensusStore {
             if (!function_exists('get_option')) {
                 return array();
             }
-            $raw = get_option(self::OPTION_NAME, '');
+            $raw = ABJ_404_Solution_OptionShapeRead::scalar(self::OPTION_NAME, '');
             if ($raw === '') {
                 return array();
             }

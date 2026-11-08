@@ -1,0 +1,19 @@
+{
+    "generator": "404 Solution scripts\/build-script-translations.php",
+    "domain": "messages",
+    "locale_data": {
+        "messages": {
+            "": {
+                "domain": "messages",
+                "lang": "pt_BR",
+                "plural-forms": "nplurals=2; plural=(n \u003E 1);"
+            },
+            "404 Suggestions": [
+                "Sugestões de 404"
+            ],
+            "Shows visitors a list of pages matching the URL they were looking for": [
+                "Mostra aos visitantes uma lista de páginas correspondentes à URL que estavam procurando"
+            ]
+        }
+    }
+}

@@ -13,6 +13,9 @@ if (!defined('ABSPATH')) {
  */
 interface ABJ_404_Solution_RedirectsRepositoryInterface {
 
+    /** Shared error returned when a stored-row mutation finds no row. */
+    public const ROW_NOT_FOUND = 'Source redirect not found.';
+
     // =========================================================================
     // Redirect CRUD (from DataAccessTrait_Redirects)
     // =========================================================================
@@ -22,6 +25,9 @@ interface ABJ_404_Solution_RedirectsRepositoryInterface {
      * @return void
      */
     public function deleteRedirect($id);
+
+    /** Trash all live rows sharing this stored source, including legacy duplicates. */
+    public function moveSourceRedirectsToTrash(int $id): string;
 
     /**
      * Fetch manual and regex redirects that are eligible for server-format
@@ -53,6 +59,13 @@ interface ABJ_404_Solution_RedirectsRepositoryInterface {
      * @return int New row id, or 0 when the source already exists/write fails.
      */
     public function setupRedirectIfSourceAbsent(ABJ_404_Solution_RedirectSpec $spec): int;
+
+    /**
+     * Group already fenced import rows under one ownership scope.
+     * Group contention retains ordinary per-row admission. A lost scope returns its cause.
+     * @param callable():void $operation Bounded import batch, with per-row persistence.
+     */
+    public function runWithImportBatch(callable $operation): string;
 
     /**
      * @param string $url
@@ -87,6 +100,16 @@ interface ABJ_404_Solution_RedirectsRepositoryInterface {
     public function getRedirectConditions(int $redirectId): array;
 
     /**
+     * Read redirect conditions with the database acknowledgement retained.
+     * An empty rows array is only authoritative when query_succeeded is true.
+     *
+     * @param int $redirectId
+     * @return array{rows: array<int, array<string, mixed>>, last_error: string,
+     *     query_succeeded: bool, timed_out: bool, table_available: bool}
+     */
+    public function readRedirectConditions(int $redirectId): array;
+
+    /**
      * Replace the full condition set for a redirect. The delete + inserts run
      * inside a single transaction so a mid-replacement DB failure cannot leave
      * a partial condition set.
@@ -112,10 +135,33 @@ interface ABJ_404_Solution_RedirectsRepositoryInterface {
     public function updateRedirect(ABJ_404_Solution_RedirectUpdate $update): string;
 
     /**
+     * Build and persist an update from the row read under the graph lock.
+     *
+     * @param int $id
+     * @param callable(array<string, mixed>): (ABJ_404_Solution_RedirectUpdate|non-empty-string) $buildUpdate
+     * @return string Empty on success; ROW_NOT_FOUND when absent; otherwise an error.
+     */
+    public function updateRedirectFromStoredRow(int $id, callable $buildUpdate): string;
+
+    /**
+     * Rows only, for display. A refused read and a missing row both come back
+     * as an empty array; callers that mutate, or that tell the admin a row is
+     * missing, must use readRedirectsByIDs().
+     *
      * @param array<int, int|string> $ids
      * @return array<int, array<string, mixed>>
      */
     public function getRedirectsByIDs($ids);
+
+    /**
+     * Rows by id with the database error kept: empty `rows` and an empty
+     * `last_error` is a row that does not exist, empty `rows` and an error is a
+     * row nobody has seen.
+     *
+     * @param array<int, int|string> $ids
+     * @return array{rows: array<int, array<string, mixed>>, last_error: string}
+     */
+    public function readRedirectsByIDs($ids);
 
     /**
      * @param int $id

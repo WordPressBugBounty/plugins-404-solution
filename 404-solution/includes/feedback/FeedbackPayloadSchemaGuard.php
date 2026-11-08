@@ -7,6 +7,8 @@ if (!defined('ABSPATH')) {
 require_once __DIR__ . '/PayloadSchema.php';
 require_once __DIR__ . '/ReportPayloadJsonSchemaValidator.php';
 require_once __DIR__ . '/FeedbackTransportLog.php';
+require_once dirname(__DIR__) . '/core/FileSystemService.php';
+require_once dirname(__DIR__) . '/core/HostFilesystemCall.php';
 
 /**
  * Schema gate for feedback report payloads. Owns every check that gives
@@ -132,10 +134,22 @@ class ABJ_404_Solution_FeedbackPayloadSchemaGuard {
         static $schemas = null;
         if ($schemas === null) {
             $schemaFile = __DIR__ . '/../schema/feedback_payload_schema.php';
-            if (!file_exists($schemaFile)) {
+            $presence = ABJ_404_Solution_HostFilesystemCall::fileExists($schemaFile);
+            if ($presence['warning'] !== null) {
+                ABJ_404_Solution_FeedbackTransportLog::log('warn', 'Feedback payload schema presence probe failed: ' . $presence['warning']);
                 return;
             }
-            $schemas = require $schemaFile;
+            if (!$presence['result']) {
+                return;
+            }
+            $load = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(static function() use ($schemaFile) {
+                return require $schemaFile;
+            });
+            if ($load['warning'] !== null) {
+                ABJ_404_Solution_FeedbackTransportLog::log('warn', 'Feedback payload schema load failed: ' . $load['warning']);
+                return;
+            }
+            $schemas = $load['result'];
         }
         if (!isset($schemas[$type])) {
             return;

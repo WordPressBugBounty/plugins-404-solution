@@ -119,18 +119,32 @@ class ABJ_404_Solution_CrashBeaconReporter {
             }
 
             $signature = $this->buildSignature($beacon);
-            $payload = call_user_func($this->payloadBuilder, 'error', array(
+            $excerpt = $signature;
+            $frame = $beacon->failureFrame();
+            if ($frame !== null) {
+                $excerpt .= "\n" . json_encode(array('abj404_original_requests' => array(
+                    'records' => array(array('request_id' => $frame['request_id'], 'status' => 'available', 'frame' => $frame)),
+                    'collector_runtime' => ABJ_404_Solution_RequestFailureFrame::runtimeIdentity())));
+            }
+            $extra = array(
                 'error_signature' => $signature,
                 'previously_sent_line' => 0,
                 'debug_log_evidence' => array(
                     'schema_version' => 1,
                     'source' => 'crash_beacon',
-                    'error_excerpt' => $signature,
+                    'error_excerpt' => $excerpt,
                     'error_excerpt_in_debug_log' => false,
                     'error_line_number' => -1,
-                    'total_evidence_bytes' => strlen($signature),
+                    'total_evidence_bytes' => strlen($excerpt),
                 ),
-            ));
+            );
+            if ($beacon->requestKind() !== null) {
+                $extra['request_kind'] = $beacon->requestKind();
+            }
+            if ($beacon->requestAction() !== null) {
+                $extra['request_action'] = $beacon->requestAction();
+            }
+            $payload = call_user_func($this->payloadBuilder, 'error', $extra);
 
             $sent = (bool) call_user_func($this->sender, $payload, 'error');
             if ($sent) {

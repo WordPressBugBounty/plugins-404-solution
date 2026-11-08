@@ -24,6 +24,8 @@ class ABJ_404_Solution_PluginLogicLifecycle {
      */
     static function runOnPluginActivation(bool $network_wide = false): void {
         if (is_multisite() && $network_wide) {
+            // Each site's own choice is discarded as its activation runs.
+            delete_site_option(ABJ_404_Solution_StorageOptionContracts::OPTION_UNINSTALL_PREFERENCES);
             $sites = get_sites(array('fields' => 'ids', 'number' => 0));
 
             update_site_option('abj404_pending_network_activation', $sites);
@@ -34,9 +36,9 @@ class ABJ_404_Solution_PluginLogicLifecycle {
             );
 
             add_action('network_admin_notices', function() {
-                $pendingRaw = get_site_option('abj404_pending_network_activation', array());
+                $pendingRaw = ABJ_404_Solution_OptionShapeRead::networkArrayValue('abj404_pending_network_activation', array());
                 $pending = is_array($pendingRaw) ? $pendingRaw : array();
-                $totalRaw = get_site_option('abj404_network_activation_total', 0);
+                $totalRaw = ABJ_404_Solution_OptionShapeRead::networkScalar('abj404_network_activation_total', 0);
                 $total = is_scalar($totalRaw) ? (int)$totalRaw : 0;
                 $completed = $total - count($pending);
 
@@ -62,8 +64,11 @@ class ABJ_404_Solution_PluginLogicLifecycle {
      * @return void
      */
     private static function activateSingleSite(): void {
-        add_option('abj404_settings', '', '', false);
-
+        // Uninstall honours what the modal saved on the deactivation before
+        // delete, a site's own choice ahead of the network's, so a choice
+        // left over from an earlier deactivation must not survive into this
+        // activation and outvote the next one.
+        delete_option(ABJ_404_Solution_StorageOptionContracts::OPTION_UNINSTALL_PREFERENCES);
         $upgradesEtc = abj_service('database_upgrades');
         $upgradesEtc->components()->bootstrapUpgrade()->createDatabaseTables();
 
@@ -79,7 +84,7 @@ class ABJ_404_Solution_PluginLogicLifecycle {
      * @return void
      */
     static function networkActivationCronHandler(): void {
-        $pendingRaw = get_site_option('abj404_pending_network_activation', array());
+        $pendingRaw = ABJ_404_Solution_OptionShapeRead::networkArrayValue('abj404_pending_network_activation', array());
         $pending = is_array($pendingRaw) ? $pendingRaw : array();
 
         if (empty($pending)) {
@@ -240,18 +245,9 @@ class ABJ_404_Solution_PluginLogicLifecycle {
             $dbCore = abj_service('db_core');
             $prefix = $dbCore->tableNameResolver()->getLowercasePrefix();
 
-            // DAO-bypass-approved: deleteBlogData() runs during multisite blog teardown after switch_to_blog()
-            $tables = $wpdb->get_results(
-                // DAO-bypass-approved: prepare() argument to the get_results above
-                $wpdb->prepare("SHOW TABLES LIKE %s", $wpdb->esc_like($prefix . 'abj404_') . '%'),
-                ARRAY_N
-            );
-            foreach ($tables as $tableRow) {
-                $tblName = is_array($tableRow) && isset($tableRow[0]) ? $tableRow[0] : '';
-                if (preg_match('/^[a-zA-Z0-9_]+$/', $tblName) && strpos($tblName, 'abj404') !== false) {
-                    // DAO-bypass-approved: deleteBlogData(), DDL drop during blog teardown
-                    $wpdb->query("DROP TABLE IF EXISTS `{$tblName}`");
-                }
+            foreach (self::pluginTablesUnderPrefix($prefix) as $tblName) {
+                // DAO-bypass-approved: deleteBlogData(), DDL drop during blog teardown
+                ABJ_404_Solution_DatabaseDriverCall::query($wpdb, "DROP TABLE IF EXISTS `{$tblName}`");
             }
 
             $plugin_options = array(
@@ -273,7 +269,7 @@ class ABJ_404_Solution_PluginLogicLifecycle {
             }
 
             // DAO-bypass-approved: deleteBlogData() runs wp_options cleanup during blog teardown
-            $wpdb->query(
+            ABJ_404_Solution_DatabaseDriverCall::query($wpdb,
                 // DAO-bypass-approved: prepare() argument to the query above
                 $wpdb->prepare(
                     "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
@@ -292,9 +288,12 @@ class ABJ_404_Solution_PluginLogicLifecycle {
                 'abj404_send_digest',
                 'abj404_logsv2_canonical_backfill',
                 'abj404_redirects_denorm_backfill',
+                'abj404_redirects_denorm_reconcile_resume',
                 'abj404_redirects_sort_key_backfill',
                 'abj404_send_queued_report',
                 'abj404_repair_collations',
+                'abj404_legacy_page_recovery',
+                'abj404_logsv2_min_log_id_backfill',
             );
 
             foreach ($cron_hooks as $hook) {
@@ -315,6 +314,52 @@ class ABJ_404_Solution_PluginLogicLifecycle {
 
             restore_current_blog();
         }
+    }
+
+    /**
+     * wpmu_drop_tables filter (WordPress 5.1+): add the deleted site's plugin
+     * tables to the tables core drops when it uninitializes the site, so
+     * they leave with the site's own tables and its options table.
+     *
+     * @param mixed $tables Table names core is about to drop.
+     * @param mixed $siteId Id of the site being deleted.
+     * @return array<int,mixed>
+     */
+    static function addPluginTablesToDrop($tables, $siteId): array {
+        global $wpdb;
+        $tables = is_array($tables) ? array_values($tables) : array();
+        $blogId = ABJ_404_Solution_ExactInteger::read($siteId, 1);
+        if ($blogId === null) {
+            return $tables;
+        }
+        // Plugin tables are created under the lowercased prefix (see
+        // DatabaseTableNameResolver::getLowercasePrefix()).
+        return array_merge($tables, self::pluginTablesUnderPrefix(strtolower($wpdb->get_blog_prefix($blogId))));
+    }
+
+    /**
+     * Every plugin table that exists under one site's table prefix, found
+     * by asking the database so a table added in any release is included.
+     *
+     * @param string $prefix A site's lowercased table prefix, e.g. wp_3_.
+     * @return array<int,string>
+     */
+    private static function pluginTablesUnderPrefix(string $prefix): array {
+        global $wpdb;
+        // DAO-bypass-approved: site teardown, discovering the site's plugin tables by prefix
+        $rows = ABJ_404_Solution_DatabaseDriverCall::getResults($wpdb,
+            // DAO-bypass-approved: prepare() argument to the get_results above
+            $wpdb->prepare("SHOW TABLES LIKE %s", $wpdb->esc_like($prefix . 'abj404_') . '%'),
+            ARRAY_N
+        );
+        $tables = array();
+        foreach (is_array($rows) ? $rows : array() as $row) {
+            $name = is_array($row) && isset($row[0]) && is_string($row[0]) ? $row[0] : '';
+            if (preg_match('/^[a-zA-Z0-9_]+$/', $name) && strpos($name, $prefix . 'abj404_') === 0) {
+                $tables[] = $name;
+            }
+        }
+        return $tables;
     }
 
     /** @return void */

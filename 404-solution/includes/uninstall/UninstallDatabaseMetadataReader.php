@@ -57,7 +57,7 @@ class ABJ_404_Solution_UninstallDatabaseMetadataReader {
         );
 
         // DAO-bypass-approved: Diagnostic information_schema.tables probe
-        $result = $wpdb->get_row($query, ARRAY_A);
+        $result = ABJ_404_Solution_DatabaseDriverCall::getRow($wpdb, $query, ARRAY_A);
 
         if (!empty($wpdb->last_error)) {
             if (stripos($wpdb->last_error, 'denied') !== false ||
@@ -103,7 +103,7 @@ class ABJ_404_Solution_UninstallDatabaseMetadataReader {
         }
 
         // DAO-bypass-approved: Diagnostic fallback metadata probe needs SHOW TABLE STATUS directly.
-        $result = $wpdb->get_row(
+        $result = ABJ_404_Solution_DatabaseDriverCall::getRow($wpdb,
             // DAO-bypass-approved: prepare() is part of diagnostic SHOW TABLE STATUS metadata probing.
             $wpdb->prepare("SHOW TABLE STATUS LIKE %s", $tableName),
             ARRAY_A
@@ -147,7 +147,7 @@ class ABJ_404_Solution_UninstallDatabaseMetadataReader {
         // @utf8-audit: opt-out - $tableName is built from $wpdb->prefix plus
         // 'abj404_*' constants by the uninstall flow; never user input.
         // DAO-bypass-approved: Diagnostic last-resort SHOW CREATE TABLE charset parse
-        $result = $wpdb->get_row("SHOW CREATE TABLE `" . esc_sql($tableName) . "`", ARRAY_N);
+        $result = ABJ_404_Solution_DatabaseDriverCall::getRow($wpdb, "SHOW CREATE TABLE `" . esc_sql($tableName) . "`", ARRAY_N);
 
         if (empty($result[1])) {
             return null;

@@ -1,0 +1,14 @@
+{
+  "_comment": "This fixture MUST fail validation. The aggregate schema version is unsupported, so a versioned request-failure window cannot be interpreted safely.",
+  "plugin_version": "4.4.0",
+  "payload_schema_version": 3,
+  "db_type": "mariadb",
+  "report_type": "heartbeat",
+  "ajax_failure_counts": {
+    "schema_version": 2,
+    "window_started_at": 1791510000,
+    "window_ended_at": 1792114800,
+    "total_events": 1,
+    "actions": []
+  }
+}

@@ -108,6 +108,11 @@ class ABJ_404_Solution_ContentRepository implements ABJ_404_Solution_ContentRepo
     }
 
     /** @inheritDoc */
+    public function readTermChildIds(array $request): array {
+        return $this->publishedTermsProvider->readTermChildIds($request);
+    }
+
+    /** @inheritDoc */
     public function addURLToTermsRows($rows) {
         return $this->publishedTermsProvider->addURLToTermsRows($rows);
     }

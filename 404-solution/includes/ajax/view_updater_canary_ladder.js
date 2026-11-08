@@ -317,14 +317,14 @@
     }
 
     /** Run a measured step plus its gated fixed baseline, preserving the request chain. */
-    function postMeasuredStep(post, observations, step, extra, parentId, baselineOrdinal) {
-        return post(step, extra, parentId).then(function (result) {
-            observations[step] = result;
+    function postMeasuredStep(post, observations, measurement) {
+        return post(measurement.step, measurement.extra, measurement.parentId).then(function (result) {
+            observations[measurement.step] = result;
             if (!baselineControlEnabled()) {
                 return { result: result, requestId: result.requestId };
             }
             return post('baseline_control', { payloadBytes: BASELINE_BYTES,
-                baselineOrdinal: baselineOrdinal }, result.requestId).then(function (baselineResult) {
+                baselineOrdinal: measurement.baselineOrdinal }, result.requestId).then(function (baselineResult) {
                 observations.baseline_control = observations.baseline_control || [];
                 observations.baseline_control.push(baselineResult);
                 return { result: result, requestId: baselineResult.requestId };
@@ -366,46 +366,44 @@
                 // The one step with no request of its own to be reported on,
                 // so its receipt is handed to the relay directly.
                 post.hold('static_asset', staticResult);
-                return postMeasuredStep(post, observations, 'auth_only', {}, ctx.requestId || '', 0);
+                return postMeasuredStep(post, observations, { step: 'auth_only', extra: {},
+                    parentId: ctx.requestId || '', baselineOrdinal: 0 });
             })
             .then(function (authStage) {
-                return postMeasuredStep(post, observations, 'post_limiter', {}, authStage.requestId, 1);
+                return postMeasuredStep(post, observations, { step: 'post_limiter', extra: {},
+                    parentId: authStage.requestId, baselineOrdinal: 1 });
             })
             .then(function (limiterStage) {
-                return postMeasuredStep(post, observations, 'summary', {}, limiterStage.requestId, 2);
+                return postMeasuredStep(post, observations, { step: 'summary', extra: {},
+                    parentId: limiterStage.requestId, baselineOrdinal: 2 });
             })
             .then(function (summaryStage) {
-                return postMeasuredStep(post, observations, 'size_target', {},
-                    summaryStage.requestId, 3);
+                return postMeasuredStep(post, observations, { step: 'size_target', extra: {},
+                    parentId: summaryStage.requestId, baselineOrdinal: 3 });
             })
             .then(function (targetStage) {
                 var target = measurements().targetPayload(ctx, observations);
                 return postSizeProbes(post, observations, target, targetStage.requestId);
             })
             .then(function (sizeStage) {
-                return postMeasuredStep(post, observations, 'inert', {
-                    payloadBytes: sizeStage.target.bytes,
-                    targetBytesSource: sizeStage.target.source
-                }, sizeStage.requestId, 4).then(function (inertStage) {
+                return postMeasuredStep(post, observations, { step: 'inert', extra: { payloadBytes: sizeStage.target.bytes, targetBytesSource: sizeStage.target.source },
+                    parentId: sizeStage.requestId, baselineOrdinal: 4 }).then(function (inertStage) {
                     return { target: sizeStage.target, requestId: inertStage.requestId };
                 });
             })
             .then(function (inertStage) {
-                return postMeasuredStep(post, observations, 'compress_on',
-                    { payloadBytes: inertStage.target.bytes,
-                        targetBytesSource: inertStage.target.source },
-                    inertStage.requestId, 5).then(function (onStage) {
+                return postMeasuredStep(post, observations, { step: 'compress_on', extra: { payloadBytes: inertStage.target.bytes, targetBytesSource: inertStage.target.source },
+                    parentId: inertStage.requestId, baselineOrdinal: 5 }).then(function (onStage) {
                     return { target: inertStage.target, requestId: onStage.requestId };
                 });
             })
             .then(function (onStage) {
-                return postMeasuredStep(post, observations, 'compress_off',
-                    { payloadBytes: onStage.target.bytes,
-                        targetBytesSource: onStage.target.source },
-                    onStage.requestId, 6);
+                return postMeasuredStep(post, observations, { step: 'compress_off', extra: { payloadBytes: onStage.target.bytes, targetBytesSource: onStage.target.source },
+                    parentId: onStage.requestId, baselineOrdinal: 6 });
             })
             .then(function (offStage) {
-                return postMeasuredStep(post, observations, 'stream', {}, offStage.requestId, 7);
+                return postMeasuredStep(post, observations, { step: 'stream', extra: {},
+                    parentId: offStage.requestId, baselineOrdinal: 7 });
             })
             .then(function (streamStage) {
                 // The full observation set still rides interpret: the

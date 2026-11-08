@@ -4,6 +4,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/DatabaseNoticeRecoveryPolicy.php';
+
 /**
  * Missing plugin-table repair/retry/notify policy.
  *
@@ -111,7 +113,11 @@ class ABJ_404_Solution_DatabaseRepairPolicy {
                     " despite a post-create exception; clearing stale error. Exception: " . $e->getMessage()
                 );
                 $result['last_error'] = '';
-                $this->core->noticeState()->clearPluginDbNoticeIfType('missing_table');
+                $noticeRecovery = new ABJ_404_Solution_DatabaseNoticeRecoveryPolicy(
+                    $this->core->noticeState(), $this->core->queryTimeoutManager(),
+                    fn(): bool => $this->classifier->isQuotaCooldownActive()
+                );
+                $noticeRecovery->clearRecoveredMissingTableNotice($missingTable, $this->classifier->tableInspector());
                 return;
             }
             $this->logger->warn("Missing-table auto-repair failed: " . $e->getMessage());
@@ -292,12 +298,12 @@ class ABJ_404_Solution_DatabaseRepairPolicy {
         try {
             $retry = function () use ($wpdb, $query): array {
                 $retried = array(
-                    'rows' => $wpdb->get_results(
+                    'rows' => ABJ_404_Solution_DatabaseDriverCall::getResults($wpdb,
                         $query,
                         $this->core->queryExecutor()->getCurrentResultType()
                     ),
                 );
-                $this->core->resultHarvester()->harvestWpdbResult($retried);
+                $this->core->resultHarvester()->harvestWpdbResult($retried, $retried['rows']);
                 return $retried;
             };
             $retried = $tracer === null
@@ -334,7 +340,14 @@ class ABJ_404_Solution_DatabaseRepairPolicy {
             }
             // If a stale missing_table notice exists from an earlier failed
             // repair attempt, clear it immediately now that repair succeeded.
-            $this->core->noticeState()->clearPluginDbNoticeIfType('missing_table');
+            if (($result['query_succeeded'] ?? false) === true
+                || ($materializedTable !== '' && $this->tableMaterializedAfterRepair($materializedTable))) {
+                $noticeRecovery = new ABJ_404_Solution_DatabaseNoticeRecoveryPolicy(
+                    $this->core->noticeState(), $this->core->queryTimeoutManager(),
+                    fn(): bool => $this->classifier->isQuotaCooldownActive()
+                );
+                $noticeRecovery->clearRecoveredMissingTableNotice($materializedTable, $this->classifier->tableInspector());
+            }
             return;
         }
 
@@ -359,7 +372,7 @@ class ABJ_404_Solution_DatabaseRepairPolicy {
 
         // DAO-bypass-approved: post-repair metadata verification for a system-generated plugin table name.
         // @utf8-audit: opt-out - tableMaterializedAfterRepair receives system-generated plugin table names from the missing-table classifier.
-        $rows = $wpdb->get_results("SHOW COLUMNS FROM `" . esc_sql($tableName) . "`", ARRAY_A);
+        $rows = ABJ_404_Solution_DatabaseDriverCall::getResults($wpdb, "SHOW COLUMNS FROM `" . esc_sql($tableName) . "`", ARRAY_A);
         return is_array($rows) && empty($wpdb->last_error);
     }
 
@@ -449,28 +462,31 @@ class ABJ_404_Solution_DatabaseRepairPolicy {
     public function setMissingTablePluginDbNotice(array $result, string $missingTable, string $prefixDiag): void {
         $tableLabel = ($missingTable !== '') ? "'" . $missingTable . "'" : 'a plugin database table';
         $rawError = is_string($result['last_error']) ? $result['last_error'] : '';
-        $adminMsg = sprintf(
-            function_exists('__')
-                ? __('404 Solution cannot function correctly: the database table %s is missing, and the plugin tried to recreate it but the CREATE TABLE statement could not be executed. This almost always means the WordPress database user does not have permission to run CREATE TABLE (and likely ALTER TABLE / CREATE INDEX) on this database. Until this is fixed, the plugin cannot record 404s, serve redirects, or generate suggestions. To fix it: ask your hosting provider or database administrator to grant CREATE, ALTER, and INDEX privileges to the WordPress database user for this site, then reload this page. Alternatively, restore the missing table from a recent database backup.', '404-solution')
-                : '404 Solution cannot function correctly: the database table %s is missing, and the plugin tried to recreate it but the CREATE TABLE statement could not be executed. This almost always means the WordPress database user does not have permission to run CREATE TABLE (and likely ALTER TABLE / CREATE INDEX) on this database. Until this is fixed, the plugin cannot record 404s, serve redirects, or generate suggestions. To fix it: ask your hosting provider or database administrator to grant CREATE, ALTER, and INDEX privileges to the WordPress database user for this site, then reload this page. Alternatively, restore the missing table from a recent database backup.',
-            $tableLabel
-        );
-        if ($rawError !== '') {
-            $adminMsg .= ' ' . sprintf(
-                function_exists('__') ? __('Original database error: %s', '404-solution') : 'Original database error: %s',
-                $rawError
+        $timestamp = $this->core->clock()->now();
+        ABJ_404_Solution_DeferredTranslation::whenReady(function () use ($tableLabel, $rawError, $prefixDiag, $missingTable, $timestamp): void {
+            $adminMsg = sprintf(
+                __('404 Solution cannot function correctly: the database table %s is missing, and the plugin tried to recreate it but the CREATE TABLE statement could not be executed. This almost always means the WordPress database user does not have permission to run CREATE TABLE (and likely ALTER TABLE / CREATE INDEX) on this database. Until this is fixed, the plugin cannot record 404s, serve redirects, or generate suggestions. To fix it: ask your hosting provider or database administrator to grant CREATE, ALTER, and INDEX privileges to the WordPress database user for this site, then reload this page. Alternatively, restore the missing table from a recent database backup.', '404-solution'),
+                $tableLabel
             );
-        }
-        if ($prefixDiag !== '') {
-            $adminMsg .= ' ' . $prefixDiag;
-        }
-        $noticePayload = array(
-            'type'         => 'missing_table',
-            'message'      => $adminMsg,
-            'guidance'     => '',
-            'timestamp'    => $this->core->clock()->now(),
-            'error_string' => $rawError,
-        );
-        $this->core->noticeState()->setRuntimeFlag('abj404_plugin_db_notice', $noticePayload, 86400);
+            if ($rawError !== '') {
+                $adminMsg .= ' ' . sprintf(
+                    __('Original database error: %s', '404-solution'),
+                    $rawError
+                );
+            }
+            if ($prefixDiag !== '') {
+                $adminMsg .= ' ' . $prefixDiag;
+            }
+            $noticePayload = array(
+                'type'         => 'missing_table',
+                'message'      => $adminMsg,
+                'guidance'     => '',
+                'timestamp'    => $timestamp,
+                'error_string' => $rawError,
+                'table_name'   => $missingTable,
+            );
+            $this->core->noticeState()->setRuntimeFlag('abj404_plugin_db_notice', $noticePayload, 86400);
+        });
     }
+
 }

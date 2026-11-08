@@ -33,6 +33,9 @@ class ABJ_404_Solution_NGramCacheRepository {
     /** @var ABJ_404_Solution_NGramSimilarity */
     private $similarity;
 
+    /** @var ABJ_404_Solution_NGramCacheRowDecoder */
+    private $rowDecoder;
+
     /** @var callable|null Lazily resolves the NGramCoveragePolicy for write-path invalidation. */
     private $coveragePolicyResolver;
 
@@ -52,6 +55,7 @@ class ABJ_404_Solution_NGramCacheRepository {
             ? $similarity
             : new ABJ_404_Solution_NGramSimilarity();
         $this->coveragePolicyResolver = $coveragePolicyResolver;
+        $this->rowDecoder = new ABJ_404_Solution_NGramCacheRowDecoder($this->logger);
     }
 
     /**
@@ -128,6 +132,15 @@ class ABJ_404_Solution_NGramCacheRepository {
             return false;
         }
 
+        if (!$this->querySucceeded($queryResult)) {
+            // REPLACE may have committed before the driver returned false.
+            // Invalidate conservatively, but never report the row as stored.
+            $this->cacheCountMemo = null;
+            $this->invalidateCoverageCaches();
+            $this->logger->warn("N-gram store did not confirm success for page ID {$pageId}.");
+            return false;
+        }
+
         $this->cacheCountMemo = null;
         if (!$skipInvalidation) {
             $this->invalidateCoverageCaches();
@@ -157,12 +170,7 @@ class ABJ_404_Solution_NGramCacheRepository {
             return null;
         }
 
-        $decoded = json_decode($first['ngrams'], true);
-        if (!is_array($decoded) || !isset($decoded['bi'], $decoded['tri'])) {
-            return null;
-        }
-        /** @var array{bi: array<int, string>, tri: array<int, string>} $decoded */
-        return $decoded;
+        return $this->rowDecoder->decodePage($first['ngrams']);
     }
 
     /**
@@ -208,25 +216,7 @@ class ABJ_404_Solution_NGramCacheRepository {
             return [];
         }
 
-        $output = [];
-        $decoded = 0;
-        foreach ($results as $row) {
-            if ($decoded % 100 === 0 && $this->decodeBudgetTripped($decoded, $budget)) {
-                return [];
-            }
-            $decoded++;
-            if (is_object($row)) {
-                $row = (array) $row;
-            }
-            if (!is_array($row)) {
-                continue;
-            }
-            $ngramsRaw = isset($row['ngrams']) && is_string($row['ngrams']) ? $row['ngrams'] : '';
-            $row['ngrams'] = json_decode($ngramsRaw, true);
-            $output[] = $row;
-        }
-
-        return $output;
+        return $this->rowDecoder->decodeAllRows($results, $budget);
     }
 
     /**
@@ -268,7 +258,7 @@ class ABJ_404_Solution_NGramCacheRepository {
         }
 
         $merged = $this->similarity->mergeByProximity($resultsBelow, $resultsAbove, $query->orderTarget(), $limit);
-        return $this->decodeNGramRows($merged, $budget);
+        return $this->rowDecoder->decodeFilteredRows($merged, $budget);
     }
 
     /**
@@ -290,7 +280,7 @@ class ABJ_404_Solution_NGramCacheRepository {
             "SELECT id, url, url_normalized, ngrams, ngram_count
              FROM {$table}
              WHERE ngram_count >= %d AND ngram_count <= %d{$typeClause}
-             ORDER BY ngram_count DESC
+             ORDER BY ngram_count DESC, id DESC
              LIMIT %d OFFSET %d",
             ['query_params' => $params]
         );
@@ -316,54 +306,11 @@ class ABJ_404_Solution_NGramCacheRepository {
             "SELECT id, url, url_normalized, ngrams, ngram_count
              FROM {$table}
              WHERE ngram_count > %d AND ngram_count <= %d{$typeClause}
-             ORDER BY ngram_count ASC
+             ORDER BY ngram_count ASC, id ASC
              LIMIT %d OFFSET %d",
             ['query_params' => $params]
         );
         return isset($result['rows']) && is_array($result['rows']) ? $result['rows'] : [];
-    }
-
-    /** Shared trip check for the decode loops: a null budget never trips; true means stop and return []. */
-    private function decodeBudgetTripped(int $decoded, ?ABJ_404_Solution_MatchingTimeBudget $budget): bool {
-        if ($budget === null || (!$budget->isExhausted() && $budget->hasTimeFor(0.05))) {
-            return false;
-        }
-        $budget->markExhausted();
-        $this->logger->debugMessage("N-gram decode: time budget exhausted after {$decoded} rows, returning no candidates");
-        return true;
-    }
-
-    /**
-     * @param array<int, mixed> $rows
-     * @param ABJ_404_Solution_MatchingTimeBudget|null $budget Request time budget (null = unbounded).
-     * @return array<int, array<string, mixed>>
-     */
-    private function decodeNGramRows(array $rows, ?ABJ_404_Solution_MatchingTimeBudget $budget = null) {
-        $validResults = [];
-        $rowsDecoded = 0;
-        foreach ($rows as $row) {
-            if ($rowsDecoded % 100 === 0 && $this->decodeBudgetTripped($rowsDecoded, $budget)) {
-                return [];
-            }
-            $rowsDecoded++;
-            if (!is_array($row)) {
-                continue;
-            }
-            $ngramsJson = isset($row['ngrams']) && is_string($row['ngrams']) ? $row['ngrams'] : '';
-            $decoded = json_decode($ngramsJson, true);
-            if ($decoded === null && json_last_error() !== JSON_ERROR_NONE) {
-                $rowId = isset($row['id']) ? $row['id'] : 0;
-                $this->logger->errorMessage(sprintf(
-                    "Corrupt N-gram JSON for page ID %s: %s",
-                    (is_scalar($rowId) ? (string)$rowId : '0'),
-                    json_last_error_msg()
-                ));
-                continue;
-            }
-            $row['ngrams'] = $decoded;
-            $validResults[] = $row;
-        }
-        return $validResults;
     }
 
     /**
@@ -381,8 +328,17 @@ class ABJ_404_Solution_NGramCacheRepository {
         );
 
         $lastError = isset($queryResult['last_error']) && is_string($queryResult['last_error']) ? $queryResult['last_error'] : '';
-        $success = $lastError === '';
-        if ($success) {
+        $success = $lastError === '' && $this->querySucceeded($queryResult);
+        if (!$success) {
+            // A DELETE can commit before a false native return. Do not claim
+            // deletion, but clear derived cache state so a committed delete is
+            // not hidden by this request's memo or coverage ratio.
+            $this->cacheCountMemo = null;
+            $this->invalidateCoverageCaches();
+            if ($lastError === '') {
+                $this->logger->warn("N-gram invalidation did not confirm success for page ID {$pageId}.");
+            }
+        } else {
             $this->cacheCountMemo = null;
             $this->invalidateCoverageCaches();
         }
@@ -490,5 +446,11 @@ class ABJ_404_Solution_NGramCacheRepository {
         if ($policy instanceof ABJ_404_Solution_NGramCoveragePolicy) {
             $policy->invalidateCoverageCaches();
         }
+    }
+
+    /** @param array<string, mixed> $result */
+    private function querySucceeded(array $result): bool {
+        return array_key_exists('query_succeeded', $result) && $result['query_succeeded'] === true
+            && (!array_key_exists('timed_out', $result) || $result['timed_out'] === false);
     }
 }

@@ -25,7 +25,7 @@ require_once __DIR__ . '/FeedbackWordPressInventory.php';
 class ABJ_404_Solution_FeedbackPayloadBuilder {
 
     /** Current additive feedback payload contract version. */
-    public const PAYLOAD_SCHEMA_VERSION = 2;
+    public const PAYLOAD_SCHEMA_VERSION = 4;
 
     /**
      * Build a payload from current site state. $extra carries type-specific
@@ -83,13 +83,34 @@ class ABJ_404_Solution_FeedbackPayloadBuilder {
         }
 
         if ($type === 'error') {
-            $payload = ABJ_404_Solution_DebugLogEvidenceBudget::normalizePayload($payload);
+            $payload = self::withErrorEvidence($payload);
         }
 
         $payload = ABJ_404_Solution_FeedbackPayloadSchemaGuard::normalize($payload);
         ABJ_404_Solution_FeedbackPayloadSchemaGuard::assert($payload, $type, 'buildPayload');
 
         return $payload;
+    }
+
+    /**
+     * Prioritize retained originals over older automatic-error bulk evidence.
+     *
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private static function withErrorEvidence(array $payload): array {
+        $ajaxEvidence = ABJ_404_Solution_AjaxFailureReporter::evidence();
+        $collected = is_string($payload['debug_log_excerpt'] ?? null) ? $payload['debug_log_excerpt'] : '';
+        $excerpt = class_exists('ABJ_404_Solution_SupportEvidenceExcerpt')
+            && in_array('withRetainedRequestFrames', get_class_methods('ABJ_404_Solution_SupportEvidenceExcerpt'), true)
+            ? ABJ_404_Solution_SupportEvidenceExcerpt::withRetainedRequestFrames(
+                $ajaxEvidence !== '' ? $ajaxEvidence : $collected
+            )
+            : 'Diagnostic evidence unavailable: support composer is updating.';
+        if ($excerpt !== '') {
+            $payload['debug_log_excerpt'] = $excerpt;
+        }
+        return ABJ_404_Solution_DebugLogEvidenceBudget::normalizePayload($payload);
     }
 
     /**

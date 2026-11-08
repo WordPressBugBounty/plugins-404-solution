@@ -24,7 +24,7 @@ if (!defined('ABSPATH')) {
  *   - a query-runner callable bound over DatabaseCore::queryAndGetResults
  *     (signature: function(string, array<string,mixed>): array<string,mixed>);
  *   - a DDL reader callable bound over the table-name resolver
- *     (signature: function(string): string);
+ *     (signature: function(string, ?callable=): string);
  *   - getter/setter callables for runtime flags
  *     (signatures: function(string): mixed, function(string, mixed, int): void);
  *   - the plugin logger and an optional clock.
@@ -50,7 +50,7 @@ class ABJ_404_Solution_DatabaseCollationHelper {
     /** @var callable(string, array<string,mixed>): array<string,mixed> */
     private $queryRunner;
 
-    /** @var callable(string): string */
+    /** @var callable(string, ?callable=): string */
     private $ddlReader;
 
     /** @var callable(string): mixed */
@@ -69,7 +69,7 @@ class ABJ_404_Solution_DatabaseCollationHelper {
      * @param callable(string, array<string,mixed>): array<string,mixed> $queryRunner
      *   Runs a SQL query through the centralized error-handling pipeline and
      *   returns its result array. Bound by DatabaseCore over queryAndGetResults().
-     * @param callable(string): string $ddlReader
+     * @param callable(string, ?callable=): string $ddlReader
      *   Returns the SHOW CREATE TABLE output for the given table name (or '').
      * @param callable(string): mixed $runtimeFlagGetter
      *   Returns the current value of a runtime flag (transient with option fallback).
@@ -214,11 +214,15 @@ class ABJ_404_Solution_DatabaseCollationHelper {
      * Result is validated through sanitizeCollationIdentifier().
      *
      * @param string $tableName Fully-qualified table name (including prefix).
+     * @param (callable(): array<string,mixed>)|null $queryOptionsFactory Fresh
+     *        options supplied immediately before each metadata query.
      * @return string
      */
-    public function getTableCollationString(string $tableName): string {
+    public function getTableCollationString(string $tableName, ?callable $queryOptionsFactory = null): string {
         $fallback = 'utf8mb4_unicode_ci';
-        $ddl = ($this->ddlReader)($tableName);
+        $ddl = $queryOptionsFactory === null
+            ? ($this->ddlReader)($tableName)
+            : ($this->ddlReader)($tableName, $queryOptionsFactory);
 
         // The TABLE-level collation is a table option, written after the
         // closing paren of the body. A column may carry a COLLATE of its own
@@ -237,12 +241,16 @@ class ABJ_404_Solution_DatabaseCollationHelper {
         // The name is BOUND by the query runner (`query_params`), after the runner's own
         // `{token}` pass over the template. Preparing it here first would hand the bound
         // bytes to that pass.
+        $queryOptions = array('query_params' => array($tableName), 'log_errors' => false);
+        if ($queryOptionsFactory !== null) {
+            $queryOptions = array_merge($queryOptions, $queryOptionsFactory());
+        }
         $result = ($this->queryRunner)(
             "SELECT TABLE_COLLATION FROM information_schema.TABLES "
             . "WHERE TABLE_SCHEMA = DATABASE() "
             . "AND TABLE_NAME = %s "
             . "LIMIT 1",
-            array('query_params' => array($tableName), 'log_errors' => false)
+            $queryOptions
         );
         $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
         if (!empty($rows) && is_array($rows[0])) {
@@ -266,27 +274,34 @@ class ABJ_404_Solution_DatabaseCollationHelper {
      *
      * @param string $tableName  Fully-qualified table name (including prefix).
      * @param string $columnName Column name to look up.
+     * @param (callable(): array<string,mixed>)|null $queryOptionsFactory Fresh
+     *        options supplied immediately before each metadata query.
      * @return string
      */
-    public function getColumnCollationString(string $tableName, string $columnName): string {
+    public function getColumnCollationString(string $tableName, string $columnName,
+        ?callable $queryOptionsFactory = null): string {
         $fallback = 'utf8mb4_unicode_ci';
         // Both names are BOUND by the query runner (`query_params`), after its `{token}` pass.
+        $queryOptions = array('query_params' => array($tableName, $columnName), 'log_errors' => false);
+        if ($queryOptionsFactory !== null) {
+            $queryOptions = array_merge($queryOptions, $queryOptionsFactory());
+        }
         $result = ($this->queryRunner)(
             "SELECT COLLATION_NAME FROM information_schema.COLUMNS "
             . "WHERE TABLE_SCHEMA = DATABASE() "
             . "AND TABLE_NAME = %s "
             . "AND COLUMN_NAME = %s "
             . "LIMIT 1",
-            array('query_params' => array($tableName, $columnName), 'log_errors' => false)
+            $queryOptions
         );
         $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
         if (empty($rows) || !is_array($rows[0])) {
-            return $this->getTableCollationString($tableName);
+            return $this->getTableCollationString($tableName, $queryOptionsFactory);
         }
         $row = array_change_key_case($rows[0]);
         $collation = $row['collation_name'] ?? '';
         if (!is_string($collation) || $collation === '') {
-            return $this->getTableCollationString($tableName);
+            return $this->getTableCollationString($tableName, $queryOptionsFactory);
         }
         $sanitized = $this->sanitizeCollationIdentifier($collation);
         return $sanitized !== '' ? $sanitized : $fallback;
@@ -304,16 +319,19 @@ class ABJ_404_Solution_DatabaseCollationHelper {
      *
      * @param string $expression SQL expression used opposite the target column.
      * @param array{table: string, column: string} $targetColumn Indexed target column metadata.
+     * @param (callable(): array<string,mixed>)|null $queryOptionsFactory Fresh
+     *        options supplied immediately before each metadata query.
      * @return string
      */
-    public function coerceExpressionToColumnCollation(string $expression, array $targetColumn): string {
+    public function coerceExpressionToColumnCollation(string $expression, array $targetColumn,
+        ?callable $queryOptionsFactory = null): string {
         $tableName = $targetColumn['table'] ?? '';
         $columnName = $targetColumn['column'] ?? '';
         if ($tableName === '' || $columnName === '') {
             throw new InvalidArgumentException('Target table and column are required for a collation-safe SQL comparison.');
         }
 
-        $rawCollation = $this->getColumnCollationString($tableName, $columnName);
+        $rawCollation = $this->getColumnCollationString($tableName, $columnName, $queryOptionsFactory);
         if (self::sanitizeCollationName($rawCollation) === '') {
             throw new InvalidArgumentException('Target column collation could not be converted to a safe SQL identifier.');
         }

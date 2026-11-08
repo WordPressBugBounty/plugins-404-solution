@@ -6,14 +6,13 @@ select {wp_abj404_logsv2}.id as log_id,
        {wp_abj404_logsv2}.dest_url as action,
        {wp_abj404_logsv2}.requested_url as url,
        COALESCE({wp_abj404_logsv2}.requested_url_detail, '') AS url_detail,
-       usernameLookup.lkup_value as username,
+       (select usernameLookup.lkup_value from {wp_abj404_lookup} usernameLookup
+        where usernameLookup.id = {wp_abj404_logsv2}.username) as username,
        COALESCE({wp_abj404_logsv2}.engine, '') AS engine,
        {wp_abj404_logsv2}.pipeline_trace as pipeline_trace
 
-from {wp_abj404_logsv2}
+from {log_records_source}
 
-     left outer join {wp_abj404_lookup} usernameLookup
-     on {wp_abj404_logsv2}.username = usernameLookup.id
 
 where 1
 
@@ -22,6 +21,5 @@ where 1
                                             where innerid.id = {logsid} )
 /* */
 
-order by {orderby} {order}, 
-         {wp_abj404_logsv2}.timestamp desc
+order by {orderby} {order}{tie_order}
 limit {start}, {perpage}

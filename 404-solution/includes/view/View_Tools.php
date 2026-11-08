@@ -187,7 +187,14 @@ class ABJ_404_Solution_View_Tools extends ABJ_404_Solution_ViewComponent {
         $logger        = abj_service('logging');
         $importer = new ABJ_404_Solution_CrossPluginImporter($redirectsRepo, $logger);
 
-        $detected = $importer->detectInstalledPlugins();
+        try {
+            $detected = $importer->detectInstalledPlugins();
+        } catch (ABJ_404_Solution_ImportSourceReadException $e) {
+            $html = $this->tpl('viewStatsMigrateEmpty.html');
+            $html = $this->f->str_replace('{empty_text}', esc_html($e->getMessage()), $html);
+            $html = $this->f->str_replace('{supported_text}', esc_html__('Supported plugins: Rank Math, Yoast SEO Premium, AIOSEO, Safe Redirect Manager, Redirection.', '404-solution'), $html);
+            return $html;
+        }
 
         $pluginLabels = array(
             'rankmath'           => __('Rank Math', '404-solution'),

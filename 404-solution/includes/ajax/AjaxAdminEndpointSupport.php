@@ -320,6 +320,7 @@ class ABJ_404_Solution_AjaxAdminEndpointSupport {
      */
     public static function armAuthorizedRetryDiagnostics(array $context): array {
         $context['diagnostic_retry_authorized'] = true;
+        ABJ_404_Solution_RequestFailureFrame::authorize($context);
         $GLOBALS['abj404_ajax_context'] = $context;
         $diagnosticsEnabled = ABJ_404_Solution_AjaxDiagnosticRequestPolicy::diagnosticRequestId($context) !== '';
         self::configureDiagnosticOperationTracers($diagnosticsEnabled);
@@ -408,7 +409,8 @@ class ABJ_404_Solution_AjaxAdminEndpointSupport {
         // Bounded with a stall check, for the same reason as the response tail:
         // each iteration here can cost a checkpoint write, so an unbounded
         // drain over a buffer that refuses to close burns CPU indefinitely.
-        ABJ_404_Solution_OutputBufferDrain::drainTo($minLevel, static function () use ($checkpointRequestId) {
+        ABJ_404_Solution_RequestFailureFrame::cleanup('started');
+        $drain = ABJ_404_Solution_OutputBufferDrain::drainTo($minLevel, static function () use ($checkpointRequestId) {
             if ($checkpointRequestId === '') {
                 @ob_end_clean();
                 return;
@@ -422,6 +424,7 @@ class ABJ_404_Solution_AjaxAdminEndpointSupport {
                 self::outputBufferCheckpointFields()
             );
         });
+        ABJ_404_Solution_RequestFailureFrame::cleanup($drain['stalled'] || $drain['budget_exhausted'] ? 'failed' : 'complete');
 
         return $out;
     }

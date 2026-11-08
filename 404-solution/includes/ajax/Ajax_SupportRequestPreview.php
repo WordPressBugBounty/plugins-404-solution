@@ -70,7 +70,7 @@ class ABJ_404_Solution_Ajax_SupportRequestPreview {
      */
     public static function init(): void {
         $me = self::getInstance();
-        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404_support_request_preview',
+        ABJ_404_Solution_WPUtils::safeAddAction(ABJ_404_Solution_PluginAjaxActions::hook('abj404_support_request_preview'),
             array($me, 'handleRequest'));
     }
 
@@ -109,7 +109,8 @@ class ABJ_404_Solution_Ajax_SupportRequestPreview {
             $userMessage = substr($userMessage, 0, self::MAX_USER_MESSAGE_LENGTH);
         }
 
-        $debugLogExcerpt = self::resolveDebugLogExcerpt();
+        $reportedAttemptId = ABJ_404_Solution_AjaxRequestLedger::normalizeId($_POST['reportedAttemptId'] ?? '', '');
+        $debugLogExcerpt = self::resolveDebugLogExcerpt($reportedAttemptId);
 
         $extras = array(
             'user_message' => $userMessage,
@@ -183,8 +184,12 @@ class ABJ_404_Solution_Ajax_SupportRequestPreview {
         if ($excerpt === '' || strlen($excerpt) <= self::PREVIEW_LOG_BYTES) {
             return $excerpt;
         }
-        $tail = substr($excerpt, -self::PREVIEW_LOG_BYTES);
-        return "(truncated for preview; full log is sent with the report)\n" . $tail;
+        $notice = "(truncated for preview; full log is sent with the report)\n";
+        $firstBreak = strpos($excerpt, "\n");
+        $original = strpos($excerpt, '{"abj404_original_requests":') === 0 && $firstBreak !== false
+            ? substr($excerpt, 0, $firstBreak) . "\n" : '';
+        $tail = substr($excerpt, -(self::PREVIEW_LOG_BYTES - strlen($notice) - strlen($original)));
+        return $original . $notice . $tail;
     }
 
     /**
@@ -218,7 +223,11 @@ class ABJ_404_Solution_Ajax_SupportRequestPreview {
      *
      * @return string
      */
-    private static function resolveDebugLogExcerpt(): string {
-        return ABJ_404_Solution_SupportLogExcerpt::resolve('Support request preview');
+    private static function resolveDebugLogExcerpt(string $reportedAttemptId = ''): string {
+        $original = $reportedAttemptId === ''
+            ? ABJ_404_Solution_StrandedRequestSupportSection::retainedOriginals()
+            : ABJ_404_Solution_StrandedRequestSupportSection::forRequests(array($reportedAttemptId), true);
+        return ($original === '' ? '' : $original . "\n")
+            . ABJ_404_Solution_SupportLogExcerpt::resolve('Support request preview');
     }
 }

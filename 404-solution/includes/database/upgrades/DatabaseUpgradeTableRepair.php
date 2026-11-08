@@ -4,6 +4,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/../DatabaseNoticeRecoveryPolicy.php';
+
 /**
  * Pre/post-upgrade table-correctness work for ABJ_404_Solution_DatabaseUpgradesEtc.
  *
@@ -88,7 +90,7 @@ class ABJ_404_Solution_DatabaseUpgradeTableRepair extends ABJ_404_Solution_Datab
 	$deprecatedWatermarkTableName = $prefix . 'abj404_mutation_watermark';
 	// @utf8-audit: opt-out - system-controlled table name composed from $wpdb->prefix plus the fixed-literal "abj404_mutation_watermark", cannot contain invalid UTF-8 bytes.
 	// DAO-bypass-approved: idempotent DROP TABLE IF EXISTS on a deprecated table; DAO error logging would surface a benign "table did not exist" line on every upgrade.
-	$wpdb->query("DROP TABLE IF EXISTS `" . esc_sql($deprecatedWatermarkTableName) . "`");
+	ABJ_404_Solution_DatabaseDriverCall::query($wpdb, "DROP TABLE IF EXISTS `" . esc_sql($deprecatedWatermarkTableName) . "`");
 
 	// Also drop the orphaned wp_options keys from the removed watermark /
 	// admin-mutation gate system. These options were used by the staged-build
@@ -243,13 +245,18 @@ class ABJ_404_Solution_DatabaseUpgradeTableRepair extends ABJ_404_Solution_Datab
 
 	$this->logger->infoMessage("Recreating missing " . $tableName .
 		" (lost during the 4.1.6→4.1.7 upgrade). The scheduled rebuild will repopulate it.");
-	$this->dbCore->queryAndGetResults($finalDdl);
+	$result = $this->dbCore->queryAndGetResults($finalDdl);
 
-	// The missing-table notice (set when ALTER TABLE failed during the 4.1.7
-	// activation) is now stale — the table has been recovered.  Clear it so
-	// the admin does not see an error notice on the next page load.
-	if (function_exists('delete_transient')) {
-		delete_transient('abj404_plugin_db_notice');
+	// A CREATE attempt is not recovery. Confirm execution and the table's
+	// materialization before withdrawing only this table's missing notice.
+	if (($result['query_succeeded'] ?? false) === true
+		&& ($result['last_error'] ?? null) === ''
+		&& $this->dbCore->tableNameResolver()->getCreateTableDDL($tableName) !== '') {
+		$noticeRecovery = new ABJ_404_Solution_DatabaseNoticeRecoveryPolicy(
+			$this->dbCore->noticeState(), $this->dbCore->queryTimeoutManager(),
+			fn(): bool => $this->dbCore->errorClassifier()->isQuotaCooldownActive()
+		);
+		$noticeRecovery->clearRecoveredMissingTableNotice($tableName, $this->dbCore->errorClassifier()->tableInspector());
 	}
     }
 

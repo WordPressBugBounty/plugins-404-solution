@@ -7,6 +7,7 @@
   "additionalProperties": false,
   "properties": {
     "nonce": { "type": "string", "minLength": 1 },
+    "reportedAttemptId": { "type": "string", "pattern": "^[A-Za-z0-9]{8,64}$", "description": "Optional original failed request to pin in the existing diagnostic evidence budget." },
     "triggered_from": {
       "type": "string",
       "enum": ["redirects_page", "captured_404s_page", "plugins_row_action", "settings_debug", "system_corrupt_install"]

@@ -107,6 +107,94 @@ class ABJ_404_Solution_PublishedTermsProvider {
     }
 
     /**
+     * Read one bounded frontier of immediate children from term_taxonomy.
+     *
+     * This deliberately does not use get_terms()/get_term_children(): core's
+     * hierarchy helper materializes the complete taxonomy before applying a
+     * caller's limit. The snapshot service owns traversal; this provider owns
+     * only the bounded, prepared read.
+     *
+     * @param array{taxonomy:string,parents:array<int,mixed>,limit:mixed} $request
+     * @return array{state:'read',ids:array<int,int>}|array{state:'failed',error:string}
+     */
+    public function readTermChildIds(array $request): array {
+        $validated = $this->validateTermChildRequest($request);
+        if (is_string($validated)) { return array('state' => 'failed', 'error' => $validated); }
+        $taxonomy = $validated['taxonomy'];
+        $parentIds = $validated['parents'];
+        $limitInt = $validated['limit'];
+        if ($parentIds === array()) {
+            return array('state' => 'read', 'ids' => array());
+        }
+
+        $termTaxonomyTable = $this->dbCore->doTableNameReplacements('{wp_term_taxonomy}');
+        $parentPlaceholders = implode(', ', array_fill(0, count($parentIds), '%d'));
+        $query = 'SELECT term_id FROM ' . $termTaxonomyTable .
+            ' WHERE taxonomy = %s AND parent IN (' . $parentPlaceholders .
+            ') ORDER BY term_id ASC LIMIT %d';
+        $params = array($taxonomy);
+        foreach (array_values($parentIds) as $parentId) {
+            $params[] = $parentId;
+        }
+        $params[] = $limitInt;
+
+        $result = $this->dbCore->queryAndGetResults($query, array(
+            'result_type' => OBJECT,
+            'query_params' => $params,
+        ));
+        $resultError = $this->validateTermChildResult($result);
+        if ($resultError !== null) { return array('state' => 'failed', 'error' => $resultError); }
+
+        $ids = array();
+        $rows = $result['rows'] ?? array();
+        if (!is_array($rows)) { return array('state' => 'failed', 'error' => 'Malformed bounded term-child query result.'); }
+        foreach ($rows as $row) {
+            if (!is_object($row) || !property_exists($row, 'term_id')) {
+                return array('state' => 'failed', 'error' => 'Malformed bounded term-child row.');
+            }
+            $termId = ABJ_404_Solution_ExactInteger::read($row->term_id, 1);
+            if ($termId === null) {
+                return array('state' => 'failed', 'error' => 'Malformed bounded term-child ID.');
+            }
+            $ids[$termId] = $termId;
+        }
+        return array('state' => 'read', 'ids' => array_values($ids));
+    }
+
+    /**
+     * @param array{taxonomy:string,parents:array<int,mixed>,limit:mixed} $request
+     * @return array{taxonomy:string,parents:array<int,int>,limit:int}|string
+     */
+    private function validateTermChildRequest(array $request) {
+        $taxonomy = $request['taxonomy'] ?? null;
+        $parents = $request['parents'] ?? null;
+        if (!is_string($taxonomy) || $taxonomy === '' || !is_array($parents)) {
+            return 'Invalid term-child read request.';
+        }
+        $limit = ABJ_404_Solution_ExactInteger::read($request['limit'] ?? null, 1);
+        if ($limit === null) { return 'Invalid term-child read limit.'; }
+        $parentIds = array();
+        foreach ($parents as $parent) {
+            $id = ABJ_404_Solution_ExactInteger::read($parent, 1);
+            if ($id === null) { return 'Invalid term-child parent ID.'; }
+            $parentIds[$id] = $id;
+        }
+        return array('taxonomy' => $taxonomy, 'parents' => array_values($parentIds), 'limit' => $limit);
+    }
+
+    /** @param mixed $result */
+    private function validateTermChildResult($result): ?string {
+        if (!is_array($result)) { return 'Malformed bounded term-child query result.'; }
+        if (array_key_exists('last_error', $result) && !is_string($result['last_error'])) { return 'Malformed bounded term-child query error.'; }
+        if (($result['last_error'] ?? '') !== '') { return (string)$result['last_error']; }
+        if (array_key_exists('timed_out', $result) && !is_bool($result['timed_out'])) { return 'Malformed bounded term-child timeout metadata.'; }
+        if (($result['timed_out'] ?? false) === true) { return 'Bounded term-child query timed out.'; }
+        if (array_key_exists('query_succeeded', $result) && $result['query_succeeded'] !== true) { return 'Bounded term-child query did not succeed.'; }
+        if (!array_key_exists('rows', $result) || !is_array($result['rows'])) { return 'Malformed bounded term-child query result.'; }
+        return null;
+    }
+
+    /**
      * @param string|null $slug
      * @param int|null $limit
      * @return array<int, object>

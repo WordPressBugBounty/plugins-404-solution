@@ -287,17 +287,81 @@ class ABJ_404_Solution_SpellChecker {
 		return $this->findMatchingPosts($requestedURL, $includeCats, $includeTagsStr);
 	}
 
+	/** Register content hooks without constructing the matching service. */
 	static function init(): void {
-		$me = abj_service('spell_checker');
-
-		add_action('updated_option', array($me,'permalinkStructureChanged'), 10, 2);
-		add_action('save_post', array($me,'save_postListener'), 10, 3);
-		add_action('delete_post', array($me,'delete_postListener'), 10, 2);
+		add_action('updated_option', array(self::class, 'dispatchPermalinkStructureChanged'), 10, 3);
+		add_action('save_post', array(self::class, 'dispatchSavedPost'), 10, 3);
+		add_action('delete_post', array(ABJ_404_Solution_SpellPostListeners::class, 'captureDeletingPost'), 10, 2);
+		add_action('deleted_post', array(self::class, 'dispatchDeletedPost'), 10, 2);
 		// A category/tag create/rename/delete changes spelling-match results, so
 		// invalidate the spelling cache (including memoized no-match entries).
-		add_action('created_term', array($me,'term_changedListener'), 10, 3);
-		add_action('edited_term', array($me,'term_changedListener'), 10, 3);
-		add_action('delete_term', array($me,'term_changedListener'), 10, 3);
+		add_action('created_term', array(self::class, 'dispatchChangedTerm'), 10, 3);
+		add_action('edited_term', array(self::class, 'dispatchChangedTerm'), 10, 3);
+		add_action('delete_term', array(self::class, 'dispatchChangedTerm'), 10, 3);
+	}
+
+	/** Keep re-entrant content hooks outside matching services until settings exist. */
+	private static function shouldDeferContentHooks(): bool {
+		$optionsRepository = abj_service('options_repository');
+		// A collaborator loaded before an in-flight update can lack this API.
+		return method_exists($optionsRepository, 'isInitializingSettings')
+			&& $optionsRepository->isInitializingSettings();
+	}
+
+	/**
+	 * Resolve matching services only on a post save, in every WordPress context.
+	 * @param int $post_id
+	 * @param \WP_Post|null $post
+	 * @param bool|null $update
+	 */
+	public static function dispatchSavedPost($post_id, $post = null, $update = null): void {
+		// Creating the first suggestion page re-enters this hook before cache
+		// tables exist. Defer before constructing matching services or claiming
+		// the post ID in the request deduplicator.
+		if (self::shouldDeferContentHooks()) {
+			return;
+		}
+		// @hook-lifecycle: opt-out - SpellPostListeners::save_postListener owns request-level dedup.
+		abj_service('spell_checker')->save_postListener($post_id, $post, $update);
+	}
+
+	/**
+	 * Invalidate only after the source row is gone, using its retained context.
+	 * @param int $post_id
+	 * @param \WP_Post|null $post
+	 */
+	public static function dispatchDeletedPost($post_id, $post = null): void {
+		$post = ABJ_404_Solution_SpellPostListeners::consumeDeletedPostContext($post_id, $post);
+		if (self::shouldDeferContentHooks()) {
+			return;
+		}
+		abj_service('spell_checker')->delete_postListener($post_id, $post);
+	}
+
+	/**
+	 * @param int $term_id
+	 * @param int $tt_id
+	 * @param string $taxonomy
+	 */
+	public static function dispatchChangedTerm(int $term_id, int $tt_id = 0, string $taxonomy = ''): void {
+		if ($taxonomy !== '' && !in_array($taxonomy, array('category', 'post_tag'), true)) {
+			return;
+		}
+		if (self::shouldDeferContentHooks()) {
+			return;
+		}
+		abj_service('spell_checker')->term_changedListener($term_id, $tt_id, $taxonomy);
+	}
+
+	/**
+	 * @param string $option
+	 * @param mixed $oldStructure
+	 * @param mixed $newStructure
+	 */
+	public static function dispatchPermalinkStructureChanged($option, $oldStructure, $newStructure): void {
+		if ($option === 'permalink_structure' && !self::shouldDeferContentHooks()) {
+			abj_service('spell_checker')->permalinkStructureChanged($option, $newStructure);
+		}
 	}
 
 	/**
@@ -405,6 +469,20 @@ class ABJ_404_Solution_SpellChecker {
 		}
 
 		return null;
+	}
+
+	/**
+	 * Retained for old dispatchers linked before an in-flight update.
+	 * @param string $requestedURL Preceding release's requested URL.
+	 * @return bool False declines retired server-loopback computation.
+	 */
+	public function triggerAndCleanupOnFailure(string $requestedURL): bool {
+		return false;
+	}
+
+	/** @return bool False leaves suggestion work to the rendered page's reader. */
+	public function does404PageHaveSuggestionsShortcode() {
+		return false;
 	}
 
 }

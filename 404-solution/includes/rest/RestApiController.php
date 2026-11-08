@@ -306,7 +306,7 @@ class ABJ_404_Solution_RestApiController {
 
     /**
      * @param \WP_REST_Request $request
-     * @return \WP_REST_Response
+     * @return \WP_REST_Response|\WP_Error
      */
     public function getLogs($request) {
         return $this->readService->logs($this->requestParser->pagination($request));

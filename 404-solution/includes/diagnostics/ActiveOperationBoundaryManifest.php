@@ -124,6 +124,18 @@ final class ABJ_404_Solution_ActiveOperationBoundaryManifest {
     );
 
     /**
+     * The discriminator fields a boundary's record must carry to be reserved.
+     *
+     * Asked by every sink that persists a boundary's record: a sink that drops
+     * one of these fields leaves a record the reservation can never select.
+     *
+     * @return array<int, string> Empty for an unknown boundary.
+     */
+    public static function requiredEvidenceFields(string $boundary): array {
+        return self::BOUNDARIES[$boundary]['required_evidence_fields'] ?? array();
+    }
+
+    /**
      * The canonical allowed/reserved active-operation boundary contract.
      *
      * @return array<string, array{

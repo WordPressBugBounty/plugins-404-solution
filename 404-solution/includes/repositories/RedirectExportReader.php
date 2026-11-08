@@ -71,7 +71,7 @@ class ABJ_404_Solution_RedirectExportReader {
              WHERE r.status IN (%d, %d)
                AND (r.disabled IS NULL OR r.disabled = 0)
                AND r.url IS NOT NULL AND r.url != ''
-             ORDER BY r.url",
+             ORDER BY r.url, r.id",
             array('query_params' => array((int)ABJ404_TYPE_POST, $manualStatus, $regexStatus))
         );
 

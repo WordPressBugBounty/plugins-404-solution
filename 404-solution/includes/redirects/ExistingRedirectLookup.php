@@ -59,7 +59,7 @@ class ABJ_404_Solution_ExistingRedirectLookup {
                 $deferredAutoRedirect = $matched;
             } else {
                 $this->dispatcher->processRedirect($requestedURL, $matched, 'existing', $trace);
-                exit;
+                return $deferredAutoRedirect;
             }
         }
 
@@ -78,7 +78,7 @@ class ABJ_404_Solution_ExistingRedirectLookup {
         }
 
         $this->dispatcher->processRedirect($requestedURL, $matched, 'existing', $trace);
-        exit;
+        return $deferredAutoRedirect;
     }
 
     /**

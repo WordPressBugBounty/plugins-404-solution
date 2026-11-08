@@ -39,18 +39,35 @@ class ABJ_404_Solution_RedirectConditionsRepository {
      * @return array<int, array<string, mixed>>
      */
     public function getRedirectConditions(int $redirectId): array {
-        $table = $this->dbCore->doTableNameReplacements('{wp_abj404_redirect_conditions}');
-
-        // Only a table the engine ANSWERED "not there" about skips the read. A
-        // probe that could not run is not evidence of absence, and reading it
-        // as one is worse here than anywhere else in the plugin: no conditions
-        // means the redirect matches unconditionally, so a database hiccup
-        // would fire redirects their owner had explicitly narrowed -- silently,
-        // since skipping the query also skips everything that would log it.
-        if ($this->readiness->isKnownAbsent('{wp_abj404_redirect_conditions}')) {
+        $result = $this->readRedirectConditions($redirectId);
+        if (($result['query_succeeded'] ?? null) !== true) {
             return [];
         }
 
+        return $result['rows'];
+    }
+
+    /**
+     * Read condition rows while retaining the acknowledgement needed by the
+     * routing evaluator. The rows-only method above remains the display/API
+     * contract; an empty array from that method must not authorize a redirect.
+     *
+     * @param int $redirectId
+     * @return array{rows: array<int, array<string, mixed>>, last_error: string,
+     *     query_succeeded: bool, timed_out: bool, table_available: bool}
+     */
+    public function readRedirectConditions(int $redirectId): array {
+        if ($this->readiness->isKnownAbsent('{wp_abj404_redirect_conditions}')) {
+            return array(
+                'rows' => array(),
+                'last_error' => 'The redirect conditions table is unavailable.',
+                'query_succeeded' => false,
+                'timed_out' => false,
+                'table_available' => false,
+            );
+        }
+
+        $table = $this->dbCore->doTableNameReplacements('{wp_abj404_redirect_conditions}');
         $result = $this->dbCore->queryAndGetResults(
             "SELECT id, redirect_id, logic, condition_type, operator, value, sort_order
              FROM `{$table}`
@@ -59,20 +76,74 @@ class ABJ_404_Solution_RedirectConditionsRepository {
             array('query_params' => array($redirectId), 'log_errors' => false)
         );
 
-        $lastError = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
-        if ($lastError !== '') {
-            $this->logger->warn("getRedirectConditions: DB error for redirect_id={$redirectId}: " . $lastError);
-            return [];
+        $normalized = $this->normalizeConditionReadResult($result);
+        if (($normalized['query_succeeded'] ?? null) !== true
+            && ($normalized['table_available'] ?? true) !== false) {
+            $this->logger->warn(
+                "getRedirectConditions: DB error for redirect_id={$redirectId}: " .
+                (string)($normalized['last_error'] ?? 'The conditions read failed.')
+            );
+        }
+        return $normalized;
+    }
+
+    /**
+     * @param mixed $result
+     * @return array{rows: array<int, array<string, mixed>>, last_error: string,
+     *     query_succeeded: bool, timed_out: bool, table_available: bool}
+     */
+    private function normalizeConditionReadResult($result): array {
+        $failure = static function (string $error, bool $timedOut = false): array {
+            return array(
+                'rows' => array(),
+                'last_error' => $error,
+                'query_succeeded' => false,
+                'timed_out' => $timedOut,
+                'table_available' => true,
+            );
+        };
+
+        if (!is_array($result)) {
+            return $failure('The redirect conditions read returned an invalid result envelope.');
         }
 
-        $rawRows = isset($result['rows']) && is_array($result['rows']) ? $result['rows'] : [];
-        $rows = [];
-        foreach ($rawRows as $row) {
-            if (is_array($row)) {
-                $rows[] = $row;
-            }
+        if (!array_key_exists('last_error', $result) || !is_string($result['last_error'])) {
+            return $failure('The redirect conditions read returned malformed error metadata.');
         }
-        return $rows;
+        $lastError = $result['last_error'];
+        if ($lastError !== '') {
+            return $failure($lastError);
+        }
+
+        if (array_key_exists('timed_out', $result) && !is_bool($result['timed_out'])) {
+            return $failure('The redirect conditions read returned malformed timeout metadata.');
+        }
+        if (($result['timed_out'] ?? false) === true) {
+            return $failure('The redirect conditions read timed out.', true);
+        }
+
+        if (!array_key_exists('query_succeeded', $result) || $result['query_succeeded'] !== true) {
+            return $failure('The redirect conditions read failed without a database error.');
+        }
+        if (!array_key_exists('rows', $result) || !is_array($result['rows'])) {
+            return $failure('The redirect conditions read returned malformed rows.');
+        }
+
+        $rows = [];
+        foreach ($result['rows'] as $row) {
+            if (!is_array($row)) {
+                return $failure('The redirect conditions read returned malformed row data.');
+            }
+            $rows[] = array_filter($row, 'is_string', ARRAY_FILTER_USE_KEY);
+        }
+
+        return array(
+            'rows' => $rows,
+            'last_error' => '',
+            'query_succeeded' => true,
+            'timed_out' => false,
+            'table_available' => true,
+        );
     }
 
     /**
@@ -95,7 +166,8 @@ class ABJ_404_Solution_RedirectConditionsRepository {
 
         if ($this->readiness->isKnownAbsent('{wp_abj404_redirect_conditions}')) {
             $this->logger->warn("saveRedirectConditions: conditions table missing, skipping save for redirect_id={$redirectId}.");
-            return '';
+            return __('The redirect conditions table is unavailable; conditions were not saved. [ABJ404_CONDITIONS_TABLE_UNAVAILABLE]', '404-solution')
+                . ' ' . __('Reload this page and try again. If the error continues, send this message to support.', '404-solution');
         }
 
         global $wpdb;
@@ -132,6 +204,11 @@ class ABJ_404_Solution_RedirectConditionsRepository {
             $message = $e->getMessage();
             return $message !== '' ? $message : 'saveRedirectConditions: transaction failed';
         }
+
+        // Conditions decide who this redirect answers, so the cached response
+        // for its source is stale.
+        $lookup = new ABJ_404_Solution_RedirectLookupRepository($this->dbCore, abj_service('functions'));
+        ABJ_404_Solution_RedirectPageCachePurge::queueRead($lookup->readRedirectsByIDs(array($redirectId)));
 
         return '';
     }

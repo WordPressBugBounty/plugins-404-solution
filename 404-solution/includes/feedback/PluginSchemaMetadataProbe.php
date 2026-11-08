@@ -31,6 +31,131 @@ require_once __DIR__ . '/FeedbackTransportLog.php';
 class ABJ_404_Solution_PluginSchemaMetadataProbe {
 
     /**
+     * The c584 definitional verdict over installed plugin tables, counts only.
+     * One metadata query covers the composite-bearing permanent DDL targets;
+     * absent optional tables cause no query errors and no invented drift.
+     * Unreadable metadata throws so recordProbe reports null with a reason.
+     *
+     * @return int
+     */
+    public function probeCompositeIndexDriftCount(): int {
+        global $wpdb;
+        if (!is_object($wpdb) || !method_exists($wpdb, 'get_results') || !method_exists($wpdb, 'prepare')) {
+            throw new \RuntimeException('wpdb unavailable for index definition probe');
+        }
+        $targets = $this->compositeIndexTargets();
+        if ($targets === array()) {
+            throw new \RuntimeException('invalid shape: no composite index DDL targets');
+        }
+        $rows = $this->readCompositeIndexMetadata(array_keys($targets));
+        $byTable = array();
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                throw new \RuntimeException('invalid shape: index metadata row');
+            }
+            $fields = ABJ_404_Solution_ShowIndexRowReader::normalizedFields($row);
+            $table = isset($fields['table_name']) && is_string($fields['table_name']) ? $fields['table_name'] : '';
+            if (isset($targets[$table])) {
+                $byTable[$table][] = $row;
+            } elseif ($table === '') {
+                throw new \RuntimeException('invalid shape: index metadata table name');
+            }
+        }
+        $count = 0;
+        foreach ($byTable as $table => $tableRows) {
+            $definitions = ABJ_404_Solution_TableIndexDefinitions::fromShowIndexRows($tableRows);
+            $narrowed = $definitions === null ? null
+                : ABJ_404_Solution_IndexDefinitionComparator::countNarrowedCompositeIndexes($definitions, $targets[$table]);
+            if ($narrowed === null) {
+                throw new \RuntimeException('invalid shape: incomplete index definitions');
+            }
+            $count += $narrowed;
+        }
+        return $count;
+    }
+
+    /**
+     * Read one bounded index-metadata result after the public probe has
+     * established the wpdb capabilities. Suppression is always restored,
+     * including failed preparation and permission/driver failures.
+     *
+     * @param array<int, string> $tables Plugin-owned tables from the DDL catalog.
+     * @return array<int, mixed>
+     */
+    private function readCompositeIndexMetadata(array $tables): array {
+        global $wpdb;
+        // Catalog filters may have run since the public capability check.
+        // Recheck the connection before issuing or restoring session state.
+        if (!is_object($wpdb) || !method_exists($wpdb, 'prepare') || !method_exists($wpdb, 'get_results')) {
+            throw new \RuntimeException('wpdb unavailable for index metadata');
+        }
+        $placeholders = implode(',', array_fill(0, count($tables), '%s'));
+        $suppress = method_exists($wpdb, 'suppress_errors') ? $wpdb->suppress_errors(true) : false;
+        try {
+            // DAO-bypass-approved: bound plugin table names, read-only index metadata, no row data or repairs.
+            $query = $wpdb->prepare('SELECT TABLE_NAME, INDEX_NAME AS Key_name, NON_UNIQUE AS Non_unique,
+                SEQ_IN_INDEX AS Seq_in_index, COLUMN_NAME AS Column_name, SUB_PART AS Sub_part
+                FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME IN (' . $placeholders . ')', $tables);
+            if (!is_string($query) || $query === '') {
+                throw new \RuntimeException('invalid shape: index metadata query could not be prepared');
+            }
+            // DAO-bypass-approved: information_schema metadata only; never reads or writes plugin records.
+            $rows = ABJ_404_Solution_DatabaseDriverCall::getResults($wpdb, $query, ARRAY_A);
+            if (!empty($wpdb->last_error) || !is_array($rows)) {
+                throw new \RuntimeException('index definition SQL probe failed: ' . (string)($wpdb->last_error ?? 'non-array'));
+            }
+        } finally {
+            if (method_exists($wpdb, 'suppress_errors')) {
+                $wpdb->suppress_errors($suppress);
+            }
+        }
+        return array_values($rows);
+    }
+
+    /**
+     * Reuse the upgrade catalog and parser, rather than another list of index
+     * names that could drift from the definitions used by the repair path.
+     * Only plugin-owned permanent tables with composite indexes are queried.
+     *
+     * @return array<string, array<string, array{name: string, columns: string, unique: bool}>>
+     */
+    private function compositeIndexTargets(): array {
+        global $wpdb;
+        $upgrades = function_exists('abj_service_optional') ? abj_service_optional('database_upgrades') : null;
+        if (!is_object($upgrades) || !method_exists($upgrades, 'components')) {
+            throw new \RuntimeException('service unavailable: database_upgrades');
+        }
+        $prefix = isset($wpdb->prefix) && is_string($wpdb->prefix) ? $wpdb->prefix : 'wp_';
+        $targets = array();
+        foreach ($upgrades->components()->bootstrapUpgrade()->discoverPermanentDDLFiles() as $entry) {
+            if (preg_match('/^abj404_[A-Za-z0-9_]+$/D', $entry['bareTableName']) !== 1) {
+                continue;
+            }
+            $specs = ABJ_404_Solution_CreateTableIndexParser::fromCreateTableSql($entry['ddlContent']);
+            foreach ($specs as $name => $spec) {
+                if (count(ABJ_404_Solution_CreateTableIndexParser::ddlColumnList($spec['columns'])) > 1) {
+                    $targets[$prefix . $entry['bareTableName']][$name] = $spec;
+                }
+            }
+        }
+        return $targets;
+    }
+
+    /**
+     * Text columns whose collation probeDbCollation() reports, keyed by table
+     * name without the WordPress prefix. A column named here that the table's
+     * DDL does not declare makes information_schema answer with no row, which
+     * the probe reads as "nothing to report"; PluginSchemaMetadataProbeTargetsTest
+     * keeps every entry equal to a column the shipped DDL declares.
+     */
+    public const COLLATION_PROBE_TARGETS = array(
+        'abj404_redirects' => array('url', 'canonical_url'),
+        'abj404_logs_hits' => array('requested_url'),
+        'abj404_logsv2'    => array('requested_url', 'canonical_url'),
+    );
+
+    /**
      * Size of plugin-owned tables beyond logsv2 (which has its own typed
      * column). The redirects-tab perf bug is bounded by the
      * redirects/logs_hits volume, not logsv2, so shipping both lets the
@@ -77,7 +202,7 @@ class ABJ_404_Solution_PluginSchemaMetadataProbe {
                 );
                 if ($prepared === null) { continue; }
                 // DAO-bypass-approved: information_schema probe; no plugin tables touched, no error class repair would apply.
-                $row = $wpdb->get_row($prepared, ARRAY_A);
+                $row = ABJ_404_Solution_DatabaseDriverCall::getRow($wpdb, $prepared, ARRAY_A);
                 if (!is_array($row)) { continue; }
                 $dl = 0; $il = 0; $df = 0;
                 foreach ($row as $col => $val) {
@@ -141,36 +266,14 @@ class ABJ_404_Solution_PluginSchemaMetadataProbe {
         foreach ($candidates as $key => $table) {
             $attempted++;
             try {
-                $prepared = 'SHOW INDEX FROM `' . $table . '`';
-                if (method_exists($wpdb, 'prepare')) {
-                    // DAO-bypass-approved: SHOW INDEX metadata probe placeholder bind; no plugin-table writes possible.
-                    $prepared = $wpdb->prepare($prepared);
-                }
-                if ($prepared === null || $prepared === '') {
-                    continue;
-                }
+                $quotedTable = str_replace('`', '``', $table);
+                $prepared = 'SHOW INDEX FROM `' . $quotedTable . '`';
                 // DAO-bypass-approved: SHOW INDEX is read-only metadata; no plugin-table writes possible.
-                $rows = $wpdb->get_results($prepared, ARRAY_A);
+                $rows = ABJ_404_Solution_DatabaseDriverCall::getResults($wpdb, $prepared, ARRAY_A);
                 if (!is_array($rows)) {
                     continue;
                 }
-                $byIndex = array();
-                foreach ($rows as $row) {
-                    if (!is_array($row)) { continue; }
-                    $idxName = '';
-                    $card = null;
-                    foreach ($row as $col => $val) {
-                        $clow = strtolower((string)$col);
-                        if ($clow === 'key_name' && is_scalar($val)) { $idxName = (string)$val; }
-                        // read(), not readOr(): NULL means the engine has no estimate
-                        // yet, and 0 is a real answer this map uses to spot damaged indexes.
-                        if ($clow === 'cardinality') { $card = ABJ_404_Solution_ExactInteger::read($val, 0); }
-                    }
-                    if ($idxName === '' || $card === null) { continue; }
-                    if (!isset($byIndex[$idxName]) || $card > $byIndex[$idxName]) {
-                        $byIndex[$idxName] = $card;
-                    }
-                }
+                $byIndex = $this->parseIndexCardinalityRows($rows);
                 if (!empty($byIndex)) {
                     $out[$key] = $byIndex;
                 }
@@ -190,6 +293,33 @@ class ABJ_404_Solution_PluginSchemaMetadataProbe {
     }
 
     /**
+     * Reduce SHOW INDEX rows to the largest known cardinality per index.
+     *
+     * @param array<mixed, mixed> $rows
+     * @return array<string, int>
+     */
+    private function parseIndexCardinalityRows(array $rows): array {
+        $byIndex = array();
+        foreach ($rows as $row) {
+            if (!is_array($row)) { continue; }
+            $idxName = '';
+            $card = null;
+            foreach ($row as $col => $val) {
+                $clow = strtolower((string)$col);
+                if ($clow === 'key_name' && is_scalar($val)) { $idxName = (string)$val; }
+                // read(), not readOr(): NULL means the engine has no estimate
+                // yet, and 0 is a real answer this map uses to spot damaged indexes.
+                if ($clow === 'cardinality') { $card = ABJ_404_Solution_ExactInteger::read($val, 0); }
+            }
+            if ($idxName === '' || $card === null) { continue; }
+            if (!isset($byIndex[$idxName]) || $card > $byIndex[$idxName]) {
+                $byIndex[$idxName] = $card;
+            }
+        }
+        return $byIndex;
+    }
+
+    /**
      * DB-level + per-column collation for the JOIN-hot URL columns on
      * `abj404_redirects` and `abj404_logs_hits`. Collation drift between
      * the two columns disables the index seek silently: MySQL falls back
@@ -201,7 +331,9 @@ class ABJ_404_Solution_PluginSchemaMetadataProbe {
      *   { db_charset: string, db_collate: string,
      *     columns: { '{prefix}abj404_redirects.url': string,
      *                '{prefix}abj404_redirects.canonical_url': string,
-     *                '{prefix}abj404_logs_hits.requested_url': string } }
+     *                '{prefix}abj404_logs_hits.requested_url': string,
+     *                '{prefix}abj404_logsv2.requested_url': string,
+     *                '{prefix}abj404_logsv2.canonical_url': string } }
      *
      * @return array<string, mixed>
      */
@@ -216,11 +348,10 @@ class ABJ_404_Solution_PluginSchemaMetadataProbe {
             throw new \RuntimeException('wpdb unavailable for db_collation probe');
         }
         $prefix = (isset($wpdb->prefix) && is_string($wpdb->prefix)) ? $wpdb->prefix : 'wp_';
-        $targets = array(
-            $prefix . 'abj404_redirects'  => array('url', 'canonical_url'),
-            $prefix . 'abj404_logs_hits'  => array('requested_url'),
-            $prefix . 'abj404_logsv2'     => array('url'),
-        );
+        $targets = array();
+        foreach (self::COLLATION_PROBE_TARGETS as $tableSuffix => $columns) {
+            $targets[$prefix . $tableSuffix] = $columns;
+        }
         $prevSuppress = method_exists($wpdb, 'suppress_errors') ? $wpdb->suppress_errors(true) : false;
         $errors = 0;
         $attempted = 0;
@@ -228,20 +359,9 @@ class ABJ_404_Solution_PluginSchemaMetadataProbe {
             foreach ($cols as $col) {
                 $attempted++;
                 try {
-                    if (!method_exists($wpdb, 'prepare')) { continue; }
-                    // DAO-bypass-approved: information_schema collation probe placeholder bind; no plugin-table writes.
-                    $prepared = $wpdb->prepare(
-                        'SELECT COLLATION_NAME '
-                      . 'FROM information_schema.COLUMNS '
-                      . 'WHERE table_schema = DATABASE() AND table_name = %s AND column_name = %s',
-                        $table,
-                        $col
-                    );
-                    if ($prepared === null) { continue; }
-                    // DAO-bypass-approved: information_schema metadata probe; no plugin-table writes.
-                    $v = $wpdb->get_var($prepared);
-                    if (is_scalar($v) && (string)$v !== '') {
-                        $out['columns'][$table . '.' . $col] = (string)$v;
+                    $collation = $this->readColumnCollation($table, $col);
+                    if ($collation !== '') {
+                        $out['columns'][$table . '.' . $col] = $collation;
                     }
                 } catch (\Throwable $e) {
                     // allow-silent-catch: per-column probe is best-effort; missing-table / permissions errors must not abort the whole map. Aggregated failure is rethrown after the loop when ALL attempts failed (see $errors check below) so the recordProbe wrapper can write the marker key.
@@ -257,5 +377,27 @@ class ABJ_404_Solution_PluginSchemaMetadataProbe {
             throw new \RuntimeException('db_collation: all per-column SQL probes failed');
         }
         return $out;
+    }
+
+    /**
+     * One information_schema lookup: the collation of a single column.
+     *
+     * @return string The collation name, or '' when the column has no row or wpdb cannot prepare.
+     */
+    private function readColumnCollation(string $table, string $column): string {
+        global $wpdb;
+        if (!is_object($wpdb) || !method_exists($wpdb, 'prepare') || !method_exists($wpdb, 'get_var')) { return ''; }
+        // DAO-bypass-approved: information_schema collation probe placeholder bind; no plugin-table writes.
+        $prepared = $wpdb->prepare(
+            'SELECT COLLATION_NAME '
+          . 'FROM information_schema.COLUMNS '
+          . 'WHERE table_schema = DATABASE() AND table_name = %s AND column_name = %s',
+            $table,
+            $column
+        );
+        if ($prepared === null) { return ''; }
+        // DAO-bypass-approved: information_schema metadata probe; no plugin-table writes.
+        $value = ABJ_404_Solution_DatabaseDriverCall::getVar($wpdb, $prepared);
+        return is_scalar($value) ? (string)$value : '';
     }
 }

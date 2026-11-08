@@ -41,6 +41,7 @@ if (!defined('ABSPATH')) {
  *   - status      : string   (lowercased; '' if absent / non-scalar)
  *   - type        : string   (post_type; '' if absent)
  *   - parentId    : int >= 0
+ *   - slug        : string   (post_name; '' if absent)
  *
  * Construction accepts WP_Post, an associative array (ARRAY_A output mode
  * or a hand-built fixture), or `null` / non-object input. `fromWpPost`
@@ -66,6 +67,8 @@ final class ABJ_404_Solution_PostRef {
 
     /** @var int */
     private $parentId;
+    /** @var string */
+    private $slug;
 
     private function __construct(
         int $id,
@@ -73,7 +76,8 @@ final class ABJ_404_Solution_PostRef {
         string $content,
         string $status,
         string $type,
-        int $parentId
+        int $parentId,
+        string $slug
     ) {
         $this->id = $id;
         $this->title = $title;
@@ -81,6 +85,7 @@ final class ABJ_404_Solution_PostRef {
         $this->status = $status;
         $this->type = $type;
         $this->parentId = $parentId;
+        $this->slug = $slug;
     }
 
     /**
@@ -104,7 +109,8 @@ final class ABJ_404_Solution_PostRef {
             $status   = strtolower(self::coerceObjectString($raw, 'post_status'));
             $type     = self::coerceObjectString($raw, 'post_type');
             $parentId = self::coerceObjectInt($raw, 'post_parent');
-            return new self($id, $title, $content, $status, $type, $parentId);
+            $slug     = self::coerceObjectString($raw, 'post_name');
+            return new self($id, $title, $content, $status, $type, $parentId, $slug);
         }
         if (is_array($raw)) {
             $id       = self::coerceArrayInt($raw, 'ID');
@@ -116,7 +122,8 @@ final class ABJ_404_Solution_PostRef {
             $status   = strtolower(self::coerceArrayString($raw, 'post_status'));
             $type     = self::coerceArrayString($raw, 'post_type');
             $parentId = self::coerceArrayInt($raw, 'post_parent');
-            return new self($id, $title, $content, $status, $type, $parentId);
+            $slug     = self::coerceArrayString($raw, 'post_name');
+            return new self($id, $title, $content, $status, $type, $parentId, $slug);
         }
         return null;
     }
@@ -159,6 +166,32 @@ final class ABJ_404_Solution_PostRef {
 
     public function getParentId(): int {
         return $this->parentId;
+    }
+
+    /** post_name. '' when absent. */
+    public function getSlug(): string {
+        return $this->slug;
+    }
+
+    /**
+     * Identity of one save of this post, for save_post handlers that skip
+     * repeated fires. WordPress fires save_post more than once for a single
+     * save within a request, always with the same values; a later save in
+     * that request that renames, re-titles, re-parents, retypes or changes
+     * the status of the post is a different save and gets a different key.
+     * A handler keyed on the post ID alone drops that later save.
+     *
+     * @param int|string $postId The save_post post ID.
+     * @param mixed $post The save_post post object, or null when not passed.
+     * @return string The ID alone when the post cannot be read.
+     */
+    public static function saveKey($postId, $post): string {
+        $ref = self::fromWpPost($post);
+        if ($ref === null) {
+            return (string)$postId;
+        }
+        return implode('|', array((string)$ref->id, $ref->type, $ref->status, (string)$ref->parentId,
+            $ref->slug, $ref->title));
     }
 
     /**

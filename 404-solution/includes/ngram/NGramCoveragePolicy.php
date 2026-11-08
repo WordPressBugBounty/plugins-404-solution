@@ -71,22 +71,48 @@ class ABJ_404_Solution_NGramCoveragePolicy {
      * On multisite, checks both get_site_option() (network activation) and
      * get_option() (per-site activation) since we can't reliably determine
      * activation mode on frontend requests where is_plugin_active_for_network()
-     * isn't available.
+     * isn't available. Both reads recover from an object cache that answers
+     * the flag with an array ({@see ABJ_404_Solution_OptionShapeRead}), which
+     * would otherwise report a finished cache as unbuilt.
      *
      * @return bool True if cache is initialized
      */
     public function isCacheInitialized() {
-        $optionName = 'abj404_ngram_cache_initialized';
+        $read = array(
+            'name' => 'abj404_ngram_cache_initialized',
+            'shape' => ABJ_404_Solution_OptionShapeRead::SHAPE_SCALAR,
+        );
 
         if (is_multisite()) {
-            $siteValue = get_site_option($optionName);
+            $siteValue = ABJ_404_Solution_OptionShapeRead::read(
+                $read + array('scope' => ABJ_404_Solution_OptionShapeRead::SCOPE_NETWORK));
             if ($siteValue === '1') {
                 return true;
             }
             // Fall through to check per-site option
         }
 
-        return get_option($optionName) === '1';
+        return ABJ_404_Solution_OptionShapeRead::read($read) === '1';
+    }
+
+    /**
+     * Detect page identities missing from the post index, independently of
+     * aggregate coverage counts (term rows and stale posts can mask holes).
+     * The published-post provider refreshes permalinks before this check.
+     * Do not cache the answer: imports can bypass WordPress content hooks.
+     * Query failure is uncertainty, so callers must preserve the full scan.
+     * @return bool True when candidate restriction would be unsafe.
+     */
+    public function hasUnindexedPermalinks(): bool {
+        $ngramTable = $this->dbCore->tableNameResolver()->getPrefixedTableName('abj404_ngram_cache');
+        $permalinkTable = $this->dbCore->tableNameResolver()->getPrefixedTableName('abj404_permalink_cache');
+        $result = $this->dbCore->queryAndGetResults(
+            "SELECT pc.id FROM {$permalinkTable} pc
+             LEFT JOIN {$ngramTable} ng ON pc.id = ng.id AND ng.type = 'post'
+             WHERE ng.id IS NULL LIMIT 1"
+        );
+        return !empty($result['last_error']) || !empty($result['timed_out'])
+            || !isset($result['rows']) || !is_array($result['rows']) || $result['rows'] !== [];
     }
 
     /**

@@ -85,13 +85,14 @@ class ABJ_404_Solution_PermalinkCache {
     public static function setInstance($instance) {
         self::$instance = $instance;
     }
-    
-    /** @return void */
-    static function init(): void {
-        $me = abj_service('permalink_cache');
-        
-        add_action('updated_option', array($me, 'permalinkStructureChanged'), 10, 3);
+
+    /** Register cache invalidation through the entry that predates 4.3.2. */
+    public static function init(): void {
+        add_action('update_option_permalink_structure', static function ($oldStructure, $newStructure): void {
+            abj_service('permalink_cache')->permalinkStructureChanged('permalink_structure', $oldStructure, $newStructure);
+        }, 10, 2);
     }
+    
 
     /** If the permalink structure changes then truncate the cache table and update some values.
      * @global type $abj404logging
@@ -272,20 +273,20 @@ class ABJ_404_Solution_PermalinkCache {
         }
         $postCount = function_exists('wp_count_posts') ? (int) (wp_count_posts('post')->publish ?? 0) : 0;
         $pageCount = function_exists('wp_count_posts') ? (int) (wp_count_posts('page')->publish ?? 0) : 0;
-        if ($postCount + $pageCount === 0) {
+        if ($postCount + $pageCount === 0 || !function_exists('set_transient')) {
             return;
         }
-        if (function_exists('set_transient')) {
+        ABJ_404_Solution_DeferredTranslation::whenReady(static function (): void {
             // allow-cache-empty: notice payload is constructed locally and intentionally persisted as-is.
             set_transient('abj404_plugin_db_notice', array(
                 'type'      => 'stale_permalink_cache',
-                'message'   => function_exists('__') ? __('Permalink cache appears empty after rebuild - suggestions may be degraded. Try rebuilding again or check available disk space.', '404-solution') : 'Permalink cache appears empty after rebuild - suggestions may be degraded. Try rebuilding again or check available disk space.',
-                'guidance'  => function_exists('__') ? __('The permalink cache appears to be empty. Try rebuilding it from the Tools tab, or check that your site has enough disk space.', '404-solution') : 'The permalink cache appears to be empty. Try rebuilding it from the Tools tab, or check that your site has enough disk space.',
+                'message'   => __('Permalink cache appears empty after rebuild - suggestions may be degraded. Try rebuilding again or check available disk space.', '404-solution'),
+                'guidance'  => __('The permalink cache appears to be empty. Try rebuilding it from the Tools tab, or check that your site has enough disk space.', '404-solution'),
                 'timestamp' => abj_clock()->now(),
             ), 86400);
-        }
+        });
     }
-    
+
     /**
      * Arm the next link of the deferred permalink-cache chain, unless the chain
      * is already armed.
@@ -451,10 +452,8 @@ class ABJ_404_Solution_PermalinkCache {
 
         // Decode HTML entities
         $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-
-        // Lowercase
-        $text = strtolower($text);
-
+        // Locale-independent ASCII folding preserves the decoded UTF-8 bytes.
+        $text = strtr($text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz');
         // Replace non-alpha characters with spaces (keeps Unicode letters via \p{L})
         $text = preg_replace('/[^\p{L}]+/u', ' ', $text);
         if (!is_string($text)) {

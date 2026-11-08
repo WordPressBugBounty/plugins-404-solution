@@ -165,7 +165,7 @@ if (!function_exists('abj404_opcache_collect_plugin_php_files')) {
      *
      * Symlinked directories are not followed. A self-referential link inside
      * the plugin directory would otherwise make this walk run forever at boot
-     * (this repository has one: `vendor/vendor`), and code reached only through
+     * (for example, a `vendor/vendor` link to its parent), and code reached only through
      * a link out of the plugin directory is not this plugin's bytecode to flush.
      *
      * @param string $root       Absolute directory to walk.
@@ -246,12 +246,30 @@ if (!function_exists('abj404_opcache_read_version_stamp')) {
      *                     means the change cannot be gated and must be skipped.
      */
     function abj404_opcache_read_version_stamp() {
-        if (function_exists('get_site_option')) {
-            $stamp = get_site_option(ABJ404_OPCACHE_VERSION_OPTION, '');
-        } elseif (function_exists('get_option')) {
-            $stamp = get_option(ABJ404_OPCACHE_VERSION_OPTION, '');
-        } else {
+        $network = function_exists('get_site_option');
+        if (!$network && !function_exists('get_option')) {
             return null;
+        }
+        $name = ABJ404_OPCACHE_VERSION_OPTION;
+        $stamp = $network ? get_site_option($name, '') : get_option($name, '');
+        if (!is_string($stamp) && function_exists('wp_cache_delete')) {
+            // A persistent object cache answered with a value this file never
+            // writes (the plugin's shape-recovering reader is not loaded yet):
+            // drop the cached entries so WordPress reads the options table.
+            $multisite = $network && function_exists('is_multisite') && is_multisite();
+            $networkId = $multisite && function_exists('get_current_network_id') ? (int) get_current_network_id() : 1;
+            if ($multisite) {
+                wp_cache_delete($networkId . ':' . $name, 'site-options');
+                wp_cache_delete($networkId . ':notoptions', 'site-options');
+            } else {
+                wp_cache_delete($name, 'options');
+                wp_cache_delete('notoptions', 'options');
+                $allOptions = function_exists('wp_cache_get') ? wp_cache_get('alloptions', 'options') : false;
+                if (!is_array($allOptions) || array_key_exists($name, $allOptions)) {
+                    wp_cache_delete('alloptions', 'options');
+                }
+            }
+            $stamp = $network ? get_site_option($name, '') : get_option($name, '');
         }
         return is_string($stamp) ? $stamp : '';
     }

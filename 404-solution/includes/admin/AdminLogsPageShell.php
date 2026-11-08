@@ -15,12 +15,16 @@ class ABJ_404_Solution_AdminLogsPageShell {
     private $logic;
     /** @var ABJ_404_Solution_View_Shared */
     private $shared;
+    /** @var ABJ_404_Solution_View_ListTableChrome */
+    private $listTableChrome;
 
     public function __construct(ABJ_404_Solution_Functions $functions,
-            ABJ_404_Solution_PluginLogic $pluginLogic, ABJ_404_Solution_View_Shared $shared) {
+            ABJ_404_Solution_PluginLogic $pluginLogic, ABJ_404_Solution_View_Shared $shared,
+            ABJ_404_Solution_View_ListTableChrome $listTableChrome) {
         $this->f = $functions;
         $this->logic = $pluginLogic;
         $this->shared = $shared;
+        $this->listTableChrome = $listTableChrome;
     }
 
     /** @return string */
@@ -29,12 +33,13 @@ class ABJ_404_Solution_AdminLogsPageShell {
         $tableOptions = $this->logic->settingsUpdate()->getTableOptions($sub);
         $tableOptions = $this->logic->settingsUpdate()->sanitizePostData($tableOptions);
 
-        $perpage = array_key_exists('perpage', $tableOptions) && is_scalar($tableOptions['perpage']) ? $tableOptions['perpage'] : 25;
+        $rawPerpage = $tableOptions['perpage'] ?? 25;
+        $perpage = is_int($rawPerpage) || is_string($rawPerpage) ? $rawPerpage : 25;
         $orderby = array_key_exists('orderby', $tableOptions) && is_string($tableOptions['orderby']) ? $tableOptions['orderby'] : 'timestamp';
         $order = array_key_exists('order', $tableOptions) && is_string($tableOptions['order']) ? $tableOptions['order'] : 'DESC';
         $paginationNonce = wp_create_nonce('abj404_updatePaginationLink');
 
-        $perpageOptionsHtml = $this->renderPerPageOptions($perpage);
+        $perpageOptionsHtml = $this->listTableChrome->buildPerpageOptions($perpage);
         $searchForm = $this->renderSearchForm();
         $warmup = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . '/../html/tableWarmupPlaceholder.html');
 
@@ -84,21 +89,6 @@ class ABJ_404_Solution_AdminLogsPageShell {
             $warmup,
             esc_html__('Loading...', '404-solution'),
         );
-    }
-
-    /** @param mixed $perpage */
-    private function renderPerPageOptions($perpage): string {
-        $optionTpl = $this->tpl('viewLogsPerpageOption.html');
-        $html = '';
-        foreach (array(10, 25, 50, 100, 250) as $opt) {
-            $selected = ($perpage == $opt) ? ' selected' : '';
-            $html .= $this->f->str_replace(
-                array('{value}', '{selected_attr}'),
-                array((string)$opt, $selected),
-                $optionTpl
-            ) . "\n";
-        }
-        return $html;
     }
 
     private function renderSearchForm(): string {

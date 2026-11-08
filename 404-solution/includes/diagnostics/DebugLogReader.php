@@ -14,6 +14,12 @@ if (!defined('ABSPATH')) {
  * excerpts. It does not know where the log file lives; callers provide a
  * concrete path from the debug-log store.
  *
+ * Reads the file once and drives two collaborators with each chunk: the entry
+ * grammar and byte bounds are ABJ_404_Solution_DebugLogEntryFormat's, and the
+ * support-request window of recent entries is kept by
+ * ABJ_404_Solution_DebugLogSupportExcerpt. The reader keeps the latest error,
+ * its context and the recent tail.
+ *
  * @phpstan-type DebugLogSnapshot array{status: string, num: int, line: string|null,
  *     total_error_count: int, file_size: int, tail: string, latest_error_offset: int,
  *     error_context_start: int, error_context: string,
@@ -22,13 +28,19 @@ if (!defined('ABSPATH')) {
 class ABJ_404_Solution_DebugLogReader {
 
     /** Existing wire budget shared by the recent tail and anchored evidence. */
-    const REPORT_EVIDENCE_MAX_BYTES = 262144;
+    const REPORT_EVIDENCE_MAX_BYTES = ABJ_404_Solution_DebugLogEntryFormat::REPORT_EVIDENCE_MAX_BYTES;
 
     /** Maximum bytes reserved for an error that sits outside the recent tail. */
-    const ERROR_EXCERPT_MAX_BYTES = 65536;
+    const ERROR_EXCERPT_MAX_BYTES = ABJ_404_Solution_DebugLogEntryFormat::ERROR_EXCERPT_MAX_BYTES;
 
     /** Context retained immediately before the latest reportable error. */
     const ERROR_CONTEXT_PREFIX_BYTES = 8192;
+
+    /** Maximum bytes admitted from one physical line before continuation parsing. */
+    const MAX_PHYSICAL_LINE_BYTES = self::ERROR_EXCERPT_MAX_BYTES + 1;
+
+    /** Marker retained when a reportable entry reaches its byte budget. */
+    const TRUNCATION_MARKER = ABJ_404_Solution_DebugLogEntryFormat::TRUNCATION_MARKER;
 
     /** @var callable */
     private $errorLogger;
@@ -74,29 +86,20 @@ class ABJ_404_Solution_DebugLogReader {
         if (array_key_exists($debugFilePath, $this->snapshots)) {
             return $this->snapshots[$debugFilePath];
         }
-        $snapshot = $this->emptySnapshot('missing');
-        if ($debugFilePath === '' || !file_exists($debugFilePath)) {
+        $openedSnapshot = $this->openSnapshotFile($debugFilePath);
+        $snapshot = $this->emptySnapshot($openedSnapshot['status']);
+        $snapshot['file_size'] = $openedSnapshot['file_size'];
+        $handle = $openedSnapshot['handle'];
+        if ($handle === null) {
             return $this->snapshots[$debugFilePath] = $snapshot;
         }
 
-        $observedSize = @filesize($debugFilePath);
-        if (is_int($observedSize)) {
-            $snapshot['file_size'] = $observedSize;
-        }
-
-        $handle = @fopen($debugFilePath, 'rb');
-        if (!is_resource($handle)) {
-            call_user_func($this->errorLogger, 'Error reading log file (open failed).');
-            $snapshot['status'] = 'unreadable';
-            return $this->snapshots[$debugFilePath] = $snapshot;
-        }
-
-        $errorEntries = array();
-        $recentLines = array();
-        $currentEntry = array();
-        $collectingEntry = false;
+        $supportExcerpt = new ABJ_404_Solution_DebugLogSupportExcerpt();
         $collectingErrorLines = false;
+        $latestErrorTruncated = false;
         $linesRead = 0;
+        // Physical newline identity must remain compatible with the persisted sent-line watermark.
+        $atPhysicalLineStart = true;
         $bytesRead = 0;
         $tailChunks = array();
         $tailHead = 0;
@@ -105,13 +108,27 @@ class ABJ_404_Solution_DebugLogReader {
         $previousHead = 0;
         $previousByteCount = 0;
         $contextActive = false;
+        $readFailed = false;
         try {
-            while (($line = fgets($handle)) !== false) {
+            while (true) {
+                $read = ABJ_404_Solution_HostFilesystemCall::fgets($handle, self::MAX_PHYSICAL_LINE_BYTES);
+                if ($read['warning'] !== null) {
+                    $this->reportFilesystemFailure('debug log read warning', $debugFilePath, $read['warning']);
+                }
+                if ($read['result'] === false) {
+                    if ($read['warning'] !== null) {
+                        $readFailed = true;
+                    }
+                    break;
+                }
+                $line = $read['result'];
                 $line = (string)$line;
                 $lineOffset = $bytesRead;
                 $lineBytes = strlen($line);
                 $bytesRead += $lineBytes;
-                $linesRead++;
+                $isFirstChunkOfPhysicalLine = $atPhysicalLineStart;
+                $linesRead += (int)$isFirstChunkOfPhysicalLine;
+                $atPhysicalLineStart = substr($line, -1) === "\n";
                 $this->appendBoundedChunk(
                     $tailChunks,
                     $tailHead,
@@ -119,20 +136,16 @@ class ABJ_404_Solution_DebugLogReader {
                     $line,
                     self::REPORT_EVIDENCE_MAX_BYTES
                 );
-                $this->collectSupportExcerptLine(
-                    $line,
-                    $errorEntries,
-                    $recentLines,
-                    $currentEntry,
-                    $collectingEntry
-                );
+                $supportExcerpt->feed($line, $linesRead, $isFirstChunkOfPhysicalLine);
 
                 $errorMarker = stripos($line, '(ERROR)');
                 $isError = $errorMarker !== false
+                    && $snapshot['num'] !== $linesRead
                     && stripos($line, 'SQL query error: DELETE command denied to user') === false;
                 if ($isError) {
                     $snapshot['num'] = $linesRead;
-                    $snapshot['line'] = $line;
+                    $latestErrorTruncated = false;
+                    $snapshot['line'] = ABJ_404_Solution_DebugLogEntryFormat::boundedLine($line, $latestErrorTruncated);
                     $snapshot['total_error_count']++;
                     $markerOffset = (int)$errorMarker;
                     $snapshot['latest_error_offset'] = $lineOffset + $markerOffset;
@@ -151,8 +164,15 @@ class ABJ_404_Solution_DebugLogReader {
                     $contextActive = strlen($snapshot['error_context']) < self::ERROR_EXCERPT_MAX_BYTES;
                     $collectingErrorLines = true;
                 } else {
-                    if ($collectingErrorLines && $this->isContinuationLine($line)) {
-                        $snapshot['line'] .= "<BR/>\n" . $line;
+                    if ($collectingErrorLines
+                        && $snapshot['line'] !== null
+                        && ABJ_404_Solution_DebugLogEntryFormat::isContinuation($line, $isFirstChunkOfPhysicalLine)
+                    ) {
+                        ABJ_404_Solution_DebugLogEntryFormat::appendToText(
+                            $snapshot['line'],
+                            $line,
+                            $latestErrorTruncated
+                        );
                     } else {
                         $collectingErrorLines = false;
                     }
@@ -171,12 +191,16 @@ class ABJ_404_Solution_DebugLogReader {
                 );
             }
 
-            $this->storeCurrentSupportEntry($errorEntries, $currentEntry);
-            $snapshot['status'] = 'ok';
-            $snapshot['file_size'] = $bytesRead;
-            $snapshot['tail'] = implode('', $tailChunks);
-            $snapshot['error_entries'] = $errorEntries;
-            $snapshot['recent_lines'] = $recentLines;
+            $supportEvidence = $supportExcerpt->finish();
+            if (!$readFailed) {
+                $snapshot['status'] = 'ok';
+                $snapshot['file_size'] = $bytesRead;
+                $snapshot['tail'] = implode('', $tailChunks);
+                $snapshot['error_entries'] = $supportEvidence['error_entries'];
+                $snapshot['recent_lines'] = $supportEvidence['recent_lines'];
+            } else {
+                $snapshot = $this->emptySnapshot('unreadable');
+            }
         } catch (\Throwable $e) {
             call_user_func(
                 $this->errorLogger,
@@ -185,9 +209,79 @@ class ABJ_404_Solution_DebugLogReader {
             );
             $snapshot = $this->emptySnapshot('unreadable');
         } finally {
-            fclose($handle);
+            $closed = ABJ_404_Solution_HostFilesystemCall::fclose($handle);
+            if (!$closed['result'] || $closed['warning'] !== null) {
+                $this->reportFilesystemFailure('debug log close failed', $debugFilePath, $closed['warning']);
+                $snapshot = $this->emptySnapshot('unreadable');
+            }
         }
         return $this->snapshots[$debugFilePath] = $snapshot;
+    }
+
+    /**
+     * Admit one log file to the snapshot parser while retaining native causes.
+     *
+     * @return array{status: string, handle: resource|null, file_size: int}
+     */
+    private function openSnapshotFile(string $debugFilePath): array {
+        if ($debugFilePath === '') {
+            return array('status' => 'missing', 'handle' => null, 'file_size' => 0);
+        }
+
+        $exists = ABJ_404_Solution_HostFilesystemCall::fileExists($debugFilePath);
+        if (!$exists['result']) {
+            if ($exists['warning'] !== null) {
+                $this->reportFilesystemFailure('debug log existence check failed', $debugFilePath, $exists['warning']);
+            }
+            return array(
+                'status' => $exists['warning'] !== null ? 'unreadable' : 'missing',
+                'handle' => null,
+                'file_size' => 0,
+            );
+        }
+
+        $fileSize = 0;
+        $observedSize = ABJ_404_Solution_HostFilesystemCall::filesize($debugFilePath);
+        if ($observedSize['warning'] !== null) {
+            $this->reportFilesystemFailure('debug log size check failed', $debugFilePath, $observedSize['warning']);
+        }
+        if (is_int($observedSize['result'])) {
+            $fileSize = $observedSize['result'];
+        }
+
+        $opened = ABJ_404_Solution_HostFilesystemCall::fopen($debugFilePath, 'rb');
+        $handle = $opened['result'];
+        if ($opened['warning'] !== null) {
+            $this->reportFilesystemFailure('debug log open warning', $debugFilePath, $opened['warning']);
+        }
+        if (!is_resource($handle)) {
+            if ($opened['warning'] === null) {
+                $this->reportFilesystemFailure('debug log open failed', $debugFilePath, null);
+            }
+            return array('status' => 'unreadable', 'handle' => null, 'file_size' => $fileSize);
+        }
+
+        return array('status' => 'open', 'handle' => $handle, 'file_size' => $fileSize);
+    }
+
+    /**
+     * Preserve a host filesystem warning without routing it through the normal
+     * error logger, which would treat an expected hosting refusal as a plugin
+     * error and could re-enter this reader while it is already handling I/O.
+     *
+     * @param string $operation
+     * @param string $path
+     * @param string|null $warning
+     * @return void
+     */
+    private function reportFilesystemFailure(string $operation, string $path, ?string $warning): void {
+        $detail = $warning !== null ? ' (' . $warning . ')' : ' (unknown filesystem failure)';
+        if (function_exists('abj404_logPhpFallback')) {
+            abj404_logPhpFallback('logger-internal', $operation . ': ' . $path . $detail);
+            return;
+        }
+
+        call_user_func($this->errorLogger, $operation . ': ' . $path . $detail);
     }
 
     /**
@@ -243,82 +337,6 @@ class ABJ_404_Solution_DebugLogReader {
             $chunks[$head] = $trimmed;
             $byteCount -= $overflow;
         }
-    }
-
-    /**
-     * @param array<int, array<int, string>> $errorEntries
-     * @param array<int, string> $recentLines
-     * @param array<int, string> $currentEntry
-     * @param bool $collectingEntry
-     * @return void
-     */
-    private function collectSupportExcerptLine(
-        string $line,
-        array &$errorEntries,
-        array &$recentLines,
-        array &$currentEntry,
-        bool &$collectingEntry
-    ): void {
-        $this->rememberRecentLine($recentLines, $line);
-
-        if ($this->isReportableWarningOrError($line)) {
-            if ($collectingEntry) {
-                $this->storeCurrentSupportEntry($errorEntries, $currentEntry);
-            }
-            $currentEntry = array($line);
-            $collectingEntry = true;
-            return;
-        }
-
-        if ($collectingEntry && $this->isContinuationLine($line)) {
-            $currentEntry[] = $line;
-            return;
-        }
-
-        if ($collectingEntry) {
-            $this->storeCurrentSupportEntry($errorEntries, $currentEntry);
-        }
-        $collectingEntry = false;
-        $currentEntry = array();
-    }
-
-    /**
-     * @param array<int, string> $recentLines
-     * @return void
-     */
-    private function rememberRecentLine(array &$recentLines, string $line): void {
-        $recentLines[] = $line;
-        if (count($recentLines) > 20) {
-            array_shift($recentLines);
-        }
-    }
-
-    private function isReportableWarningOrError(string $line): bool {
-        $hasError = stripos($line, '(ERROR)') !== false;
-        $hasWarn = stripos($line, '(WARN)') !== false;
-        $isDeleteError = stripos($line, 'SQL query error: DELETE command denied to user') !== false;
-        return ($hasError || $hasWarn) && !$isDeleteError;
-    }
-
-    private function isContinuationLine(string $line): bool {
-        $f = abj_service('functions');
-        return !$f->regexMatch("^\d{4}[-]\d{2}[-]\d{2} .*\(\w+\):\s.*$", $line);
-    }
-
-    /**
-     * @param array<int, array<int, string>> $errorEntries
-     * @param array<int, string> $currentEntry
-     * @return void
-     */
-    private function storeCurrentSupportEntry(array &$errorEntries, array &$currentEntry): void {
-        if (empty($currentEntry)) {
-            return;
-        }
-        $errorEntries[] = $currentEntry;
-        if (count($errorEntries) > 15) {
-            array_shift($errorEntries);
-        }
-        $currentEntry = array();
     }
 
 }

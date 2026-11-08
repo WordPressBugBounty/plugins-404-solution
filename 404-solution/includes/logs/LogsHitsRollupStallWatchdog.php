@@ -27,10 +27,13 @@ if (!defined('ABSPATH')) {
  *   1. NOTHING ELSE COULD REBUILD IT. There is exactly one other moment at which
  *      the work is safe to do: after the response has been handed back to the
  *      web server, on an administrator's page render (never a visitor's
- *      front-end request, an AJAX call, or cron itself).
+ *      front-end request, ordinary AJAX call, or cron itself). The one
+ *      authenticated stats endpoint may explicitly opt in after its own gates.
  *      armDeferredRebuildIfCronIsNotExecuting() opens that path, and only on
- *      evidence -- the plugin's own event is stored AND is more than
- *      CRON_OVERDUE_SECONDS past due, which no healthy host produces. The
+ *      evidence -- the plugin's own event is stored and due AND the site has
+ *      proved WP-Cron is not dispatching (CronDispatchStallEvidence: some
+ *      stored event more than OVERDUE_SECONDS past due, now or earlier), which
+ *      no healthy host produces. The
  *      rebuild is detached from the response first
  *      (ABJ_404_Solution_ResponseDetach), so the "a shutdown rebuild blanks the
  *      admin page on LSAPI" hazard cannot occur: the page is already delivered.
@@ -73,20 +76,6 @@ class ABJ_404_Solution_LogsHitsRollupStallWatchdog {
     const NOTICE_THRESHOLD_SECONDS = 3600;
 
     /**
-     * How far past due the armed rebuild event must be before WP-Cron counts as
-     * not executing on this host.
-     *
-     * Generous on purpose. A site whose cron is driven out of band (the common
-     * DISABLE_WP_CRON plus a system crontab arrangement) runs it every one to
-     * fifteen minutes, and treating that as broken would move work off cron for
-     * no reason. Fifteen minutes past due is outside every healthy cadence and
-     * a site that has been stalled for weeks loses nothing by waiting for it.
-     *
-     * @var int
-     */
-    const CRON_OVERDUE_SECONDS = 900;
-
-    /**
      * Minimum wall-clock gap between two post-response rebuilds, site-wide.
      * Bounds the cost of the fallback to one rebuild per window no matter how
      * many admin page views happen inside it.
@@ -110,22 +99,29 @@ class ABJ_404_Solution_LogsHitsRollupStallWatchdog {
     /** @var bool Whether this request already armed the post-response rebuild. */
     private $deferredArmed = false;
 
+    /** @var callable():bool|null Whether a bounded generation needs another slice. */
+    private $hasPendingRebuild;
+
+    /** @var string Separates another rollup's deferred-work cooldown. */
+    private $flagNamespace;
+
     /**
      * @param ABJ_404_Solution_DatabaseNoticeStateHolder $noticeState Owns flag and notice persistence.
-     * @param callable():bool $rebuildIfStillNeeded Re-checks staleness and rebuilds; returns whether the rollup was refreshed.
-     * @param ABJ_404_Solution_Logging|null $logger
-     * @param ABJ_404_Solution_ScheduledEventInspector|null $inspector Read side of the cron store; owns no state.
+     * @param callable():bool $rebuildIfStillNeeded Re-checks staleness and rebuilds.
+     * @param array{logger?:ABJ_404_Solution_Logging|null,inspector?:ABJ_404_Solution_ScheduledEventInspector,
+     *     hasPendingRebuild?:callable():bool,flagNamespace?:string} $options Named optional collaborators and cooldown scope.
      */
     public function __construct(
         ABJ_404_Solution_DatabaseNoticeStateHolder $noticeState,
         callable $rebuildIfStillNeeded,
-        $logger = null,
-        ?ABJ_404_Solution_ScheduledEventInspector $inspector = null
+        array $options = array()
     ) {
         $this->noticeState = $noticeState;
         $this->rebuildIfStillNeeded = $rebuildIfStillNeeded;
-        $this->logger = $logger;
-        $this->inspector = $inspector !== null ? $inspector : new ABJ_404_Solution_ScheduledEventInspector();
+        $this->logger = $options['logger'] ?? null;
+        $this->inspector = $options['inspector'] ?? new ABJ_404_Solution_ScheduledEventInspector();
+        $this->hasPendingRebuild = $options['hasPendingRebuild'] ?? null;
+        $this->flagNamespace = $options['flagNamespace'] ?? '';
     }
 
     /**
@@ -167,44 +163,58 @@ class ABJ_404_Solution_LogsHitsRollupStallWatchdog {
 
     /**
      * Open the post-response rebuild path, but only on evidence that the cron
-     * event this plugin armed is not being executed.
+     * event this plugin armed is not being executed. An explicitly authorized
+     * bounded continuation may opt in from AJAX after its own request gates.
      *
+     * @param bool $allowAjax Whether this trusted endpoint may use the path.
      * @return bool Whether a post-response rebuild was armed for this request.
      */
-    public function armDeferredRebuildIfCronIsNotExecuting(): bool {
+    public function armDeferredRebuildIfCronIsNotExecuting(bool $allowAjax = false): bool {
         if ($this->deferredArmed || !function_exists('add_action')) {
             return false;
         }
-        // Only an administrator's page render may carry the rebuild: cron runs
-        // it inline, an AJAX request must not hold a worker open for it, and a
-        // visitor's front-end request (scheduleHitsTableRebuild() is reached
-        // from redirect matching) must never pay for it. On a buffering SAPI
+        // Only an administrator's page render may carry the rebuild by default:
+        // cron runs it inline, ordinary AJAX requests must not hold a worker
+        // open for it, and a visitor's front-end request (scheduleHitsTableRebuild()
+        // is reached from redirect matching) must never pay for it. The one
+        // authenticated bounded continuation may explicitly opt in. On a buffering SAPI
         // the page is detached first; on a streaming SAPI (neither finish
         // function exists) the page has already been sent as it was produced.
-        if (!ABJ_404_Solution_RequestKind::isAdminPageRender()) {
+        $adminPage = ABJ_404_Solution_RequestKind::isAdminPageRender();
+        $authorizedAjax = $allowAjax && ABJ_404_Solution_RequestKind::isAjax();
+        if (!$adminPage && !$authorizedAjax) {
             return false;
         }
-        if (!$this->cronIsNotExecuting()) {
+        $pending = $this->hasPendingRebuild !== null && (bool)call_user_func($this->hasPendingRebuild);
+        if (!$pending && !$this->cronIsNotExecuting()) {
             return false;
         }
-        if (!$this->claimDeferredRebuildWindow()) {
+        // The cooldown admits a NEW rebuild. Charging it for each deliberately
+        // yielded slice would strand a cron-dead host for fifteen minutes per
+        // chunk. Existing progress gets one bounded slice per admin render.
+        if (!$pending && !$this->claimDeferredRebuildWindow()) {
             return false;
         }
         $this->deferredArmed = true;
+        // WordPress 6.9+ spawns cron at shutdown priority 10. Admit this
+        // bounded slice first, before a spawned worker can take its lease.
         add_action('shutdown', function (): void {
             $this->runDeferredRebuild();
-        });
+        }, 9);
         return true;
     }
 
     /**
-     * Whether the rebuild event this plugin armed is so far past due that
-     * WP-Cron cannot be executing it on this host.
+     * Whether the rebuild event this plugin armed is due on a site that has
+     * proved WP-Cron is not dispatching, so cron cannot be executing it.
      *
      * Behavioural rather than configuration-sniffing on purpose: DISABLE_WP_CRON
      * is set on plenty of sites that run cron perfectly well from a system
      * crontab, and it is unset on sites whose loopback request is refused with a
-     * 403 by a security plugin. Only the store's own answer separates them.
+     * 403 by a security plugin. Only the store's own answer separates them, and
+     * CronDispatchStallEvidence is the one place that reads it, so this
+     * watchdog, the n-gram fallback and the queued-event continuations cannot
+     * disagree about whether cron runs.
      *
      * @return bool
      */
@@ -222,10 +232,10 @@ class ABJ_404_Solution_LogsHitsRollupStallWatchdog {
             );
             return false;
         }
-        if ($event === null) {
+        if ($event === null || $event['timestamp'] > abj_clock()->now()) {
             return false;
         }
-        return (abj_clock()->now() - $event['timestamp']) > self::CRON_OVERDUE_SECONDS;
+        return (new ABJ_404_Solution_CronDispatchStallEvidence(abj_cron_scheduler(), $this->inspector))->isProven($event['timestamp']);
     }
 
     /**
@@ -256,14 +266,14 @@ class ABJ_404_Solution_LogsHitsRollupStallWatchdog {
      * @return bool
      */
     private function claimDeferredRebuildWindow(): bool {
-        $rawLast = $this->noticeState->getRuntimeFlag(self::DEFERRED_REBUILD_FLAG);
+        $rawLast = $this->noticeState->getRuntimeFlag(self::DEFERRED_REBUILD_FLAG . $this->flagNamespace);
         $lastAttempt = is_scalar($rawLast) ? (int)$rawLast : 0;
         $now = abj_clock()->now();
         if ($lastAttempt > 0 && ($now - $lastAttempt) < self::DEFERRED_REBUILD_COOLDOWN_SECONDS) {
             return false;
         }
         $this->noticeState->setRuntimeFlag(
-            self::DEFERRED_REBUILD_FLAG,
+            self::DEFERRED_REBUILD_FLAG . $this->flagNamespace,
             $now,
             self::DEFERRED_REBUILD_COOLDOWN_SECONDS
         );
@@ -290,24 +300,25 @@ class ABJ_404_Solution_LogsHitsRollupStallWatchdog {
      * @return void
      */
     private function raiseStallNotice(int $ageSeconds): void {
-        if ($this->foreignNoticeIsLive()) {
-            return;
-        }
-        $hours = max(1, intval(floor($ageSeconds / 3600)));
-        $template = 'The Hits and Last Used columns on the Page Redirects screen have been out of date for at least %d hour(s). 404 Solution has not been able to finish rebuilding its hit-count summary in that time.';
-        $message = sprintf(
-            function_exists('__')
-                ? __('The Hits and Last Used columns on the Page Redirects screen have been out of date for at least %d hour(s). 404 Solution has not been able to finish rebuilding its hit-count summary in that time.', '404-solution')
-                : $template,
-            $hours
-        );
-        $this->noticeState->setPluginDbNotice(
-            self::NOTICE_TYPE,
-            $message,
-            $this->stallGuidance(),
-            '',
-            ABJ_404_Solution_DatabaseNoticeStateHolder::SEVERITY_WARNING
-        );
+        // The foreign-notice check runs where the notice is written, so a notice
+        // another subsystem raises while this one waits for translation is kept.
+        ABJ_404_Solution_DeferredTranslation::whenReady(function () use ($ageSeconds): void {
+            if ($this->foreignNoticeIsLive()) {
+                return;
+            }
+            $hours = max(1, intval(floor($ageSeconds / 3600)));
+            $message = sprintf(
+                __('The Hits and Last Used columns on the Page Redirects screen have been out of date for at least %d hour(s). 404 Solution has not been able to finish rebuilding its hit-count summary in that time.', '404-solution'),
+                $hours
+            );
+            $this->noticeState->setPluginDbNotice(
+                self::NOTICE_TYPE,
+                $message,
+                $this->stallGuidance(),
+                '',
+                ABJ_404_Solution_DatabaseNoticeStateHolder::SEVERITY_WARNING
+            );
+        });
     }
 
     /**
@@ -319,16 +330,10 @@ class ABJ_404_Solution_LogsHitsRollupStallWatchdog {
      * @return string
      */
     private function stallGuidance(): string {
-        $cronText = "This site's WP-Cron is not running the plugin's scheduled rebuild. If DISABLE_WP_CRON is set in wp-config.php, either remove it or configure a system cron job that requests wp-cron.php periodically. In the meantime 404 Solution retries the rebuild in the background after an admin page has finished loading.";
-        $rebuildText = 'The scheduled rebuild is being picked up but is not completing. Enable debug logging on the 404 Solution Options screen and check the log for the reason the rebuild stopped.';
         if ($this->cronIsNotExecuting()) {
-            return function_exists('__')
-                ? __("This site's WP-Cron is not running the plugin's scheduled rebuild. If DISABLE_WP_CRON is set in wp-config.php, either remove it or configure a system cron job that requests wp-cron.php periodically. In the meantime 404 Solution retries the rebuild in the background after an admin page has finished loading.", '404-solution')
-                : $cronText;
+            return __("This site's WP-Cron is not running the plugin's scheduled rebuild. If DISABLE_WP_CRON is set in wp-config.php, either remove it or configure a system cron job that requests wp-cron.php periodically. In the meantime 404 Solution retries the rebuild in the background after an admin page has finished loading.", '404-solution');
         }
-        return function_exists('__')
-            ? __('The scheduled rebuild is being picked up but is not completing. Enable debug logging on the 404 Solution Options screen and check the log for the reason the rebuild stopped.', '404-solution')
-            : $rebuildText;
+        return __('The scheduled rebuild is being picked up but is not completing. Enable debug logging on the 404 Solution Options screen and check the log for the reason the rebuild stopped.', '404-solution');
     }
 
     /** @return bool Whether a live plugin database notice belongs to another subsystem. */

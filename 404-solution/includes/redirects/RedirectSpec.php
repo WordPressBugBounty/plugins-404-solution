@@ -29,8 +29,12 @@ if (!defined('ABSPATH')) {
  *   - disabled: 0/1 flag (int, default 0).
  *   - engine:  optional engine name producing this redirect (string|null).
  *   - score:   optional match score (float|null).
+ *   - timestamp: optional source timestamp for migrations (int|null).
  */
 final class ABJ_404_Solution_RedirectSpec {
+
+    /** @var string|null */
+    private $queryMode;
 
     /** @var string */
     private $fromURL;
@@ -48,6 +52,8 @@ final class ABJ_404_Solution_RedirectSpec {
     private $engine;
     /** @var float|null */
     private $score;
+    /** @var int|null */
+    private $timestamp;
 
     /**
      * @param string $fromURL
@@ -58,6 +64,7 @@ final class ABJ_404_Solution_RedirectSpec {
      * @param int $disabled
      * @param string|null $engine
      * @param float|null $score
+     * @param int|null $timestamp
      */
     private function __construct(
         $fromURL,
@@ -67,8 +74,11 @@ final class ABJ_404_Solution_RedirectSpec {
         $code,
         $disabled,
         $engine,
-        $score
+        $score,
+        ?int $timestamp = null,
+        ?string $queryMode = null
     ) {
+        $this->queryMode = $queryMode;
         $this->fromURL = (string)$fromURL;
         $this->status = $status;
         $this->type = $type;
@@ -77,6 +87,7 @@ final class ABJ_404_Solution_RedirectSpec {
         $this->disabled = (int)$disabled;
         $this->engine = ($engine === null) ? null : (string)$engine;
         $this->score = ($score === null) ? null : (float)$score;
+        $this->timestamp = $timestamp;
     }
 
     /**
@@ -104,7 +115,34 @@ final class ABJ_404_Solution_RedirectSpec {
                 : null,
             array_key_exists('score', $fields) && $fields['score'] !== null
                 ? self::requiredFloat($fields, 'score')
-                : null
+                : null,
+            array_key_exists('timestamp', $fields) && $fields['timestamp'] !== null
+                ? self::requiredInt($fields, 'timestamp')
+                : null,
+            ABJ_404_Solution_QueryStringHelper::queryMode($fields['query_mode'] ?? null)
+        );
+    }
+
+    /**
+     * Return the named, stable representation used by durable intent JSON.
+     *
+     * The explicit key order is part of the canonical payload hash contract;
+     * callers must not serialize the object or infer its fields positionally.
+     *
+     * @return array<string, mixed>
+     */
+    public function toArray(): array {
+        return array(
+            'fromURL' => $this->fromURL,
+            'status' => $this->status,
+            'type' => $this->type,
+            'finalDest' => $this->finalDest,
+            'code' => $this->code,
+            'disabled' => $this->disabled,
+            'engine' => $this->engine,
+            'score' => $this->score,
+            'timestamp' => $this->timestamp,
+            'query_mode' => $this->queryMode,
         );
     }
 
@@ -161,6 +199,9 @@ final class ABJ_404_Solution_RedirectSpec {
         return (float)$fields[$name];
     }
 
+    /** @return string|null */
+    public function getQueryMode(): ?string { return $this->queryMode; }
+
     /** @return string */
     public function getFromURL(): string { return $this->fromURL; }
 
@@ -185,6 +226,9 @@ final class ABJ_404_Solution_RedirectSpec {
     /** @return float|null */
     public function getScore() { return $this->score; }
 
+    /** @return int|null */
+    public function getTimestamp(): ?int { return $this->timestamp; }
+
     /**
      * Return a new spec with the fromURL replaced. Used by callers that need
      * to normalize the URL after construction (e.g. relative-path conversion).
@@ -201,7 +245,9 @@ final class ABJ_404_Solution_RedirectSpec {
             $this->code,
             $this->disabled,
             $this->engine,
-            $this->score
+            $this->score,
+            $this->timestamp,
+            $this->queryMode
         );
     }
 }

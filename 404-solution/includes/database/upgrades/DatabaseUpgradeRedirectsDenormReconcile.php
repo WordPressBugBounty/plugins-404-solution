@@ -37,7 +37,7 @@ if (!defined('ABSPATH')) {
  * in one pass. Progress is a resumable id cursor persisted in a wp_options key:
  * each invocation walks `WHERE id > cursor ORDER BY id ASC LIMIT chunkSize`,
  * advancing the cursor per chunk, until the time budget is spent (cursor
- * persists, the next nightly tick resumes mid-table) or the backlog drains
+ * persists, a bounded continuation of that nightly sweep resumes mid-table) or the backlog drains
  * (cursor resets to 0 so the next tick starts a fresh full pass). Recompute is
  * idempotent, so an interrupted run resumes cleanly and a re-run is a no-op on
  * values that were already correct.
@@ -61,9 +61,12 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsDenormReconcile extends ABJ_404_S
      *   - the dest_for_view column is missing (column add has not happened yet),
      *   - a DB write block is active (read-only replica / disk full).
      *
+     * @param ?callable $onPassComplete Notifies the daily orchestrator when the
+     *   entire sweep has completed, including an empty table. Failure and budget
+     *   exhaustion never notify, so the same nightly pass remains resumable.
      * @return int Number of redirect rows recomputed in this invocation.
      */
-    public function reconcileRedirectsDenormColumns(): int {
+    public function reconcileRedirectsDenormColumns(?callable $onPassComplete = null): int {
         global $wpdb;
         if (!isset($wpdb)) {
             return 0;
@@ -74,7 +77,7 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsDenormReconcile extends ABJ_404_S
         // Routing through queryAndGetResults would log a benign "table doesn't
         // exist" error on freshly-installed sites before create-tables has run.
         // DAO-bypass-approved: schema existence probe, see comment above.
-        $found = $wpdb->get_var("SHOW TABLES LIKE '" . esc_sql($redirectsTable) . "'");
+        $found = ABJ_404_Solution_DatabaseDriverCall::getVar($wpdb, "SHOW TABLES LIKE '" . esc_sql($redirectsTable) . "'");
         if ($found !== $redirectsTable) {
             return 0;
         }
@@ -90,17 +93,34 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsDenormReconcile extends ABJ_404_S
             return 0;
         }
 
-        $chunkSize = (int)$this->getRedirectsDenormReconcileChunkSize();
-        if ($chunkSize < 1) {
-            $chunkSize = 1;
-        }
+        $batchSizer = new ABJ_404_Solution_DatabaseMaintenanceBatchSizer(array(
+            'initial_size' => (int)$this->getRedirectsDenormReconcileChunkSize(),
+            'maximum_size' => 5000,
+            'maximum_sparse_size' => 1000,
+        ));
         $timeBudget = (float)$this->getRedirectsDenormReconcileTimeBudgetSec();
         $cursor = $this->readReconcileCursor();
         $start = abj_clock()->nowFloat();
         $totalReconciled = 0;
+        if (is_callable(array(ABJ_404_Solution_RedirectsDenormChunkResolver::class, 'forPass'))) {
+            $resolveChunk = ABJ_404_Solution_RedirectsDenormChunkResolver::forPass(
+                $this->dbCore, $this->logger, $redirectsTable, true
+            );
+        } else {
+            // An in-flight plugin request may retain the older resolver API.
+            $dbCore = $this->dbCore;
+            $logger = $this->logger;
+            $resolveChunk = static function (array $ids) use ($dbCore, $logger, $redirectsTable): bool {
+                return ABJ_404_Solution_RedirectsDenormChunkResolver::resolveChunk(
+                    $dbCore, $logger, $redirectsTable, $ids, true
+                );
+            };
+        }
 
         while ((abj_clock()->nowFloat() - $start) < $timeBudget) {
-            $ids = $this->fetchNextReconcileChunkIds($redirectsTable, $cursor, $chunkSize);
+            $iterationStart = abj_clock()->nowFloat();
+            $requestedLimit = $batchSizer->limit();
+            $ids = $this->fetchNextReconcileChunkIds($redirectsTable, $cursor, $requestedLimit);
             if ($ids === null) {
                 // Read error already warned about; leave the cursor where it is
                 // so the next tick re-reads this range, and stop so we don't spin.
@@ -108,12 +128,18 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsDenormReconcile extends ABJ_404_S
             }
             if (empty($ids)) {
                 // No rows past the cursor: a full pass completed. Reset so the
-                // next nightly tick starts a fresh sweep from the top.
+                // next nightly tick starts a fresh sweep from the top. The
+                // daily orchestrator retires this pass's continuation chain.
                 $this->resetReconcileCursor();
+                if ($onPassComplete !== null) {
+                    $onPassComplete();
+                }
                 break;
             }
-            if (!ABJ_404_Solution_RedirectsDenormChunkResolver::resolveChunk(
-                    $this->dbCore, $this->logger, $redirectsTable, $ids, true)) {
+            $fetchedCount = count($ids);
+            $ids = $batchSizer->boundedIds($ids);
+            $lastChunk = $fetchedCount < $requestedLimit && count($ids) === $fetchedCount;
+            if (!$resolveChunk($ids)) {
                 // Write error: leave the cursor at the last fully-resolved chunk
                 // so the next tick retries this one. Never reset on failure.
                 return $totalReconciled;
@@ -121,9 +147,13 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsDenormReconcile extends ABJ_404_S
             $cursor = (int)max($ids);
             $this->writeReconcileCursor($cursor);
             $totalReconciled += count($ids);
-            if (count($ids) < $chunkSize) {
+            $batchSizer->observe($ids, abj_clock()->nowFloat() - $iterationStart);
+            if ($lastChunk) {
                 // Last (partial) chunk drained the table: pass complete, reset.
                 $this->resetReconcileCursor();
+                if ($onPassComplete !== null) {
+                    $onPassComplete();
+                }
                 break;
             }
         }
@@ -154,22 +184,25 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsDenormReconcile extends ABJ_404_S
     private function fetchNextReconcileChunkIds(string $redirectsTable, int $cursor, int $chunkSize): ?array {
         $result = $this->dbCore->queryAndGetResults(
             "SELECT id FROM " . $redirectsTable .
-            " WHERE id > " . (int)$cursor . " ORDER BY id ASC LIMIT " . $chunkSize
+            " FORCE INDEX (PRIMARY) WHERE id > " . (int)$cursor . " ORDER BY id ASC LIMIT " . $chunkSize
         );
         $lastError = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
-        if ($lastError !== '') {
+        if (($result['query_succeeded'] ?? null) !== true
+                || (array_key_exists('timed_out', $result) && $result['timed_out'] !== false)
+                || $lastError !== '' || !array_key_exists('rows', $result) || !is_array($result['rows'])) {
             $this->logger->warn("reconcileRedirectsDenormColumns: stopping after read error: " . $lastError);
             return null;
         }
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+        $rows = $result['rows'];
         $ids = array();
         foreach ($rows as $row) {
             $id = is_array($row)
                 ? ABJ_404_Solution_ExactInteger::read($row['id'] ?? null, 1)
                 : null;
-            if ($id !== null) {
-                $ids[] = $id;
+            if ($id === null) {
+                return null;
             }
+            $ids[] = $id;
         }
         return $ids;
     }
@@ -184,7 +217,7 @@ class ABJ_404_Solution_DatabaseUpgradeRedirectsDenormReconcile extends ABJ_404_S
         if (!function_exists('get_option')) {
             return 0;
         }
-        $raw = get_option($this->getRedirectsDenormReconcileCursorOption(), 0);
+        $raw = ABJ_404_Solution_OptionShapeRead::scalar($this->getRedirectsDenormReconcileCursorOption(), 0);
         $cursor = is_scalar($raw) ? (int)$raw : 0;
         return max(0, $cursor);
     }

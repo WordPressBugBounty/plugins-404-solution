@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
  * editing a query.
  *
  * @phpstan-type Row array{started_at_ms: int, channel: string, action: string, pid: int|null, phase?: string, timeline?: string}
- * @phpstan-type Entry array{option_name: string, started_at_ms: int, channel: string, action: string, pid: int|null, phase: string, timeline: string}
+ * @phpstan-type Entry array{option_name: string, raw_value: string, started_at_ms: int, channel: string, action: string, pid: int|null, phase: string, timeline: string}
  */
 final class ABJ_404_Solution_SameSiteRequestRowCodec {
 
@@ -69,7 +69,7 @@ final class ABJ_404_Solution_SameSiteRequestRowCodec {
      * @return string
      */
     public static function encode(array $row): string {
-        $timeline = str_replace('|', '', substr($row['timeline'] ?? '', 0, self::MAX_TIMELINE_CHARS));
+        $timeline = str_replace('|', '', ABJ_404_Solution_RequestPhaseTimeline::bound($row['timeline'] ?? ''));
         $pid = $row['pid'];
         $fields = $row['started_at_ms'] . '|' . $row['channel'] . '|' . $row['action'] . '|'
             . ($pid !== null ? (string)$pid : '')
@@ -140,6 +140,10 @@ final class ABJ_404_Solution_SameSiteRequestRowCodec {
         }
         return array(
             'option_name' => $name,
+            // The disposer needs the exact bytes observed by readAll(). A
+            // re-encoded decoded row can differ on legacy/truncated fields,
+            // and must never authorize deleting a changed row.
+            'raw_value' => $raw,
             'started_at_ms' => (int)$parts[0],
             'channel' => substr($parts[1], 0, 16),
             'action' => substr($parts[2], 0, 64),

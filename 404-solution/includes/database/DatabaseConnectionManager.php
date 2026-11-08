@@ -89,7 +89,12 @@ class ABJ_404_Solution_DatabaseConnectionManager {
                 $this->logger->debugMessage("Database connection lost, attempting to reconnect...");
 
                 if (is_object($wpdb) && method_exists($wpdb, 'db_connect')) {
-                    $reconnect = static fn() => $wpdb->db_connect();
+                    // $allow_bail = false: with the default, a refused connect
+                    // runs wpdb::bail(), which wp_die()s the request while
+                    // show_errors is on and otherwise returns false without
+                    // setting last_error. The plugin's own probe must never
+                    // end the request, and the cause is read below instead.
+                    $reconnect = static fn() => $wpdb->db_connect(false);
                     if ($preflight === null) {
                         $reconnect();
                     } else {
@@ -113,16 +118,15 @@ class ABJ_404_Solution_DatabaseConnectionManager {
                     return true;
                 }
 
-                // wpdb's own error is the reason the reconnect failed; without
-                // it this ERROR says only that something is wrong.
-                $wpdbError = (isset($wpdb->last_error) && is_string($wpdb->last_error))
-                    ? $wpdb->last_error : '';
-                // A host-side cause (server gone away, read-only, access denied) is
-                // recorded by the classifier as a WARN plus the plugin-page notice
-                // state; only a cause it does not recognise is an ERROR.
-                if (!$this->core->errorClassifier()->classifyAndHandleInfrastructureError($wpdbError)) {
-                    $this->logger->errorMessage("Failed to reconnect to database"
-                        . ($wpdbError !== '' ? ' (wpdb last_error: ' . $wpdbError . ')' : ' (wpdb reported no last_error)'));
+                // A reconnect the server refuses is the host's database being
+                // down, unreachable or out of connections: the plugin cannot
+                // repair it and the statement that needed the connection
+                // reports its own failure, so it is a WARN (defensive rule 8),
+                // never an ERROR that mails the developer. The recognised
+                // causes also set the plugin-page notice state.
+                $cause = $this->reconnectFailureCause($wpdb);
+                if (!$this->core->errorClassifier()->classifyAndHandleInfrastructureError($cause['error'])) {
+                    $this->logger->warn('Failed to reconnect to database (' . $cause['description'] . ')');
                 }
                 return false;
             }
@@ -135,6 +139,40 @@ class ABJ_404_Solution_DatabaseConnectionManager {
         }
 
         return true;
+    }
+
+    /**
+     * The reason a reconnect failed, from the best evidence still readable.
+     *
+     * wpdb::db_connect(false) leaves last_error untouched on a refused
+     * connect and drops its handle, so the mysqli client's own record of the
+     * last connect attempt in this process is the only cause left. A drop-in
+     * that is not mysqli-backed may leave neither, and the text says so.
+     *
+     * @param object $wpdb
+     * @return array{error: string, description: string} The raw error text
+     *   for the infrastructure classifier, and the labelled cause for the log.
+     */
+    private function reconnectFailureCause($wpdb): array {
+        $wpdbError = (isset($wpdb->last_error) && is_string($wpdb->last_error))
+            ? trim($wpdb->last_error) : '';
+        if ($wpdbError !== '') {
+            return array('error' => $wpdbError, 'description' => 'wpdb last_error: ' . $wpdbError);
+        }
+        $connectErrno = function_exists('mysqli_connect_errno') ? mysqli_connect_errno() : 0;
+        if ($connectErrno !== 0) {
+            $connectError = function_exists('mysqli_connect_error') ? mysqli_connect_error() : null;
+            $connectError = is_string($connectError) ? trim($connectError) : '';
+            return array(
+                'error' => $connectError,
+                'description' => 'wpdb reported no last_error; last mysqli connect error ' . $connectErrno
+                    . ($connectError !== '' ? ': ' . $connectError : ''),
+            );
+        }
+        return array(
+            'error' => '',
+            'description' => 'wpdb reported no last_error and the mysqli client recorded no connect error',
+        );
     }
 
     /**

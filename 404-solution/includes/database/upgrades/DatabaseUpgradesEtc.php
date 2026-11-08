@@ -43,6 +43,10 @@ require_once __DIR__ . '/DatabaseUpgradeBootstrap.php';
  */
 class ABJ_404_Solution_DatabaseUpgradesEtc {
 
+    /** Independent schema revision; avoids a plugin release bump for DDL changes. */
+    const SCHEMA_REVISION = 4;
+
+
 	/** @var self|null */
 	private static $instance = null;
 

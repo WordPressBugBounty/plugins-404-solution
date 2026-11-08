@@ -49,7 +49,8 @@ if (!function_exists('abj404_get_simulated_db_latency_ms')) {
 		if (defined('ABJ404_SIMULATED_DB_LATENCY_MS')) {
 			return max(0, min(5000, absint(ABJ404_SIMULATED_DB_LATENCY_MS)));
 		}
-		$value = get_option('abj404_simulated_db_latency_ms', 0);
+		$value = function_exists('abj404_option_shape_read_available') && abj404_option_shape_read_available()
+			? ABJ_404_Solution_OptionShapeRead::scalar('abj404_simulated_db_latency_ms', 0) : 0;
 		return max(0, min(5000, absint(is_scalar($value) ? $value : 0)));
 	}
 }

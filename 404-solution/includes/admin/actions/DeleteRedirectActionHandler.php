@@ -26,9 +26,9 @@ class ABJ_404_Solution_DeleteRedirectActionHandler {
             return '';
         }
 
-        $id = $_GET['id'] ?? '';
-        if ($this->parent->getFunctions()->regexMatch('[0-9]+', $id)) {
-            $this->parent->getRedirectsRepo()->deleteRedirect(absint($id));
+        $id = ABJ_404_Solution_ExactInteger::readOr($_GET['id'] ?? null, 1, 0);
+        if ($id > 0) {
+            $this->parent->getRedirectsRepo()->deleteRedirect($id);
             return __('Redirect Removed Successfully!', '404-solution');
         }
 

@@ -63,7 +63,7 @@ class ABJ_404_Solution_TableIndexWriter {
      * Bring one index into existence with the definition the schema asks for.
      *
      * @param string $tableName Fully-qualified table name.
-     * @param array{name: string, columns: string, unique: bool} $spec The index the schema defines.
+     * @param array{name: string, columns: string, unique: bool, replace_existing?: bool} $spec The index the schema defines.
      *        `columns` carries its own parentheses, e.g. "(`a`, `b`(190))".
      * @param array{replace_existing?: bool, try_online_first?: bool} $options
      *        replace_existing: drop the same-named index in the SAME ALTER first, so a drifted
@@ -75,56 +75,86 @@ class ABJ_404_Solution_TableIndexWriter {
      * @return void
      */
     public function addIndex(string $tableName, array $spec, array $options = array()): void {
+        $this->addIndexes($tableName, array($spec), $options);
+    }
+
+    /**
+     * Bring a set of indexes into existence in one ALTER TABLE.
+     *
+     * The set is validated before any DDL is emitted. A batch uses the same
+     * options and per-index shape as addIndex(), with an optional per-index
+     * replacement override. It shares the table scan and online-DDL fallback
+     * so a large upgrade does not queue one table rebuild per index.
+     *
+     * @param string $tableName Fully-qualified table name.
+     * @param array<int, array{name: string, columns: string, unique: bool, replace_existing?: bool}> $specs
+     * @param array{replace_existing?: bool, try_online_first?: bool} $options
+     * @return void
+     */
+    public function addIndexes(string $tableName, array $specs, array $options = array()): void {
+        if ($specs === array()) {
+            return;
+        }
+        $specs = array_values($specs);
+        if (!$this->validateBatchInput($tableName, $specs, $options)) {
+            return;
+        }
+        $options = $this->normalizeBatchOptions($options);
+
         $replaceExisting = !empty($options['replace_existing']);
         $tryOnlineFirst = !array_key_exists('try_online_first', $options)
             || !empty($options['try_online_first']);
-
-        $statement = $this->buildAddIndexStatement(array(
+        $request = array(
             'tableName' => $tableName,
-            'spec' => $spec,
+            'specs' => $specs,
+            'options' => $options,
             'online' => $tryOnlineFirst,
             'replaceExisting' => $replaceExisting,
-        ));
+        );
+        $statement = $this->buildAddIndexesStatement($request);
         $lastError = $this->runStatement($statement);
 
-        if ($lastError !== '' && $tryOnlineFirst) {
-            if ($this->recordRedundantChange(array(
+        if ($lastError !== '') {
+            if ($this->recordRedundantBatchChange(array(
                 'tableName' => $tableName,
-                'spec' => $spec,
+                'specs' => $specs,
+                'options' => $options,
                 'lastError' => $lastError,
             ))) {
                 return;
             }
-            if (!$this->isOnlineDdlHintRejection($lastError)) {
-                $this->logger->errorMessage("Failed to add index {$spec['name']} to {$tableName}: " .
-                    $lastError . " (query: {$statement})");
-                return;
+            if ($tryOnlineFirst && $this->isOnlineDdlHintRejection($lastError)) {
+                $warningPrefix = count($specs) === 1
+                    ? "Online index add for {$specs[0]['name']} on {$tableName} failed; "
+                    : "Online index batch add on {$tableName} failed; ";
+                $this->logger->warn($warningPrefix .
+                    "retrying without online DDL hints: " . $lastError . " (query: {$statement})");
+                $request['online'] = false;
+                $statement = $this->buildAddIndexesStatement($request);
+                $lastError = $this->runStatement($statement);
+                if ($lastError !== '' && $this->recordRedundantBatchChange(array(
+                    'tableName' => $tableName,
+                    'specs' => $specs,
+                    'options' => $options,
+                    'lastError' => $lastError,
+                ))) {
+                    return;
+                }
             }
-            $this->logger->warn("Online index add for {$spec['name']} on {$tableName} failed; " .
-                "retrying without online DDL hints: " . $lastError . " (query: {$statement})");
-            $statement = $this->buildAddIndexStatement(array(
-                'tableName' => $tableName,
-                'spec' => $spec,
-                'online' => false,
-                'replaceExisting' => $replaceExisting,
-            ));
-            $lastError = $this->runStatement($statement);
         }
 
         if ($lastError !== '') {
-            if ($this->recordRedundantChange(array(
-                'tableName' => $tableName,
-                'spec' => $spec,
-                'lastError' => $lastError,
-            ))) {
-                return;
-            }
-            $this->logger->errorMessage("Failed to add index {$spec['name']} to {$tableName}: " .
+            $names = implode(', ', array_map(static function (array $spec): string {
+                return (string)$spec['name'];
+            }, $specs));
+            $label = count($specs) === 1 ? "index {$names}" : "indexes {$names}";
+            $this->logger->errorMessage("Failed to add {$label} to {$tableName}: " .
                 $lastError . " (query: {$statement})");
             return;
         }
 
-        $this->logger->infoMessage("I added an index: " . $statement);
+        $message = count($specs) === 1 ? 'I added an index: ' : 'I added indexes: ';
+        $this->logger->infoMessage($message . $statement);
     }
 
     /**
@@ -155,6 +185,172 @@ class ABJ_404_Solution_TableIndexWriter {
     }
 
     /**
+     * Validate every member before the first destructive statement.
+     *
+     * @param string $tableName
+     * @param array<int, mixed> $specs
+     * @param array<string, mixed> $options
+     * @return bool
+     */
+    private function validateBatchInput(string $tableName, array $specs, array $options): bool {
+        if (trim($tableName) === '') {
+            $this->logger->errorMessage('Cannot add indexes without a table name.');
+            return false;
+        }
+        foreach (array('replace_existing', 'try_online_first') as $optionName) {
+            if (array_key_exists($optionName, $options) && !is_bool($options[$optionName])) {
+                $this->logger->errorMessage("Cannot add indexes: option {$optionName} must be boolean.");
+                return false;
+            }
+        }
+
+        $seenNames = array();
+        foreach ($specs as $spec) {
+            if (!$this->validateBatchSpec($spec, $seenNames)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * @param mixed $spec
+     * @param array<string, bool> $seenNames
+     * @return bool
+     */
+    private function validateBatchSpec($spec, array &$seenNames): bool {
+        if (!is_array($spec)) {
+            $this->logger->errorMessage('Cannot add indexes: unreadable definition (unknown).');
+            return false;
+        }
+        $nameValue = $spec['name'] ?? null;
+        $name = is_string($nameValue) ? trim($nameValue) : '(non-string name)';
+        if (!is_string($nameValue) || $name === '') {
+            $this->logger->errorMessage("Cannot add indexes: unreadable definition {$name}.");
+            return false;
+        }
+
+        $columnsValue = $spec['columns'] ?? null;
+        if (!is_string($columnsValue) || trim($columnsValue) === '') {
+            $this->logger->errorMessage("Cannot add indexes: unreadable definition {$name}.");
+            return false;
+        }
+        $uniqueValue = $spec['unique'] ?? null;
+        if (!is_bool($uniqueValue)) {
+            $this->logger->errorMessage("Cannot add indexes: definition {$name} has no boolean unique flag.");
+            return false;
+        }
+        if (array_key_exists('replace_existing', $spec) && !is_bool($spec['replace_existing'])) {
+            $this->logger->errorMessage("Cannot add indexes: definition {$name} has no boolean replace_existing flag.");
+            return false;
+        }
+        $signatureSpec = array(
+            'name' => $name,
+            'columns' => trim($columnsValue),
+            'unique' => $uniqueValue,
+        );
+        if (ABJ_404_Solution_IndexDefinitionComparator::signatureOfDdlSpec($signatureSpec) === null) {
+            $this->logger->errorMessage("Cannot add indexes: unreadable definition {$name}.");
+            return false;
+        }
+
+        $normalizedName = strtolower($name);
+        if (isset($seenNames[$normalizedName])) {
+            $this->logger->errorMessage("Cannot add indexes: duplicate definition {$name}.");
+            return false;
+        }
+        $seenNames[$normalizedName] = true;
+        return true;
+    }
+
+    /**
+     * @param array<string, mixed> $options
+     * @return array{replace_existing?: bool, try_online_first?: bool}
+     */
+    private function normalizeBatchOptions(array $options): array {
+        $normalized = array();
+        foreach (array('replace_existing', 'try_online_first') as $optionName) {
+            if (array_key_exists($optionName, $options) && is_bool($options[$optionName])) {
+                $normalized[$optionName] = $options[$optionName];
+            }
+        }
+        return $normalized;
+    }
+
+    /**
+     * Interpret a redundant batch result against one metadata read, then use
+     * bounded single-index fallbacks only for goals still absent from that
+     * read. This avoids repeating an already-matching ALTER after a race while
+     * still repairing a partial multi-index result safely.
+     *
+     * @param array{tableName: string, specs: array<int, array{name: string, columns: string, unique: bool, replace_existing?: bool}>,
+     *        options: array{replace_existing?: bool, try_online_first?: bool}, lastError: string} $request
+     * @return bool True when the redundant error was handled.
+     */
+    private function recordRedundantBatchChange(array $request): bool {
+        $lastError = (string)$request['lastError'];
+        $specs = $request['specs'];
+        if (count($specs) === 1) {
+            return $this->recordRedundantChange(array(
+                'tableName' => $request['tableName'],
+                'spec' => $specs[0],
+                'lastError' => $lastError,
+            ));
+        }
+        if (!$this->dbCore->sqlErrorReporter()->isRedundantSchemaChangeError($lastError)) {
+            return false;
+        }
+
+        $tableName = $request['tableName'];
+        $liveDefinitions = (new ABJ_404_Solution_TableIndexDefinitions($this->dbCore))->readLive($tableName);
+        if ($liveDefinitions === null) {
+            foreach ($specs as $spec) {
+                $this->logger->warn("Index {$spec['name']} on {$tableName} was already there when this " .
+                    "process tried to add it, and the table's index metadata could not be read back to " .
+                    "confirm what it contains. Leaving it for the next upgrade tick to check.");
+            }
+            return true;
+        }
+
+        $missing = array();
+        foreach ($specs as $spec) {
+            $indexName = (string)$spec['name'];
+            $goalSignature = ABJ_404_Solution_IndexDefinitionComparator::signatureOfDdlSpec($spec);
+            $liveDefinition = $liveDefinitions[strtolower($indexName)] ?? null;
+            if ($goalSignature !== null && is_array($liveDefinition)
+                    && ABJ_404_Solution_IndexDefinitionComparator::signatureOfLiveDefinition($liveDefinition)
+                        === $goalSignature) {
+                $this->logger->infoMessage("Index {$indexName} on {$tableName} was added by another " .
+                    "process while this one was building it, and it matches the shipped definition.");
+                continue;
+            }
+            if (is_array($liveDefinition)) {
+                $this->logger->warn("Index {$indexName} on {$tableName} was already there when this process " .
+                    "tried to add it, but the server does not describe it as " . trim((string)$spec['columns']) .
+                    ". Leaving it for the drift check to repair.");
+                continue;
+            }
+            $missing[] = $spec;
+        }
+
+        if ($missing === array()) {
+            return true;
+        }
+
+        $fallbackOptions = $request['options'];
+        // A missing member cannot be dropped safely. The batch's duplicate
+        // answer came from another member, so the bounded fallback is an ADD.
+        $fallbackOptions['replace_existing'] = false;
+        foreach ($missing as $spec) {
+            // A missing member is an ADD-only fallback even when the original
+            // batch carried a replacement flag for a different member.
+            unset($spec['replace_existing']);
+            $this->addIndex($tableName, $spec, $fallbackOptions);
+        }
+        return true;
+    }
+
+    /**
      * Whether the statement failed only because the change had already been
      * made and -- when it had -- what the table actually ended up carrying.
      *
@@ -164,7 +360,7 @@ class ABJ_404_Solution_TableIndexWriter {
      * stops here, and what gets recorded is what the schema now says, read
      * back rather than assumed.
      *
-     * @param array{tableName: string, spec: array{name: string, columns: string, unique: bool},
+     * @param array{tableName: string, spec: array{name: string, columns: string, unique: bool, replace_existing?: bool},
      *        lastError: string} $request
      * @return bool True when the change was already applied and the caller must stop.
      */
@@ -206,17 +402,15 @@ class ABJ_404_Solution_TableIndexWriter {
     }
 
     /**
-     * Build a valid ALTER TABLE ... ADD INDEX statement for THIS server.
+     * Build one ALTER TABLE with all requested index clauses.
      *
-     * @param array{tableName: string, spec: array{name: string, columns: string, unique: bool},
-     *        online: bool, replaceExisting: bool} $request The table/index definition and
-     *        statement policy. replaceExisting emits "drop index `n`, add ..." so a drifted
-     *        index is swapped in one statement.
+     * @param array{tableName: string, specs: array<int, array{name: string, columns: string, unique: bool, replace_existing?: bool}>,
+     *        online: bool, replaceExisting: bool} $request
      * @return string
      */
-    private function buildAddIndexStatement(array $request): string {
+    private function buildAddIndexesStatement(array $request): string {
         $tableName = $request['tableName'];
-        $spec = $request['spec'];
+        $specs = $request['specs'];
         $online = $request['online'];
         $replaceExisting = $request['replaceExisting'];
         global $wpdb;
@@ -228,13 +422,20 @@ class ABJ_404_Solution_TableIndexWriter {
         $cleanedVersion = preg_replace('/[^\d\.]/', '', $serverVersion) ?? '';
         $supportsIfNotExists = $isMaria && version_compare($cleanedVersion, '10.5', '>=');
 
-        $indexName = (string)$spec['name'];
-        $indexType = !empty($spec['unique']) ? 'unique index' : 'index';
-        $ifNotExists = ($supportsIfNotExists && !$replaceExisting) ? ' if not exists' : '';
         $onlineClause = $online ? ', ALGORITHM=INPLACE, LOCK=NONE' : '';
-        $dropClause = $replaceExisting ? " drop index `" . $indexName . "`," : '';
-
-        return "alter table " . $tableName . $dropClause . " add " . $indexType . $ifNotExists .
-            " `" . $indexName . "` " . trim((string)$spec['columns']) . $onlineClause;
+        $clauses = array();
+        foreach ($specs as $spec) {
+            $indexName = (string)$spec['name'];
+            $indexType = !empty($spec['unique']) ? 'unique index' : 'index';
+            $replaceThisIndex = array_key_exists('replace_existing', $spec)
+                ? $spec['replace_existing'] : $replaceExisting;
+            $ifNotExists = ($supportsIfNotExists && !$replaceThisIndex) ? ' if not exists' : '';
+            if ($replaceThisIndex) {
+                $clauses[] = "drop index `" . $indexName . "`";
+            }
+            $clauses[] = "add " . $indexType . $ifNotExists . " `" . $indexName . "` " .
+                trim((string)$spec['columns']);
+        }
+        return "alter table " . $tableName . ' ' . implode(', ', $clauses) . $onlineClause;
     }
 }

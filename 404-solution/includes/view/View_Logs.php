@@ -111,7 +111,8 @@ class ABJ_404_Solution_View_Logs extends ABJ_404_Solution_ViewComponent {
 
     private function pageShell(): ABJ_404_Solution_AdminLogsPageShell {
         if ($this->pageShell === null) {
-            $this->pageShell = new ABJ_404_Solution_AdminLogsPageShell($this->f, $this->logic, $this->shared);
+            $this->pageShell = new ABJ_404_Solution_AdminLogsPageShell(
+                $this->f, $this->logic, $this->shared, $this->listTableChrome);
         }
         return $this->pageShell;
     }

@@ -63,11 +63,6 @@ class ABJ_404_Solution_AdminFatalErrorResponder {
         if (function_exists('set_transient')) {
             // allow-cache-empty: admin fatal stashes must persist even when PHP omits message/file details from error_get_last().
             set_transient('abj404_admin_fatal', $payload, $ttl);
-            return;
-        }
-
-        if (function_exists('update_option')) {
-            update_option('abj404_admin_fatal_fallback', $payload);
         }
     }
 

@@ -5,7 +5,8 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * Reads aggregate statistics used by admin dashboards and periodic summaries.
+ * Background aggregate SQL and legacy diagnostics. Request callers use the
+ * published-only StatsRepository facade; its cache never invokes these scans.
  */
 class ABJ_404_Solution_StatsReadRepository {
 
@@ -22,6 +23,8 @@ class ABJ_404_Solution_StatsReadRepository {
     private $logger;
     /** @var ABJ_404_Solution_StatsRefreshLock */
     private $refreshLock;
+    /** @var ABJ_404_Solution_PeriodicStatsRepository */
+    private $periodicStatsRepository;
 
     /**
      * @param ABJ_404_Solution_DatabaseQueryInterface $dbCore
@@ -39,6 +42,7 @@ class ABJ_404_Solution_StatsReadRepository {
         $this->logsRepo = $logsRepo;
         $this->logger = $logging;
         $this->refreshLock = $refreshLock;
+        $this->periodicStatsRepository = new ABJ_404_Solution_PeriodicStatsRepository($dbCore, $logging);
     }
 
     /**
@@ -78,50 +82,7 @@ class ABJ_404_Solution_StatsReadRepository {
      * @return array{disp404:int,distinct404:int,visitors404:int,refer404:int,redirected:int,distinctredirected:int,distinctvisitors:int,distinctrefer:int}
      */
     public function getPeriodicStatsSummary($sinceTimestamp, $notFoundDest = '404') {
-        $sinceTimestamp = absint($sinceTimestamp);
-        $notFoundDest = sanitize_text_field((string)$notFoundDest);
-        if ($notFoundDest === '') {
-            $notFoundDest = '404';
-        }
-
-        $zero = $this->zeroPeriodicStats();
-
-        $logsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_logsv2}');
-        $sql = "SELECT
-                COUNT(CASE WHEN dest_url = %s THEN 1 END) AS disp404,
-                COUNT(DISTINCT CASE WHEN dest_url = %s THEN requested_url END) AS distinct404,
-                COUNT(DISTINCT CASE WHEN dest_url = %s THEN user_ip END) AS visitors404,
-                COUNT(DISTINCT CASE WHEN dest_url = %s THEN referrer END) AS refer404,
-                COUNT(CASE WHEN dest_url <> %s THEN 1 END) AS redirected,
-                COUNT(DISTINCT CASE WHEN dest_url <> %s THEN requested_url END) AS distinctredirected,
-                COUNT(DISTINCT CASE WHEN dest_url <> %s THEN user_ip END) AS distinctvisitors,
-                COUNT(DISTINCT CASE WHEN dest_url <> %s THEN referrer END) AS distinctrefer
-            FROM {$logsTable}
-            WHERE timestamp >= %d";
-
-        $result = $this->dbCore->queryAndGetResults($sql, array(
-            'query_params' => array(
-                $notFoundDest, $notFoundDest, $notFoundDest, $notFoundDest,
-                $notFoundDest, $notFoundDest, $notFoundDest, $notFoundDest,
-                $sinceTimestamp,
-            ),
-        ));
-
-        if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
-            return $zero;
-        }
-
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
-        if (empty($rows) || !is_array($rows[0] ?? null)) {
-            return $zero;
-        }
-        $row = $rows[0];
-
-        foreach ($zero as $key => $unused) {
-            $zero[$key] = array_key_exists($key, $row) ? $this->toInt($row[$key], 0) : 0;
-        }
-
-        return $zero;
+        return $this->periodicStatsRepository->getSummary($sinceTimestamp, $notFoundDest);
     }
 
     /**
@@ -166,12 +127,7 @@ class ABJ_404_Solution_StatsReadRepository {
         }
 
         try {
-            $result = array(
-                'today' => $this->getPeriodicStatsSummary($thresholds['today'], $notFoundDest),
-                'month' => $this->getPeriodicStatsSummary($thresholds['month'], $notFoundDest),
-                'year' => $this->getPeriodicStatsSummary($thresholds['year'], $notFoundDest),
-                'all' => $this->getPeriodicStatsSummary($thresholds['all'], $notFoundDest),
-            );
+            $result = $this->periodicStatsRepository->readSummariesWithRecovery($thresholds, $notFoundDest);
 
             if (function_exists('set_transient')) {
                 set_transient(
@@ -258,84 +214,84 @@ class ABJ_404_Solution_StatsReadRepository {
         if (empty($rows) || !is_array($rows[0] ?? null)) {
             return null;
         }
-        $row = $rows[0];
-
-        $highCount   = $this->toInt($row['high_count']   ?? 0, 0);
-        $mediumCount = $this->toInt($row['medium_count'] ?? 0, 0);
-        $lowCount    = $this->toInt($row['low_count']    ?? 0, 0);
-        $manualCount = $this->toInt($row['manual_count'] ?? 0, 0);
-        $avgRaw = $row['avg_score'] ?? null;
-        $avgScore = is_numeric($avgRaw) ? round((float)$avgRaw, 1) : null;
-
-        return array(
-            'high'   => $highCount,
-            'medium' => $mediumCount,
-            'low'    => $lowCount,
-            'manual' => $manualCount,
-            'avg'    => $avgScore,
-            'total'  => $highCount + $mediumCount + $lowCount + $manualCount,
-        );
+        return $this->confidenceBandCountsFromRow($rows[0]);
     }
 
     /** @return array<string, mixed> */
     public function buildStatsDashboardSnapshotData() {
         $redirectsTable = $this->dbCore->doTableNameReplacements("{wp_abj404_redirects}");
+        $aggregate = $this->readDashboardRedirectAggregate($redirectsTable);
+        $thresholds = $this->computePeriodicThresholds(abj_clock()->now());
+        $aggregate['periods'] = $this->periodicStatsRepository->readSummariesWithRecovery($thresholds, '404');
+        return $aggregate;
+    }
 
-        $auto301 = $this->getStatsCount(
-            "select count(id) from $redirectsTable where disabled = 0 and code = 301 and status = %d",
-            array(ABJ404_STATUS_AUTO)
-        );
-        $auto302 = $this->getStatsCount(
-            "select count(id) from $redirectsTable where disabled = 0 and code = 302 and status = %d",
-            array(ABJ404_STATUS_AUTO)
-        );
-        $manual301 = $this->getStatsCount(
-            "select count(id) from $redirectsTable where disabled = 0 and code = 301 and status = %d",
-            array(ABJ404_STATUS_MANUAL)
-        );
-        $manual302 = $this->getStatsCount(
-            "select count(id) from $redirectsTable where disabled = 0 and code = 302 and status = %d",
-            array(ABJ404_STATUS_MANUAL)
-        );
-        $trashedRedirects = $this->getStatsCount(
-            "select count(id) from $redirectsTable where disabled = 1 and (status = %d or status = %d)",
-            array(ABJ404_STATUS_AUTO, ABJ404_STATUS_MANUAL)
-        );
-
-        $captured = $this->getStatsCount(
-            "select count(id) from $redirectsTable where disabled = 0 and status = %d",
-            array(ABJ404_STATUS_CAPTURED)
-        );
-        $ignored = $this->getStatsCount(
-            "select count(id) from $redirectsTable where disabled = 0 and status in (%d, %d)",
-            array(ABJ404_STATUS_IGNORED, ABJ404_STATUS_LATER)
-        );
-        $trashedCaptured = $this->getStatsCount(
-            "select count(id) from $redirectsTable where disabled = 1 and (status in (%d, %d, %d) )",
-            array(ABJ404_STATUS_CAPTURED, ABJ404_STATUS_IGNORED, ABJ404_STATUS_LATER)
-        );
-
-        $now = abj_clock()->now();
-        $thresholds = $this->computePeriodicThresholds($now);
-        $periods = array();
-        foreach ($thresholds as $periodKey => $ts) {
-            $periods[$periodKey] = $this->getPeriodicStatsSummary($ts, '404');
+    /** @return array{redirects:array<string,int>,captured:array<string,int>,confidence:array{high:int,medium:int,low:int,manual:int,avg:float|null,total:int}} */
+    public function readDashboardRedirectAggregate(string $redirectsTable, int $timeout = 4): array {
+        $high = ABJ_404_Solution_ScoreThresholds::HIGH;
+        $medium = ABJ_404_Solution_ScoreThresholds::MEDIUM;
+        $sql = "SELECT
+                SUM(CASE WHEN disabled = 0 AND code = 301 AND status = %d THEN 1 ELSE 0 END) AS auto301_count,
+                SUM(CASE WHEN disabled = 0 AND code = 302 AND status = %d THEN 1 ELSE 0 END) AS auto302_count,
+                SUM(CASE WHEN disabled = 0 AND code = 301 AND status = %d THEN 1 ELSE 0 END) AS manual301_count,
+                SUM(CASE WHEN disabled = 0 AND code = 302 AND status = %d THEN 1 ELSE 0 END) AS manual302_count,
+                SUM(CASE WHEN disabled = 1 AND (status = %d OR status = %d) THEN 1 ELSE 0 END) AS trashed_redirects_count,
+                SUM(CASE WHEN disabled = 0 AND status = %d THEN 1 ELSE 0 END) AS captured_count,
+                SUM(CASE WHEN disabled = 0 AND (status = %d OR status = %d) THEN 1 ELSE 0 END) AS ignored_count,
+                SUM(CASE WHEN disabled = 1 AND (status = %d OR status = %d OR status = %d) THEN 1 ELSE 0 END) AS trashed_captured_count,
+                SUM(CASE WHEN disabled = 0 AND status != %d AND score IS NULL THEN 1 ELSE 0 END) AS manual_count,
+                SUM(CASE WHEN disabled = 0 AND status != %d AND score >= {$high} THEN 1 ELSE 0 END) AS high_count,
+                SUM(CASE WHEN disabled = 0 AND status != %d AND score >= {$medium} AND score < {$high} THEN 1 ELSE 0 END) AS medium_count,
+                SUM(CASE WHEN disabled = 0 AND status != %d AND score IS NOT NULL AND score < {$medium} THEN 1 ELSE 0 END) AS low_count,
+                AVG(CASE WHEN disabled = 0 AND status != %d THEN score ELSE NULL END) AS avg_score FROM {$redirectsTable}";
+        $result = $this->dbCore->queryAndGetResults($sql, array('timeout' => $timeout, 'query_params' => array(
+            ABJ404_STATUS_AUTO, ABJ404_STATUS_AUTO, ABJ404_STATUS_MANUAL, ABJ404_STATUS_MANUAL,
+            ABJ404_STATUS_AUTO, ABJ404_STATUS_MANUAL, ABJ404_STATUS_CAPTURED, ABJ404_STATUS_IGNORED,
+            ABJ404_STATUS_LATER, ABJ404_STATUS_CAPTURED, ABJ404_STATUS_IGNORED, ABJ404_STATUS_LATER, 0, 0, 0, 0, 0,
+        )));
+        if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
+            throw new RuntimeException('Dashboard redirect aggregate failed: '
+                . (is_string($result['last_error'] ?? null) ? $result['last_error'] : 'timeout'), 503);
         }
+        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+        if (empty($rows) || !is_array($rows[0] ?? null)) {
+            throw new UnexpectedValueException('Dashboard redirect aggregate returned no row.', 502);
+        }
+        $row = $rows[0];
+        return array('redirects' => array(
+            'auto301' => $this->toInt($row['auto301_count'] ?? 0, 0),
+            'auto302' => $this->toInt($row['auto302_count'] ?? 0, 0),
+            'manual301' => $this->toInt($row['manual301_count'] ?? 0, 0),
+            'manual302' => $this->toInt($row['manual302_count'] ?? 0, 0),
+            'trashed' => $this->toInt($row['trashed_redirects_count'] ?? 0, 0),
+        ), 'captured' => array(
+            'captured' => $this->toInt($row['captured_count'] ?? 0, 0),
+            'ignored' => $this->toInt($row['ignored_count'] ?? 0, 0),
+            'trashed' => $this->toInt($row['trashed_captured_count'] ?? 0, 0),
+        ),
+            'confidence' => $this->confidenceBandCountsFromRow($row),
+        );
+    }
+
+    /**
+     * @param array<mixed,mixed> $row
+     * @return array{high:int,medium:int,low:int,manual:int,avg:float|null,total:int}
+     */
+    private function confidenceBandCountsFromRow(array $row): array {
+        $highCount = $this->toInt($row['high_count'] ?? 0, 0);
+        $mediumCount = $this->toInt($row['medium_count'] ?? 0, 0);
+        $lowCount = $this->toInt($row['low_count'] ?? 0, 0);
+        $manualCount = $this->toInt($row['manual_count'] ?? 0, 0);
+        $avgRaw = $row['avg_score'] ?? null;
+        $avgScore = is_numeric($avgRaw) ? round((float)$avgRaw, 1) : null;
 
         return array(
-            'redirects' => array(
-                'auto301' => intval($auto301),
-                'auto302' => intval($auto302),
-                'manual301' => intval($manual301),
-                'manual302' => intval($manual302),
-                'trashed' => intval($trashedRedirects),
-            ),
-            'captured' => array(
-                'captured' => intval($captured),
-                'ignored' => intval($ignored),
-                'trashed' => intval($trashedCaptured),
-            ),
-            'periods' => $periods,
+            'high' => $highCount,
+            'medium' => $mediumCount,
+            'low' => $lowCount,
+            'manual' => $manualCount,
+            'avg' => $avgScore,
+            'total' => $highCount + $mediumCount + $lowCount + $manualCount,
         );
     }
 
@@ -353,7 +309,7 @@ class ABJ_404_Solution_StatsReadRepository {
      * @param int $now Unix epoch (true UTC) to anchor the boundaries to.
      * @return array{today:int,month:int,year:int,all:int}
      */
-    private function computePeriodicThresholds(int $now): array {
+    public function computePeriodicThresholds(int $now): array {
         $siteTimezone = ABJ_404_Solution_SiteTimezone::resolve();
         try {
             $siteNow = (new DateTimeImmutable('@' . $now))->setTimezone($siteTimezone);
@@ -435,14 +391,7 @@ class ABJ_404_Solution_StatsReadRepository {
 
     /** @return int */
     private function currentBlogId(): int {
-        $blogId = 1;
-        if (function_exists('get_current_blog_id')) {
-            $blogId = absint(get_current_blog_id());
-            if ($blogId <= 0) {
-                $blogId = 1;
-            }
-        }
-        return $blogId;
+        return function_exists('get_current_blog_id') ? max(1, absint(get_current_blog_id())) : 1;
     }
 
     /** @param mixed $value @param int $default @return int */

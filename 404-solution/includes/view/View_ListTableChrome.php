@@ -5,7 +5,7 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * Admin list-table chrome shared by the Page Redirects and Captured 404 URLs
+ * Admin list-table chrome shared by the Page Redirects, Captured 404 URLs and Logs
  * admin tables. Owns the widgets that surround the data rows: subsubsub filter
  * row, per-page selector, score-range filter, bulk-action form URL/options,
  * empty-trash form, and the i18n strings for the pagination auto-refresh
@@ -29,15 +29,24 @@ class ABJ_404_Solution_View_ListTableChrome extends ABJ_404_Solution_ViewCompone
     }
 
     /**
-     * Build the rows-per-page <option> list HTML.
+     * Build the shared rows-per-page selector without changing a saved size.
+     * All three tables persist one preference, including valid sizes selected
+     * through an API or an older screen's preset list.
      *
      * @param int|string $currentPerPage
      */
     public function buildPerpageOptions($currentPerPage): string {
         $optionTpl = $this->tpl('viewRedirectsTablePerpageOption.html');
+        $current = filter_var($currentPerPage, FILTER_VALIDATE_INT, array('options' => array(
+            'min_range' => ABJ404_OPTION_MIN_PERPAGE,
+            'max_range' => ABJ404_OPTION_MAX_PERPAGE,
+        )));
+        $current = is_int($current) ? $current : ABJ404_OPTION_DEFAULT_PERPAGE;
+        $choices = array_values(array_unique(array(10, 25, 50, 100, 200, 250, $current)));
+        sort($choices, SORT_NUMERIC);
         $html = '';
-        foreach (array(10, 25, 50, 100, 200) as $opt) {
-            $selected = ($currentPerPage == $opt) ? ' selected' : '';
+        foreach ($choices as $opt) {
+            $selected = ($current === $opt) ? ' selected' : '';
             $html .= $this->f->str_replace(
                 array('{value}', '{selected_attr}'),
                 array((string)$opt, $selected),

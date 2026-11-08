@@ -84,9 +84,9 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
      * last_used are owned by the rollup write-back and keep their values.
      *
      * @param array<int, int|string> $ids
-     * @return void
+     * @return bool True only when every existing projection statement succeeds.
      */
-    public function recomputeByRedirectIds(array $ids): void {
+    public function recomputeByRedirectIds(array $ids): bool {
         $cleanIds = array();
         foreach ($ids as $id) {
             $intId = is_scalar($id) ? (int)$id : 0;
@@ -95,35 +95,34 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
             }
         }
         if (empty($cleanIds)) {
-            return;
+            return false;
         }
         if (!$this->denormColumnsPresent()) {
             // Schema drift: the column-add ALTER never completed. Nothing to
             // maintain; the live resolver still renders the visible page.
             $this->logger->debugMessage(__FUNCTION__ . " skipped: denorm columns absent (schema drift).");
-            return;
+            return false;
         }
         if ($this->dbCore->noticeState()->isWriteBlockActive()) {
             // Read-only replica / disk full: skip the write, never error.
             $this->logger->debugMessage(__FUNCTION__ . " skipped: DB write block active (read-only / disk full).");
-            return;
+            return false;
         }
 
         $redirectsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
-        $idList = implode(',', array_values($cleanIds));
         // Gate the narrow sort-key UPDATEs on column presence: those columns are
         // added by a separate ALTER that can lag the dest_for_view add, and an
         // UPDATE against a missing column would error (logged as a warning by
         // queryAndGetResults) and skip the rest of the recompute for this id.
         $columns = $this->redirectsColumnSet();
-        $statements = ABJ_404_Solution_RedirectsDenormColumnSql::buildDestPublishedStatements(
-            $redirectsTable,
-            " AND r.id IN (" . $idList . ")",
-            " AND id IN (" . $idList . ")",
-            true,
-            isset($columns['dest_sort_key']),
-            isset($columns['url_sort_key'])
-        );
+        $idClause = ABJ_404_Solution_RedirectsDenormColumnSql::buildIdClauses(array_values($cleanIds))['aliased'];
+        $statements = ABJ_404_Solution_RedirectsDenormColumnSql::buildDestPublishedStatements(array(
+            'redirects_table' => $redirectsTable,
+            'id_clause' => $idClause,
+            'recompute' => true,
+            'include_dest_sort_key' => isset($columns['dest_sort_key']),
+            'include_url_sort_key' => isset($columns['url_sort_key']),
+        ));
         foreach ($statements as $statement) {
             // queryAndGetResults is the centralized error handler: a write
             // failure on a read-only / disk-full host is logged there as a
@@ -140,11 +139,15 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
             // recompute, not lost or hybrid user data.
             $result = $this->dbCore->queryAndGetResults($statement);
             $lastError = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
-            if ($lastError !== '') {
-                $this->logger->debugMessage(__FUNCTION__ . ' stopped after a write error: ' . $lastError);
-                break;
+            if (($result['query_succeeded'] ?? false) !== true || $lastError !== '') {
+                $reason = $lastError !== ''
+                    ? 'a write error: ' . $lastError
+                    : 'the driver refused the write without exposing an error';
+                $this->logger->debugMessage(__FUNCTION__ . ' stopped after ' . $reason . '.');
+                return false;
             }
         }
+        return true;
     }
 
     /**
@@ -153,14 +156,19 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
      * saved, transitions status, or is deleted.
      *
      * @param int $postId
-     * @return void
+     * @return bool True only when projection succeeded and no caller transaction remains active.
      */
-    public function recomputeForChangedPost(int $postId): void {
+    public function recomputeForChangedPost(int $postId): bool {
         if ($postId <= 0) {
-            return;
+            return false;
         }
         $ids = $this->reverseLookupRedirectIds(array((int)ABJ404_TYPE_POST), $postId);
-        $this->recomputeByRedirectIds($ids);
+        if (!$this->recomputeByRedirectIds($ids)) {
+            return false;
+        }
+        // Probe after all work: autocommit=0 can open a caller transaction on
+        // the reverse lookup itself, even when the projection writes succeed.
+        return !$this->dbCore->transactionExecutor()->hasActiveTransaction();
     }
 
     /**
@@ -229,92 +237,28 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
      * @return void
      */
     public function writeBackLogsHitsColumns(): void {
-        if (!$this->denormColumnsPresent()) {
-            $this->logger->debugMessage(__FUNCTION__ . " skipped: denorm columns absent (schema drift).");
-            return;
-        }
-        if ($this->dbCore->noticeState()->isWriteBlockActive()) {
-            $this->logger->debugMessage(__FUNCTION__ . " skipped: DB write block active (read-only / disk full).");
-            return;
-        }
         if (!$this->logsHitsTableExists()) {
-            $this->logger->debugMessage(__FUNCTION__ . " skipped: logs_hits rollup table absent.");
+            $this->logger->debugMessage(__FUNCTION__ . ' skipped: logs_hits rollup table absent.');
             return;
         }
-
-        $redirectsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
-        $logsHitsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_logs_hits}');
-        $canonicalRedirectUrl = "COALESCE(r.canonical_url, CONCAT('/', TRIM(BOTH '/' FROM r.url)))";
-        $comparableRedirectUrl = $this->dbCore->collationHelper()->coerceExpressionToColumnCollation(
-            $canonicalRedirectUrl,
-            array('table' => $logsHitsTable, 'column' => 'requested_url')
-        );
-
-        // Chunk by redirect id (report.md Finding 5): a single full-table UPDATE
-        // JOIN over every redirect row can lock / heavily load the redirects table
-        // on slow shared hosting while the admin is reading it. Walk the ids with
-        // a cursor (so sparse ids after heavy deletion never produce empty range
-        // passes) and roll each batch through the same single-source-of-truth
-        // builder the backfill / reconcile chunk resolver uses (LEFT JOIN
-        // logs_hits, so a no-hit URL resets to 0/0 rather than keeping a stale
-        // count). A write error stops the walk; the next rollup / nightly
-        // reconcile retries from the start (queryAndGetResults logs it).
         $cursor = 0;
         while (true) {
-            $ids = $this->nextRedirectIdChunk($redirectsTable, $cursor, self::WRITE_BACK_CHUNK_SIZE);
-            if (empty($ids)) {
-                break;
-            }
-            $cursor = (int)max($ids);
-            $idClause = ' AND r.id IN (' . implode(',', $ids) . ')';
-            $query = ABJ_404_Solution_RedirectsDenormColumnSql::buildHitsRollupFromRollupTableStatement(
+            $result = ABJ_404_Solution_RedirectsDenormChunkResolver::writeHitsChunk(
+                $this->dbCore,
+                $this->logger,
                 array(
-                    'redirects_table' => $redirectsTable,
-                    'logs_hits_table' => $logsHitsTable,
-                    'id_clause' => $idClause,
-                    'comparable_redirect_url' => $comparableRedirectUrl,
+                'after_id' => $cursor,
+                'limit' => self::WRITE_BACK_CHUNK_SIZE,
                 )
             );
-            $result = $this->dbCore->queryAndGetResults($query);
-            $lastError = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
-            if ($lastError !== '') {
-                $this->logger->debugMessage(__FUNCTION__ . ' stopped after a write error past id ' . $cursor
-                    . '; the next rollup / reconcile will retry.');
+            if (!empty($result['error'])) {
                 break;
             }
-            if (count($ids) < self::WRITE_BACK_CHUNK_SIZE) {
+            $cursor = (int)$result['cursor'];
+            if (!empty($result['complete'])) {
                 break;
             }
         }
-    }
-
-    /**
-     * Fetch the next batch of redirect ids strictly greater than $afterId, in id
-     * order, capped at $limit. The cursor walk over the PRIMARY key visits only
-     * rows that exist, so a table with sparse ids (heavy deletion) never wastes a
-     * pass on an empty id range.
-     *
-     * @param string $redirectsTable
-     * @param int $afterId
-     * @param int $limit
-     * @return array<int, int>
-     */
-    private function nextRedirectIdChunk(string $redirectsTable, int $afterId, int $limit): array {
-        $result = $this->dbCore->queryAndGetResults(
-            'SELECT id FROM ' . $redirectsTable . ' WHERE id > ' . (int)$afterId
-            . ' ORDER BY id ASC LIMIT ' . (int)$limit
-        );
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
-        $ids = array();
-        foreach ($rows as $row) {
-            $id = is_array($row)
-                ? ABJ_404_Solution_ExactInteger::read($row['id'] ?? null, 1)
-                : null;
-            if ($id !== null) {
-                $ids[] = $id;
-            }
-        }
-        return $ids;
     }
 
     /**
@@ -322,10 +266,13 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
      * (probed via the dest_for_view sentinel column). Derived from the memoized
      * column-set probe.
      *
+     * @param callable|null $beforeQuery
+     * @param-out string $error
      * @return bool
      */
-    private function denormColumnsPresent(): bool {
-        return isset($this->redirectsColumnSet()['dest_for_view']);
+    private function denormColumnsPresent(?callable $beforeQuery = null, ?string &$error = null): bool {
+        $error = '';
+        return isset($this->redirectsColumnSet($beforeQuery, $error)['dest_for_view']);
     }
 
     /**
@@ -336,20 +283,45 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
      * presence check (dest_for_view, dest_sort_key, url_sort_key) degrades to
      * false -- the safe schema-drift fallback (skip the write / omit the UPDATE).
      *
+     * @param callable|null $beforeQuery
+     * @param-out string $error
      * @return array<string, bool>
      */
-    private function redirectsColumnSet(): array {
+    private function redirectsColumnSet(?callable $beforeQuery = null, ?string &$error = null): array {
+        $error = '';
         if ($this->redirectsColumnSetCache !== null) {
             return $this->redirectsColumnSetCache;
+        }
+        if ($beforeQuery !== null) {
+            $queryOptions = $beforeQuery();
+            if (!is_array($queryOptions)) {
+                $error = 'before_query must return query options.';
+                return array();
+            }
         }
         if ($this->readiness->isKnownAbsent('{wp_abj404_redirects}')) {
             return array();
         }
         $table = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
+        $queryOptions = array('log_errors' => false);
+        if ($beforeQuery !== null) {
+            $queryOptions = $beforeQuery();
+            if (!is_array($queryOptions)) {
+                $error = 'before_query must return query options.';
+                return array();
+            }
+            $queryOptions['log_errors'] = false;
+        }
         $result = $this->dbCore->queryAndGetResults(
             "SHOW COLUMNS FROM " . $table,
-            array('log_errors' => false)
+            $queryOptions
         );
+        $lastError = isset($result['last_error']) && is_scalar($result['last_error'])
+            ? trim((string)$result['last_error']) : '';
+        if ($lastError !== '' || !empty($result['timed_out'])) {
+            $error = $lastError !== '' ? $lastError : 'Database query timed out.';
+            return array();
+        }
         $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
         $set = array();
         foreach ($rows as $row) {
@@ -387,7 +359,7 @@ class ABJ_404_Solution_RedirectsDenormMaintenanceService {
         // stripped install.
         // @utf8-audit: opt-out - $logsTable is an internally resolved plugin table name (doTableNameReplacements); system-controlled, cannot contain invalid UTF-8.
         // DAO-bypass-approved: SHOW TABLES schema existence probe.
-        $found = $wpdb->get_var("SHOW TABLES LIKE '" . esc_sql($logsTable) . "'");
+        $found = ABJ_404_Solution_DatabaseDriverCall::getVar($wpdb, "SHOW TABLES LIKE '" . esc_sql($logsTable) . "'");
         return $found === $logsTable;
     }
 }

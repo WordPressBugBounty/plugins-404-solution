@@ -42,7 +42,7 @@ class ABJ_404_Solution_DatabasePrefixDiagnostics {
             // of '*abj404_redirects' tables across subsite prefixes. 50 is well above any plausible
             // legitimate count and prevents an unbounded information_schema sweep on the degraded path.
             // DAO-bypass-approved: read-only information_schema prefix diagnostic when a plugin table is missing.
-            $rows = $wpdb->get_results(
+            $rows = ABJ_404_Solution_DatabaseDriverCall::getResults($wpdb,
                 "SELECT table_name FROM information_schema.tables "
                 . "WHERE table_schema = '{$dbNameStr}' "
                 . "AND LOWER(table_name) LIKE '%abj404\_redirects' "
@@ -61,7 +61,7 @@ class ABJ_404_Solution_DatabasePrefixDiagnostics {
                 $name = null;
                 foreach ($row as $key => $value) {
                     if (strtolower((string)$key) === 'table_name') {
-                        $name = (string)$value;
+                        $name = is_scalar($value) ? (string)$value : null;
                         break;
                     }
                 }

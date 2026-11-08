@@ -165,7 +165,7 @@ class ABJ_404_Solution_InternalLinkScanner {
             } else {
                 $prepared = $wpdb->prepare($sql, $capturedStatus, $pageSize, $offset);
                 // DAO-bypass-approved: Test-environment fallback. Primary path goes through queryAndGetResults above.
-                $rows = $wpdb->get_results($prepared, ARRAY_A);
+                $rows = ABJ_404_Solution_DatabaseDriverCall::getResults($wpdb, $prepared, ARRAY_A);
                 if (!is_array($rows)) {
                     return $urlSet;
                 }

@@ -41,6 +41,9 @@ class ABJ_404_Solution_LoggingFeedbackDispatcher {
      * @return bool
      */
     public function emailErrorLogIfNecessary(): bool {
+        if (!$this->isErrorLogSendingEnabled()) {
+            return false;
+        }
         $debugFilePath = $this->logging->getDebugFilePath();
         if (!file_exists($debugFilePath)) {
             $this->logging->debugMessage("No log file found so no errors were found.");
@@ -101,6 +104,10 @@ class ABJ_404_Solution_LoggingFeedbackDispatcher {
      * @return bool True if a heartbeat was sent successfully.
      */
     public function sendHeartbeatIfDueWeekly(): bool {
+        if (!$this->isErrorLogSendingEnabled()) {
+            $this->logging->debugMessage("Weekly heartbeat skipped: send_error_logs is disabled or unavailable.");
+            return false;
+        }
         $now = abj_clock()->now();
         $installedAt = $this->installedAt();
         if ($installedAt <= 0) {
@@ -130,12 +137,7 @@ class ABJ_404_Solution_LoggingFeedbackDispatcher {
         $errorInfo = $this->logging->getLatestErrorLine();
 
         try {
-            $payload = ABJ_404_Solution_FeedbackTransport::buildPayload('heartbeat', array(
-                'error_signature' => 'Heartbeat: no errors to report.',
-                'previously_sent_line' => 0,
-                'error_count_in_log' => (int)$errorInfo['total_error_count'],
-            ));
-            $sent = ABJ_404_Solution_FeedbackTransport::sendNow($payload, 'heartbeat');
+            $sent = ABJ_404_Solution_FeedbackTransport::sendHeartbeat((int)$errorInfo['total_error_count']);
             if ($sent) {
                 $state->setLastHeartbeatSentAt($now);
             }
@@ -209,7 +211,23 @@ class ABJ_404_Solution_LoggingFeedbackDispatcher {
         if (!function_exists('get_option')) {
             return 0;
         }
-        $installedAt = get_option('abj404_installed_time', null);
+        $installedAt = ABJ_404_Solution_OptionShapeRead::scalar('abj404_installed_time', null);
         return ABJ_404_Solution_ExactInteger::readOr($installedAt, 0, 0);
+    }
+
+    private function isErrorLogSendingEnabled(): bool {
+        $repository = function_exists('abj_service_optional')
+            ? abj_service_optional('options_repository')
+            : null;
+        if (!is_object($repository) || !method_exists($repository, 'getRawSettingValue')) {
+            return false;
+        }
+        try {
+            $enabled = $repository->getRawSettingValue('send_error_logs');
+        } catch (\Throwable $e) {
+            $this->logDispatchFailure('Feedback dispatcher: send_error_logs setting read failed', $e);
+            return false;
+        }
+        return $enabled === '1' || $enabled === 1 || $enabled === true;
     }
 }

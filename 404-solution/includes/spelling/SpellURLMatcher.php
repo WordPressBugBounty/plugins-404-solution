@@ -13,6 +13,8 @@ if (!defined('ABSPATH')) {
  */
 class ABJ_404_Solution_SpellURLMatcher {
 
+	private const PREPARED_REGEX_PATTERN_CACHE_MAX_COUNT = 250;
+
 	/** @var ABJ_404_Solution_Functions */
 	private $f;
 
@@ -59,100 +61,136 @@ class ABJ_404_Solution_SpellURLMatcher {
 		return is_iterable($rows) ? $rows : array();
 	}
 
-	/** @return array<int, array<string, mixed>> */
-	private function getManualRedirectsWithRegexMetachars(): array {
+	/** @return iterable<int, array<string, mixed>> */
+	private function getManualRedirectsWithRegexMetachars(): iterable {
 		if (!is_object($this->viewReadService) || !is_callable(array($this->viewReadService, 'getManualRedirectsWithRegexMetachars'))) {
 			return array();
 		}
 		$rows = call_user_func(array($this->viewReadService, 'getManualRedirectsWithRegexMetachars'));
-		return $this->normalizeRows($rows);
+		return is_iterable($rows) ? $rows : array();
 	}
 
-	/**
-	 * @param mixed $rows
-	 * @return array<int, array<string, mixed>>
-	 */
-	private function normalizeRows($rows): array {
-		if (!is_array($rows)) {
-			return array();
-		}
-		$normalized = array();
-		foreach ($rows as $row) {
-			if (is_array($row)) {
-				$normalized[] = $row;
-			}
-		}
-		return $normalized;
-	}
-
-    /** Find a match using the user-defined regex patterns.
+	/** Find a match using the user-defined regex patterns.
 	 * @param string $requestedURL
 	 * @param array<string, mixed>|null $options
 	 * @return array<string, mixed>|null
 	 */
 	function getPermalinkUsingRegEx(string $requestedURL, $options = null) {
-		if (!is_array($options)) {
-				$options = abj_service('options_repository')->getOptions(true);
-		}
-		$isDebug = $this->logger->isDebug();
-
-		$regexURLsRows = $this->appendRegexFallbackRows(
-			$this->getRedirectsWithRegEx(),
-			$this->collectRuntimeRegexFallbackRows($requestedURL, $isDebug)
-		);
-
-		foreach ($regexURLsRows as $row) {
-			$regexURL = $row['url'];
-
-			if ($isDebug) {
-				abj_service('request_context')->debug_info = 'Applying custom regex "' . $regexURL . '" to URL: ' .
-					$requestedURL;
+		try {
+			if (!is_array($options)) {
+					$options = abj_service('options_repository')->getOptions(true);
 			}
-			$regexURLStr = is_string($regexURL) ? $regexURL : '';
-			$preparedURL = $this->getPreparedRegexPattern($regexURLStr);
-			if (@$this->f->regexMatch($preparedURL, $requestedURL)) {
+			$isDebug = $this->logger->isDebug();
+
+			$context = is_array($options) ? $options : array();
+			$regexURLsRows = $this->appendRegexFallbackRows(
+				$this->projectPendingRegex($this->excludeRedirectRows($this->getRedirectsWithRegEx(), $context), $context),
+				$this->excludeRedirectRows($this->iterateRuntimeRegexFallbackRows($requestedURL, $isDebug), $context)
+			);
+
+			foreach ($regexURLsRows as $row) {
+				$regexURL = $row['url'];
+
+				if ($isDebug) {
+					abj_service('request_context')->debug_info = 'Applying custom regex "' . $regexURL . '" to URL: ' .
+						$requestedURL;
+				}
+				$regexURLStr = is_string($regexURL) ? $regexURL : '';
+				$queryMode = ABJ_404_Solution_QueryStringHelper::storedQueryMode($row);
+				$matchURL = abj_service('query_string_helper')->redirectSourceKey($requestedURL, $queryMode);
+				$preparedURL = $this->getPreparedRegexPattern($regexURLStr);
+				if (@$this->f->regexMatch($preparedURL, $matchURL)) {
+					if ($isDebug) {
+						abj_service('request_context')->debug_info = 'Cleared after regex.';
+					}
+					$rowType = ABJ_404_Solution_ExactInteger::readOr($row['type'] ?? null, PHP_INT_MIN, 0);
+					$rowDest = isset($row['final_dest']) && is_scalar($row['final_dest']) ? (string)$row['final_dest'] : '';
+					if ($rowType === (int)ABJ404_TYPE_EXTERNAL) {
+						$permalink = array(
+							'id' => 0,
+							'type' => ABJ404_TYPE_EXTERNAL,
+							'link' => $rowDest,
+							'title' => '',
+							'score' => 100,
+						);
+					} else {
+						$idAndType = $rowDest . '|' . $row['type'];
+						$permalink = ABJ_404_Solution_PermalinkResolver::permalinkInfoToArray($idAndType, 0,
+							null, $options);
+					}
+					$permalink['query_mode'] = $queryMode;
+					$permalink['matching_regex'] = $regexURL;
+					$permalink['code'] = ABJ_404_Solution_ExactInteger::readOr($row['code'] ?? null, PHP_INT_MIN, 0);
+					$originalPermalink = $isDebug ? $permalink : null;
+
+					$permalink = $this->applyCapturedGroupsToDestination($permalink, $regexURLStr, $matchURL, $isDebug);
+					if ($permalink === null) {
+						continue;
+					}
+
+					if ($isDebug) {
+						$this->logger->debugMessage("Found matching regex. Original permalink" .
+							json_encode($originalPermalink) . ", final: " .
+							json_encode($permalink));
+					}
+
+					return $permalink;
+				}
+
 				if ($isDebug) {
 					abj_service('request_context')->debug_info = 'Cleared after regex.';
 				}
-				$rowType = isset($row['type']) && is_scalar($row['type']) ? (int)$row['type'] : 0;
-				$rowDest = isset($row['final_dest']) && is_scalar($row['final_dest']) ? (string)$row['final_dest'] : '';
-				if ($rowType === (int)ABJ404_TYPE_EXTERNAL) {
-					$permalink = array(
-						'id' => 0,
-						'type' => ABJ404_TYPE_EXTERNAL,
-						'link' => $rowDest,
-						'title' => '',
-						'score' => 100,
-					);
-				} else {
-					$idAndType = $rowDest . '|' . $row['type'];
-					$permalink = ABJ_404_Solution_PermalinkResolver::permalinkInfoToArray($idAndType, 0,
-						null, $options);
-				}
-				$permalink['matching_regex'] = $regexURL;
-				$permalink['code'] = isset($row['code']) && is_scalar($row['code']) ? (int)$row['code'] : 0;
-				$originalPermalink = $isDebug ? $permalink : null;
-
-				$permalink = $this->applyCapturedGroupsToDestination($permalink, $regexURLStr, $requestedURL, $isDebug);
-				if ($permalink === null) {
-					continue;
-				}
-
-				if ($isDebug) {
-					$this->logger->debugMessage("Found matching regex. Original permalink" .
-						json_encode($originalPermalink) . ", final: " .
-						json_encode($permalink));
-				}
-
-				return $permalink;
 			}
 
-			if ($isDebug) {
-				abj_service('request_context')->debug_info = 'Cleared after regex.';
-			}
+			return null;
+		} catch (ABJ_404_Solution_ViewQueryFailureException $error) {
+			// The executor already logged the query error. Retain it for callers
+			// that must distinguish an unreadable rule set from a successful miss.
+			return array('last_error' => $error->getMessage());
 		}
+	}
 
-		return null;
+	/**
+	 * @param iterable<int, array<string, mixed>> $rows
+	 * @param array<string, mixed> $context
+	 * @return iterable<int, array<string, mixed>>
+	 */
+	private function excludeRedirectRows(iterable $rows, array $context): iterable {
+		$excludedRaw = $context['excluded_redirect_id'] ?? null;
+		$excludedID = ABJ_404_Solution_ExactInteger::readOr($excludedRaw, 1, 0);
+		foreach ($rows as $row) {
+			if (!is_array($row)) {
+				continue;
+			}
+			$rowID = ABJ_404_Solution_ExactInteger::readOr($row['id'] ?? null, 1, 0);
+			if ($excludedID > 0 && $rowID === $excludedID) {
+				continue;
+			}
+			yield $row;
+		}
+	}
+
+	/**
+	 * Merge a pending save into the same ascending-ID regex order as persisted rules.
+	 * @param iterable<int, array<string, mixed>> $rows
+	 * @param array<string, mixed> $context
+	 * @return iterable<int, array<string, mixed>>
+	 */
+	private function projectPendingRegex(iterable $rows, array $context): iterable {
+		$pending = isset($context['pending_regex']) && is_array($context['pending_regex'])
+			? $context['pending_regex'] : null;
+		$position = ABJ_404_Solution_ExactInteger::readOr($context['excluded_redirect_id'] ?? null, 1, PHP_INT_MAX);
+		foreach ($rows as $row) {
+			$rowID = ABJ_404_Solution_ExactInteger::readOr($row['id'] ?? null, 1, 0);
+			if ($pending !== null && $rowID > $position) {
+				yield $pending;
+				$pending = null;
+			}
+			yield $row;
+		}
+		if ($pending !== null) {
+			yield $pending;
+		}
 	}
 
 	/**
@@ -161,33 +199,34 @@ class ABJ_404_Solution_SpellURLMatcher {
 	 *
 	 * @param string $requestedURL
 	 * @param bool $isDebug
-	 * @return array<int, array<string, mixed>>
+	 * @return iterable<int, array<string, mixed>>
 	 */
-	private function collectRuntimeRegexFallbackRows(string $requestedURL, bool $isDebug): array {
-		$filtered = array();
+	private function iterateRuntimeRegexFallbackRows(string $requestedURL, bool $isDebug): iterable {
+		$logged = false;
 		foreach ($this->getManualRedirectsWithRegexMetachars() as $manualRow) {
+			if (!is_array($manualRow)) {
+				continue;
+			}
 			$manualUrl = isset($manualRow['url']) && is_string($manualRow['url']) ? $manualRow['url'] : '';
 			if (!ABJ_404_Solution_RegexAutoPromote::looksLikeUnambiguousRegex($manualUrl)) {
 				continue;
 			}
 			$glob = ABJ_404_Solution_RegexAutoPromote::applyGlobFixup($manualUrl);
 			$manualRow['url'] = $glob['url'];
-			$filtered[] = $manualRow;
+			if (!$logged) {
+				// The line is not gated on isDebug(): debugMessage() already
+				// writes at once in debug mode and otherwise buffers it for the
+				// next error. It records that fallback started without counting
+				// or materializing the remaining candidates.
+				$this->logger->debugMessage(
+					"Runtime regex fallback: trying 1 MANUAL row(s) with regex metachars; " .
+					"streaming further candidates as needed" .
+					($isDebug ? " against URL: " . $requestedURL : '')
+				);
+				$logged = true;
+			}
+			yield $manualRow;
 		}
-		if (!empty($filtered)) {
-			// The line is not gated on isDebug(): debugMessage() already
-			// writes at once in debug mode and otherwise buffers it for the
-			// next error, and "did the regex fallback run at all" is the
-			// first question a "why did this not redirect" report asks. The
-			// requested URL stays debug-only (the process404 breadcrumb
-			// already names it).
-			$this->logger->debugMessage(
-				"Runtime regex fallback: trying " . count($filtered) .
-				" MANUAL row(s) with regex metachars" .
-				($isDebug ? " against URL: " . $requestedURL : '')
-			);
-		}
-		return $filtered;
 	}
 
 	/**
@@ -238,10 +277,10 @@ class ABJ_404_Solution_SpellURLMatcher {
 
 	/**
 	 * @param iterable<int, array<string, mixed>> $regexRows
-	 * @param array<int, array<string, mixed>> $fallbackRows
+	 * @param iterable<int, array<string, mixed>> $fallbackRows
 	 * @return iterable<int, array<string, mixed>>
 	 */
-	private function appendRegexFallbackRows(iterable $regexRows, array $fallbackRows): iterable {
+	private function appendRegexFallbackRows(iterable $regexRows, iterable $fallbackRows): iterable {
 		foreach ($regexRows as $row) {
 			yield $row;
 		}
@@ -260,7 +299,9 @@ class ABJ_404_Solution_SpellURLMatcher {
 		}
 
 		$prepared = $this->f->str_replace('/', '\/', $regexURL);
-		$this->preparedRegexPatternCache[$regexURL] = $prepared;
+		if (count($this->preparedRegexPatternCache) < self::PREPARED_REGEX_PATTERN_CACHE_MAX_COUNT) {
+			$this->preparedRegexPatternCache[$regexURL] = $prepared;
+		}
 		return $prepared;
 	}
 

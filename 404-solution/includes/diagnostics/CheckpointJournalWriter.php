@@ -63,7 +63,8 @@ final class ABJ_404_Solution_CheckpointJournalWriter {
             self::LOCK_WAIT_TIMEOUT_US
         );
         if ($acquired['status'] === 'failed') {
-            self::reportFailure('AJAX checkpoint lock file could not be opened: ' . $lockPath);
+            self::reportFailure('AJAX checkpoint lock file could not be opened: ' . $lockPath
+                . ($acquired['warning'] !== '' ? ' (' . $acquired['warning'] . ')' : ''));
             return self::result(array('status' => 'failed', 'reason' => 'lock_open_failed',
                 'request_id' => $requestId, 'event' => $event, 'started_ns' => $startedNs));
         }
@@ -77,6 +78,7 @@ final class ABJ_404_Solution_CheckpointJournalWriter {
                 self::appendLockTimeoutRecord(array(
                     'path' => $path,
                     'record' => $record,
+                    'line' => $json . "\n",
                     'blocked_event' => $event,
                     'wait_us' => $waitUs,
                 ));
@@ -126,15 +128,33 @@ final class ABJ_404_Solution_CheckpointJournalWriter {
         }
         if (($size + strlen($line)) > self::MAX_CHECKPOINT_BYTES) {
             $old = $directory . self::ROTATED_FILE;
-            if (@is_file($old) && !@unlink($old)) {
-                $status = 'failed';
-                $reason = 'rotated_file_delete_failed';
-                self::reportFailure('AJAX checkpoint rotated file could not be deleted: ' . $old);
+            $oldIsFile = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($old) { return is_file($old); }
+            );
+            if ($oldIsFile['result']) {
+                $removed = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                    static function () use ($old) { return unlink($old); }
+                );
+                if (!$removed['result']) {
+                    $status = 'failed';
+                    $reason = 'rotated_file_delete_failed';
+                    self::reportFailure('AJAX checkpoint rotated file could not be deleted: ' . $old
+                        . ($removed['warning'] !== null ? ' (' . $removed['warning'] . ')' : ''));
+                }
             }
-            if (@is_file($path) && !@rename($path, $old)) {
-                $status = 'failed';
-                $reason = 'rotation_rename_failed';
-                self::reportFailure('AJAX checkpoint file could not be rotated: ' . $path);
+            $pathIsFile = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($path) { return is_file($path); }
+            );
+            if ($pathIsFile['result']) {
+                $renamed = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                    static function () use ($path, $old) { return rename($path, $old); }
+                );
+                if (!$renamed['result']) {
+                    $status = 'failed';
+                    $reason = 'rotation_rename_failed';
+                    self::reportFailure('AJAX checkpoint file could not be rotated: ' . $path
+                        . ($renamed['warning'] !== null ? ' (' . $renamed['warning'] . ')' : ''));
+                }
             }
             // The held descriptor now names the rotated file, so drop it: the
             // record that triggered the rotation belongs in the new journal.
@@ -142,18 +162,20 @@ final class ABJ_404_Solution_CheckpointJournalWriter {
         }
         $written = ABJ_404_Solution_DiagnosticAppendStream::append($path, $line);
         if ($written['status'] !== 'complete') {
+            // The append stream captured the native cause; name it in the report.
+            $cause = $written['warning'] !== '' ? ' (' . $written['warning'] . ')' : '';
             if ($written['reason'] === 'open_failed') {
-                self::reportFailure('AJAX checkpoint file could not be opened: ' . $path);
+                self::reportFailure('AJAX checkpoint file could not be opened: ' . $path . $cause);
                 return array('status' => 'failed', 'reason' => 'journal_open_failed');
             }
-            self::reportFailure('AJAX checkpoint append/flush failed: ' . $path);
+            self::reportFailure('AJAX checkpoint append/flush failed: ' . $path . $cause);
             return array('status' => 'failed', 'reason' => 'append_flush_failed');
         }
         return array('status' => $status, 'reason' => $reason);
     }
 
     /**
-     * The emergency record written when the advisory lock never came free.
+     * Preserve the checkpoint and report the lock timeout in one emergency append.
      *
      * Deliberately opens its own descriptor rather than reusing the
      * request-scoped one: this path exists because the ordinary write path is
@@ -161,7 +183,7 @@ final class ABJ_404_Solution_CheckpointJournalWriter {
      * construction (once per stuck lock), so the open it pays for is not the
      * per-record cost DiagnosticAppendStream removes.
      *
-     * @param array{path: string, record: array<string, mixed>, blocked_event: string, wait_us: int} $timeout
+     * @param array{path: string, record: array<string, mixed>, line: string, blocked_event: string, wait_us: int} $timeout
      */
     private static function appendLockTimeoutRecord(array $timeout): void {
         $path = $timeout['path'];
@@ -178,20 +200,40 @@ final class ABJ_404_Solution_CheckpointJournalWriter {
             self::reportFailure('AJAX checkpoint lock-timeout JSON encoding failed.');
             return;
         }
-        $handle = @fopen($path, 'ab');
+        $opened = ABJ_404_Solution_HostFilesystemCall::fopen($path, 'ab');
+        $handle = $opened['result'];
         if ($handle === false) {
-            self::reportFailure('AJAX checkpoint lock-timeout journal could not be opened: ' . $path);
+            self::reportFailure('AJAX checkpoint lock-timeout journal could not be opened: ' . $path
+                . ($opened['warning'] !== null ? ' (' . $opened['warning'] . ')' : ''));
             return;
         }
         try {
-            $line = $json . "\n";
-            $written = @fwrite($handle, $line);
-            $flushed = @fflush($handle);
+            // Contention is a recorder failure, not an event replacement:
+            // consumers still need the original boundary and its fields.
+            // Both newline-terminated records share one O_APPEND write so a
+            // concurrent writer cannot split this checkpoint/diagnostic pair.
+            $line = $timeout['line'] . $json . "\n";
+            $writtenResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($handle, $line) { return fwrite($handle, $line); }
+            );
+            $written = $writtenResult['result'];
+            $flushedResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($handle) { return fflush($handle); }
+            );
+            $flushed = $flushedResult['result'];
             if ($written !== strlen($line) || !$flushed) {
-                self::reportFailure('AJAX checkpoint lock-timeout record could not be appended: ' . $path);
+                $warning = $writtenResult['warning'] ?? $flushedResult['warning'];
+                self::reportFailure('AJAX checkpoint lock-timeout record could not be appended: ' . $path
+                    . ($warning !== null ? ' (' . $warning . ')' : ''));
             }
         } finally {
-            @fclose($handle);
+            $closed = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($handle) { return fclose($handle); }
+            );
+            if (!$closed['result'] && $closed['warning'] !== null) {
+                self::reportFailure('AJAX checkpoint lock-timeout journal could not be closed: ' . $path
+                    . ' (' . $closed['warning'] . ')');
+            }
         }
     }
 

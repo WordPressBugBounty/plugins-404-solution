@@ -11,8 +11,8 @@ if (!defined('ABSPATH')) {
  * A healthy request leaves nothing behind, so promotion is the whole reason a
  * later report can show what an ordinary-looking request did: a finished
  * request is promoted when it was slow, started late against its client's send
- * time, or was a retry, and a request named by a retry or a client beacon is
- * promoted with the reason it was named.
+ * time, was a retry, or observed a server/storage failure. A request named by
+ * a retry or a client beacon is promoted with the reason it was named.
  *
  * Callers own the authorization question. Every field a timeline is keyed on
  * (request id, retry count, client send time) is request-supplied, so this
@@ -73,7 +73,7 @@ final class ABJ_404_Solution_RequestTimelinePromoter {
 
     /**
      * Promote this request's own finished timeline when it is noteworthy: slow
-     * start to shutdown, late start against the client send time, or a retry.
+     * start to shutdown, late start, retry, or an observed server/storage failure.
      *
      * @param int|null $elapsedMs request start to now, or null when the clock
      *   was unavailable (slowness cannot then be judged).
@@ -85,6 +85,10 @@ final class ABJ_404_Solution_RequestTimelinePromoter {
             $rid = isset($timeline['rid']) && is_string($timeline['rid']) ? $timeline['rid'] : '';
             if ($rid === '') {
                 return;
+            }
+            if (self::hasRecordedFailure($timeline)) {
+                // The reason wire value also works with a ledger loaded before this update.
+                self::record($timeline, 'failure');
             }
             if ($elapsedMs !== null && $elapsedMs >= self::SLOW_REQUEST_MS) {
                 self::record($timeline, ABJ_404_Solution_StrandedRequestLedger::REASON_SLOW);
@@ -101,6 +105,19 @@ final class ABJ_404_Solution_RequestTimelinePromoter {
         } catch (Throwable $e) {
             self::reportFailure('request timeline promote own failed: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * A successful HTTP response can still carry a failed query or diagnostic write.
+     *
+     * @param array<string, mixed> $timeline
+     */
+    private static function hasRecordedFailure(array $timeline): bool {
+        $frame = is_array($timeline['failure_frame'] ?? null) ? $timeline['failure_frame'] : array();
+        $query = is_array($frame['query'] ?? null) ? $frame['query'] : array();
+        return ($frame['storage_status'] ?? '') === 'write_failed'
+            || in_array($frame['terminal_state'] ?? '', array('error', 'sql_failure', 'sql_timeout'), true)
+            || in_array($query['state'] ?? '', array('sql_failure', 'sql_timeout'), true);
     }
 
     /**

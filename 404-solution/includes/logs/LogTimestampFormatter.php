@@ -49,6 +49,11 @@ class ABJ_404_Solution_LogTimestampFormatter {
         // DateTimeZone construction for EITHER source shares one guarded
         // fallback to the server default.
         try {
+            // Older PHP silently accepts oversized numeric offsets as UTC.
+            // Enforce the numeric format this branch constructs before parsing.
+            if ($timezoneString === '' && preg_match('/^[+-][0-9]{2}:[0-9]{2}$/D', $tzString) !== 1) {
+                throw new UnexpectedValueException('Invalid gmt_offset timezone: ' . $tzString);
+            }
             $date = new DateTime('@' . abj_clock()->now());
             $date->setTimezone(new DateTimeZone($tzString));
         } catch (Exception $e) {

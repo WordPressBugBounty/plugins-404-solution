@@ -21,19 +21,18 @@ if (!defined('ABSPATH')) {
  *
  * This class owns the bounded persistence contract. Boundary field privacy is
  * owned by ABJ_404_Solution_ActiveOperationBoundaryManifest, and event semantics
- * remain with AjaxCheckpointLogger.
+ * remain with AjaxCheckpointLogger. Turning the journal file back into a folded
+ * snapshot is ABJ_404_Solution_ActiveOperationBreadcrumbReader's job.
  *
- * @phpstan-type EncodedRecord array{record: array<string, mixed>, line: string}
- * @phpstan-type Snapshot array{ino: mixed, dev: mixed, size: int,
- *   max_sequence: int, torn_tail: bool, records: array<int, EncodedRecord>}
+ * @phpstan-import-type Snapshot from ABJ_404_Solution_ActiveOperationBreadcrumbReader
  */
 final class ABJ_404_Solution_ActiveOperationBreadcrumbs {
 
     const FILE = 'abj404_ajax_active_operations.jsonl';
     const LOCK_FILE = 'abj404_ajax_active_operations.lock';
-    const MAX_RECORDS = 32;
-    const MAX_RECORD_BYTES = 2048;
-    const MAX_FILE_BYTES = 1048576;
+    const MAX_RECORDS = ABJ_404_Solution_ActiveOperationBreadcrumbState::MAX_RECORDS;
+    const MAX_RECORD_BYTES = ABJ_404_Solution_ActiveOperationBreadcrumbState::MAX_RECORD_BYTES;
+    const MAX_FILE_BYTES = ABJ_404_Solution_ActiveOperationBreadcrumbState::MAX_FILE_BYTES;
     const LOCK_WAIT_TIMEOUT_US = 50000;
 
     /**
@@ -69,7 +68,8 @@ final class ABJ_404_Solution_ActiveOperationBreadcrumbs {
                 self::LOCK_WAIT_TIMEOUT_US
             );
             if ($acquired['status'] === 'failed') {
-                self::reportFailure('active-operation lock could not be opened: ' . $lockPath);
+                self::reportFailure('active-operation lock could not be opened: ' . $lockPath
+                    . ($acquired['warning'] !== '' ? ' (' . $acquired['warning'] . ')' : ''));
                 return self::failure('lock_open_failed');
             }
             try {
@@ -81,11 +81,15 @@ final class ABJ_404_Solution_ActiveOperationBreadcrumbs {
                 if ($snapshot === null) {
                     return self::failure('existing_file_unparseable');
                 }
+                // This prefix is already on disk and validated under the lock.
+                // Keep it even if compaction or the following append fails;
+                // the next stat still detects replacement, truncation or growth.
+                self::rememberSnapshot($path, $snapshot);
 
                 $record['breadcrumb_format_version'] = 2;
                 $record['breadcrumb_seq'] = $snapshot['max_sequence'] >= PHP_INT_MAX
                     ? 1 : $snapshot['max_sequence'] + 1;
-                $encoded = self::encodeRecord($record);
+                $encoded = ABJ_404_Solution_ActiveOperationBreadcrumbState::encodeRecord($record);
                 if ($encoded === null) {
                     self::reportFailure('active-operation file contains an over-budget record.');
                     return self::failure('record_too_large');
@@ -104,12 +108,15 @@ final class ABJ_404_Solution_ActiveOperationBreadcrumbs {
                     $encoded['line'] . "\n"
                 );
                 if ($append['status'] !== 'complete') {
-                    unset(self::$rememberedTable[$path]);
                     self::reportFailure('active-operation append failed: '
-                        . ($append['reason'] ?? 'unknown'));
+                        . ($append['reason'] ?? 'unknown')
+                        . ($append['warning'] !== '' ? ' (' . $append['warning'] . ')' : ''));
                     return self::failure('append_failed');
                 }
-                $snapshot['records'] = self::foldEncodedRecord($snapshot['records'], $encoded);
+                $snapshot['records'] = ABJ_404_Solution_ActiveOperationBreadcrumbState::foldEncodedRecord(
+                    $snapshot['records'],
+                    $encoded
+                );
                 $snapshot['size'] += $payloadBytes;
                 $snapshot['max_sequence'] = $record['breadcrumb_seq'];
                 $snapshot['torn_tail'] = false;
@@ -140,7 +147,7 @@ final class ABJ_404_Solution_ActiveOperationBreadcrumbs {
         if (preg_match('/^[A-Za-z0-9]{8,64}$/', $requestId) !== 1) {
             return array();
         }
-        $snapshot = self::readSnapshot(self::path($directory));
+        $snapshot = ABJ_404_Solution_ActiveOperationBreadcrumbReader::read(self::path($directory));
         if ($snapshot === null) {
             return array();
         }
@@ -154,40 +161,11 @@ final class ABJ_404_Solution_ActiveOperationBreadcrumbs {
     }
 
     /**
-     * Fold active-operation lines for support consumers while preserving every
-     * unrelated or malformed line for its owning policy to inspect.
-     *
      * @param array<int, string> $lines
      * @return array<int, string>
      */
     public static function compactSupportLines(array $lines): array {
-        $latest = array();
-        foreach ($lines as $index => $line) {
-            $record = json_decode($line, true);
-            $key = is_array($record) ? self::recordKey($record) : '';
-            if ($key === '') {
-                continue;
-            }
-            unset($latest[$key]);
-            $latest[$key] = $index;
-            if (count($latest) > self::MAX_RECORDS) {
-                array_shift($latest);
-            }
-        }
-        if ($latest === array()) {
-            return $lines;
-        }
-        $keep = array_fill_keys(array_values($latest), true);
-        return array_values(array_filter(
-            $lines,
-            static function (string $line, int $index) use ($keep): bool {
-                $record = json_decode($line, true);
-                return !is_array($record)
-                    || self::recordKey($record) === ''
-                    || isset($keep[$index]);
-            },
-            ARRAY_FILTER_USE_BOTH
-        ));
+        return ABJ_404_Solution_ActiveOperationBreadcrumbState::compactSupportLines($lines);
     }
 
     /** Discard request-local cached state between PHPUnit request fixtures. */
@@ -242,24 +220,25 @@ final class ABJ_404_Solution_ActiveOperationBreadcrumbs {
         return array('status' => 'complete', 'reason' => '');
     }
 
-    /**
-     * @param array<string, mixed> $record
-     * @return array{record: array<string, mixed>, line: string}|null
-     */
-    private static function encodeRecord(array $record): ?array {
-        $line = json_encode($record, JSON_UNESCAPED_SLASHES);
-        if (!is_string($line) || strlen($line) > self::MAX_RECORD_BYTES) {
-            return null;
-        }
-        return array('record' => $record, 'line' => $line);
-    }
-
     /** @return Snapshot|null */
     private static function readExistingOrRemembered(string $path): ?array {
         clearstatcache(true, $path);
-        $current = @stat($path);
-        if (!is_array($current) || !@is_file($path)) {
-            return self::emptySnapshot();
+        $exists = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($path) { return is_file($path); }
+        );
+        if ($exists['warning'] !== null) {
+            self::reportFilesystemWarning('active-operation file existence could not be checked: ' . $path, $exists['warning']);
+            return null;
+        }
+        if (!$exists['result']) {
+            return ABJ_404_Solution_ActiveOperationBreadcrumbReader::emptySnapshot();
+        }
+        $currentResult = ABJ_404_Solution_HostFilesystemCall::stat($path);
+        $current = $currentResult['result'];
+        if (!is_array($current) || $currentResult['warning'] !== null) {
+            self::reportFailure('active-operation file identity could not be read: ' . $path
+                . ($currentResult['warning'] !== null ? ' (' . $currentResult['warning'] . ')' : ''));
+            return null;
         }
         $size = is_int($current['size'] ?? null) ? $current['size'] : -1;
         if ($size < 0 || $size > self::MAX_FILE_BYTES) {
@@ -274,147 +253,9 @@ final class ABJ_404_Solution_ActiveOperationBreadcrumbs {
             if ($size === $remembered['size']) {
                 return $remembered;
             }
-            return self::readSnapshot($path, $remembered['size'], $remembered);
+            return ABJ_404_Solution_ActiveOperationBreadcrumbReader::read($path, $remembered['size'], $remembered);
         }
-        return self::readSnapshot($path);
-    }
-
-    /**
-     * @param Snapshot|null $base Previously validated prefix.
-     * @return Snapshot|null
-     */
-    private static function readSnapshot(string $path, int $offset = 0, ?array $base = null): ?array {
-        if (!@is_file($path)) {
-            return self::emptySnapshot();
-        }
-        $handle = @fopen($path, 'rb');
-        if ($handle === false) {
-            self::reportFailure('active-operation file could not be read: ' . $path);
-            return null;
-        }
-        try {
-            $stat = @fstat($handle);
-            $size = is_array($stat) && is_int($stat['size'] ?? null) ? $stat['size'] : -1;
-            if ($size < 0 || $size > self::MAX_FILE_BYTES || $offset > $size) {
-                self::reportFailure('active-operation file exceeds its fixed byte bound: ' . $path);
-                return null;
-            }
-            if ($offset > 0 && @fseek($handle, $offset) !== 0) {
-                self::reportFailure('active-operation file suffix could not be read: ' . $path);
-                return null;
-            }
-            $snapshot = $base ?? self::emptySnapshot();
-            $snapshot['ino'] = is_array($stat) ? ($stat['ino'] ?? null) : null;
-            $snapshot['dev'] = is_array($stat) ? ($stat['dev'] ?? null) : null;
-            $snapshot['size'] = $size;
-            $snapshot['torn_tail'] = false;
-            while (($line = @fgets($handle, self::MAX_RECORD_BYTES + 3)) !== false) {
-                $parsed = self::parseJournalLine($line, @feof($handle), $path);
-                if ($parsed['status'] === 'torn') {
-                    $snapshot['torn_tail'] = true;
-                    break;
-                }
-                if ($parsed['status'] !== 'complete') {
-                    return null;
-                }
-                $snapshot['records'] = self::foldEncodedRecord(
-                    $snapshot['records'],
-                    $parsed['encoded']
-                );
-                $snapshot['max_sequence'] = max(
-                    $snapshot['max_sequence'],
-                    $parsed['sequence']
-                );
-            }
-            return $snapshot;
-        } finally {
-            @fclose($handle);
-        }
-    }
-
-    /** @return Snapshot */
-    private static function emptySnapshot(): array {
-        return array(
-            'ino' => null,
-            'dev' => null,
-            'size' => 0,
-            'max_sequence' => 0,
-            'torn_tail' => false,
-            'records' => array(),
-        );
-    }
-
-    /**
-     * Parse one bounded journal read without letting a torn final append poison
-     * the complete prefix.
-     *
-     * @return array{status: 'complete', encoded: EncodedRecord, sequence: int}
-     *   |array{status: 'torn'|'failed'}
-     */
-    private static function parseJournalLine(string $line, bool $atEof, string $path): array {
-        if (substr($line, -1) !== "\n") {
-            if ($atEof) {
-                return array('status' => 'torn');
-            }
-            self::reportFailure('active-operation file contains an over-budget record: ' . $path);
-            return array('status' => 'failed');
-        }
-        $line = rtrim($line, "\r\n");
-        if (strlen($line) > self::MAX_RECORD_BYTES) {
-            self::reportFailure('active-operation file contains an over-budget record: ' . $path);
-            return array('status' => 'failed');
-        }
-        $decoded = json_decode($line, true);
-        if (!is_array($decoded) || self::recordKey($decoded) === '') {
-            self::reportFailure('active-operation file contains an unparseable record: ' . $path);
-            return array('status' => 'failed');
-        }
-        $record = array();
-        foreach ($decoded as $key => $value) {
-            $record[(string)$key] = $value;
-        }
-        $sequence = is_int($record['breadcrumb_seq'] ?? null)
-            ? $record['breadcrumb_seq'] : 0;
-        return array(
-            'status' => 'complete',
-            'encoded' => array('record' => $record, 'line' => $line),
-            'sequence' => $sequence,
-        );
-    }
-
-    /**
-     * @param array<int, array{record: array<string, mixed>, line: string}> $records
-     * @param array{record: array<string, mixed>, line: string} $replacement
-     * @return array<int, array{record: array<string, mixed>, line: string}>
-     */
-    private static function foldEncodedRecord(array $records, array $replacement): array {
-        $key = self::recordKey($replacement['record']);
-        $kept = array_values(array_filter(
-            $records,
-            static function (array $encoded) use ($key): bool {
-                return self::recordKey($encoded['record']) !== $key;
-            }
-        ));
-        $kept[] = $replacement;
-        return count($kept) > self::MAX_RECORDS
-            ? array_slice($kept, -self::MAX_RECORDS)
-            : $kept;
-    }
-
-    /** @param array<mixed, mixed> $record */
-    private static function recordKey(array $record): string {
-        $requestId = $record['request_id'] ?? null;
-        $boundary = $record['boundary'] ?? null;
-        $state = $record['state'] ?? null;
-        if (($record['event'] ?? '') !== 'active_operation_breadcrumb'
-                || !is_string($requestId)
-                || preg_match('/^[A-Za-z0-9]{8,64}$/', $requestId) !== 1
-                || !is_string($boundary)
-                || !ABJ_404_Solution_ActiveOperationBoundaryManifest::hasBoundary($boundary)
-                || !in_array($state, array('active', 'complete'), true)) {
-            return '';
-        }
-        return $requestId . '|' . $boundary;
+        return ABJ_404_Solution_ActiveOperationBreadcrumbReader::read($path);
     }
 
     /**
@@ -425,34 +266,54 @@ final class ABJ_404_Solution_ActiveOperationBreadcrumbs {
         $lines = array_column($snapshot['records'], 'line');
         $payload = implode("\n", $lines) . ($lines === array() ? '' : "\n");
         $temporary = $path . '.compact.tmp';
-        $handle = @fopen($temporary, 'wb');
+        $opened = ABJ_404_Solution_HostFilesystemCall::fopen($temporary, 'wb');
+        $handle = $opened['result'];
         if ($handle === false) {
-            self::reportFailure('active-operation compaction file could not be opened: ' . $temporary);
+            self::reportFailure('active-operation compaction file could not be opened: ' . $temporary
+                . ($opened['warning'] !== null ? ' (' . $opened['warning'] . ')' : ''));
             return null;
         }
         try {
-            $written = @fwrite($handle, $payload);
-            $flushed = @fflush($handle);
+            $writtenResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($handle, $payload) { return fwrite($handle, $payload); }
+            );
+            $written = $writtenResult['result'];
+            $flushedResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($handle) { return fflush($handle); }
+            );
+            $flushed = $flushedResult['result'];
         } finally {
-            @fclose($handle);
+            $closed = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($handle) { return fclose($handle); }
+            );
         }
         if ($written !== strlen($payload) || !$flushed) {
+            $warning = $writtenResult['warning'] ?? $flushedResult['warning'];
             self::reportFailure('active-operation compaction file could not be flushed: '
-                . $temporary);
-            @unlink($temporary);
+                . $temporary . ($warning !== null ? ' (' . $warning . ')' : ''));
+            ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($temporary) { return unlink($temporary); }
+            );
             return null;
         }
-        if (!@rename($temporary, $path)) {
+        $renamed = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($temporary, $path) { return rename($temporary, $path); }
+        );
+        if (!$renamed['result']) {
             self::reportFailure('active-operation compacted file could not be atomically replaced: '
-                . $path);
-            @unlink($temporary);
+                . $path . ($renamed['warning'] !== null ? ' (' . $renamed['warning'] . ')' : ''));
+            ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($temporary) { return unlink($temporary); }
+            );
             return null;
         }
         ABJ_404_Solution_DiagnosticAppendStream::invalidate($path);
         clearstatcache(true, $path);
-        $stat = @stat($path);
+        $statResult = ABJ_404_Solution_HostFilesystemCall::stat($path);
+        $stat = $statResult['result'];
         if (!is_array($stat)) {
-            self::reportFailure('active-operation compacted file identity could not be read: ' . $path);
+            self::reportFailure('active-operation compacted file identity could not be read: ' . $path
+                . ($statResult['warning'] !== null ? ' (' . $statResult['warning'] . ')' : ''));
             return null;
         }
         $snapshot['ino'] = $stat['ino'] ?? null;
@@ -465,8 +326,16 @@ final class ABJ_404_Solution_ActiveOperationBreadcrumbs {
     /** @param Snapshot $snapshot Validated folded state. */
     private static function rememberSnapshot(string $path, array $snapshot): void {
         if ($snapshot['ino'] === null || $snapshot['dev'] === null) {
+            $exists = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($path) { return is_file($path); }
+            );
+            if (!$exists['result']) {
+                unset(self::$rememberedTable[$path]);
+                return;
+            }
             clearstatcache(true, $path);
-            $stat = @stat($path);
+            $statResult = ABJ_404_Solution_HostFilesystemCall::stat($path);
+            $stat = $statResult['result'];
             if (!is_array($stat)) {
                 unset(self::$rememberedTable[$path]);
                 return;
@@ -480,6 +349,12 @@ final class ABJ_404_Solution_ActiveOperationBreadcrumbs {
     /** @return array{status: string, reason: string} */
     private static function failure(string $reason): array {
         return array('status' => 'failed', 'reason' => $reason);
+    }
+
+    private static function reportFilesystemWarning(string $message, ?string $warning): void {
+        if ($warning !== null) {
+            self::reportFailure($message . ' (' . $warning . ')');
+        }
     }
 
     private static function reportFailure(string $message): void {

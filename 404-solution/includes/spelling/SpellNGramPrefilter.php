@@ -79,6 +79,11 @@ class ABJ_404_Solution_SpellNGramPrefilter {
 			return 'skipped';
 		}
 
+		if ($this->ngramFilter->hasUnindexedPermalinks()) {
+			$this->logger->debugMessage("N-gram prefilter skipped: page-index coverage is incomplete or could not be verified");
+			return 'skipped';
+		}
+
 		$similarPages = $this->ngramFilter->findSimilarPages(
 			$requestedURLCleaned,
 			self::NGRAM_PREFILTER_THRESHOLD,
@@ -129,7 +134,8 @@ class ABJ_404_Solution_SpellNGramPrefilter {
 			|| $beforeNGramCount <= self::NGRAM_SECONDARY_MIN_CANDIDATES
 			|| $this->ngramFilter->getCacheCount() < self::NGRAM_MIN_CACHE_ENTRIES
 			|| !$this->ngramFilter->isCacheInitialized()
-			|| $this->ngramFilter->getCacheCoverageRatio() < self::NGRAM_MIN_COVERAGE_RATIO) {
+			|| $this->ngramFilter->getCacheCoverageRatio() < self::NGRAM_MIN_COVERAGE_RATIO
+			|| $this->ngramFilter->hasUnindexedPermalinks()) {
 			return $this->normalizeScalarIds($candidateIds);
 		}
 

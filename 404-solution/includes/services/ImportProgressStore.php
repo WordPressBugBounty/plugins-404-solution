@@ -24,7 +24,7 @@ class ABJ_404_Solution_ImportProgressStore {
         if ($contentHash === '' || !function_exists('get_option')) {
             return null;
         }
-        $progress = get_option($this->optionKey, null);
+        $progress = ABJ_404_Solution_OptionShapeRead::arrayValue($this->optionKey, null);
         if (!is_array($progress) || !isset($progress['hash']) || !is_string($progress['hash'])) {
             return null;
         }

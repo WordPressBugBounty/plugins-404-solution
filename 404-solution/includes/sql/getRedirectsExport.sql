@@ -27,6 +27,7 @@ SELECT r.url as from_url,
        wpp.post_type as type_wp,
        COALESCE(r.engine, '') as engine,
        r.code,
+       r.query_mode,
        /* read by RedirectExportDestination::csvColumns() to resolve a post,
           category or tag destination to the URL the live redirect uses */
        r.type as type_id,

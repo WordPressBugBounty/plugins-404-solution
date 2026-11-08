@@ -39,9 +39,29 @@ class ABJ_404_Solution_RedirectLookupService {
      * @return array<string, mixed>
      */
     public function getActiveRedirectForURL($url, $degradedMode = false): array {
-        return $this->findFirstCandidate($url, function($candidate) use ($degradedMode) {
+        $exact = $this->findFirstCandidate($url, function($candidate) use ($degradedMode) {
             return $this->lookupRepository->getActiveRedirectForNormalizedUrl($candidate, $degradedMode);
         });
+        if (!empty($exact['last_error']) || ABJ_404_Solution_ExactInteger::readOr($exact['id'] ?? null, 1, 0) !== 0 || strpos($url, '?') === false) {
+            return $exact;
+        }
+        $routingKey = abj_service('query_string_helper')->routingKey($url);
+        if ($routingKey !== $url) {
+            $routing = $this->findFirstCandidate($routingKey, function($candidate) use ($degradedMode) {
+                return $this->lookupRepository->getActiveRedirectForNormalizedUrl($candidate, $degradedMode, 'routing');
+            });
+            if (!empty($routing['last_error']) || ABJ_404_Solution_ExactInteger::readOr($routing['id'] ?? null, 1, 0) !== 0) { return $routing; }
+        }
+        $path = explode('?', $url, 2)[0];
+        if ($path === $routingKey) { return array('id' => 0); }
+        return $this->findFirstCandidate($path, function($candidate) use ($degradedMode) {
+            return $this->lookupRepository->getActiveRedirectForNormalizedUrl($candidate, $degradedMode, 'pass');
+        });
+    }
+
+    /** @param array<string, int> $context @return self */
+    public function withLookupContext(array $context): self {
+        return new self($this->f, $this->lookupRepository->withLookupContext($context), $this->urlNormalization);
     }
 
     /**
@@ -73,6 +93,9 @@ class ABJ_404_Solution_RedirectLookupService {
                 continue;
             }
             $assocRedirect = $this->assocRedirectRow($redirect);
+            if (!empty($assocRedirect['last_error'])) {
+                return $assocRedirect;
+            }
             if (isset($assocRedirect['id']) && $assocRedirect['id'] !== 0) {
                 return $assocRedirect;
             }
@@ -102,6 +125,14 @@ class ABJ_404_Solution_RedirectLookupService {
         if ($this->urlNormalization !== null) {
             return $this->urlNormalization;
         }
-        return abj_service('plugin_logic')->urlNormalization();
+        $pluginLogic = function_exists('abj_service_optional')
+            ? abj_service_optional('plugin_logic') : null;
+        if (is_object($pluginLogic) && method_exists($pluginLogic, 'urlNormalization')) {
+            $normalization = $pluginLogic->urlNormalization();
+            if ($normalization instanceof ABJ_404_Solution_PluginLogicUrlNormalization) {
+                return $normalization;
+            }
+        }
+        return new ABJ_404_Solution_PluginLogicUrlNormalization($this->f, '', 0);
     }
 }

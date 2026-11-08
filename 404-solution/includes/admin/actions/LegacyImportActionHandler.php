@@ -61,12 +61,23 @@ class ABJ_404_Solution_LegacyImportActionHandler {
             try {
                 $result = $this->parent->getDependencies()->getPluginUpdateRepo()->importDataFromPluginRedirectioner();
                 if ($result['last_error'] != '') {
+                    $rowsAffected = is_scalar($result['rows_affected']) ? (string)$result['rows_affected'] : '0';
                     $lastErrorJson = json_encode($result['last_error']);
-                    $message = sprintf(__("Error: No records were imported. SQL result: %s", '404-solution'),
-                            wp_kses_post(is_string($lastErrorJson) ? $lastErrorJson : ''));
+                    $message = sprintf(__("Records imported: %s", '404-solution'), esc_html($rowsAffected));
+                    $message .= ' ' . __('Error:', '404-solution') . ' ' .
+                            wp_kses_post(is_string($lastErrorJson) ? $lastErrorJson : '');
                 } else {
                     $rowsAffected = is_scalar($result['rows_affected']) ? (string)$result['rows_affected'] : '0';
                     $message = sprintf(__("Records imported: %s", '404-solution'), esc_html($rowsAffected));
+                    if (isset($result['errors']) && is_array($result['errors']) && !empty($result['errors'])) {
+                        $issues = array();
+                        foreach ($result['errors'] as $issue) {
+                            if (is_scalar($issue)) {
+                                $issues[] = (string)$issue;
+                            }
+                        }
+                        $message .= ' ' . esc_html(implode(' | ', $issues));
+                    }
                 }
 
             } catch (Exception $e) {
@@ -86,14 +97,22 @@ class ABJ_404_Solution_LegacyImportActionHandler {
         if ($notice === null || $notice['redirect_id'] <= 0) {
             return __('Error: No regex auto-promotion to undo.', '404-solution');
         }
-        $dbQuery = $this->parent->getDbQuery();
-        $redirectsTable = $dbQuery->doTableNameReplacements('{wp_abj404_redirects}');
-        $sql = "UPDATE `" . $redirectsTable . "` SET `url` = %s, `status` = %d WHERE `id` = %d";
-        $dbQuery->queryAndGetResults($sql, array('query_params' => array(
-            $notice['original_url'],
-            (int)ABJ404_STATUS_MANUAL,
-            (int)$notice['redirect_id'],
-        )));
+        $repository = $this->parent->getRedirectsRepo();
+        $error = $repository->updateRedirectFromStoredRow($notice['redirect_id'], function (array $row) use ($notice) {
+            return ABJ_404_Solution_RedirectUpdate::fromArray(array(
+                'id' => $notice['redirect_id'],
+                'type' => ABJ_404_Solution_ExactInteger::readOr($row['type'] ?? null, 0, -1),
+                'fromUrl' => $notice['original_url'],
+                'destination' => isset($row['final_dest']) && is_string($row['final_dest']) ? $row['final_dest'] : '',
+                'code' => is_scalar($row['code'] ?? null) ? (string)$row['code'] : '301',
+                'statusType' => (string)ABJ404_STATUS_MANUAL,
+                'startTs' => $row['start_ts'] ?? null,
+                'endTs' => $row['end_ts'] ?? null,
+            ));
+        });
+        if ($error !== '') { return 'Error: ' . esc_html($error); }
+        // The row was a regex until now; the URLs it matched are unknowable.
+        ABJ_404_Solution_RedirectPageCachePurge::queueSiteWide();
         ABJ_404_Solution_RegexAutoPromote::clearNotice();
         return sprintf(
             /* translators: %s = the original from_url string that was restored */
@@ -124,6 +143,20 @@ class ABJ_404_Solution_LegacyImportActionHandler {
 
         $importer = new ABJ_404_Solution_CrossPluginImporter($this->parent->getRedirectsRepo(), $this->parent->getLogger());
         $count = $importer->importFrom($source);
+        $issues = $importer->getLastIssues();
+        if (!empty($issues)) {
+            return sprintf(
+                /* translators: %d = number imported, %s = skipped row issues */
+                _n(
+                    '%d redirect imported successfully; skipped row: %s',
+                    '%d redirects imported successfully; skipped rows: %s',
+                    count($issues),
+                    '404-solution'
+                ),
+                $count,
+                esc_html(implode(' | ', $issues))
+            );
+        }
 
         return sprintf(
             /* translators: %d = number of redirects imported */

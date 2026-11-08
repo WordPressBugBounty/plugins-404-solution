@@ -19,10 +19,46 @@ class ABJ_404_Solution_RuntimeServiceRegistration implements ABJ_404_Solution_Ab
      * @return void
      */
     public static function register($container): void {
+        $container->set('maintenance_drain', function($c) {
+            return new ABJ_404_Solution_MaintenanceDrain([
+                'store' => new ABJ_404_Solution_MaintenancePassRepository(),
+                'sync' => $c->get('sync_utils'), 'cron' => $c->get('cron_scheduler'),
+                'logger' => $c->get('logging'),
+                'retention' => $c->get('redirects_retention_service'),
+                'database' => $c->get('database_upgrades')->components()->dailyMaintenanceUpgrade(),
+            ]);
+        });
+
         $container->set('previous_request_cookie_tracker', function($c) {
             return new ABJ_404_Solution_PreviousRequestCookieTracker(
                 $c->get('logging')
             );
+        });
+
+        $container->set('redirect_chain_walker', function($c) {
+            return new ABJ_404_Solution_RedirectChainWalker(null, null, $c->get('functions'));
+        });
+
+        // The legacy metadata repository owns source reads. This callback
+        // composes the Core importer above that Data boundary without making
+        // a repository construct its business-policy collaborator.
+        $container->set('redirectioner_row_importer', function($c) {
+            /**
+             * @param array<int, array<string, mixed>> $rows
+             * @param array{core: ABJ_404_Solution_DatabaseCore, functions: ABJ_404_Solution_Functions,
+             *   logging: ABJ_404_Solution_Logging} $dependencies The source reader's dependencies.
+             * @return array{imported: int, issues: array<int, string>}
+             */
+            return static function(array $rows, array $dependencies): array {
+                $core = $dependencies['core'];
+                $logger = $dependencies['logging'];
+                $importer = new ABJ_404_Solution_CrossPluginImporter(
+                    new ABJ_404_Solution_RedirectsRepository($core, $dependencies['functions'], $logger),
+                    $logger,
+                    $core
+                );
+                return $importer->importRows($rows, 'redirectioner');
+            };
         });
 
         $container->set('not_found_response', function($c) {
@@ -46,8 +82,25 @@ class ABJ_404_Solution_RuntimeServiceRegistration implements ABJ_404_Solution_Ab
         });
 
         $container->set('slug_change_handler', function($c) {
+            $delivery = new ABJ_404_Solution_PostChangeRedirectDelivery(array(
+                'intents' => new ABJ_404_Solution_RedirectIntentRepository($c->get('db_core')),
+                'redirects' => $c->get('redirects_repository'),
+                'transactions' => $c->get('db_core')->transactionExecutor(),
+                'options' => $c->get('options_repository'),
+                'requestContext' => $c->get('request_context'),
+                'clock' => $c->get('clock'), 'logger' => $c->get('logging'),
+            ));
             return new ABJ_404_Solution_SlugChangeHandler($c->get('content_repository'),
-                $c->get('redirects_repository'), $c->get('logging'));
+                $c->get('redirects_repository'), $c->get('logging'), $delivery);
+        });
+
+        $container->set('auto_redirect_snapshot_service', function($c) {
+            return new ABJ_404_Solution_AutoRedirectSnapshotService(
+                $c->get('redirects_repository'),
+                $c->get('options_repository'),
+                $c->get('logging'),
+                $c->get('content_repository')
+            );
         });
 
         // 'published_posts_provider' is intentionally NOT registered as a shared

@@ -42,6 +42,8 @@ class ABJ_404_Solution_LogsHitsRebuildLock {
      * @var int
      */
     const TTL_SECONDS = 180;
+    /** Refresh comfortably before expiry without writing on every SQL boundary. */
+    const RENEW_AFTER_SECONDS = 30;
 
     /** @var ABJ_404_Solution_DatabaseCoreInterface */
     private $dbCore;
@@ -115,6 +117,26 @@ class ABJ_404_Solution_LogsHitsRebuildLock {
             $this->heldValue = $replacementValue;
         }
         return $renewed;
+    }
+
+    /**
+     * Fence the next unit with a fresh owner read, renewing only when due.
+     *
+     * A short request can check dozens of SQL boundaries. Rewriting the same
+     * lease at every boundary forces repeated durable commits without adding
+     * ownership protection: both a read and a CAS can be superseded after they
+     * return. Every boundary still checks the exact owner, and renewal itself
+     * remains conditional on that owner. The interval leaves five sixths of
+     * the TTL available for an in-flight bounded statement.
+     */
+    public function checkAndRenew(): bool {
+        if ($this->heldValue === null
+            || $this->lockRow()->valueOf($this->optionName()) !== $this->heldValue) {
+            return false;
+        }
+        $timestamp = ABJ_404_Solution_ExactInteger::read(explode(':', $this->heldValue, 2)[0], 1);
+        if ($timestamp === null) { return false; }
+        return abj_clock()->now() - $timestamp < self::RENEW_AFTER_SECONDS || $this->renew();
     }
 
     /** Whether a live (non-expired) holder currently has the lock.

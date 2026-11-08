@@ -100,15 +100,25 @@ class ABJ_404_Solution_AddRedirectHandler implements ABJ_404_Solution_AdminActio
         if ($tdType2 != "" && ($tdDest2 !== "" || $code410)) {
             $code = $postedCodeForCheck2 !== '' ? $postedCodeForCheck2 : '301';
 
-            $newRedirectId = $redirectsRepo->setupRedirect(ABJ_404_Solution_RedirectSpec::fromArray(array(
-                'fromURL' => $manualURL,
-                'status' => (string)$statusType,
-                'type' => $tdType2,
-                'finalDest' => $tdDest2,
-                'code' => $code,
-                'disabled' => 0,
-            )));
+            try {
+                $newRedirectId = $redirectsRepo->setupRedirect(ABJ_404_Solution_RedirectSpec::fromArray(array(
+                    'fromURL' => $manualURL,
+                    'status' => (string)$statusType,
+                    'type' => $tdType2,
+                    'finalDest' => $tdDest2,
+                    'code' => $code,
+                    'disabled' => 0,
+                )));
+            } catch (ABJ_404_Solution_RedirectCycleException $e) {
+                $logger->warn($e->getMessage());
+                return __('Error:', '404-solution') . ' ' . esc_html($e->getMessage()) . '<BR/>';
+            }
             if ((int)$newRedirectId <= 0) {
+                $cycleError = method_exists($redirectsRepo, 'getLastWriteError')
+                    ? (string)$redirectsRepo->getLastWriteError() : '';
+                if ($cycleError !== '') {
+                    return __('Error:', '404-solution') . ' ' . esc_html($cycleError) . '<BR/>';
+                }
                 $logger->errorMessage("Add redirect: the insert returned no row id. From: " . esc_html($manualURL) . ", type: " . esc_html($tdType2));
                 return __('Error: The database did not save the new redirect. The debug log has the underlying database error.', '404-solution') . "<BR/>";
             }

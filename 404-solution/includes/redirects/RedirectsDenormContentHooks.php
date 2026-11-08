@@ -37,13 +37,26 @@ class ABJ_404_Solution_RedirectsDenormContentHooks {
     private $maintenance;
 
     /**
-     * Post IDs whose denorm recompute already ran in the current request.
-     * WordPress fires save_post 2-4 times per save; this prevents the
-     * final_dest reverse lookup + denorm UPDATE from running that many times
-     * for one save (canonical d1a315e6 SlugChangeHandler shape).
-     * @var array<int, bool>
+     * Saves (by ABJ_404_Solution_PostRef::saveKey()) whose denorm recompute
+     * completed outside a caller transaction in this request. WordPress fires save_post 2-4 times
+     * per save; this prevents the final_dest reverse lookup + denorm UPDATE
+     * from running that many times for one save (canonical d1a315e6
+     * SlugChangeHandler shape), while a later save that changes the post's
+     * title or status still recomputes.
+     * @var array<string, bool>
      */
     private static $processedPosts = [];
+
+    /**
+     * Reset the per-request save dedup. Test seam: lets tests replay several
+     * requests in one process without one request's handled saves
+     * suppressing the next request's.
+     *
+     * @return void
+     */
+    public static function resetForTests(): void {
+        self::$processedPosts = [];
+    }
 
     /**
      * @param ABJ_404_Solution_RedirectsDenormMaintenanceService|null $maintenance
@@ -60,7 +73,7 @@ class ABJ_404_Solution_RedirectsDenormContentHooks {
      */
     public static function init(): void {
         $me = new self();
-        add_action('save_post', array($me, 'onSavePost'), 10, 1);
+        add_action('save_post', array($me, 'onSavePost'), 10, 2);
         add_action('transition_post_status', array($me, 'onTransitionPostStatus'), 10, 3);
         add_action('deleted_post', array($me, 'onDeletedPost'), 10, 1);
         add_action('edited_term', array($me, 'onEditedTerm'), 10, 1);
@@ -83,9 +96,10 @@ class ABJ_404_Solution_RedirectsDenormContentHooks {
      * fire save_post with their own ids.
      *
      * @param int|string $postId
+     * @param \WP_Post|null $post The saved post; WordPress always passes it.
      * @return void
      */
-    public function onSavePost($postId): void {
+    public function onSavePost($postId, $post = null): void {
         $id = is_scalar($postId) ? (int)$postId : 0;
         if ($id <= 0) {
             return;
@@ -96,14 +110,25 @@ class ABJ_404_Solution_RedirectsDenormContentHooks {
         if (function_exists('wp_is_post_autosave') && wp_is_post_autosave($id)) {
             return;
         }
-        // Request-level dedup: save_post fires 2-4 times per save.
-        if (isset(self::$processedPosts[$id])) {
+        // Request-level dedup of WordPress's repeated fires of one save.
+        $saveKey = ABJ_404_Solution_PostRef::saveKey($id, $post);
+        if (isset(self::$processedPosts[$saveKey])) {
             return;
         }
-        self::$processedPosts[$id] = true;
-        $this->safelyRecompute(function () use ($id) {
-            $this->maintenance()->recomputeForChangedPost($id);
-        }, 'onSavePost(post=' . $id . ')');
+        self::$processedPosts[$saveKey] = true;
+        $completed = false;
+        try {
+            $this->safelyRecompute(function () use ($id, &$completed): void {
+                $completed = $this->maintenance()->recomputeForChangedPost($id);
+            }, 'onSavePost(post=' . $id . ')');
+        } finally {
+            // A skipped, failed, or caller-owned transaction must be retryable
+            // later in this request. Only a fully committed projection keeps
+            // the request-level save guard.
+            if (!$completed) {
+                unset(self::$processedPosts[$saveKey]);
+            }
+        }
     }
 
     /**

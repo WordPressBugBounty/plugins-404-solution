@@ -65,11 +65,15 @@ final class ABJ_404_Solution_DiagnosticModuleManifest {
         'ajax/Ajax_Php.php',
         'ajax/AjaxAdminEndpointSupport.php',
         'ajax/Ajax_GetPaginationLinks.php',
+        'ajax/AdminTableResponseParts.php',
         'ajax/Ajax_RefreshHealthBar.php',
         // AjaxStageDiagnostics.php is deliberately absent: it now lives under
         // diagnostics/ and is therefore picked up automatically.
         // The report-only beacon branch of the table endpoint.
         'ajax/AjaxClientReportBeaconResponder.php',
+        // Fatal observation and the original-request crash-beacon capture.
+        'core/ErrorHandler.php',
+        'services/FatalErrorProcessor.php',
         // Response emission and connection detach.
         'ajax/AjaxResponseEmitter.php',
         // Canary ladder and support collection endpoints. The ladder's endpoint
@@ -84,8 +88,17 @@ final class ABJ_404_Solution_DiagnosticModuleManifest {
         'services/RequestInputNormalizer.php',
         // Local template I/O boundary used by the table renderers.
         'core/FileSystemService.php',
+        // The host-probe filesystem boundary every diagnostics journal calls.
+        'core/HostFilesystemCall.php',
         // Pre-query sort-readiness schema and option/cache authority.
         'view-build/RedirectsDenormSchemaReadiness.php',
+        'view-build/AdminTableReadRepository.php',
+        'view-build/ViewQueryBuilder.php',
+        'view-build/ViewSortResolver.php',
+        'logs/LogsReadQueries.php',
+        'logs/LogsUrlSortRepository.php',
+        'admin/AdminLogsTable.php',
+        'view/View_Shared.php',
         // Foreground status-count cache and cron scheduling authorities.
         'stats/StatusCountsRepository.php',
         'stats/RedirectHitCountHistogramRepository.php',
@@ -94,6 +107,11 @@ final class ABJ_404_Solution_DiagnosticModuleManifest {
         'services/CronScheduler.php',
         // The per-query attribution hook, which lives with the DB layer.
         'database/DatabaseQueryDiagnostics.php',
+        // Shared classifiers define the query state retained in the frame.
+        'database/DatabaseInfrastructureErrorTaxonomy.php',
+        'database/DatabaseConnectivityErrorTaxonomy.php',
+        'database/DatabaseHostStateErrorTaxonomy.php',
+        'database/DatabaseSchemaErrorTaxonomy.php',
         // Query preflight spans these DB collaborators before the first SQL
         // probe. Mixed opcodes in any one would erase or mislabel the gap.
         'database/DatabaseQueryExecutor.php',
@@ -220,9 +238,30 @@ final class ABJ_404_Solution_DiagnosticModuleManifest {
         $releaseParts = array();
 
         foreach (self::modulePaths() as $name => $path) {
-            $source = @file_get_contents($path);
+            $sourceResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($path) {
+                    if (!is_file($path)) {
+                        return false;
+                    }
+                    return file_get_contents($path);
+                }
+            );
+            if ($sourceResult['warning'] !== null) {
+                self::reportFilesystemWarning('diagnostic module source read', $path, $sourceResult['warning']);
+            }
+            $source = $sourceResult['warning'] === null ? $sourceResult['result'] : false;
             $hash = is_string($source) ? md5($source) : false;
-            $mtime = @is_file($path) ? @filemtime($path) : false;
+            // A path that is not a regular file has no mtime to read; asking
+            // filemtime() anyway would raise (and report) a second warning for
+            // the same absent module.
+            $presentResult = ABJ_404_Solution_HostFilesystemCall::isFile($path);
+            $mtimeResult = $presentResult['result'] === true
+                ? ABJ_404_Solution_HostFilesystemCall::filemtime($path)
+                : array('result' => false, 'warning' => $presentResult['warning']);
+            if ($mtimeResult['warning'] !== null) {
+                self::reportFilesystemWarning('diagnostic module mtime read', $path, $mtimeResult['warning']);
+            }
+            $mtime = $mtimeResult['warning'] === null ? $mtimeResult['result'] : false;
             $releaseParts[] = $name . ':' . (
                 is_string($source) ? self::canonicalSourceHashOf($source) : 'missing'
             );
@@ -268,11 +307,32 @@ final class ABJ_404_Solution_DiagnosticModuleManifest {
     }
 
     private static function canonicalSourceHash(string $path): string {
-        $source = @file_get_contents($path);
+        $sourceResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($path) {
+                if (!is_file($path)) {
+                    return false;
+                }
+                return file_get_contents($path);
+            }
+        );
+        if ($sourceResult['warning'] !== null) {
+            self::reportFilesystemWarning('diagnostic module canonical source read', $path, $sourceResult['warning']);
+        }
+        $source = $sourceResult['warning'] === null ? $sourceResult['result'] : false;
         if (!is_string($source)) {
             return 'missing';
         }
         return self::canonicalSourceHashOf($source);
+    }
+
+    private static function reportFilesystemWarning(string $operation, string $path, ?string $warning): void {
+        if ($warning === null || $warning === '') {
+            return;
+        }
+        abj404_logPhpFallback(
+            'diagnostic-module-manifest',
+            $operation . ' failed for ' . $path . ': ' . $warning
+        );
     }
 
     private static function canonicalSourceHashOf(string $source): string {

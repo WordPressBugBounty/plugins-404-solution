@@ -64,19 +64,22 @@ class ABJ_404_Solution_RedirectsSortKeyChunkStore {
             " ORDER BY id ASC LIMIT " . $chunkSize
         );
         $lastError = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
-        if ($lastError !== '') {
+        if (($result['query_succeeded'] ?? null) !== true
+                || (array_key_exists('timed_out', $result) && $result['timed_out'] !== false)
+                || $lastError !== '' || !array_key_exists('rows', $result) || !is_array($result['rows'])) {
             $logger->warn("drainNarrowSortKey(" . $targetColumn . "): stopping after read error: " . $lastError);
             return null;
         }
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+        $rows = $result['rows'];
         $ids = array();
         foreach ($rows as $row) {
             $id = is_array($row)
                 ? ABJ_404_Solution_ExactInteger::read($row['id'] ?? null, 1)
                 : null;
-            if ($id !== null) {
-                $ids[] = $id;
+            if ($id === null) {
+                return null;
             }
+            $ids[] = $id;
         }
         return $ids;
     }
@@ -105,17 +108,19 @@ class ABJ_404_Solution_RedirectsSortKeyChunkStore {
         string $sourceGuard,
         array $ids
     ): bool {
-        $idList = implode(',', array_map('intval', $ids));
-        if ($idList === '') {
+        if (empty($ids)) {
             return true;
         }
+        $idClause = ABJ_404_Solution_RedirectsDenormColumnSql::buildIdClauses($ids)['bare'];
         $result = $dbCore->queryAndGetResults(
             "UPDATE " . $redirectsTable .
             " SET " . $targetColumn . " = LEFT(" . $sourceColumn . ", 191)" .
-            " WHERE 1 = 1" . $sourceGuard . " AND id IN (" . $idList . ")"
+            " WHERE 1 = 1" . $sourceGuard . $idClause
         );
         $lastError = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
-        if ($lastError !== '') {
+        if (($result['query_succeeded'] ?? null) !== true
+                || (array_key_exists('timed_out', $result) && $result['timed_out'] !== false)
+                || $lastError !== '') {
             $logger->warn("drainNarrowSortKey(" . $targetColumn . "): stopping after write error: " . $lastError);
             return false;
         }

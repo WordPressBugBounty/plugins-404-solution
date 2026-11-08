@@ -185,7 +185,7 @@ class ABJ_404_Solution_Logging {
                 new ABJ_404_Solution_ErrorEmailBodyFormatter(),
                 $this->getDebugLogArchiveBuilder(),
                 array($this, 'debugMessage'),
-                array($this, 'errorMessage')
+                array($this, 'warn')
             );
         }
         return $this->developerLogMailer;

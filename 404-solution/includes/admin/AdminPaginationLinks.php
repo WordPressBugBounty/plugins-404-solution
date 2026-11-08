@@ -43,7 +43,8 @@ class ABJ_404_Solution_AdminPaginationLinks {
     /**
      * @param array<string, mixed> $tableOptionOverrides Internal per-request read options.
      * @return array{tableOptions: array<string, mixed>, logsid: string, orderby: string, order: string,
-     *     filter: string, paged: int, perpage: int, totalPages: int, numRecords: int, filterText: string,
+     *     filter: string, paged: int, perpage: int, totalPages: int, pageCountKnown: bool,
+     *     numRecords: int, filterText: string,
      *     urls: array{first: string, previous: string, next: string, last: string}}
      */
     private function paginationState(string $sub, array $tableOptionOverrides = array()): array {
@@ -58,19 +59,13 @@ class ABJ_404_Solution_AdminPaginationLinks {
         $filterForUrl = (int)$filter;
         $url = $this->baseUrl($sub, $logsidForUrl, $orderby, $order, $filterForUrl);
         $numRecords = (int)(($sub == 'abj404_logs')
-            ? $this->viewReadService->getLogsCount((int)$logsid)
+            ? $this->viewReadService->getLogsCount((int)$logsid, $tableOptions)
             : $this->viewReadService->getRedirectsForViewCount($sub, $tableOptions));
 
-        $perpage = absint(array_key_exists('perpage', $tableOptions) && is_scalar($tableOptions['perpage']) ? $tableOptions['perpage'] : ABJ404_OPTION_MIN_PERPAGE);
-        if ($perpage == 0) {
-            $perpage = ABJ404_OPTION_MIN_PERPAGE;
-        }
-        $paged = absint(array_key_exists('paged', $tableOptions) && is_scalar($tableOptions['paged']) ? $tableOptions['paged'] : 1);
-        if ($paged == 0) {
-            $paged = 1;
-        }
-
-        $totalPages = max(1, (int)ceil(max(0, $numRecords) / $perpage));
+        $bounds = $this->pageBounds($tableOptions, $numRecords);
+        $perpage = $bounds['perpage'];
+        $paged = $bounds['paged'];
+        $totalPages = $bounds['totalPages'];
 
         $urls = $this->navigationUrls($url, $paged, $totalPages);
         $filterText = array_key_exists('filterText', $tableOptions) && is_string($tableOptions['filterText']) ? $tableOptions['filterText'] : '';
@@ -87,9 +82,42 @@ class ABJ_404_Solution_AdminPaginationLinks {
             'paged' => $paged,
             'perpage' => $perpage,
             'totalPages' => $totalPages,
+            'pageCountKnown' => $bounds['pageCountKnown'],
             'numRecords' => $numRecords,
             'filterText' => $filterText,
             'urls' => $urls,
+        );
+    }
+
+    /**
+     * Preserve the requested page normally; a bounded read has one navigable page.
+     * @param array<string, mixed> $tableOptions
+     * @return array{perpage: int, paged: int, totalPages: int, pageCountKnown: bool}
+     */
+    private function pageBounds(array $tableOptions, int $numRecords): array {
+        $perpage = absint(array_key_exists('perpage', $tableOptions) && is_scalar($tableOptions['perpage']) ? $tableOptions['perpage'] : ABJ404_OPTION_MIN_PERPAGE);
+        if ($perpage == 0) {
+            $perpage = ABJ404_OPTION_MIN_PERPAGE;
+        }
+        $paged = absint(array_key_exists('paged', $tableOptions) && is_scalar($tableOptions['paged']) ? $tableOptions['paged'] : 1);
+        if ($paged == 0) {
+            $paged = 1;
+        }
+
+        $totalPages = max(1, (int)ceil(max(0, $numRecords) / $perpage));
+        $pageCountKnown = $numRecords >= 0;
+        $reader = abj_service_optional('admin_table_reader');
+        if ($reader instanceof ABJ_404_Solution_AdminTableReadRepository && $reader->isDegraded()) {
+            $paged = 1;
+            $totalPages = 1;
+            $pageCountKnown = true;
+        }
+
+        return array(
+            'perpage' => $perpage,
+            'paged' => $paged,
+            'totalPages' => $totalPages,
+            'pageCountKnown' => $pageCountKnown,
         );
     }
 
@@ -146,7 +174,8 @@ class ABJ_404_Solution_AdminPaginationLinks {
 
     /**
      * @param array{tableOptions: array<string, mixed>, logsid: string, orderby: string, order: string,
-     *     filter: string, paged: int, perpage: int, totalPages: int, numRecords: int, filterText: string,
+     *     filter: string, paged: int, perpage: int, totalPages: int, pageCountKnown: bool,
+     *     numRecords: int, filterText: string,
      *     urls: array{first: string, previous: string, next: string, last: string}} $state
      */
     private function renderPaginationStrip(string $sub, array $state): string {
@@ -172,7 +201,7 @@ class ABJ_404_Solution_AdminPaginationLinks {
                 _n('%s item', '%s items', $numRecords, '404-solution'),
                 number_format_i18n($numRecords)
             );
-        $currentPageText = $numRecords < 0
+        $currentPageText = !$state['pageCountKnown']
             ? '<span aria-hidden="true">-</span><span class="screen-reader-text">'
                 . esc_html__('Loading...', '404-solution') . '</span>'
             : sprintf(

@@ -194,30 +194,40 @@ class ABJ_404_Solution_NGramTermCacheReconciler {
 
         $this->logger->infoMessage("Found " . count($orphaned) . " orphaned {$type} ngram entries. Deleting...");
 
-        $deleted = 0;
-        $errors = 0;
-        foreach ($orphaned as $termId) {
-            $deleteResult = $this->dbCore->queryAndGetResults(
-                "DELETE FROM {$ngramTable} WHERE id = %d AND type = %s",
-                ['query_params' => [$termId, $type]]
-            );
+        $deletion = $this->deleteOrphanedTerms($ngramTable, $type, $orphaned);
+        $deleted = $deletion['deleted'];
+        $errors = $deletion['errors'];
+        $uncertain = $deletion['uncertain'];
 
-            $deleteError = isset($deleteResult['last_error']) && is_string($deleteResult['last_error']) ? $deleteResult['last_error'] : '';
-            if ($deleteError !== '') {
-                if (!$this->dbCore->errorClassifier()->classifyAndHandleInfrastructureError($deleteError)) {
-                    $this->logger->errorMessage("Failed to delete orphaned {$type} ngram entry ID {$termId}: " . $deleteError);
-                }
-                $errors++;
-            } else {
-                $deleted++;
-            }
-        }
-
-        if ($deleted > 0) {
+        if ($deleted > 0 || $uncertain) {
             $this->invalidateCoverageCaches();
         }
 
         return ['deleted' => $deleted, 'errors' => $errors];
+    }
+
+    /**
+     * @param array<int,int> $orphaned
+     * @return array{deleted:int,errors:int,uncertain:bool}
+     */
+    private function deleteOrphanedTerms(string $ngramTable, string $type, array $orphaned): array {
+        $deleted = 0; $errors = 0; $uncertain = false;
+        foreach ($orphaned as $termId) {
+            $result = $this->dbCore->queryAndGetResults("DELETE FROM {$ngramTable} WHERE id = %d AND type = %s",
+                array('query_params' => array($termId, $type)));
+            $error = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
+            $failed = $error !== '' || !array_key_exists('query_succeeded', $result)
+                || $result['query_succeeded'] !== true
+                || (array_key_exists('timed_out', $result) && $result['timed_out'] !== false);
+            if ($failed) {
+                if (!$this->dbCore->errorClassifier()->classifyAndHandleInfrastructureError($error)) {
+                    $this->logger->errorMessage("Failed to delete orphaned {$type} ngram entry ID {$termId}: "
+                        . ($error !== '' ? $error : 'query did not confirm success.'));
+                }
+                $errors++; $uncertain = true;
+            } else { $deleted++; }
+        }
+        return array('deleted' => $deleted, 'errors' => $errors, 'uncertain' => $uncertain);
     }
 
     /**

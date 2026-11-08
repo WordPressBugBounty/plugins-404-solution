@@ -1,5 +1,27 @@
 # Changelog #
 
+## Version 4.4.0 (November 5, 2026) ##
+
+**New Features**
+
+* Added redirect options for matching query strings and passing or discarding query parameters. These options are included in CSV imports and exports.
+* Added a 404 Suggestions block for the WordPress editor and first-run setup for displaying similar pages, with improved keyboard and screen-reader support.
+
+**Bug Fixes**
+
+* Stopped tracking parameters, such as UTM tags, from creating duplicate automatic redirects.
+* Preserved redirects after page and category URL changes, including changes affecting child pages, and improved redirect-loop prevention.
+* Fixed cached 404 pages hiding new redirects by clearing affected entries in W3 Total Cache, WP Super Cache and LiteSpeed Cache.
+* Fixed the blank Match Confidence chart and corrected email digest dates to use the site's timezone.
+* Fixed errors during plugin updates when older requests were still running.
+* Kept the redirect tables available when the database temporarily refuses writes.
+* Corrected multisite uninstall cleanup to respect each site's saved data-retention choices.
+
+**Improvements**
+
+* Improved table loading and pagination on large sites, corrected URL searches containing punctuation, and moved statistics refresh work into the background.
+* Improved recovery of unfinished upgrades and background rebuilds when WordPress scheduled tasks are stalled.
+
 ## Version 4.3.6 (September 29, 2026) ##
 
 **Bug Fixes**

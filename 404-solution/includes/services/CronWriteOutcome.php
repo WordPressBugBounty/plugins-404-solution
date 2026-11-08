@@ -234,6 +234,42 @@ class ABJ_404_Solution_CronWriteOutcome {
     }
 
     /**
+     * Verify bulk removal from fresh storage. A refusal is benign only when
+     * every argument tuple is already gone; a claimed success must prove the
+     * same end state. Preserve the primitive's original error on real failure.
+     * @param array{writeResult:mixed,hook:string} $request
+     */
+    public function resolveHookRemoval(array $request): bool {
+        $result = $request['writeResult'];
+        $hook = $request['hook'];
+        $inspectionFailure = '';
+        try {
+            $this->inspector->refreshCronStoreReads();
+            $absent = $this->inspector->hookIsAbsent($hook);
+        } catch (Throwable $error) {
+            $absent = false;
+            $inspectionFailure = $this->inspectionFailureDetail($error);
+        }
+        if ($absent) {
+            $this->lastFailureDetail = '';
+            if ($this->reportsFailure($result)) {
+                $this->debug('WordPress refused bulk removal of cron hook ' . $hook
+                    . ', but fresh storage confirms every argument tuple is already absent.');
+            }
+            return true;
+        }
+        $errorCode = $this->wpErrorCode($result) ?: 'cron_hook_removal_unverified';
+        $this->lastFailureDetail = ($this->reportsFailure($result)
+            ? $this->writeFailureDetail($result, 'wp_unschedule_hook')
+            : 'wp_unschedule_hook returned ' . var_export($result, true) . ' but complete removal could not be verified')
+            . $inspectionFailure;
+        $this->warn('Failed to remove every argument tuple for cron hook ' . $hook
+            . '. Error code: ' . $errorCode . '. Detail: ' . $this->lastFailureDetail
+            . '. Recovery: inspect filters on wp_unschedule_hook and the WordPress cron option, then retry.');
+        return false;
+    }
+
+    /**
      * Report a removal that a WordPress build reported no status for and that
      * the cron store shows still scheduled afterwards.
      */
@@ -242,6 +278,22 @@ class ABJ_404_Solution_CronWriteOutcome {
         $this->warn('Failed to verify cron hook removal for ' . $hook . ' at timestamp ' . $timestamp
             . '. Detail: ' . $this->lastFailureDetail
             . '. Recovery: inspect filters on wp_unschedule_event and the WordPress cron option, then retry.');
+        return false;
+    }
+
+    /**
+     * Preserve a cron-store read failure that prevented exact consumption.
+     *
+     * @param string $hook
+     * @param int $timestamp
+     * @param string $detail
+     * @return bool
+     */
+    public function reportRemovalReadFailure(string $hook, int $timestamp, string $detail): bool {
+        $this->lastFailureDetail = $detail;
+        $this->warn('Failed to verify exact cron hook removal for ' . $hook
+            . ' at timestamp ' . $timestamp . '. Detail: ' . $detail
+            . '. Recovery: inspect the WordPress cron store and retry.');
         return false;
     }
 

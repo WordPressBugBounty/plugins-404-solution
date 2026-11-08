@@ -5,6 +5,7 @@ if (!defined('ABSPATH')) {
 }
 
 require_once __DIR__ . '/RedirectsRetentionPolicy.php';
+require_once __DIR__ . '/RedirectDuplicatesRepository.php';
 require_once __DIR__ . '/../view-build/ViewReadRuntimeState.php';
 
 /**
@@ -44,6 +45,18 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
     /** @var ABJ_404_Solution_RedirectsRetentionPolicy */
     private $retentionPolicy;
 
+    /** @var ABJ_404_Solution_CleanupQuerySession */
+    private $querySession;
+
+    /** @var ABJ_404_Solution_LogRetentionRepository */
+    private $logRetentionRepository;
+
+    /** @var ABJ_404_Solution_RedirectBatchDeletion */
+    private $redirectBatchDeletion;
+
+    /** @var ABJ_404_Solution_RedirectDuplicatesRepository */
+    private $duplicateRepository;
+
     /**
      * @param ABJ_404_Solution_DatabaseCore $dbCore
      * @param ABJ_404_Solution_RedirectsRepositoryInterface $redirectsRepo
@@ -63,42 +76,28 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
         $this->f = $functions;
         $this->logger = $logger;
         $this->retentionPolicy = $retentionPolicy !== null ? $retentionPolicy : new ABJ_404_Solution_RedirectsRetentionPolicy();
+        $this->querySession = new ABJ_404_Solution_CleanupQuerySession($dbCore);
+        $this->logRetentionRepository = new ABJ_404_Solution_LogRetentionRepository(
+            $this->querySession, $this->retentionPolicy
+        );
+        $this->redirectBatchDeletion = new ABJ_404_Solution_RedirectBatchDeletion(array(
+            'dbCore' => $dbCore,
+            'redirectsRepo' => $redirectsRepo,
+            'querySession' => $this->querySession,
+        ));
+        $this->duplicateRepository = new ABJ_404_Solution_RedirectDuplicatesRepository(
+            $this->querySession
+        );
     }
 
-    /**
-     * Drive a cleanup SELECT in bounded batches so a large match set never loads
-     * into PHP memory all at once. $runBatch($batchSize) returns the rows for one
-     * LIMIT-bounded batch; $handleRow($row) processes each row and MUST remove it
-     * from the SELECT's match set (delete/trash it) so the next batch advances.
-     * Loops until a batch returns fewer than $batchSize rows (or the iteration cap
-     * is hit). Returns the total number of rows handled.
-     *
-     * @param callable(int):array<int,mixed> $runBatch
-     * @param callable(array<mixed,mixed>):void $handleRow Each $row is a DB
-     *        result row (string-keyed at runtime; typed array<mixed,mixed>
-     *        because the result-set key type is not statically provable).
-     * @return int
-     */
-    private function runBatchedCleanup(callable $runBatch, callable $handleRow,
-            int $batchSize = self::CLEANUP_BATCH_SIZE, int $maxBatches = self::CLEANUP_MAX_BATCHES): int {
-        $handled = 0;
-        for ($batch = 0; $batch < $maxBatches; $batch++) {
-            $rows = $runBatch($batchSize);
-            $rows = is_array($rows) ? $rows : array();
-            $rowCount = count($rows);
-            foreach ($rows as $row) {
-                if (!is_array($row)) { continue; }
-                $handleRow($row);
-                $handled++;
-            }
-            if ($rowCount < $batchSize) {
-                break;
-            }
-        }
-        return $handled;
+    /** Return the first direct-query failure from the most recent cleanup operation. */
+    public function lastCleanupFailure(): string {
+        return $this->querySession->failure();
     }
 
-    public function cleanupOrphanedAutoRedirects(): int {
+    /** @param array<string,mixed> $limits */
+    public function cleanupOrphanedAutoRedirects(array $limits = array()): int {
+        $limits = $this->querySession->begin($limits);
         $redirectsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
         if (!$this->dbCore->tableNameResolver()->tableExists($redirectsTable)) {
             $this->logger->warn("Skipping orphaned redirect cleanup: table missing.");
@@ -109,22 +108,12 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
         $query = $this->dbCore->doTableNameReplacements($query);
         $query = $this->f->replaceKnownConstants($query);
 
-        // Bound the SELECT with a LIMIT and loop until exhausted so the orphaned
-        // match set never loads into PHP memory all at once. Each handled row is
-        // deleted, so it drops out of the next batch's match set.
-        $runBatch = function (int $batchSize) use ($query): array {
-            $results = $this->dbCore->queryAndGetResults($query . " LIMIT " . (int)$batchSize);
-            return is_array($results['rows'] ?? null) ? $results['rows'] : array();
-        };
-        $handleRow = function (array $row): void {
-            $id = isset($row['id']) && is_scalar($row['id']) ? (string)$row['id'] : '0';
+        $logRow = function (array $row): void {
             $url = isset($row['url']) && is_string($row['url']) ? $row['url'] : '';
             $this->logger->debugMessage('Orphaned auto redirect deleted: "' . $url . '" (dest post ' .
                 (isset($row['final_dest']) && is_scalar($row['final_dest']) ? (string)$row['final_dest'] : '?') . ' missing/unpublished).');
-            $this->redirectsRepo->deleteRedirect($id);
         };
-
-        return $this->runBatchedCleanup($runBatch, $handleRow);
+        return $this->redirectBatchDeletion->deleteMatches($query, $logRow, $limits);
     }
 
     /**
@@ -133,9 +122,12 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
      * @param string $optionKey
      * @param string $statusList
      * @param string $debugMessageType
+     * @param array<string,mixed> $limits
      * @return int
      */
-    public function deleteOldRedirectsByType($options, $now, $optionKey, $statusList, $debugMessageType) {
+    public function deleteOldRedirectsByType($options, $now, $optionKey, $statusList, $debugMessageType,
+            array $limits = array()) {
+        $limits = $this->querySession->begin($limits);
         $logsRepo = abj_service('logs_repository');
 
         $deletionDays = $this->retentionPolicy->daysFromOptions(is_array($options) ? $options : array(), $optionKey);
@@ -163,14 +155,7 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
         );
         $query = $this->f->str_replace('{logs_hits_url_rhs}', $comparableRedirectUrl, $query);
 
-        // Bound the SELECT with a LIMIT and loop until exhausted so the unused
-        // redirect match set never loads into PHP memory all at once. Each
-        // handled row is deleted, so it drops out of the next batch's match set.
-        $runBatch = function (int $batchSize) use ($query): array {
-            $results = $this->dbCore->queryAndGetResults($query . " LIMIT " . (int)$batchSize);
-            return is_array($results['rows'] ?? null) ? $results['rows'] : array();
-        };
-        $handleRow = function (array $row) use ($debugMessageType): void {
+        $logRow = function (array $row) use ($debugMessageType): void {
             $fromUrl = isset($row['from_url']) && is_scalar($row['from_url']) ? (string)$row['from_url'] : '';
             $lastUsed = isset($row['last_used_formatted']) && is_scalar($row['last_used_formatted'])
                 ? (string)$row['last_used_formatted']
@@ -185,125 +170,52 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
                 $this->logger->debugMessage($debugMessageType . " from: " . $fromUrl . ' to: ' .
                     $bestGuessDest . ' deleted (last used: ' . $lastUsed . ').');
             }
-
-            $this->redirectsRepo->deleteRedirect(isset($row['id']) && is_scalar($row['id']) ? (string)$row['id'] : '0');
         };
-
-        return $this->runBatchedCleanup($runBatch, $handleRow);
+        return $this->redirectBatchDeletion->deleteMatches($query, $logRow, $limits);
     }
 
-    public function deleteOldLogsByAge(int $daysToKeep, int $now): int {
-        $cutoffTimestamp = $this->retentionPolicy->cutoffForDays($daysToKeep, $now);
-        if ($cutoffTimestamp === null) {
-            return 0;
-        }
-
-        $deletedTotal = 0;
-        $batchSize = 2000;
-        $maxBatches = 200;
-
-        for ($i = 0; $i < $maxBatches; $i++) {
-            $result = $this->dbCore->queryAndGetResults(
-                "DELETE FROM {wp_abj404_logsv2} WHERE timestamp <= %d LIMIT %d",
-                array(
-                    'query_params' => array($cutoffTimestamp, $batchSize),
-                    'log_errors' => true,
-                )
-            );
-            $rowsDeletedRaw = $result['rows_affected'] ?? 0;
-            $rowsDeleted = (is_int($rowsDeletedRaw) || is_float($rowsDeletedRaw) || is_string($rowsDeletedRaw))
-                ? (int)$rowsDeletedRaw
-                : 0;
-            if ($rowsDeleted <= 0) {
-                break;
-            }
-            $deletedTotal += $rowsDeleted;
-            if ($rowsDeleted < $batchSize) {
-                break;
-            }
-        }
-
-        return $deletedTotal;
+    /** @param array<string,mixed> $limits */
+    public function deleteOldLogsByAge(int $daysToKeep, int $now, array $limits = array()): int {
+        return $this->logRetentionRepository->deleteOldLogsByAge($daysToKeep, $now, $limits);
     }
 
-    public function removeDuplicatesCron(): int {
-        $rowsDeleted = 0;
-        // allow-unbounded-select: LIMIT appended at runtime by runBatchedCleanup (batched); dedup collapses each url so the match set drains
-        $query = "SELECT COUNT(id) as repetitions, url FROM {wp_abj404_redirects} GROUP BY url HAVING repetitions > 1 ";
+    /** @param array<string,mixed> $limits */
+    public function removeDuplicatesCron(array $limits = array()): int {
+        return $this->duplicateRepository->removeDuplicates($limits);
+    }
 
-        // Bound the duplicate-group SELECT with a LIMIT and loop until exhausted
-        // so the full set of duplicated URLs never loads into PHP memory at
-        // once. De-duplicating a URL collapses its repetitions to 1, so it drops
-        // out of the next batch's HAVING repetitions > 1 match set.
-        $runBatch = function (int $batchSize) use ($query): array {
-            $result = $this->dbCore->queryAndGetResults($query . " LIMIT " . (int)$batchSize);
-            return is_array($result['rows'] ?? null) ? $result['rows'] : array();
-        };
-        $handleRow = function (array $outerRow) use (&$rowsDeleted): void {
-            $url = $outerRow['url'];
-
-            // The url is a stored value a visitor chose (a captured 404), so it is BOUND by the
-            // executor (`query_params`) AFTER its `{wp_...}` token pass. Binding it here first
-            // would let that pass rewrite a `{wp_posts}` inside the url and match the wrong rows.
-            // allow-unbounded-select: this assembled query ends in LIMIT 0,1 and returns only the chosen survivor
-            $result = $this->dbCore->queryAndGetResults(
-                "select id from {wp_abj404_redirects} where url = %s order by " .
-                "case status " .
-                "when " . (int)ABJ404_STATUS_MANUAL . " then 0 " .
-                "when " . (int)ABJ404_STATUS_REGEX . " then 1 " .
-                "when " . (int)ABJ404_STATUS_AUTO . " then 2 " .
-                "when " . (int)ABJ404_STATUS_CAPTURED . " then 3 " .
-                "else 4 end asc, timestamp desc, id desc limit 0,1",
-                array('query_params' => array($url))
-            );
-            $innerRows = is_array($result['rows']) ? $result['rows'] : array();
-            if (count($innerRows) >= 1) {
-                $row = is_array($innerRows[0]) ? $innerRows[0] : array();
-                // Positive evidence for destruction: the delete keeps ONE row by id, so without a
-                // readable survivor id it would remove every row for this url. Skip the url instead.
-                $original = ABJ_404_Solution_ExactInteger::read($row['id'] ?? null, 1);
-                if ($original === null) {
-                    return;
-                }
-
-                $deleteResult = $this->dbCore->queryAndGetResults(
-                    "delete from {wp_abj404_redirects} where url = %s and id != %d",
-                    array('query_params' => array($url, $original))
-                );
-                $affected = ABJ_404_Solution_ExactInteger::readOr(
-                    $deleteResult['rows_affected'] ?? null,
-                    0,
-                    1
-                );
-                $rowsDeleted += max($affected, 1);
-            }
-        };
-
-        $this->runBatchedCleanup($runBatch, $handleRow);
-
-        if ($rowsDeleted > 0) {
-            abj_service('view_read_service')->invalidateStatusCountsCache();
-        }
-
-        return $rowsDeleted;
+    /**
+     * @param array<string,mixed> $request
+     * @return array{removed:int,complete:bool,duplicate_scan:array<string,mixed>|null,failure:string}
+     */
+    public function removeDuplicatesSlice(array $request): array {
+        return $this->duplicateRepository->slice($request);
     }
 
     /**
      * @param array<string, mixed> $options
      * @return int
      */
-    public function autoTrashJunkCapturedUrls(array $options): int {
+    /**
+     * @param array<string,mixed> $options
+     * @param array<string,mixed> $limits
+     */
+    public function autoTrashJunkCapturedUrls(array $options, array $limits = array()): int {
+        $limitsProvided = $limits !== array();
+        $limits = $this->querySession->begin($limits);
         $enabled = $options['auto_trash_junk_urls'] ?? '0';
         if ($enabled !== '1') {
             return 0;
         }
 
         $transientKey = 'abj404_last_auto_trash';
-        if (get_transient($transientKey) !== false) {
-            return 0;
+        // Both modes honor the one-hour cooldown. A bounded (staged) run sets it only once the
+        // backlog is drained (below), so the continuation batches of a draining backlog still run.
+        if (get_transient($transientKey) !== false) { return 0; }
+        if (!$limitsProvided) {
+            // allow-cache-empty: timestamp marker rate-limits automatic trash cleanup; not a cached query payload.
+            set_transient($transientKey, abj_clock()->now(), HOUR_IN_SECONDS);
         }
-        // allow-cache-empty: timestamp marker rate-limits automatic trash cleanup; not a cached query payload.
-        set_transient($transientKey, abj_clock()->now(), HOUR_IN_SECONDS);
 
         $patternsRaw = $options['auto_trash_junk_patterns'] ?? '';
         $patternsStr = is_string($patternsRaw) ? $patternsRaw : '';
@@ -334,9 +246,17 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
             AND (" . $wherePatterns . ")";
         $query = $this->dbCore->doTableNameReplacements($query);
 
-        $result = $this->dbCore->queryAndGetResults($query, array('query_params' => $likeParams));
-        $affected = $result['rows_affected'] ?? 0;
-        $totalTrashed += ABJ_404_Solution_ExactInteger::readOr($affected, 0, 0);
+        $result = $this->querySession->query($query . ($limitsProvided ? ' LIMIT ' . $limits['batch_size'] : ''),
+            array('query_params' => $likeParams));
+        $patternFailed = $this->querySession->failure() !== '';
+        $patternAffected = $this->querySession->affectedRows($result);
+        $totalTrashed += $patternAffected;
+        $patternsDrained = !$patternFailed && $patternAffected < $limits['batch_size'];
+
+        if ($patternFailed) {
+            ABJ_404_Solution_ViewCacheInvalidator::invalidateCapturedStatusCountsCache();
+            return $totalTrashed;
+        }
 
         $cutoff = abj_clock()->now() - (14 * DAY_IN_SECONDS);
         $logsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_logsv2}');
@@ -357,19 +277,31 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
         $query = $this->f->str_replace('{logs_url_rhs}', $comparableRedirectUrl, $query);
         $query = $this->dbCore->doTableNameReplacements($query);
 
-        $result = $this->dbCore->queryAndGetResults($query, array('query_params' => array($cutoff)));
-        $affected = $result['rows_affected'] ?? 0;
-        $totalTrashed += ABJ_404_Solution_ExactInteger::readOr($affected, 0, 0);
+        $result = $this->querySession->query($query . ($limitsProvided ? ' LIMIT ' . $limits['batch_size'] : ''),
+            array('query_params' => array($cutoff)));
+        $staleFailed = $this->querySession->failure() !== '';
+        $staleAffected = $this->querySession->affectedRows($result);
+        $totalTrashed += $staleAffected;
+        $staleDrained = !$staleFailed && $staleAffected < $limits['batch_size'];
+
+        if ($limitsProvided && $patternsDrained && $staleDrained) {
+            // allow-cache-empty: cooldown starts only after both bounded predicates are drained.
+            set_transient($transientKey, abj_clock()->now(), HOUR_IN_SECONDS);
+        }
 
         if ($totalTrashed > 0) {
             $this->logger->infoMessage("Auto-trashed " . $totalTrashed . " junk/stale captured URLs during maintenance.");
+        }
+        if ($totalTrashed > 0 || $staleFailed) {
             ABJ_404_Solution_ViewCacheInvalidator::invalidateCapturedStatusCountsCache();
         }
 
         return $totalTrashed;
     }
 
-    public function expireOldAutoRedirects(int $days, int $now): int {
+    /** @param array<string,mixed> $limits */
+    public function expireOldAutoRedirects(int $days, int $now, array $limits = array()): int {
+        $limits = $this->querySession->begin($limits);
         $cutoff = $this->retentionPolicy->cutoffForDays($days, $now);
         if ($cutoff === null) {
             return 0;
@@ -381,7 +313,7 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
             return 0;
         }
 
-        // allow-unbounded-select: LIMIT %d appended at runtime by runBatchedCleanup (batched cron cleanup)
+        // allow-unbounded-select: LIMIT %d appended at runtime by processRows (batched cron cleanup)
         $sql = "SELECT id FROM `{$redirectsTable}`
              WHERE status = %d
                AND disabled = 0
@@ -395,27 +327,55 @@ class ABJ_404_Solution_RedirectsCleanupRepository {
         // batch that times out or errors, the closure returns array() so the
         // loop stops cleanly (preserving the original bail-on-error semantics
         // for the first batch).
-        $runBatch = function (int $batchSize) use ($sql, $cutoff): array {
-            $result = $this->dbCore->queryAndGetResults($sql . " LIMIT %d", array(
+        $runBatch = function (int $batchSize, ?int $timeout) use ($sql, $cutoff): array {
+            $queryOptions = array(
                 'query_params' => array(ABJ404_STATUS_AUTO, $cutoff, (int)$batchSize),
-            ));
-            if (!empty($result['timed_out']) || (isset($result['last_error']) && $result['last_error'] != '')) {
+            );
+            if ($timeout !== null) {
+                $queryOptions['timeout'] = $timeout;
+            }
+            $result = $this->querySession->query($sql . " LIMIT %d", $queryOptions);
+            if ($this->querySession->failure() !== '') {
+                return array();
+            }
+            if (!is_array($result['rows'] ?? null)) {
+                $this->querySession->noteFailure('expireOldAutoRedirects SELECT: result omitted rows');
                 return array();
             }
             return is_array($result['rows'] ?? null) ? $result['rows'] : array();
         };
-        $handleRow = function (array $row): void {
-            $value = $row['id'] ?? reset($row);
-            if ($value !== null && $value !== '') {
-                $this->redirectsRepo->moveRedirectsToTrash(absint($value), 1);
+        $handleRow = function (array $row): bool {
+            $id = ABJ_404_Solution_ExactInteger::read($row['id'] ?? null, 1);
+            if ($id === null) {
+                $this->querySession->noteFailure('expireOldAutoRedirects SELECT: result row omitted a valid id');
+                return false;
             }
+            $result = $this->redirectsRepo->moveRedirectsToTrash($id, 1);
+            if (is_string($result) && $result !== '') {
+                $this->querySession->noteFailure('expireOldAutoRedirects move to trash: ' . $result);
+                return false;
+            }
+            return true;
         };
 
-        $moved = $this->runBatchedCleanup($runBatch, $handleRow);
+        $moved = $this->querySession->processRows($runBatch, $handleRow, $limits);
 
         if ($moved > 0) {
             $this->logger->infoMessage("expireOldAutoRedirects: moved {$moved} expired auto-redirect(s) to trash (threshold: {$days} days).");
         }
         return $moved;
     }
+
+    /**
+     * Remove one bounded slice of oldest log rows until the caller's persisted
+     * target is reached.
+     *
+     * @param int $targetKeep Minimum number of log rows to retain.
+     * @param array<string, mixed> $limits
+     * @return array{removed:int,complete:bool}
+     */
+    public function trimOldestLogsToCount(int $targetKeep, array $limits = array()): array {
+        return $this->logRetentionRepository->trimOldestLogsToCount($targetKeep, $limits);
+    }
+
 }

@@ -30,7 +30,7 @@ if (!function_exists('abj404_degraded_register_support_request')) {
 	 *
 	 * Strictly best-effort. Every step is guarded with file_exists() and
 	 * class_exists() so a corrupted install that is missing any of the
-	 * support-request files just falls back to the mailto link in the
+	 * support-request files just falls back to the forum link in the
 	 * degraded admin page. We must not throw a fatal here, because we
 	 * already ARE on the degraded path.
 	 *
@@ -39,6 +39,9 @@ if (!function_exists('abj404_degraded_register_support_request')) {
 	function abj404_degraded_register_support_request() {
 		$inc = ABJ404_PATH . 'includes/';
 		$supportFiles = array(
+			// Dependency-free hook-name vocabulary: the degraded path registers
+			// through it too, so a killed support request is still the plugin's own.
+			$inc . 'ajax/PluginAjaxActions.php',
 			$inc . 'ajax/AjaxSecurityGate.php',
 			$inc . 'feedback/FeedbackTransport.php',
 			$inc . 'feedback/SupportRequestButton.php',
@@ -54,14 +57,15 @@ if (!function_exists('abj404_degraded_register_support_request')) {
 			foreach ($supportFiles as $file) {
 				require_once $file;
 			}
-		// allow-silent-catch: degraded boot path. If any of the support-request files compile-fatals on require we want to fall through to the mailto fallback rather than crash the corrupt-install screen the user is here to read. The exception is NOT dropped: abj404_logRuntimeWarning() records it (plugin logger if resolvable, else the PHP fallback logger) before we fall through.
+		// allow-silent-catch: degraded boot path. If any of the support-request files compile-fatals on require we want to fall through to the forum fallback rather than crash the corrupt-install screen the user is here to read. The exception is NOT dropped: abj404_logRuntimeWarning() records it (plugin logger if resolvable, else the PHP fallback logger) before we fall through.
 		} catch (\Throwable $e) {
 			if (function_exists('abj404_logRuntimeWarning')) {
 				abj404_logRuntimeWarning('abj404_degraded_register_support_request: support-request file require failed', $e);
 			}
 			return;
 		}
-		if (!class_exists('ABJ_404_Solution_Ajax_SupportRequest')
+		if (!class_exists('ABJ_404_Solution_PluginAjaxActions')
+			|| !class_exists('ABJ_404_Solution_Ajax_SupportRequest')
 			|| !class_exists('ABJ_404_Solution_Ajax_SupportRequestPreview')) {
 			return;
 		}
@@ -71,8 +75,8 @@ if (!function_exists('abj404_degraded_register_support_request')) {
 		// add_action() avoids that dependency.
 		$supportInstance = ABJ_404_Solution_Ajax_SupportRequest::getInstance();
 		$previewInstance = ABJ_404_Solution_Ajax_SupportRequestPreview::getInstance();
-		add_action('wp_ajax_abj404_support_request', array($supportInstance, 'handleRequest'));
-		add_action('wp_ajax_abj404_support_request_preview', array($previewInstance, 'handleRequest'));
+		add_action(ABJ_404_Solution_PluginAjaxActions::hook('abj404_support_request'), array($supportInstance, 'handleRequest'));
+		add_action(ABJ_404_Solution_PluginAjaxActions::hook('abj404_support_request_preview'), array($previewInstance, 'handleRequest'));
 		// Enqueue the JS assets on the degraded admin page only. Using a
 		// closure keeps this self-contained without registering a new
 		// global function on the corrupted boot path.
@@ -178,6 +182,9 @@ if (!function_exists('abj404_degraded_admin_page')) {
 		$missingFiles = isset($GLOBALS['abj404_missing_files']) && is_array($GLOBALS['abj404_missing_files']) ? $GLOBALS['abj404_missing_files'] : array();
 		$bootError = isset($GLOBALS['abj404_boot_error']) ? $GLOBALS['abj404_boot_error'] : '';
 		$pluginDir = defined('ABJ404_PATH') ? ABJ404_PATH : dirname(dirname(__DIR__)) . '/';
+		$contactScriptUrl = plugin_dir_url(ABJ404_FILE) . 'includes/js/contact-email.js';
+		$contactScriptVersion = defined('ABJ404_VERSION') ? ABJ404_VERSION : false;
+		wp_enqueue_script('abj404-contact-email', $contactScriptUrl, array(), $contactScriptVersion, true);
 
 		// Check for a stored fatal from a previous request.
 		$fatalInfo = function_exists('get_transient') ? get_transient('abj404_boot_fatal') : false;
@@ -240,9 +247,10 @@ if (!function_exists('abj404_degraded_admin_page')) {
 		// this screen needs help and may not be able to navigate the
 		// normal plugin UI. When the SupportRequestButton class is
 		// present (most corruption is partial), render the mount div so
-		// the JS component can take over. Always emit a mailto fallback
+		// the JS component can take over. Always emit a forum fallback
 		// underneath in case the JS files are themselves among the
-		// missing files.
+		// missing files; the client renderer adds the mailto only after
+		// it has decoded the protected address in the browser.
 		echo '<div class="card" style="max-width:800px;">';
 		echo '<h2>Need help? Contact the developer</h2>';
 		echo '<p>Send the developer a one-time diagnostic report including the missing-file list above. Your redirects and settings are not shared.</p>';
@@ -255,8 +263,13 @@ if (!function_exists('abj404_degraded_admin_page')) {
 		if (class_exists('ABJ_404_Solution_SupportRequestButton')) {
 			echo ABJ_404_Solution_SupportRequestButton::render('system_corrupt_install', $contextSummary);
 		}
-		$mailEmail = defined('ABJ404_AUTHOR_EMAIL') ? (string)ABJ404_AUTHOR_EMAIL : '404solution@ajexperience.com';
-		$mailSubject = rawurlencode('404 Solution: corrupt install report');
+		$mailEmail = defined('ABJ404_AUTHOR_EMAIL') ? (string)ABJ404_AUTHOR_EMAIL : 'support@forethought-studio.com';
+		$mailParts = array_pad(explode('@', $mailEmail, 2), 2, '');
+		$mailUser = $mailParts[0];
+		$mailDomain = $mailParts[1];
+		$mailUserEncoded = base64_encode($mailUser);
+		$mailDomainEncoded = base64_encode($mailDomain);
+		$mailSubject = '[404 Solution] 404 Solution: corrupt install report';
 		$homeUrlText = '(unknown)';
 		if (function_exists('home_url')) {
 			$homeUrlVal = home_url();
@@ -267,13 +280,19 @@ if (!function_exists('abj404_degraded_admin_page')) {
 			$stringMissingFiles[] = is_scalar($entry) ? (string)$entry : '';
 		}
 		$missingFileLines = implode("\n", $stringMissingFiles);
-		$mailBody = rawurlencode("Site URL: " . $homeUrlText . "\n"
+		$mailBody = "Site URL: " . $homeUrlText . "\n"
 			. "Missing files (" . (int)$missingCount . "):\n"
 			. $missingFileLines
-			. "\n\nBoot error:\n" . $bootErrorText);
+			. "\n\nBoot error:\n" . $bootErrorText;
 		echo '<p style="margin-top:8px;">Or email manually: ';
-		echo '<a href="mailto:' . esc_attr($mailEmail) . '?subject=' . $mailSubject . '&body=' . $mailBody . '">';
-		echo esc_html($mailEmail) . '</a></p>';
+		echo '<a href="' . esc_url('https://wordpress.org/support/plugin/404-solution/') . '"'
+			. ' data-contact-email="developer"'
+			. ' data-contact-user="' . esc_attr($mailUserEncoded) . '"'
+			. ' data-contact-domain="' . esc_attr($mailDomainEncoded) . '"'
+			. ' data-contact-email-text="address"'
+			. ' data-contact-subject="' . esc_attr($mailSubject) . '"'
+			. ' data-contact-body="' . esc_attr($mailBody) . '">';
+		echo 'Contact the developer</a></p>';
 		echo '</div>';
 
 		echo '</div>'; // .wrap

@@ -201,6 +201,9 @@ msgstr "* 使用星号 (*) 匹配 \"任何模式\"。"
 msgid "404 Page Suggestions"
 msgstr "404 页面建议"
 
+msgid "404 Suggestions"
+msgstr "404 建议"
+
 msgid "404 URL marked as %s successfully!"
 msgstr "404 URL 已成功标记为 %s！"
 
@@ -2070,6 +2073,9 @@ msgstr "重定向"
 msgid "Showing %1$d-%2$d of %3$d %4$s"
 msgstr "当前显示第 %1$d 至第 %2$d 条记录，共计 %3$d 条%4$s"
 
+msgid "Showing a limited set of matching records while sorting and search are being prepared. The full list returns automatically."
+msgstr "正在准备排序和搜索，暂时显示部分匹配记录。完整列表将自动恢复。"
+
 msgid "Redirects will appear here once created."
 msgstr "创建重定向后将在此处显示。"
 
@@ -3745,6 +3751,9 @@ msgstr "正在后台准备表格数据。"
 msgid "Preparing the redirects view table. Please wait."
 msgstr "正在准备重定向列表，请稍候。"
 
+msgid "Preparing the redirects table."
+msgstr "正在准备重定向列表。"
+
 #: includes/DataAccessTrait_ViewQueriesStaged.php
 msgid "(404 page)"
 msgstr "(404 页面)"
@@ -4553,3 +4562,154 @@ msgstr "超时的请求"
 #: includes/view/ShortcodeSuggestionsPresenter.php:260
 msgid "Show suggested pages"
 msgstr "显示推荐页面"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Query strings"
+msgstr "查询字符串"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Routing parameters, pass query (default)"
+msgstr "按路由参数匹配并传递查询字符串（默认）"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Exact URL, pass query"
+msgstr "按完整网址精确匹配并传递查询字符串"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Routing parameters, discard query"
+msgstr "按路由参数匹配并丢弃查询字符串"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Path only, pass query"
+msgstr "仅按路径匹配并传递查询字符串"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Choose how missing pages are handled. You can change these settings later in Options."
+msgstr "选择如何处理找不到的页面。您可以稍后在选项中更改这些设置。"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Redirect to the closest match (recommended)"
+msgstr "重定向到最接近的匹配页面（推荐）"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "When no close match is found, show a 404 page that suggests similar pages."
+msgstr "如果没有找到接近的匹配页面，则显示一个推荐相似页面的 404 页面。"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Show a 404 page that suggests similar pages"
+msgstr "显示一个推荐相似页面的 404 页面"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Visitors are never redirected automatically. Redirects you create yourself still work."
+msgstr "访问者永远不会被自动重定向。您自己创建的重定向仍然有效。"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Missing URLs are listed under Captured 404s so you can create redirects for them."
+msgstr "找不到的 URL 会列在已捕获的404中，方便您为它们创建重定向。"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Missing URLs are not recorded. This does not change how visitors are redirected."
+msgstr "找不到的 URL 不会被记录。这不会改变访问者的重定向方式。"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Email me about missing pages?"
+msgstr "是否通过电子邮件通知找不到的页面？"
+
+#. translators: %d is the number of captured 404 URLs that triggers an email.
+#: includes/admin/SetupWizardPresenter.php
+#, php-format
+msgid "Yes, email me when %d or more 404s have been captured (recommended)"
+msgstr "是，当已捕获 %d 个或更多 404 时给我发送电子邮件（推荐）"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Checked weekly. The email is sent to the site administrator."
+msgstr "每周检查一次。电子邮件会发送给网站管理员。"
+
+#. translators: %s is the site administrator's email address.
+#: includes/admin/SetupWizardPresenter.php
+#, php-format
+msgid "Checked weekly. The email is sent to %s."
+msgstr "每周检查一次。电子邮件会发送到 %s。"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Email alerts need the list of missing pages, so they are off while logging is off."
+msgstr "电子邮件提醒需要找不到页面的列表，因此在记录关闭期间也会关闭。"
+
+#: includes/redirects/RedirectChainWalker.php
+#, php-format
+msgid "Redirect loop: %s. Choose a destination outside this loop."
+msgstr "重定向循环：%s。请选择此循环之外的目标。"
+
+#: includes/redirects/RedirectChainWalker.php
+#, php-format
+msgid "Redirect not saved: the redirect loop check could not run (%s)."
+msgstr "重定向未保存：无法运行重定向循环检查（%s）。"
+
+#: includes/php/wordpress/WPNotices.php
+msgid "A redirect loop was stopped:"
+msgstr "已阻止一个重定向循环："
+
+#: includes/php/wordpress/WPNotices.php
+#, php-format
+msgid "A redirect loop was stopped: %s. Edit these rules in Page Redirects."
+msgstr "已阻止一个重定向循环：%s。请在页面重定向中编辑这些规则。"
+
+#: includes/view/View_Shared.php
+msgid "Sorting by this column is being prepared. It becomes available automatically."
+msgstr "正在准备按此列排序。准备完成后将自动可用。"
+
+#: includes/redirects/RedirectChainWalker.php
+msgid "Reload this page and try again. If the error continues, send this message to support."
+msgstr "请重新加载此页面后再试。如果错误仍然出现，请将此消息发送给支持人员。"
+
+#: includes/repositories/RedirectConditionsRepository.php
+msgid "The redirect conditions table is unavailable; conditions were not saved. [ABJ404_CONDITIONS_TABLE_UNAVAILABLE]"
+msgstr "重定向条件表不可用；条件未保存。[ABJ404_CONDITIONS_TABLE_UNAVAILABLE]"
+
+#: includes/redirects/RedirectWriteAdmissionPolicy.php
+#: includes/repositories/RedirectLifecycleService.php
+#: includes/repositories/RedirectWriteService.php
+#, php-format
+msgid "A live row already owns this source URL: %s [ABJ404_SOURCE_CONFLICT] Edit or move the existing redirect to the trash before trying again."
+msgstr "已有活动行使用此源 URL：%s [ABJ404_SOURCE_CONFLICT] 请先编辑现有重定向，或将其移至回收站，然后再试一次。"
+#: includes/core/PluginLogicSettingsUpdate.php:159
+#: includes/core/SetupWizard.php:125
+msgid "Settings could not be saved because the checked storage writer is unavailable. Reload this page and try again."
+msgstr "由于受检查的存储写入器不可用，无法保存设置。请重新加载此页面，然后重试。"
+
+#: includes/core/PluginLogicSettingsUpdate.php:165
+#: includes/core/SetupWizard.php:132
+msgid "Settings could not be saved because another update is in progress. Reload this page and try again."
+msgstr "由于另一个更新正在进行，无法保存设置。请重新加载此页面，然后重试。"
+
+#: includes/core/PluginLogicSettingsUpdate.php:182
+#: includes/core/SetupWizard.php:153
+msgid "Settings could not be saved. Reload this page and try again."
+msgstr "无法保存设置。请重新加载此页面，然后重试。"
+#: includes/ajax/Ajax_RestoreDefaults.php:76
+msgid "Settings could not be restored because the checked storage writer is unavailable."
+msgstr "由于受检查的存储写入器不可用，无法恢复设置。"
+
+#: includes/ajax/Ajax_RestoreDefaults.php:82
+msgid "Settings could not be restored because another update is in progress."
+msgstr "由于另一个更新正在进行，无法恢复设置。"
+
+#: includes/ajax/Ajax_RestoreDefaults.php:99
+msgid "Settings could not be restored. Reload this page and try again."
+msgstr "无法恢复设置。请重新加载此页面，然后重试。"
+
+#. translators: %d = number of import issue details not displayed.
+#: includes/import/ImportIssueSummary.php
+#, php-format
+msgid "Additional import issues omitted: %d."
+msgstr "省略的其他导入问题：%d 个。"
+
+#. translators: %s = legacy plugin redirect table name.
+#: includes/repositories/PluginUpdateMetadataRepository.php
+#, php-format
+msgid "[ABJ404-IMPORT-SOURCE-NOT-FOUND] Legacy Redirectioner source table \"%s\" was not found; no records were imported. Confirm that the legacy redirects are present in this WordPress installation before retrying the import."
+msgstr "[ABJ404-IMPORT-SOURCE-NOT-FOUND] 未找到 Legacy Redirectioner 源数据表「%s」，未导入任何记录。请先确认此 WordPress 安装中存在旧重定向，再重试导入。"
+
+#: includes/import/ForeignSourceQueryGateway.php
+msgid "The database did not confirm a successful source read. Check the source plugin data and database connection before retrying."
+msgstr "数据库未确认成功读取源数据。请先检查源插件数据和数据库连接，再重试。"

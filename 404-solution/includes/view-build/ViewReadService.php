@@ -180,7 +180,7 @@ class ABJ_404_Solution_ViewReadService implements ABJ_404_Solution_ViewReadServi
      * right now. For a narrow-sort-key-backed column (URL, Destination) that
      * means the column exists AND its one-time legacy-row drain has converged
      * (the latch is set) -- the SAME condition the read path uses before ordering
-     * by the key (see ViewQueryBuilder::wideColumnSortPendingBackfill /
+     * by the key (see ViewSortResolver::wideColumnSortPendingBackfill /
      * AdminViewReadCoordinator). Sorts on real always-populated columns
      * (logshits, last_used, score, timestamp, ...) are always ready.
      *
@@ -202,19 +202,16 @@ class ABJ_404_Solution_ViewReadService implements ABJ_404_Solution_ViewReadServi
      * @return string One of ABJ_404_Solution_ViewReadServiceInterface::SORT_READINESS_*.
      */
     public function sortReadinessStatusForOrderby(string $orderby): string {
+        $reader = abj_service_optional('admin_table_reader');
+        if ($reader instanceof ABJ_404_Solution_AdminTableReadRepository && $reader->isDegraded()) {
+            return ABJ_404_Solution_ViewReadServiceInterface::SORT_READINESS_BACKFILL_PENDING;
+        }
         $column = self::ORDERBY_TO_SORT_KEY[strtolower($orderby)] ?? '';
         if ($column === '') {
             return ABJ_404_Solution_ViewReadServiceInterface::SORT_READINESS_READY;
         }
 
-        $readiness = $this->liveResolver->schemaReadiness();
-        if (!$readiness->sortKeySchemaAvailableForColumn($column)) {
-            return ABJ_404_Solution_ViewReadServiceInterface::SORT_READINESS_SCHEMA_UNAVAILABLE;
-        }
-        if ($readiness->sortKeyReadyForColumn($column)) {
-            return ABJ_404_Solution_ViewReadServiceInterface::SORT_READINESS_READY;
-        }
-        return ABJ_404_Solution_ViewReadServiceInterface::SORT_READINESS_BACKFILL_PENDING;
+        return $this->liveResolver->schemaReadiness()->readinessForColumn($column);
     }
 
     /**
@@ -241,7 +238,7 @@ class ABJ_404_Solution_ViewReadService implements ABJ_404_Solution_ViewReadServi
             return 0;
         }
         $cursorOption = ABJ_404_Solution_RedirectsDenormColumnSql::sortKeyBackfillCursorOption($column);
-        $cursorRaw = get_option($cursorOption);
+        $cursorRaw = ABJ_404_Solution_OptionShapeRead::scalar($cursorOption);
         $cursor = ABJ_404_Solution_ExactInteger::readOr($cursorRaw, 0, 0);
         $maxId = $this->sortKeyMaxId();
         if ($maxId <= 0 || $cursor <= 0) {
@@ -333,12 +330,14 @@ class ABJ_404_Solution_ViewReadService implements ABJ_404_Solution_ViewReadServi
         return $this->statusCountsRefreshCoordinator->refreshingCapturedStatusCountsResult();
     }
 
-    /**
-     * Cron-only status-count recomputation. Foreground callers can only enqueue
-     * the work, which prevents a cache miss from entering an aggregate query.
-     */
+    /** Cron-only status-count recomputation; a foreground call only enqueues it. */
     public function refreshStatusCounts(string $scope): void {
         $this->statusCountsRefreshCoordinator->refresh($scope);
+    }
+
+    /** Admin views of a cron-stalled site run the queued per-scope refreshes. */
+    public function armStatusCountsAdminContinuations(): void {
+        $this->statusCountsRefreshCoordinator->armAdminContinuations();
     }
 
     /** @return int|null Enqueues a recomputation when the cache is stale. */
@@ -364,8 +363,8 @@ class ABJ_404_Solution_ViewReadService implements ABJ_404_Solution_ViewReadServi
     // Delegated: RedirectsBulkReader
     // =========================================================================
 
-    /** @return iterable<int, array<string, mixed>>|null Null when the export query failed. */
-    function redirectsExportRows(): ?iterable {
+    /** @return iterable<int, array<string, mixed>>|WP_Error WP_Error when the export query failed. */
+    function redirectsExportRows() {
         return $this->redirectsBulkReader->redirectsExportRows();
     }
 
@@ -374,7 +373,7 @@ class ABJ_404_Solution_ViewReadService implements ABJ_404_Solution_ViewReadServi
         return $this->redirectsBulkReader->getRedirectsWithRegEx();
     }
 
-    /** @return array<int, array<string, mixed>> */
+    /** @return iterable<int, array<string, mixed>> */
     function getManualRedirectsWithRegexMetachars() {
         return $this->redirectsBulkReader->getManualRedirectsWithRegexMetachars();
     }
@@ -388,9 +387,13 @@ class ABJ_404_Solution_ViewReadService implements ABJ_404_Solution_ViewReadServi
     // Delegated: LogsMetricsReader
     // =========================================================================
 
-    /** @param int $logID @return int */
-    function getLogsCount($logID) {
-        return $this->logsMetricsReader->getLogsCount($logID);
+    /**
+     * @param int $logID
+     * @param array<string, mixed> $tableOptions Internal strict-read and timeout options.
+     * @return int Count, or -1 when a non-strict read could not determine it.
+     */
+    function getLogsCount($logID, array $tableOptions = array()) {
+        return $this->logsMetricsReader->getLogsCount($logID, $tableOptions);
     }
 
     /** @return int */

@@ -10,6 +10,35 @@ if (!defined('ABSPATH')) {
 class ABJ_404_Solution_ImportCsvParser {
 
     /**
+     * Stream canonical CSV rows, retaining the data-row index used by resume checkpoints.
+     * Blank rows and the format header do not consume an index. Repeated data
+     * headers remain visible so each caller retains its existing accounting.
+     * The caller owns the handle and closes it even when this stream is discarded.
+     * @param resource $fileHandle
+     * @return \Generator<int,array{index:int,data:array<string,string>}>
+     */
+    public function readRows($fileHandle, string $delimiter, int $resumeFromDataRow = 0): \Generator {
+        $headers = null;
+        $index = 0;
+        while (($row = fgetcsv($fileHandle, 0, $delimiter, '"', '\\')) !== false) {
+            $data = is_array($row)
+                ? array_map(static function ($value): string { return trim((string)$value); }, $row)
+                : array();
+            if (count($data) === 1 && $data[0] === '') { continue; }
+            if ($headers === null && $this->isCompatibleImportHeaderRow($data)) {
+                $headers = $this->normalizeImportHeaders($data);
+                continue;
+            }
+            $currentIndex = $index++;
+            if ($currentIndex < $resumeFromDataRow) { continue; }
+            $mapped = $headers !== null ? $this->mapImportRowByHeaders($data, $headers)
+                : $this->mapImportRowWithoutHeaders($data);
+            yield array('index' => $currentIndex, 'data' => $mapped);
+            if (isset($mapped['error'])) { return; }
+        }
+    }
+
+    /**
      * @param mixed $line
      * @return array<string, string>
      */
@@ -123,6 +152,13 @@ class ABJ_404_Solution_ImportCsvParser {
             'to_url' => $to,
         );
 
+        foreach (array('query_mode', 'match_data') as $field) {
+            $index = $this->findImportHeaderIndex($normalizedHeaders, array($field));
+            if ($index !== -1 && array_key_exists($index, $row)) {
+                $result[$field] = trim((string)$row[$index]);
+            }
+        }
+
         $engineIndex = $this->findImportHeaderIndex($normalizedHeaders, array('engine'));
         if ($engineIndex !== -1 && array_key_exists($engineIndex, $row)) {
             $result['engine'] = trim((string)$row[$engineIndex]);
@@ -136,6 +172,11 @@ class ABJ_404_Solution_ImportCsvParser {
         $statusIndex = $this->findImportHeaderIndex($normalizedHeaders, array('status', 'redirect_status'));
         if ($statusIndex !== -1 && array_key_exists($statusIndex, $row)) {
             $result['status'] = trim((string)$row[$statusIndex]);
+        }
+
+        $typeIndex = $this->findImportHeaderIndex($normalizedHeaders, array('type'));
+        if ($typeIndex !== -1 && array_key_exists($typeIndex, $row)) {
+            $result['type'] = trim((string)$row[$typeIndex]);
         }
 
         $regexIndex = $this->findImportHeaderIndex($normalizedHeaders, array('regex', 'is_regex'));
@@ -167,6 +208,11 @@ class ABJ_404_Solution_ImportCsvParser {
      */
     function mapImportRowWithoutHeaders($columns) {
         $columns = array_values($columns);
+        if (count($columns) === 8) {
+            $row = $this->mapImportRowWithoutHeaders(array_slice($columns, 0, 7));
+            $row['query_mode'] = trim((string)$columns[7]);
+            return $row;
+        }
         if (count($columns) === 7) {
             return array(
                 'from_url' => trim((string)$columns[0]),

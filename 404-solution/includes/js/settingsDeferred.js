@@ -54,6 +54,10 @@ jQuery(document).ready(function ($) {
         return fallback + ' (' + detail + ')';
     }
 
+    // Holds the admin ready signal (includes/js/adminReady.js) until the
+    // section renders or shows why it could not.
+    var releaseReady = (window.ABJ404 && window.ABJ404.adminReady)
+        ? window.ABJ404.adminReady.hold('gsc-section') : function () {};
     $.ajax({
         url: window.ajaxurl || 'admin-ajax.php',
         type: 'POST',
@@ -64,37 +68,45 @@ jQuery(document).ready(function ($) {
             nonce: nonce
         },
         success: function (response, textStatus, jqXHR) {
-            if (response && response.success && response.data && typeof response.data.html === 'string') {
-                $container.html(response.data.html);
-                $container.attr('data-deferred-load', '0');
-                return;
-            }
+            try {
+                if (response && response.success && response.data && typeof response.data.html === 'string') {
+                    $container.html(response.data.html);
+                    $container.attr('data-deferred-load', '0');
+                    return;
+                }
 
-            var message;
-            if (response && response.data && response.data.message) {
-                message = String(response.data.message);
-            } else {
-                // A 200 that is not the expected shape: name the status and
-                // keep the response in the console.
-                message = describeFailure(jqXHR, {
-                    source: 'gsc-deferred-section-malformed',
-                    textStatus: textStatus,
-                    errorThrown: ''
-                });
+                var message;
+                if (response && response.data && response.data.message) {
+                    message = String(response.data.message);
+                } else {
+                    // A 200 that is not the expected shape: name the status and
+                    // keep the response in the console.
+                    message = describeFailure(jqXHR, {
+                        source: 'gsc-deferred-section-malformed',
+                        textStatus: textStatus,
+                        errorThrown: ''
+                    });
+                }
+                $container.html('<p class="abj404-form-help">' + $('<div>').text(message).html() + '</p>');
+                $container.attr('data-deferred-load', '0');
+            } finally {
+                releaseReady();
             }
-            $container.html('<p class="abj404-form-help">' + $('<div>').text(message).html() + '</p>');
-            $container.attr('data-deferred-load', '0');
         },
         error: function (jqXHR, textStatus, errorThrown) {
-            // The server's forwarded exception message when it sent one, else
-            // the underlying status.
-            var message = describeFailure(jqXHR, {
-                source: 'gsc-deferred-section',
-                textStatus: textStatus,
-                errorThrown: errorThrown
-            });
-            $container.html('<p class="abj404-form-help">' + $('<div>').text(message).html() + '</p>');
-            $container.attr('data-deferred-load', '0');
+            try {
+                // The server's forwarded exception message when it sent one, else
+                // the underlying status.
+                var message = describeFailure(jqXHR, {
+                    source: 'gsc-deferred-section',
+                    textStatus: textStatus,
+                    errorThrown: errorThrown
+                });
+                $container.html('<p class="abj404-form-help">' + $('<div>').text(message).html() + '</p>');
+                $container.attr('data-deferred-load', '0');
+            } finally {
+                releaseReady();
+            }
         }
     });
 });

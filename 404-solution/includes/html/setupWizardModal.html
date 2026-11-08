@@ -1,87 +1,75 @@
 <div id="abj404-setup-wizard" class="abj404-setup-overlay">
-    <div class="abj404-setup-modal">
+    <div class="abj404-setup-modal" role="dialog" aria-modal="true" aria-labelledby="abj404-setup-title" aria-describedby="abj404-setup-intro" tabindex="-1">
         <form method="post" action="">
             {nonce_field}
 
             <div class="abj404-setup-header">
-                <h2>{welcome_heading}</h2>
-                <button type="button" id="abj404-setup-close" class="abj404-setup-close" title="{close_label}">&times;</button>
+                <h2 id="abj404-setup-title">{welcome_heading}</h2>
             </div>
 
             <div class="abj404-setup-content">
-                <p class="abj404-setup-intro">
-                    {intro_primary} {intro_secondary}
-                </p>
+                <p id="abj404-setup-intro" class="abj404-setup-intro">{intro}</p>
 
-                <div class="abj404-setup-question">
-                    <h3>{q1_heading}</h3>
-                    <div class="abj404-setup-options">
-                        <label class="abj404-setup-option">
-                            <input type="radio" name="abj404_setup_q1" value="redirect"{q1_redirect_checked}>
-                            <span class="abj404-setup-option-text">
-                                <span class="abj404-setup-option-label">{q1_redirect_label}</span>
-                                <span class="abj404-setup-option-desc">{q1_redirect_desc}</span>
-                            </span>
+                <fieldset class="abj404-setup-question">
+                    <legend>{q1_heading}</legend>
+                    <div class="abj404-setup-option">
+                        <label>
+                            <input type="radio" name="abj404_setup_q1" value="redirect"{q1_redirect_checked} aria-describedby="abj404-setup-q1-redirect-desc">
+                            {q1_redirect_label}
                         </label>
-                        <label class="abj404-setup-option">
-                            <input type="radio" name="abj404_setup_q1" value="default"{q1_default_checked}>
-                            <span class="abj404-setup-option-text">
-                                <span class="abj404-setup-option-label">{q1_default_label}</span>
-                                <span class="abj404-setup-option-desc">{q1_default_desc}</span>
-                            </span>
-                        </label>
+                        <p class="description" id="abj404-setup-q1-redirect-desc">{q1_redirect_desc}</p>
                     </div>
-                </div>
+                    <div class="abj404-setup-option">
+                        <label>
+                            <input type="radio" name="abj404_setup_q1" value="default"{q1_default_checked} aria-describedby="abj404-setup-q1-default-desc">
+                            {q1_default_label}
+                        </label>
+                        <p class="description" id="abj404-setup-q1-default-desc">{q1_default_desc}</p>
+                    </div>
+                </fieldset>
 
-                <div class="abj404-setup-question">
-                    <h3>{q2_heading}</h3>
-                    <div class="abj404-setup-options">
-                        <label class="abj404-setup-option">
-                            <input type="radio" name="abj404_setup_q2" value="yes"{q2_yes_checked}>
-                            <span class="abj404-setup-option-text">
-                                <span class="abj404-setup-option-label">{q2_yes_label}</span>
-                                <span class="abj404-setup-option-desc">{q2_yes_desc}</span>
-                            </span>
+                <fieldset class="abj404-setup-question">
+                    <legend>{q2_heading}</legend>
+                    <div class="abj404-setup-option">
+                        <label>
+                            <input type="radio" name="abj404_setup_q2" value="yes"{q2_yes_checked} aria-describedby="abj404-setup-q2-yes-desc">
+                            {q2_yes_label}
                         </label>
-                        <label class="abj404-setup-option">
-                            <input type="radio" name="abj404_setup_q2" value="no"{q2_no_checked}>
-                            <span class="abj404-setup-option-text">
-                                <span class="abj404-setup-option-label">{q2_no_label}</span>
-                                <span class="abj404-setup-option-desc">{q2_no_desc}</span>
-                            </span>
-                        </label>
+                        <p class="description" id="abj404-setup-q2-yes-desc">{q2_yes_desc}</p>
                     </div>
-                </div>
+                    <div class="abj404-setup-option">
+                        <label>
+                            <input type="radio" name="abj404_setup_q2" value="no"{q2_no_checked} aria-describedby="abj404-setup-q2-no-desc">
+                            {q2_no_label}
+                        </label>
+                        <p class="description" id="abj404-setup-q2-no-desc">{q2_no_desc}</p>
+                    </div>
+                </fieldset>
 
-                <div class="abj404-setup-question">
-                    <h3>{q3_heading}</h3>
-                    <div class="abj404-setup-options">
-                        <label class="abj404-setup-option">
-                            <input type="radio" name="abj404_setup_q3" value="yes"{q3_yes_checked}>
-                            <span class="abj404-setup-option-text">
-                                <span class="abj404-setup-option-label">{q3_yes_label}</span>
-                                <span class="abj404-setup-option-desc">{q3_yes_desc}</span>
-                            </span>
+                <fieldset class="abj404-setup-question" id="abj404-setup-q3-group"{q3_group_disabled}>
+                    <legend>{q3_heading}</legend>
+                    <div class="abj404-setup-option">
+                        <label>
+                            <input type="radio" name="abj404_setup_q3" value="yes"{q3_yes_checked} aria-describedby="abj404-setup-q3-yes-desc">
+                            {q3_yes_label}
                         </label>
-                        <label class="abj404-setup-option">
-                            <input type="radio" name="abj404_setup_q3" value="no"{q3_no_checked}>
-                            <span class="abj404-setup-option-text">
-                                <span class="abj404-setup-option-label">{q3_no_label}</span>
-                                <span class="abj404-setup-option-desc">{q3_no_desc}</span>
-                            </span>
-                        </label>
+                        <p class="description" id="abj404-setup-q3-yes-desc">{q3_yes_desc}</p>
                     </div>
-                </div>
+                    <div class="abj404-setup-option">
+                        <label>
+                            <input type="radio" name="abj404_setup_q3" value="no"{q3_no_checked} aria-describedby="abj404-setup-q3-no-desc">
+                            {q3_no_label}
+                        </label>
+                        <p class="description" id="abj404-setup-q3-no-desc">{q3_no_desc}</p>
+                    </div>
+                    <p class="description abj404-setup-q3-unavailable" id="abj404-setup-q3-unavailable"{q3_unavailable_hidden}>{q3_unavailable_note}</p>
+                </fieldset>
             </div>
 
             <div class="abj404-setup-footer">
-                <button type="button" id="abj404-setup-skip" class="abj404-setup-skip">
-                    {skip_label}
-                </button>
                 <input type="hidden" name="abj404_setup_wizard_action" value="save">
-                <button type="submit" class="button abj404-setup-primary">
-                    {save_label}
-                </button>
+                <button type="button" id="abj404-setup-skip" class="button abj404-setup-skip">{skip_label}</button>
+                <button type="submit" class="button button-primary abj404-setup-primary">{save_label}</button>
             </div>
         </form>
     </div>

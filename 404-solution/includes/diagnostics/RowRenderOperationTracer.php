@@ -4,6 +4,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// allow-no-test-found: exercised through the real AJAX table render entry point in tests/AjaxRowProgressAttributionTest.php
 /**
  * Request-scoped durable attribution for external work inside table rows.
  *
@@ -21,7 +22,6 @@ if (!defined('ABSPATH')) {
  * cache groups are emitted only as conventional safe names or SHA-256
  * prefixes. Values and callback arguments are never inspected.
  *
- * allow-no-test-found: exercised through the real AJAX table render entry point in tests/AjaxRowProgressAttributionTest.php
  */
 final class ABJ_404_Solution_RowRenderOperationTracer
     implements ABJ_404_Solution_CacheOperationTraceSink {

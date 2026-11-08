@@ -159,19 +159,75 @@ class ABJ_404_Solution_NGramCacheRebuildScheduler {
      * @return int|false
      */
     public function armedRebuildTimestamp() {
+        $event = $this->queuedRebuildEvent();
+        return $event === false ? false : $event['timestamp'];
+    }
+
+    /**
+     * Whether this site has proved WP-Cron is not dispatching (any hook).
+     *
+     * @param int|null $observedEventTimestamp This chain's own stored event, already read.
+     */
+    public function cronDispatchStallProven(?int $observedEventTimestamp = null): bool {
+        return (new ABJ_404_Solution_CronDispatchStallEvidence($this->cronScheduler))
+            ->isProven($observedEventTimestamp);
+    }
+
+    /** Refresh the durable cron option before selecting this chain's event. */
+    public function refreshCronStoreReads(): void {
+        $this->cronScheduler->refreshStoredEventReads();
+    }
+
+    /**
+     * Select the one event identity this rebuild chain can own.
+     *
+     * The no-argument initial event is preferred; once the authoritative
+     * cursor is positive, the continuation carries that exact offset. All
+     * consumers use this selected timestamp and argument list together so a
+     * fallback cannot unschedule a different hook occurrence.
+     *
+     * @return array{timestamp:int,args:array<int,mixed>}|false
+     */
+    public function queuedRebuildEvent() {
         $hookName = self::REBUILD_CRON_HOOK;
         $nextScheduled = $this->cronScheduler->nextScheduled($hookName);
         if ($nextScheduled !== false) {
-            return $nextScheduled;
+            $event = $this->normalizeQueuedEvent($nextScheduled, array());
+            return $event === null ? false : $event;
         }
         $currentOffset = $this->currentRebuildOffset();
         if ($currentOffset > 0) {
             $nextForOffset = $this->cronScheduler->nextScheduled($hookName, [$currentOffset]);
             if ($nextForOffset !== false) {
-                return $nextForOffset;
+                $event = $this->normalizeQueuedEvent($nextForOffset, [$currentOffset]);
+                return $event === null ? false : $event;
             }
         }
         return false;
+    }
+
+    /**
+     * Consume the exact event selected by queuedRebuildEvent().
+     *
+     * @param array{timestamp:int,hook:string,args:array<int,mixed>} $request
+     * @return bool
+     */
+    public function consumeExactEvent(array $request): bool {
+        return $this->cronScheduler->consumeExactEvent($request);
+    }
+
+    /**
+     * @param mixed $timestamp
+     * @param array<int,mixed> $args
+     * @return array{timestamp:int,args:array<int,mixed>}|null
+     */
+    private function normalizeQueuedEvent($timestamp, array $args): ?array {
+        $normalizedTimestamp = ABJ_404_Solution_ExactInteger::read($timestamp, 1);
+        if ($normalizedTimestamp === null) {
+            $this->logger->warn('N-gram rebuild cron event had an unreadable timestamp; refusing fallback admission.');
+            return null;
+        }
+        return array('timestamp' => $normalizedTimestamp, 'args' => array_values($args));
     }
 
     /**

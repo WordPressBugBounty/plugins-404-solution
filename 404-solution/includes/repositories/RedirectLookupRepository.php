@@ -15,33 +15,77 @@ class ABJ_404_Solution_RedirectLookupRepository {
     /** @var ABJ_404_Solution_Functions */
     private $f;
 
+    /** @var array<int, string>|null Request-local schema snapshot. */
+    private $columns = null;
+
+    /** @var string Error from the most recent schema read; never cache a failure. */
+    private $columnsError = '';
+
+    /** @var array<string, int> */
+    private $lookupContext;
+
     /**
      * @param ABJ_404_Solution_DatabaseCore $dbCore
      * @param ABJ_404_Solution_Functions $functions
+     * @param array<string, int> $lookupContext
      */
-    public function __construct(ABJ_404_Solution_DatabaseCore $dbCore, $functions) {
+    public function __construct(ABJ_404_Solution_DatabaseCore $dbCore, $functions, array $lookupContext = array()) {
         $this->dbCore = $dbCore;
         $this->f = $functions;
+        $excludedID = isset($lookupContext['excluded_redirect_id']) ? (int)$lookupContext['excluded_redirect_id'] : 0;
+        $this->lookupContext = $excludedID > 0 ? array('excluded_redirect_id' => $excludedID) : array();
+    }
+
+    /** @param array<string, int> $context @return self */
+    public function withLookupContext(array $context): self {
+        return new self($this->dbCore, $this->f, $context);
     }
 
     /**
      * @param string $url
      * @param bool $degradedMode
+     * @param string $scope exact, routing, or pass-only path fallback.
      * @return array<string, mixed>
      */
-    public function getActiveRedirectForNormalizedUrl($url, $degradedMode = false): array {
+    public function getActiveRedirectForNormalizedUrl($url, $degradedMode = false, string $scope = 'exact'): array {
+        $parts = explode('?', $url, 2);
+        $path = $parts[0];
+        $suffix = isset($parts[1]) ? '?' . $parts[1] : '';
         $url1 = $url;
-        $url2 = $url;
-        if (substr($url, -1) === '/') {
-            $url2 = rtrim($url, '/');
-        } else {
-            $url2 = $url2 . '/';
-        }
+        $url2 = (substr($path, -1) === '/' ? rtrim($path, '/') : $path . '/') . $suffix;
 
         $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getPermalinkFromURL.sql");
 
         if ($degradedMode && $this->redirectsTableMissingScheduledColumns()) {
             $query = $this->stripScheduledRedirectPredicates($query);
+        }
+        if ($degradedMode && $this->columnsError !== '') {
+            return array('id' => 0, 'last_error' => $this->columnsError);
+        }
+
+        if ($scope !== 'exact') {
+            $columns = $this->getRedirectsTableColumns();
+            if ($this->columnsError !== '') {
+                return array('id' => 0, 'last_error' => $this->columnsError);
+            }
+            if ($columns === array()) { return array('id' => 0); }
+            if (in_array('query_mode', array_map('strtolower', $columns), true)) {
+                $predicate = $scope === 'pass'
+                    ? "and r.query_mode = 'pass'"
+                    : "and (r.query_mode IS NULL OR r.query_mode IN ('ignore', 'pass'))";
+                $query = str_replace('where   r.url', 'where 1=1 ' . $predicate . ' AND r.url', $query);
+            } elseif ($scope === 'pass') {
+                return array('id' => 0);
+            }
+        }
+
+        $excludedID = isset($this->lookupContext['excluded_redirect_id'])
+            ? (int)$this->lookupContext['excluded_redirect_id'] : 0;
+        if ($excludedID > 0) {
+            $orderPos = stripos($query, 'order by');
+            if ($orderPos !== false) {
+                $query = substr($query, 0, $orderPos) . "and r.id <> {excluded_redirect_id}\n" . substr($query, $orderPos);
+            }
         }
 
         // The visitor's URL is bound LAST. Table names and constants are expanded on the
@@ -52,8 +96,15 @@ class ABJ_404_Solution_RedirectLookupRepository {
         // quoted literal.
         $query = $this->dbCore->doTableNameReplacements($query);
         $query = $this->f->replaceKnownConstants($query);
-        list($preparedQuery, $orderedValues) = $this->prepare_query($query, array("url1" => $url1, "url2" => $url2));
-        $results = $this->dbCore->queryAndGetResults($preparedQuery, array('query_params' => $orderedValues));
+        $queryData = array("url1" => $url1, "url2" => $url2);
+        if ($excludedID > 0) {
+            $queryData['excluded_redirect_id'] = $excludedID;
+        }
+        list($preparedQuery, $orderedValues) = $this->prepare_query($query, $queryData);
+        $results = ABJ_404_Solution_DatabaseReadResultValidator::confirm(
+            $this->dbCore->queryAndGetResults($preparedQuery, array('query_params' => $orderedValues)),
+            'active redirect lookup'
+        );
 
         return $this->firstRedirectRow($results);
     }
@@ -62,7 +113,14 @@ class ABJ_404_Solution_RedirectLookupRepository {
      * @param string $url
      * @return array<string, mixed>
      */
-    public function getExistingRedirectForNormalizedUrl($url): array {
+    public function getExistingRedirectForNormalizedUrl($url, int $excludedId = 0): array {
+        return $this->firstRedirectRow($this->getLiveRowsForNormalizedUrl($url, $excludedId));
+    }
+
+    /** All live rows of one stored source, including legacy duplicates.
+     * @return array{rows: array<int, array<string, mixed>>, last_error: string} Query result retaining database errors.
+     */
+    public function getLiveRowsForNormalizedUrl(string $url, int $excludedId = 0): array {
         // Index-assisted exact match: the plain `url = {url}` predicate is
         // sargable on the `url`(190) prefix index and narrows to the (typically
         // one) row sharing this URL ignoring collation; the `BINARY url = BINARY
@@ -76,11 +134,69 @@ class ABJ_404_Solution_RedirectLookupRepository {
         // Table names are expanded on the template and the URL is bound last, as a positional
         // query parameter (see getActiveRedirectForNormalizedUrl).
         $query = $this->dbCore->doTableNameReplacements('select * from {wp_abj404_redirects} where url = {url} and BINARY url = BINARY {url} ' .
-            " and disabled = 0 ");
-        list($preparedQuery, $orderedValues) = $this->prepare_query($query, array("url" => $url));
-        $results = $this->dbCore->queryAndGetResults($preparedQuery, array('query_params' => $orderedValues));
+            " and disabled = 0 AND id <> {excluded_id} ");
+        list($preparedQuery, $orderedValues) = $this->prepare_query($query, array("url" => $url, 'excluded_id' => $excludedId));
+        $results = ABJ_404_Solution_DatabaseReadResultValidator::confirm(
+            $this->dbCore->queryAndGetResults($preparedQuery, array('query_params' => $orderedValues)),
+            'live redirect lookup'
+        );
 
-        return $this->firstRedirectRow($results);
+        $rawRows = isset($results['rows']) && is_array($results['rows']) ? $results['rows'] : array();
+        $rows = array();
+        foreach ($rawRows as $row) {
+            if (is_array($row)) { $rows[] = array_filter($row, 'is_string', ARRAY_FILTER_USE_KEY); }
+        }
+        return array('rows' => $rows, 'last_error' => isset($results['last_error']) && is_string($results['last_error']) ? $results['last_error'] : '');
+    }
+
+    /**
+     * Rows only: display and list consumers that render whatever came back.
+     * A caller that mutates or answers "not found" from the result must use
+     * readRedirectsByIDs(), because here a refused read and a missing row are
+     * both an empty array.
+     *
+     * @param array<int, int|string> $ids
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRedirectsByIDs($ids): array {
+        return $this->readRedirectsByIDs($ids)['rows'];
+    }
+
+    /**
+     * Rows by id with the executor's error retained. Empty rows with an empty
+     * `last_error` prove the ids have no stored row; empty rows with an error
+     * prove nothing, and a write that was about to be admitted against the
+     * stored row must be refused rather than treated as "no row to check".
+     *
+     * @param array<int, int|string> $ids
+     * @return array{rows: array<int, array<string, mixed>>, last_error: string} Query result retaining database errors.
+     */
+    public function readRedirectsByIDs($ids): array {
+        if (!is_array($ids) || empty($ids)) {
+            return array('rows' => array(), 'last_error' => '');
+        }
+        $validids = array_map('absint', $ids);
+        $multipleIds = implode(',', $validids);
+
+        // allow-unbounded-select: caller-supplied id keyset (where id IN an absint-filtered list); bounded by the explicit id list
+        $query = "select * from {wp_abj404_redirects} " .
+                "where id in (" . $multipleIds . ")";
+        $result = ABJ_404_Solution_DatabaseReadResultValidator::confirm(
+            $this->dbCore->queryAndGetResults($query),
+            'redirect ID lookup'
+        );
+        $rawRows = isset($result['rows']) && is_array($result['rows']) ? $result['rows'] : array();
+
+        $rows = array();
+        foreach ($rawRows as $row) {
+            if (is_array($row)) {
+                $rows[] = array_filter($row, 'is_string', ARRAY_FILTER_USE_KEY);
+            }
+        }
+        return array(
+            'rows' => $rows,
+            'last_error' => isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '',
+        );
     }
 
     /**
@@ -88,6 +204,11 @@ class ABJ_404_Solution_RedirectLookupRepository {
      * @return array<string, mixed>
      */
     private function firstRedirectRow(array $results): array {
+        // Empty rows prove absence only after a successful query. Keep the
+        // executor's error so safety-sensitive consumers can refuse a write.
+        if (isset($results['last_error']) && is_string($results['last_error']) && $results['last_error'] !== '') {
+            return array('id' => 0, 'last_error' => $results['last_error']);
+        }
         $redirect = array();
         $rows = isset($results['rows']) && is_array($results['rows']) ? $results['rows'] : array();
 
@@ -144,19 +265,26 @@ class ABJ_404_Solution_RedirectLookupRepository {
      * @return array<int, string>
      */
     private function getRedirectsTableColumns(): array {
+        $this->columnsError = '';
+        if ($this->columns !== null) { return $this->columns; }
         global $wpdb;
         if (!isset($wpdb)) {
+            $this->columnsError = 'Redirect schema lookup unavailable: wpdb is not initialized';
             return [];
         }
         // The redirects table is named by the executor's own token; nothing is
         // spliced into the statement text ahead of its `{wp_...}` pass.
-        $result = $this->dbCore->queryAndGetResults(
-            "SHOW COLUMNS FROM `{wp_abj404_redirects}`",
-            array('log_errors' => false)
+        $result = ABJ_404_Solution_DatabaseReadResultValidator::confirm(
+            $this->dbCore->queryAndGetResults(
+                "SHOW COLUMNS FROM `{wp_abj404_redirects}`",
+                array('log_errors' => false)
+            ),
+            'redirect schema lookup'
         );
         $rows = isset($result['rows']) && is_array($result['rows']) ? $result['rows'] : [];
         $lastError = isset($result['last_error']) && is_string($result['last_error']) ? $result['last_error'] : '';
         if ($lastError !== '') {
+            $this->columnsError = $lastError;
             return [];
         }
 
@@ -172,6 +300,7 @@ class ABJ_404_Solution_RedirectLookupRepository {
                 $columns[] = $row['field'];
             }
         }
+        $this->columns = $columns;
         return $columns;
     }
 

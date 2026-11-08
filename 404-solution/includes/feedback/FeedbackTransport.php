@@ -314,6 +314,31 @@ class ABJ_404_Solution_FeedbackTransport {
     }
 
     /**
+     * Send one heartbeat window and acknowledge only the snapshot delivered.
+     *
+     * Snapshot ownership belongs to the transport transaction: a failed send
+     * leaves the pending window available, and events recorded during delivery
+     * remain in the next active window. Logging only decides when a send is due.
+     *
+     * @param int $errorCount Number of errors observed in the debug-log snapshot.
+     * @return bool Whether the heartbeat transport accepted the report.
+     */
+    public static function sendHeartbeat(int $errorCount): bool {
+        $window = ABJ_404_Solution_HeartbeatWindowAggregate::beginHeartbeat();
+        $payload = self::buildPayload('heartbeat', array(
+            'error_signature' => 'Heartbeat: no errors to report.',
+            'previously_sent_line' => 0,
+            'error_count_in_log' => $errorCount,
+            'ajax_failure_counts' => $window['payload']['ajax_failure_counts'],
+        ));
+        $sent = self::sendNow($payload, 'heartbeat');
+        if ($sent) {
+            ABJ_404_Solution_HeartbeatWindowAggregate::completeHeartbeat($window['token']);
+        }
+        return $sent;
+    }
+
+    /**
      * Drain any pending crash beacon and report it as a post-mortem `error`
      * report. A crash beacon is written by the fatal shutdown handler when a
      * fatal/OOM kills a request before it can phone home; this reports it on a

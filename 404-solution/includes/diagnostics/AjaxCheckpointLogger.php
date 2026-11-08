@@ -30,7 +30,7 @@ final class ABJ_404_Solution_AjaxCheckpointLogger {
      * from canonical source and prevents a covered code change from shipping
      * with an old marker.
      */
-    const DIAGNOSTIC_BUILD_ID = 'd9a360884e5d34fda457b7c2767dc2702f786908';
+    const DIAGNOSTIC_BUILD_ID = '57f4644333e7aa17d0caf7b05731b6c0a1ac90e3';
 
     const CHECKPOINT_FILE = ABJ_404_Solution_CheckpointJournalWriter::CHECKPOINT_FILE;
     const ROTATED_FILE = ABJ_404_Solution_CheckpointJournalWriter::ROTATED_FILE;
@@ -100,6 +100,7 @@ final class ABJ_404_Solution_AjaxCheckpointLogger {
      * @return string Empty string when unavailable.
      */
     public static function resolveDirectory(): string {
+        self::$recordingDepth++;
         try {
             $directory = self::resolveDirectoryPath();
             if ($directory === '') {
@@ -113,6 +114,8 @@ final class ABJ_404_Solution_AjaxCheckpointLogger {
         } catch (Throwable $e) {
             self::reportFailure('AJAX checkpoint directory resolution failed: ' . $e->getMessage());
             return '';
+        } finally {
+            self::$recordingDepth = max(0, self::$recordingDepth - 1);
         }
     }
 
@@ -137,7 +140,7 @@ final class ABJ_404_Solution_AjaxCheckpointLogger {
      * @param array<string, mixed> $fields
      */
     public static function record(string $requestId, string $event, array $fields = array()): void {
-        if ($requestId === '') {
+        if ($requestId === '' || self::isRecording()) {
             return;
         }
         self::$recordingDepth++;
@@ -229,7 +232,7 @@ final class ABJ_404_Solution_AjaxCheckpointLogger {
      * @param array<string, mixed> $fields
      */
     public static function recordFrequent(string $requestId, string $event, array $fields = array()): void {
-        if ($requestId === '') {
+        if ($requestId === '' || self::isRecording()) {
             return;
         }
         self::$recordingDepth++;
@@ -258,7 +261,10 @@ final class ABJ_404_Solution_AjaxCheckpointLogger {
 
     /** True while this logger is persisting one of its own records. */
     public static function isRecording(): bool {
-        return self::$recordingDepth > 0;
+        return self::$recordingDepth > 0
+            || (class_exists('ABJ_404_Solution_DurableOperationRecorder', false)
+                && (!in_array('isRecording', get_class_methods('ABJ_404_Solution_DurableOperationRecorder'), true)
+                    || ABJ_404_Solution_DurableOperationRecorder::isRecording()));
     }
 
     /**
@@ -282,7 +288,7 @@ final class ABJ_404_Solution_AjaxCheckpointLogger {
         string $state,
         array $fields
     ): void {
-        if ($requestId === '') {
+        if ($requestId === '' || self::isRecording()) {
             return;
         }
         ABJ_404_Solution_DurableOperationRecorder::recordActiveOperation(

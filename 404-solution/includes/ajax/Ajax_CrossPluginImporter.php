@@ -42,22 +42,26 @@ class ABJ_404_Solution_Ajax_CrossPluginImporter {
 
         // Count-only path: never materializes the full row set (see
         // CrossPluginImporter::countImportable() / ForeignRedirectSourceReader::countSource()).
-        $count = $importer->countImportable($source);
+        try {
+            $count = $importer->countImportable($source);
 
-        // This array lists all allowed sources — $source has already been validated above.
-        $pluginLabels = array(
-            'rankmath'              => __('Rank Math', '404-solution'),
-            'yoast'                 => __('Yoast SEO Premium', '404-solution'),
-            'aioseo'                => __('AIOSEO', '404-solution'),
-            'safe-redirect-manager' => __('Safe Redirect Manager', '404-solution'),
-            'redirection'           => __('Redirection Plugin', '404-solution'),
-        );
-        $label = $pluginLabels[$source];
+            // This array lists all allowed sources; $source has already been validated above.
+            $pluginLabels = array(
+                'rankmath'              => __('Rank Math', '404-solution'),
+                'yoast'                 => __('Yoast SEO Premium', '404-solution'),
+                'aioseo'                => __('AIOSEO', '404-solution'),
+                'safe-redirect-manager' => __('Safe Redirect Manager', '404-solution'),
+                'redirection'           => __('Redirection Plugin', '404-solution'),
+            );
+            $label = $pluginLabels[$source];
 
-        wp_send_json_success(array(
-            'count'  => $count,
-            'source' => $source,
-            'label'  => $label,
-        ));
+            wp_send_json_success(array(
+                'count'  => $count,
+                'source' => $source,
+                'label'  => $label,
+            ));
+        } catch (ABJ_404_Solution_ImportSourceReadException $e) {
+            wp_send_json_error(array('message' => $e->getMessage()));
+        }
     }
 }

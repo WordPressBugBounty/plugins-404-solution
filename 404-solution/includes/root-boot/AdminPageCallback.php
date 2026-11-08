@@ -32,18 +32,12 @@ if (!function_exists('abj404_admin_page_callback')) {
 		}
 
 		$fatalInfo = function_exists('get_transient') ? get_transient('abj404_admin_fatal') : false;
-		if ($fatalInfo === false && function_exists('get_option')) {
-			$fatalInfo = get_option('abj404_admin_fatal_fallback', false);
-		}
 		if (!is_array($fatalInfo) || empty($fatalInfo['message'])) {
 			return;
 		}
 
 		if (function_exists('delete_transient')) {
 			delete_transient('abj404_admin_fatal');
-		}
-		if (function_exists('delete_option')) {
-			delete_option('abj404_admin_fatal_fallback');
 		}
 
 		$pluginDir = defined('ABJ404_PATH') ? ABJ404_PATH : dirname(dirname(__DIR__)) . '/';

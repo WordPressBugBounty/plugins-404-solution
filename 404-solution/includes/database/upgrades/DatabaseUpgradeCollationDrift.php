@@ -52,37 +52,8 @@ class ABJ_404_Solution_DatabaseUpgradeCollationDrift extends ABJ_404_Solution_Da
     function getTableCollationFromShowCreate($tableName) {
         $query = "SHOW CREATE TABLE `$tableName`";
         $results = $this->dbCore->queryAndGetResults($query);
-
-        // Check for query errors or empty results
-        $lastError = isset($results['last_error']) && is_scalar($results['last_error'])
-            ? (string)$results['last_error']
-            : '';
-        if ($lastError !== '') {
-            $this->logger->debugMessage("SHOW CREATE TABLE failed for $tableName: " . $lastError);
-            return null;
-        }
-
-        $rows = isset($results['rows']) && is_array($results['rows']) ? $results['rows'] : [];
-        $firstRow = isset($rows[0]) && is_array($rows[0]) ? $rows[0] : null;
-        if ($firstRow === null) {
-            $this->logger->debugMessage("SHOW CREATE TABLE returned no data for $tableName.");
-            return null;
-        }
-
-        // Use array_values to handle varying column name cases ('Create Table', 'CREATE TABLE', etc.)
-        // SHOW CREATE TABLE returns: [table_name, create_statement]
-        $row = array_values($firstRow);
-        if (count($row) < 2 || empty($row[1])) {
-            $this->logger->debugMessage("SHOW CREATE TABLE returned unexpected format for $tableName.");
-            return null;
-        }
-
-        if (!is_string($row[1])) {
-            $this->logger->debugMessage("SHOW CREATE TABLE returned non-string DDL for $tableName.");
-            return null;
-        }
-
-        $createTableSQL = $row[1];
+        $createTableSQL = $this->showCreateSql($results, $tableName);
+        if ($createTableSQL === null) { return null; }
 
         // The table default lives in the table-options section, after the
         // closing paren of the body -- never inside it. Column definitions come
@@ -120,6 +91,23 @@ class ABJ_404_Solution_DatabaseUpgradeCollationDrift extends ABJ_404_Solution_Da
         return ($collation && $charset) ? [$collation, $charset] : null;
     }
 
+    /** @param array<string,mixed> $results */
+    private function showCreateSql(array $results, string $tableName): ?string {
+        $lastError = isset($results['last_error']) && is_scalar($results['last_error']) ? (string)$results['last_error'] : '';
+        if (($results['query_succeeded'] ?? null) !== true
+            || (array_key_exists('timed_out', $results) && $results['timed_out'] !== false) || $lastError !== '') {
+            $this->logger->debugMessage("SHOW CREATE TABLE failed for $tableName: " . $lastError);
+            return null;
+        }
+        $rows = isset($results['rows']) && is_array($results['rows']) ? $results['rows'] : array();
+        $firstRow = isset($rows[0]) && is_array($rows[0]) ? $rows[0] : null;
+        if ($firstRow === null) { $this->logger->debugMessage("SHOW CREATE TABLE returned no data for $tableName."); return null; }
+        $row = array_values($firstRow);
+        if (count($row) < 2 || empty($row[1])) { $this->logger->debugMessage("SHOW CREATE TABLE returned unexpected format for $tableName."); return null; }
+        if (!is_string($row[1])) { $this->logger->debugMessage("SHOW CREATE TABLE returned non-string DDL for $tableName."); return null; }
+        return $row[1];
+    }
+
     /** Query information_schema for table collation (fallback method).
      * @param string $tableName
      * @return array{0: string, 1: string}|null Array of [collation, charset] or null if query failed.
@@ -134,7 +122,9 @@ class ABJ_404_Solution_DatabaseUpgradeCollationDrift extends ABJ_404_Solution_Da
         );
 
         $lastError = isset($queryResult['last_error']) && is_string($queryResult['last_error']) ? $queryResult['last_error'] : '';
-        if ($lastError !== '') {
+        if (($queryResult['query_succeeded'] ?? null) !== true
+                || (array_key_exists('timed_out', $queryResult) && $queryResult['timed_out'] !== false)
+                || $lastError !== '') {
             $this->logger->debugMessage("information_schema query failed for $tableName: " . $lastError);
             return null;
         }
@@ -185,19 +175,6 @@ class ABJ_404_Solution_DatabaseUpgradeCollationDrift extends ABJ_404_Solution_Da
     }
 
     /**
-     * Keep collation identifiers SQL-safe.
-     *
-     * @param string $collation
-     * @return string
-     */
-    private function sanitizeCollationIdentifier($collation) {
-        if (!is_string($collation) || $collation === '') {
-            return '';
-        }
-        return preg_replace('/[^A-Za-z0-9_]/', '', $collation) ?? '';
-    }
-
-    /**
      * Resolve the utf8mb4 collation target for plugin-table normalization.
      *
      * Priority:
@@ -214,7 +191,7 @@ class ABJ_404_Solution_DatabaseUpgradeCollationDrift extends ABJ_404_Solution_Da
         global $wpdb;
 
         if (!empty($wpdb->collate)) {
-            $wpdbCollation = $this->sanitizeCollationIdentifier((string)$wpdb->collate);
+            $wpdbCollation = ABJ_404_Solution_DatabaseCollationHelper::sanitizeCollationName((string)$wpdb->collate);
             if (ABJ_404_Solution_DatabaseCollationHelper::isUtf8mb4Collation($wpdbCollation)) {
                 return $wpdbCollation;
             }
@@ -226,7 +203,7 @@ class ABJ_404_Solution_DatabaseUpgradeCollationDrift extends ABJ_404_Solution_Da
             if (!is_array($row)) {
                 continue;
             }
-            $collation = $this->sanitizeCollationIdentifier((string)$row[0]);
+            $collation = ABJ_404_Solution_DatabaseCollationHelper::sanitizeCollationName((string)$row[0]);
             $charset = strtolower((string)$row[1]);
             if ($charset === 'utf8mb4' && ABJ_404_Solution_DatabaseCollationHelper::isUtf8mb4Collation($collation)) {
                 $counts[$collation] = ($counts[$collation] ?? 0) + 1;
@@ -242,7 +219,7 @@ class ABJ_404_Solution_DatabaseUpgradeCollationDrift extends ABJ_404_Solution_Da
         if (!empty($varRows)) {
             $row = is_array($varRows[0]) ? $varRows[0] : [];
             $valueRaw = isset($row['Value']) ? $row['Value'] : (isset($row['value']) ? $row['value'] : '');
-            $value = $this->sanitizeCollationIdentifier(is_scalar($valueRaw) ? (string)$valueRaw : '');
+            $value = ABJ_404_Solution_DatabaseCollationHelper::sanitizeCollationName(is_scalar($valueRaw) ? (string)$valueRaw : '');
             if (ABJ_404_Solution_DatabaseCollationHelper::isUtf8mb4Collation($value)) {
                 return $value;
             }
@@ -253,23 +230,182 @@ class ABJ_404_Solution_DatabaseUpgradeCollationDrift extends ABJ_404_Solution_Da
 
     /**
      * Ensure our tables use utf8mb4 (do not alter WordPress core tables).
-     * @return void
+     *
+     * One table's ALTER is the step. With a deadline (an admin-view slice of the
+     * queued repair) no further table starts once it has passed; without one
+     * (cron, activation, upgrade) every drifted table is attempted. A table
+     * whose indexes had to be dropped to convert gets the shipped indexes back
+     * in this same call: nothing else is guaranteed to run createIndexes() on a
+     * site whose WP-Cron never dispatches.
+     *
+     * @param ?float $deadline Absolute abj_clock() nowFloat deadline, or null.
+     * @return array{complete:bool,progressed:bool,unconverted:list<string>}
+     *   complete when every drifted table was attempted and converted.
      */
-    function correctCollations() {
+    function correctCollations(?float $deadline = null) {
+        $tableCollations = $this->discoverTableCollations();
+        if ($tableCollations === null) {
+            // An unavailable inventory is not an empty inventory. Do not let a
+            // failed SHOW TABLES read consume the queued repair as complete.
+            return array('complete' => false, 'progressed' => false, 'unconverted' => array());
+        }
+        $abjTableNames = array_keys($tableCollations);
+
+        $declaredColumns = $this->declaredColumnCollations();
+        $columnDrift = new ABJ_404_Solution_ColumnCollationDriftDetector($this->dbCore, $this->logger);
+        $targetCharset = 'utf8mb4';
+        $targetCollation = $this->resolveTargetUtf8mb4Collation($abjTableNames, $tableCollations);
+        $outcome = array('complete' => true, 'progressed' => false, 'unconverted' => array());
+        $attempted = 0;
+        $indexesDropped = false;
+
+        try {
+            foreach ($tableCollations as $tableName => $abjTableData) {
+                if ($abjTableData === null) {
+                    $this->logger->warn("Failed to retrieve collation for $tableName.");
+                    // An unreadable table is not verified healthy. Keep it in the
+                    // unfinished set so queued/admin continuation cannot consume
+                    // the repair event while this table still needs a retry.
+                    $outcome['complete'] = false;
+                    $outcome['unconverted'][] = $tableName;
+                    continue;
+                }
+
+                [$abjTableCollation, $abjTableCharset] = $abjTableData;
+
+                $needsUpdate = !($abjTableCharset === $targetCharset && $abjTableCollation === $targetCollation);
+                if (!$needsUpdate) {
+                    // Table default matches, but individual columns can still drift (e.g., some columns left as *_bin).
+                    $columnMismatch = $columnDrift->tableHasMismatch($tableName, array(
+                        'collation' => $targetCollation, 'declarations' => $declaredColumns[$tableName] ?? array()));
+                    if ($columnMismatch === true) {
+                        $needsUpdate = true;
+                        $this->logger->infoMessage("Detected column-level collation mismatch on {$tableName}; normalizing to {$targetCharset}/{$targetCollation}");
+                    } else if ($columnMismatch === null) {
+                        $this->logger->warn("Could not verify column collations for {$tableName}; skipping collation normalization.");
+                        // A failed column metadata read is an unknown state, not a
+                        // clean table. Preserve the repair for a later attempt.
+                        $outcome['complete'] = false;
+                        $outcome['unconverted'][] = $tableName;
+                        continue;
+                    }
+                }
+                if (!$needsUpdate) {
+                    continue;
+                }
+                if ($deadline !== null && $attempted > 0 && abj_clock()->nowFloat() >= $deadline) {
+                    $outcome['complete'] = false;
+                    $outcome['unconverted'][] = $tableName;
+                    continue;
+                }
+                $attempted++;
+
+                $this->logger->infoMessage("Updating charset/collation on {$tableName} from {$abjTableCharset}/{$abjTableCollation} to {$targetCharset}/{$targetCollation}");
+
+                $query = $this->tableCollationConversionSql(array(
+                    'table' => $tableName, 'collation' => $targetCollation,
+                    'declarations' => $declaredColumns[$tableName] ?? array()));
+                $converted = $this->convertTableCollation($tableName, $query, $indexesDropped);
+                if ($converted) {
+                    $outcome['progressed'] = true;
+                    $this->logger->infoMessage("Successfully changed charset/collation of $tableName to {$targetCharset}/{$targetCollation}");
+                } else {
+                    $outcome['complete'] = false;
+                    $outcome['unconverted'][] = $tableName;
+                }
+            }
+        } finally {
+            if ($indexesDropped) {
+                $this->upgrades()->indexesUpgrade()->createIndexes();
+            }
+        }
+        return $outcome;
+    }
+
+    /**
+     * Run one table's conversion, dropping its secondary indexes and retrying
+     * once when an index cannot hold the wider characters.
+     *
+     * @param bool $indexesDropped Shared restoration debt, set before attempting drops.
+     * @return bool True when the table converted successfully.
+     */
+    private function convertTableCollation(string $tableName, string $query, bool &$indexesDropped): bool {
+        $results = $this->dbCore->queryAndGetResults($query,
+            array('ignore_errors' => ABJ_404_Solution_DatabaseSchemaErrorTaxonomy::INDEX_TOO_LARGE_TO_WIDEN_MARKERS));
+        $lastErr = isset($results['last_error']) && is_scalar($results['last_error']) ? (string)$results['last_error'] : '';
+        $querySucceeded = ($results['query_succeeded'] ?? null) === true
+            && (!array_key_exists('timed_out', $results) || $results['timed_out'] === false);
+        if ($querySucceeded && $lastErr === '') {
+            return true;
+        }
+        if (!$querySucceeded && $lastErr === '') {
+            $this->logger->warn("Charset/collation change for $tableName failed without a native error.");
+            return false;
+        }
+        if (!ABJ_404_Solution_DatabaseSchemaErrorTaxonomy::isIndexTooLargeToWidenError($lastErr)) {
+            $this->logger->warn("Charset/collation change for $tableName failed: " . $lastErr);
+            return false;
+        }
+
+        $this->logger->warn("Charset/collation change for $tableName failed: $lastErr. Deleting indexes and retrying...");
+
+        // A drop-in may throw after some DDL already committed. Restoration
+        // is owed before attempting any potentially partial destructive drop.
+        $indexesDropped = true;
+        $this->upgrades()->indexesUpgrade()->deleteIndexes($tableName);
+
+        $retryResults = $this->dbCore->queryAndGetResults($query);
+        $retryLastError = isset($retryResults['last_error']) && is_scalar($retryResults['last_error'])
+            ? (string)$retryResults['last_error']
+            : '';
+        $retrySucceeded = ($retryResults['query_succeeded'] ?? null) === true
+            && (!array_key_exists('timed_out', $retryResults) || $retryResults['timed_out'] === false);
+        if (!$retrySucceeded || $retryLastError !== '') {
+            $this->logger->warn("Charset/collation retry for $tableName failed: " . $retryLastError);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * @param array{table:string,collation:string,declarations:array<string,array{collation:string,definition:string}>} $options Permanent column contracts.
+     */
+    private function tableCollationConversionSql(array $options): string {
+        if (!empty($options['declarations'])) {
+            return ABJ_404_Solution_DatabaseTableCharacterSetChange::statement($this->dbCore, $options);
+        }
+        return 'ALTER TABLE ' . $options['table'] . ' CONVERT TO CHARSET utf8mb4 COLLATE ' . $options['collation'];
+    }
+
+    /** @return array<string,array{0:string,1:string}|null>|null Live metadata, or null when inventory cannot be verified. */
+    private function discoverTableCollations(): ?array {
         // Discover all plugin tables dynamically so new tables are automatically included.
         // Use queryAndGetResults() so the SHOW TABLES call goes through the same DAO
         // layer as all other queries (enables testability via mock injection).
         // {wp_prefix} is resolved by doTableNameReplacements inside queryAndGetResults.
         $rawResult = $this->dbCore->queryAndGetResults("SHOW TABLES LIKE '{wp_prefix}abj404_%'");
+        $lastError = $rawResult['last_error'] ?? null;
+        if (($rawResult['query_succeeded'] ?? null) !== true
+                || (array_key_exists('timed_out', $rawResult) && $rawResult['timed_out'] !== false)
+                || !is_string($lastError)
+                || $lastError !== '') {
+            $this->logger->warn('Could not verify the plugin-table inventory; deferring collation repair.');
+            return null;
+        }
+        if (!array_key_exists('rows', $rawResult) || !is_array($rawResult['rows'])) {
+            $this->logger->warn('Plugin-table inventory returned malformed rows; deferring collation repair.');
+            return null;
+        }
+
         /** @var array<int, string> $abjTableNames */
         $abjTableNames = [];
-        if (isset($rawResult['rows']) && is_array($rawResult['rows'])) {
-            foreach ($rawResult['rows'] as $row) {
-                $tableName = is_array($row) ? reset($row) : $row;
-                if (is_scalar($tableName)) {
-                    $abjTableNames[] = (string)$tableName;
-                }
+        foreach ($rawResult['rows'] as $row) {
+            $tableName = is_array($row) ? reset($row) : $row;
+            if (!is_string($tableName) || $tableName === '') {
+                $this->logger->warn('Plugin-table inventory returned a malformed table row; deferring collation repair.');
+                return null;
             }
+            $abjTableNames[] = $tableName;
         }
 
         // Exclude the vestigial staged-build tables (view_build / view_done /
@@ -299,129 +435,24 @@ class ABJ_404_Solution_DatabaseUpgradeCollationDrift extends ABJ_404_Solution_Da
             ) ? [(string)$collationResult[0], (string)$collationResult[1]] : null;
         }
 
-        $targetCharset = 'utf8mb4';
-        $targetCollation = $this->resolveTargetUtf8mb4Collation($abjTableNames, $tableCollations);
-
-        foreach ($abjTableNames as $tableName) {
-            $abjTableData = $tableCollations[$tableName] ?? null;
-
-            if ($abjTableData === null) {
-                $this->logger->warn("Failed to retrieve collation for $tableName.");
-                continue;  // Skip this table if collation can't be determined
-            }
-
-            [$abjTableCollation, $abjTableCharset] = $abjTableData;
-
-            $needsUpdate = !($abjTableCharset === $targetCharset && $abjTableCollation === $targetCollation);
-            if (!$needsUpdate) {
-                // Table default matches, but individual columns can still drift (e.g., some columns left as *_bin).
-                $columnMismatch = $this->tableHasMismatchedCharacterColumnCollation($tableName, $targetCharset, $targetCollation);
-                if ($columnMismatch === true) {
-                    $needsUpdate = true;
-                    $this->logger->infoMessage("Detected column-level collation mismatch on {$tableName}; normalizing to {$targetCharset}/{$targetCollation}");
-                } else if ($columnMismatch === null) {
-                    $this->logger->warn("Could not verify column collations for {$tableName}; skipping collation normalization.");
-                    continue;
-                }
-            }
-            if (!$needsUpdate) {
-                continue;
-            }
-
-            $this->logger->infoMessage("Updating charset/collation on {$tableName} from {$abjTableCharset}/{$abjTableCollation} to {$targetCharset}/{$targetCollation}");
-
-            $query = "ALTER TABLE {table_name} CONVERT TO CHARSET " . $targetCharset .
-                     " COLLATE " . $targetCollation;
-            $query = str_replace('{table_name}', $tableName, $query);
-            $results = $this->dbCore->queryAndGetResults($query,
-                array('ignore_errors' => array("Index column size too large")));
-
-            $lastErr = isset($results['last_error']) && is_string($results['last_error']) ? $results['last_error'] : '';
-            if ($lastErr !== '' &&
-                    strpos($lastErr, "Index column size too large") !== false) {
-
-                $this->logger->warn("Charset/collation change for $tableName failed: Index column size too large. Deleting indexes and retrying...");
-
-                // delete indexes and try again.
-                $this->upgrades()->schemaDiffUpgrade()->deleteIndexes($tableName);
-
-                $retryResults = $this->dbCore->queryAndGetResults($query);
-                $retryLastError = isset($retryResults['last_error']) && is_scalar($retryResults['last_error'])
-                    ? (string)$retryResults['last_error']
-                    : '';
-                if ($retryLastError !== '') {
-                    $this->logger->warn("Charset/collation retry for $tableName failed: " . $retryLastError);
-                } else {
-                    $this->logger->infoMessage("Successfully changed charset/collation of $tableName after retry.");
-                }
-
-            } else if (empty($results['last_error'])) {
-                $this->logger->infoMessage("Successfully changed charset/collation of $tableName to {$targetCharset}/{$targetCollation}");
-            } else {
-                $resultLastError = isset($results['last_error']) && is_scalar($results['last_error'])
-                    ? (string)$results['last_error']
-                    : '';
-                $this->logger->warn("Charset/collation change for $tableName failed: " . $resultLastError);
-            }
-        }
+        return $tableCollations;
     }
 
     /**
-     * Detect character column collation drift on a table.
-     *
-     * Some environments can end up with per-column collations that differ from the table default
-     * (e.g., `utf8mb4_bin` on one VARCHAR column while the table default is `utf8mb4_unicode_520_ci`).
-     * This causes MySQL errors in string operations (REPLACE/LOWER) that mix collations.
-     *
-     * @param string $tableName Fully qualified table name (with prefix)
-     * @param string $targetCharset Expected charset (e.g., utf8mb4)
-     * @param string $targetCollation Expected collation (e.g., utf8mb4_unicode_ci)
-     * @return bool|null True if mismatch found, false if all match, null if query failed
+     * Permanent DDL is authoritative for explicit column collations, including ASCII generation keys.
+     * @return array<string,array<string,array{collation:string,definition:string}>>
      */
-    private function tableHasMismatchedCharacterColumnCollation($tableName, $targetCharset, $targetCollation) {
-        $results = $this->dbCore->queryAndGetResults("SHOW FULL COLUMNS FROM " . $tableName);
-        $lastError = isset($results['last_error']) && is_scalar($results['last_error'])
-            ? (string)$results['last_error']
-            : '';
-        if ($lastError !== '') {
-            $this->logger->warn("Failed to read columns for {$tableName}: " . $lastError);
-            return null;
-        }
-        /** @var array<int, array<string, mixed>> $rows */
-        $rows = isset($results['rows']) && is_array($results['rows']) ? $results['rows'] : [];
-        if (empty($rows)) {
-            return false;
-        }
-
-        $collationKey = null;
-        $firstRow = $rows[0];
-        foreach (array_keys($firstRow) as $key) {
-            if ($this->f->strtolower((string)$key) === 'collation') {
-                $collationKey = $key;
-                break;
+    private function declaredColumnCollations(): array {
+        $declarations = array();
+        foreach ($this->upgrades()->bootstrapUpgrade()->discoverPermanentDDLFiles() as $entry) {
+            $table = $this->dbCore->doTableNameReplacements($entry['placeholder']);
+            foreach (ABJ_404_Solution_CreateTableColumnParser::fromCreateTableSql($entry['ddlContent']) as $column) {
+                if (preg_match('/\bCOLLATE\s+([a-zA-Z0-9_]+)/i', $column['definition'], $match) === 1) {
+                    $declarations[$table][strtolower($column['name'])] = array(
+                        'collation' => strtolower($match[1]), 'definition' => $column['definition']);
+                }
             }
         }
-        if ($collationKey === null) {
-            $this->logger->warn("SHOW FULL COLUMNS returned no Collation column for {$tableName}");
-            return null;
-        }
-
-        foreach ($rows as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-            $rawColCollation = $row[$collationKey] ?? null;
-            if ($rawColCollation === null || !is_string($rawColCollation) || trim($rawColCollation) === '') {
-                continue; // Non-character columns
-            }
-            $colCollation = trim($rawColCollation);
-            $colCharset = explode('_', $colCollation)[0] ?? '';
-
-            if ($colCharset !== $targetCharset || $colCollation !== $targetCollation) {
-                return true;
-            }
-        }
-
-        return false;
+        return $declarations;
     }
 }

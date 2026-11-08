@@ -40,7 +40,7 @@ class ABJ_404_Solution_NGramUsageTelemetry {
             'avg_reduction_percent' => 0,
             'last_reset' => abj_clock()->now(),
         ];
-        $statsRaw = get_option(self::OPTION_KEY, $defaultStats);
+        $statsRaw = ABJ_404_Solution_OptionShapeRead::arrayValue(self::OPTION_KEY, $defaultStats);
         /** @var array<string, mixed> $stats */
         $stats = is_array($statsRaw) ? $statsRaw : $defaultStats;
 
@@ -86,7 +86,7 @@ class ABJ_404_Solution_NGramUsageTelemetry {
             'avg_reduction_percent' => 0,
             'last_reset' => abj_clock()->now(),
         ];
-        $statsRaw = get_option(self::OPTION_KEY, $defaultStats);
+        $statsRaw = ABJ_404_Solution_OptionShapeRead::arrayValue(self::OPTION_KEY, $defaultStats);
         /** @var array<string, mixed> $stats */
         $stats = is_array($statsRaw) ? $statsRaw : $defaultStats;
 

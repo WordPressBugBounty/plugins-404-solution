@@ -82,6 +82,36 @@ final class ABJ_404_Solution_SupportEvidenceExcerpt {
     const MAX_COLLECTION_MANIFEST_BYTES = 8192;
 
     /**
+     * Capture the log and both ranked journals for an automatic AJAX failure.
+     * Unlike a support click, this may run inside a census reap: it must not
+     * sample live workers again or recursively reap the same registry rows.
+     *
+     * @param array<int, string> $requestIds The failed requests to pin.
+     * @return string Bounded whole-record excerpt ready for an error payload.
+     */
+    public static function assembleAjaxFailure(array $requestIds): string {
+        $attempts = ABJ_404_Solution_DrainedTelemetryBuffer::attemptOutcomes('');
+        $channels = ABJ_404_Solution_DiagnosticChannelEvidence::collect($attempts, $requestIds);
+        $sections = array(ABJ_404_Solution_StrandedRequestSupportSection::forRequests($requestIds),
+            self::collectionManifest($channels, $attempts), self::loggerExcerpt());
+        foreach ($channels as $channel) {
+            $sections[] = $channel['collected'];
+        }
+        return self::bound(self::joinSections($sections));
+    }
+
+    /**
+     * Reserve current retained request identities ahead of older bulk error evidence.
+     * The existing excerpt bound and whole-record truncation remain unchanged.
+     */
+    public static function withRetainedRequestFrames(string $excerpt): string {
+        return self::bound(self::joinSections(array(
+            ABJ_404_Solution_StrandedRequestSupportSection::retainedOriginals(),
+            $excerpt,
+        )));
+    }
+
+    /**
      * The whole excerpt, ready for the payload.
      *
      * The browser's two contributions arrive as one named bag rather than as
@@ -89,7 +119,7 @@ final class ABJ_404_Solution_SupportEvidenceExcerpt {
      * swapped pair would silently produce a verdict about a session id that is
      * really a telemetry buffer while reporting the buffer as unparseable.
      *
-     * @param array{telemetry?: string, session_id?: string} $client
+     * @param array{telemetry?: string, session_id?: string, reported_attempt_id?: string} $client
      *   telemetry: the drained attempt buffer, already unslashed.
      *   session_id: the browser session id this request was sent from, which is
      *   what the detach A/B verdict is scoped to.
@@ -100,7 +130,7 @@ final class ABJ_404_Solution_SupportEvidenceExcerpt {
         $clientAttempts = ABJ_404_Solution_DrainedTelemetryBuffer::attemptOutcomes(
             $clientTelemetry);
         $clientSessionId = self::clientField($client, 'session_id');
-        $channels = self::collectChannels($clientAttempts);
+        $channels = ABJ_404_Solution_DiagnosticChannelEvidence::collect($clientAttempts);
         // Ordered by what must survive bound(), which cuts from the END.
         //
         // The client transport buffer is placed HERE, ahead of the bulk
@@ -126,7 +156,8 @@ final class ABJ_404_Solution_SupportEvidenceExcerpt {
             self::canonicalSuppression(),
             self::canaryReceiptInterpretation($clientSessionId),
             self::failingSessionDiagnostics($clientAttempts, $clientSessionId),
-            self::strandedRequestDiagnostics(),
+            self::strandedRequestDiagnostics(ABJ_404_Solution_AjaxRequestLedger::normalizeId(
+                self::clientField($client, 'reported_attempt_id'), '')),
             self::loggerExcerpt(),
         );
         foreach ($channels as $channel) {
@@ -141,96 +172,11 @@ final class ABJ_404_Solution_SupportEvidenceExcerpt {
      * gets the section that field feeds saying so, never a type error inside a
      * support request the admin is waiting on.
      *
-     * @param array{telemetry?: string, session_id?: string} $client
+     * @param array{telemetry?: string, session_id?: string, reported_attempt_id?: string} $client
      */
     private static function clientField(array $client, string $field): string {
         $value = $client[$field] ?? null;
         return is_scalar($value) ? (string)$value : '';
-    }
-
-    /**
-     * Both durable AJAX diagnostic journals: what each one was asked for, and
-     * what it gave back.
-     *
-     * The stage trace and the checkpoint log are separate channels on purpose
-     * (a defect in the trace must not be able to erase the evidence about it),
-     * so draining only one of them reintroduces the beta.1 failure mode from
-     * the read side: a request that never reached its first stage writes
-     * nothing to the trace, and its whole story lives in the checkpoints. Each
-     * is labeled and independently bounded, so a failure to read one still
-     * yields the other.
-     *
-     * The candidate paths come back paired with the text they produced,
-     * because the manifest below has to describe the read that actually
-     * happened, not a second guess at what it would have read.
-     *
-     * Every channel is sourced BEFORE any of them is read, because the two
-     * excerpts are ranked from one shared failure index and the index has to
-     * be complete before the first read spends its budget. Browser verdicts
-     * normally arrive through the checkpoint journal, but a final timeout can
-     * survive only in the drained support-request buffer when neither its
-     * retry nor its report-only beacon reached PHP. Both browser channels are
-     * therefore unioned into the same index before either journal applies its
-     * file cap. Without this, the stage trace ranks a request PHP completed and
-     * the browser never received as ordinary healthy context -- and that
-     * request's stage timings are the evidence for where the response was
-     * built before it failed to arrive.
-     *
-     * @param array{status: string, ids: array<int, string>, records: int, outcomes: array<string, bool>} $clientAttempts
-     * @return array<int, array{channel: string, directory: string, usable: bool, paths: array<int, string>, collected: string, file_selection: array<string, mixed>}>
-     */
-    private static function collectChannels(array $clientAttempts): array {
-        $trace = class_exists('ABJ_404_Solution_AjaxRequestTrace')
-            ? ABJ_404_Solution_AjaxTraceJournal::supportCollectionSource() : null;
-        $checkpoints = class_exists('ABJ_404_Solution_CheckpointJournalReader')
-            ? ABJ_404_Solution_CheckpointJournalReader::supportCollectionSource() : null;
-
-        // Built per channel rather than from one merged path list: each
-        // channel's read is bounded by its own file count and byte allowance,
-        // and an index assembled over a merged list would silently drop the
-        // files that fell off the far end of a combined bound.
-        $failingIds = array();
-        if (class_exists('ABJ_404_Solution_DiagnosticJournalExcerpt')) {
-            foreach (array($trace, $checkpoints) as $source) {
-                if ($source !== null) {
-                    $failingIds += ABJ_404_Solution_DiagnosticJournalExcerpt::failureIndex($source['paths']);
-                }
-            }
-        }
-        $clientOutcomes = isset($clientAttempts['outcomes']) && is_array($clientAttempts['outcomes'])
-            ? $clientAttempts['outcomes'] : array();
-        foreach ($clientOutcomes as $requestId => $healthy) {
-            if ($healthy === false) {
-                $failingIds[(string)$requestId] = true;
-            }
-        }
-        // The ledgers condemn ids neither journal names: a slow or
-        // late-starting first attempt that finished, or a retry parent whose
-        // own records never survived. Unioned here so both excerpts rank on
-        // the same index.
-        if (class_exists('ABJ_404_Solution_StrandedRequestLedger')) {
-            $failingIds += ABJ_404_Solution_StrandedRequestLedger::condemnedRequestIds();
-        }
-
-        $channels = array();
-        if ($trace !== null) {
-            $selection = ABJ_404_Solution_DiagnosticJournalFileSelector::select(
-                $trace['paths'], $failingIds);
-            $trace['file_selection'] = $selection['manifest'];
-            $trace['collected'] = ABJ_404_Solution_AjaxTraceJournal::readRecentForSupport(
-                $failingIds, $selection);
-            $channels[] = $trace;
-        }
-        if ($checkpoints !== null) {
-            $selection = ABJ_404_Solution_DiagnosticJournalFileSelector::select(
-                $checkpoints['paths'], $failingIds);
-            $checkpoints['file_selection'] = $selection['manifest'];
-            $checkpoints['collected'] =
-                ABJ_404_Solution_CheckpointJournalReader::readRecentForSupport(
-                    $failingIds, $selection);
-            $channels[] = $checkpoints;
-        }
-        return $channels;
     }
 
     /**
@@ -367,12 +313,13 @@ final class ABJ_404_Solution_SupportEvidenceExcerpt {
      * Guarded here the same way every other section is: a support request is the
      * last thing that may be blocked by its own diagnostics.
      */
-    private static function strandedRequestDiagnostics(): string {
+    private static function strandedRequestDiagnostics(string $reportedAttemptId = ''): string {
         if (!class_exists('ABJ_404_Solution_StrandedRequestSupportSection')) {
             return 'Stranded-request diagnostics unavailable: ABJ_404_Solution_StrandedRequestSupportSection'
                 . ' could not be loaded on this install, so in-flight worker state was not read here.';
         }
-        return ABJ_404_Solution_StrandedRequestSupportSection::compose();
+        return ABJ_404_Solution_StrandedRequestSupportSection::compose(
+            $reportedAttemptId === '' ? array() : array($reportedAttemptId));
     }
 
     /**
@@ -440,7 +387,7 @@ final class ABJ_404_Solution_SupportEvidenceExcerpt {
             $raw, self::MAX_CLIENT_TELEMETRY_LENGTH);
         if (!$bounded['parsed']) {
             $block = 'Client transport telemetry (unparseable, ' . $bounded['raw_length'] . ' bytes, '
-                . $bounded['error'] . "):\n" . substr($raw, 0, 500);
+                . $bounded['error'] . '): raw content omitted.';
         } else {
             $label = $bounded['dropped'] > 0
                 ? 'Client transport telemetry (JSON, ' . $bounded['kept'] . ' of '
@@ -468,6 +415,11 @@ final class ABJ_404_Solution_SupportEvidenceExcerpt {
      * one section the clamp could not see.
      */
     private static function bound(string $excerpt): string {
+        if (!class_exists('ABJ_404_Solution_ClientTransportReport')
+                || !in_array('sanitizeJournalExcerpt', get_class_methods('ABJ_404_Solution_ClientTransportReport'), true)) {
+            return 'Diagnostic evidence unavailable: client redaction policy is updating.';
+        }
+        $excerpt = ABJ_404_Solution_ClientTransportReport::sanitizeJournalExcerpt($excerpt);
         if (strlen($excerpt) <= self::MAX_DEBUG_LOG_EXCERPT_BYTES) {
             return $excerpt;
         }

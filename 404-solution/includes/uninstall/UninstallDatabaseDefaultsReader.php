@@ -43,7 +43,7 @@ class ABJ_404_Solution_UninstallDatabaseDefaultsReader {
         global $wpdb;
 
         // DAO-bypass-approved: Diagnostic MySQL VERSION() for support email
-        $version = $wpdb->get_var("SELECT VERSION()");
+        $version = ABJ_404_Solution_DatabaseDriverCall::getVar($wpdb, "SELECT VERSION()");
         return is_scalar($version) && (string)$version !== '' ? (string)$version : 'Unknown';
     }
 
@@ -60,7 +60,7 @@ class ABJ_404_Solution_UninstallDatabaseDefaultsReader {
             DB_NAME
         );
         // DAO-bypass-approved: Diagnostic information_schema.SCHEMATA probe
-        $dbResult = $wpdb->get_row($charsetQuery, ARRAY_A);
+        $dbResult = ABJ_404_Solution_DatabaseDriverCall::getRow($wpdb, $charsetQuery, ARRAY_A);
         if (!is_array($dbResult)) {
             return null;
         }
@@ -84,9 +84,9 @@ class ABJ_404_Solution_UninstallDatabaseDefaultsReader {
         global $wpdb;
 
         // DAO-bypass-approved: Diagnostic server variable readout for support email
-        $charsetResult = $wpdb->get_row("SHOW VARIABLES LIKE 'character_set_database'", ARRAY_A);
+        $charsetResult = ABJ_404_Solution_DatabaseDriverCall::getRow($wpdb, "SHOW VARIABLES LIKE 'character_set_database'", ARRAY_A);
         // DAO-bypass-approved: Diagnostic server variable readout for support email
-        $collationResult = $wpdb->get_row("SHOW VARIABLES LIKE 'collation_database'", ARRAY_A);
+        $collationResult = ABJ_404_Solution_DatabaseDriverCall::getRow($wpdb, "SHOW VARIABLES LIKE 'collation_database'", ARRAY_A);
 
         return array(
             'charset' => is_array($charsetResult) ? ($this->rowValue($charsetResult, 'Value') ?: 'Unknown') : 'Unknown',

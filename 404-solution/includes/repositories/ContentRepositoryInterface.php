@@ -24,6 +24,14 @@ interface ABJ_404_Solution_ContentRepositoryInterface extends
     ABJ_404_Solution_PublishedContentLookupInterface,
     ABJ_404_Solution_OldSlugLookupInterface {
 
+    /**
+     * Read immediate children for one bounded taxonomy frontier.
+     *
+     * @param array{taxonomy:string,parents:array<int,mixed>,limit:mixed} $request
+     * @return array{state:'read',ids:array<int,int>}|array{state:'failed',error:string}
+     */
+    public function readTermChildIds(array $request): array;
+
     // --- Permalink cache table: read, write, repopulate, truncate. The cache
     // exists because resolving a post ID -> permalink is too expensive to do
     // per-request on large sites, so a denormalized table keeps the answer ready.

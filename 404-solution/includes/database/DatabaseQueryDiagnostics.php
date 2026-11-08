@@ -91,6 +91,48 @@ class ABJ_404_Solution_DatabaseQueryDiagnostics {
     }
 
     /**
+     * Bounded original-request evidence also works when the full query trace is unarmed.
+     *
+     * @return array{sql_id: string, timeout_seconds: int|null, state: string, deadline_mode: string}|null
+     */
+    public function beginFailureQuery(string $query, int $timeoutSeconds): ?array {
+        if (!class_exists('ABJ_404_Solution_RequestFailureFrame', false)
+                || !ABJ_404_Solution_RequestFailureFrame::acceptsQuery()
+                || $timeoutSeconds < 1 || ABJ_404_Solution_SameSiteRequestCensus::isPersisting()) { return null; }
+        $redactor = new ABJ_404_Solution_AjaxFailureLogger();
+        $identity = ABJ_404_Solution_RequestFailureFrame::beginQuery(array(
+            'sql_id' => $redactor->sqlIdForShape($redactor->redactSqlShape($query)),
+            'timeout_seconds' => min(86400, $timeoutSeconds), 'state' => 'in_progress',
+            'deadline_mode' => preg_match('/\bSET\s+STATEMENT\s+max_statement_time\s*=/i', $query) === 1
+                ? 'applied_wrapper' : (stripos($query, 'MAX_EXECUTION_TIME') !== false ? 'requested_hint' : 'unwrapped')));
+        if ($identity !== null && ABJ_404_Solution_RequestFailureFrame::shouldCheckpointQuery()) {
+            ABJ_404_Solution_SameSiteRequestCensus::checkpoint();
+        }
+        return $identity;
+    }
+
+    /**
+     * @param array{sql_id: string, timeout_seconds: int|null, state: string, deadline_mode: string}|null $identity
+     * @param array<string, mixed> $result
+     */
+    public function finishFailureQuery(?array $identity, array $result, bool $threw = false): void {
+        if ($identity === null || ABJ_404_Solution_SameSiteRequestCensus::isPersisting()) { return; }
+        // Classify the driver return before recovery can replace its error.
+        // Later retries may have a different cause; the frame keeps the first.
+        $error = is_string($result['last_error'] ?? null) ? $result['last_error'] : '';
+        if ($error !== '') {
+            $taxonomy = new ABJ_404_Solution_DatabaseInfrastructureErrorTaxonomy(abj_service('functions'));
+            $rejectedStatement = $taxonomy->schema()->isMalformedStatementError($error)
+                || $taxonomy->hostState()->classifySetStatementFailure($error);
+            $result['timed_out'] = !$rejectedStatement && $taxonomy->connectivity()->isQueryTimeoutError($error);
+        }
+        if (class_exists('ABJ_404_Solution_RequestFailureFrame', false)
+                && ABJ_404_Solution_RequestFailureFrame::endQuery($identity, $result, $threw)) {
+            ABJ_404_Solution_SameSiteRequestCensus::checkpoint();
+        }
+    }
+
+    /**
      * Close the in-flight timeline entry with the duration the executor
      * measured. In-memory only; the value is carried out by the next probe and
      * by the request's closing summary.
@@ -240,6 +282,9 @@ class ABJ_404_Solution_DatabaseQueryDiagnostics {
         }
 
         $cls = isset($frame['class']) && is_string($frame['class']) ? $frame['class'] : '';
+        if ($cls === __CLASS__) {
+            return true;
+        }
         if ($cls !== '' && (strpos($cls, 'Patchwork') !== false || strpos($cls, 'PHPUnit\\') === 0)) {
             return true;
         }

@@ -14,9 +14,6 @@ if (!defined('ABSPATH')) {
  */
 final class ABJ_404_Solution_HostPressureSampler {
 
-    /** @var array<string, array<string, mixed>> */
-    private static $sameUidProcessesByRequest = array();
-
     /**
      * Capture host pressure while paying the process-wide procfs walk once
      * for each request. Cheap counters remain fresh on every checkpoint.
@@ -37,15 +34,16 @@ final class ABJ_404_Solution_HostPressureSampler {
         }
         $procRoot = rtrim($procRoot, '/\\');
         $environment = self::processEnvironment();
+        $procfs = ABJ_404_Solution_HostProcfsPressureProbe::capture($procRoot, $requestScope);
 
         return array(
             'sys_loadavg' => self::systemLoadAverage(),
-            'proc_loadavg' => self::procLoadAverage($procRoot . '/loadavg'),
-            'proc_self_status' => self::procSelfStatus($procRoot . '/self/status'),
+            'proc_loadavg' => $procfs['proc_loadavg'],
+            'proc_self_status' => $procfs['proc_self_status'],
             'runtime_identity' => self::runtimeIdentity(),
-            'proc_self_limits' => self::procSelfLimits($procRoot . '/self/limits'),
-            'proc_self_cgroup' => self::procSelfCgroup($procRoot . '/self/cgroup'),
-            'same_uid_processes' => self::sameUidProcesses($procRoot, $requestScope),
+            'proc_self_limits' => $procfs['proc_self_limits'],
+            'proc_self_cgroup' => $procfs['proc_self_cgroup'],
+            'same_uid_processes' => $procfs['same_uid_processes'],
             'cloudlinux_lve_server_vars' => ABJ_404_Solution_HostServerCounterProbe::capture(
                 '/^(?:LVE_|CLOUDLINUX_)/i',
                 $environment
@@ -62,7 +60,7 @@ final class ABJ_404_Solution_HostPressureSampler {
      * PHPUnit workers simulate multiple requests in one PHP process.
      */
     public static function resetForTests(): void {
-        self::$sameUidProcessesByRequest = array();
+        ABJ_404_Solution_HostProcfsPressureProbe::resetCache();
     }
 
     /**
@@ -161,55 +159,6 @@ final class ABJ_404_Solution_HostPressureSampler {
     }
 
     /** @return array<string, mixed> */
-    private static function procLoadAverage(string $path): array {
-        $raw = self::readProbeFile($path);
-        if ($raw === null) {
-            return self::unavailable('not_readable', array($path => 'not_readable'));
-        }
-        $parts = preg_split('/\s+/', trim($raw));
-        $processes = is_array($parts) && isset($parts[3]) ? explode('/', (string)$parts[3], 2) : array();
-        if (!is_array($parts) || count($parts) < 5 || !is_numeric($parts[0])
-                || !is_numeric($parts[1]) || !is_numeric($parts[2])
-                || count($processes) !== 2 || !is_numeric($processes[0])
-                || !is_numeric($processes[1]) || !is_numeric($parts[4])) {
-            return self::unavailable('invalid_format', array($path => 'invalid_format'));
-        }
-        return array(
-            'status' => 'available',
-            'one_min' => (float)$parts[0],
-            'five_min' => (float)$parts[1],
-            'fifteen_min' => (float)$parts[2],
-            'running_processes' => (int)$processes[0],
-            'total_processes' => (int)$processes[1],
-            'last_pid' => (int)$parts[4],
-        );
-    }
-
-    /** @return array<string, mixed> */
-    private static function procSelfStatus(string $path): array {
-        $raw = self::readProbeFile($path);
-        if ($raw === null) {
-            return self::unavailable('not_readable', array($path => 'not_readable'));
-        }
-        $wanted = array_flip(array(
-            'State', 'Threads', 'VmPeak', 'VmSize', 'VmRSS', 'VmSwap',
-            'voluntary_ctxt_switches', 'nonvoluntary_ctxt_switches',
-        ));
-        $values = array();
-        foreach (preg_split('/\R/', $raw) ?: array() as $line) {
-            $pair = explode(':', (string)$line, 2);
-            $name = $pair[0] ?? '';
-            if (isset($wanted[$name]) && isset($pair[1])) {
-                $values[$name] = substr(trim($pair[1]), 0, 64);
-            }
-        }
-        if ($values === array()) {
-            return self::unavailable('no_supported_fields', array($path => 'no_supported_fields'));
-        }
-        return array('status' => 'available', 'values' => $values);
-    }
-
-    /** @return array<string, mixed> */
     private static function runtimeIdentity(): array {
         $sapi = php_sapi_name();
         $serverSoftware = $_SERVER['SERVER_SOFTWARE'] ?? null;
@@ -264,187 +213,6 @@ final class ABJ_404_Solution_HostPressureSampler {
             ));
     }
 
-    /** @return array<string, mixed> */
-    private static function procSelfLimits(string $path): array {
-        $raw = self::readProbeFile($path);
-        if ($raw === null) {
-            return self::unavailable('not_readable', array($path => 'not_readable'));
-        }
-        $names = array(
-            'Max processes' => 'RLIMIT_NPROC',
-            'Max address space' => 'RLIMIT_AS',
-            'Max open files' => 'RLIMIT_NOFILE',
-        );
-        $limits = array_fill_keys(array_values($names), self::unavailable('not_reported', array(
-            $path => 'limit_not_reported',
-        )));
-        $recognized = false;
-        foreach (preg_split('/\R/', $raw) ?: array() as $line) {
-            foreach ($names as $label => $constant) {
-                if (strpos((string)$line, $label) !== 0) {
-                    continue;
-                }
-                $recognized = true;
-                $parts = preg_split('/\s+/', trim(substr((string)$line, strlen($label))));
-                if (!is_array($parts) || count($parts) !== 3
-                        || preg_match('/^(?:unlimited|\d+)$/', $parts[0]) !== 1
-                        || preg_match('/^(?:unlimited|\d+)$/', $parts[1]) !== 1
-                        || preg_match('/^[a-z]+$/i', $parts[2]) !== 1) {
-                    $limits[$constant] = self::unavailable('invalid_format', array(
-                        $path . ':' . $label => 'invalid_format',
-                    ));
-                    continue;
-                }
-                $limits[$constant] = array(
-                    'status' => 'available',
-                    'soft_limit' => $parts[0],
-                    'hard_limit' => $parts[1],
-                    'unit' => $parts[2],
-                );
-            }
-        }
-        if (!$recognized) {
-            $reason = trim($raw) === '' ? 'empty_file' : 'no_supported_limits';
-            return self::unavailable($reason, array($path => $reason));
-        }
-        return array('status' => 'available', 'limits' => $limits);
-    }
-
-    /** @return array<string, mixed> */
-    private static function procSelfCgroup(string $path): array {
-        $raw = self::readProbeFile($path);
-        if ($raw === null) {
-            return self::unavailable('not_readable', array($path => 'not_readable'));
-        }
-        $memberships = array();
-        $invalidLines = 0;
-        foreach (preg_split('/\R/', trim($raw)) ?: array() as $line) {
-            if ($line === '') {
-                continue;
-            }
-            $parts = explode(':', (string)$line, 3);
-            $controllers = count($parts) === 3 && $parts[1] !== '' ? explode(',', $parts[1]) : array();
-            $controllersValid = array_filter($controllers, static function ($controller): bool {
-                return preg_match('/^[a-z0-9_.=-]+$/i', (string)$controller) !== 1;
-            }) === array();
-            if (count($parts) !== 3 || preg_match('/^\d+$/', $parts[0]) !== 1
-                    || !$controllersValid || strpos($parts[2], '/') !== 0) {
-                $invalidLines++;
-                continue;
-            }
-            $memberships[] = array(
-                'hierarchy_id' => $parts[0],
-                'controllers' => $controllers,
-                'path' => self::readableScalar($parts[2], 256),
-            );
-        }
-        if ($memberships === array()) {
-            $reason = trim($raw) === '' ? 'empty_file' : 'invalid_format';
-            return self::unavailable($reason, array($path => $reason));
-        }
-        return array(
-            'status' => 'available',
-            'memberships' => $memberships,
-            'invalid_lines' => $invalidLines,
-        );
-    }
-
-    /** @return array<string, mixed> */
-    private static function sameUidProcesses(string $procRoot, string $requestScope): array {
-        $cacheKey = hash('sha256', $requestScope . "\0" . $procRoot);
-        if (array_key_exists($cacheKey, self::$sameUidProcessesByRequest)) {
-            return self::$sameUidProcessesByRequest[$cacheKey];
-        }
-        if (!is_dir($procRoot) || !is_readable($procRoot)) {
-            return self::unavailable('proc_root_not_readable', array(
-                $procRoot => 'not_readable_directory',
-            ));
-        }
-        $selfStatus = self::readProbeFile($procRoot . '/self/status');
-        if ($selfStatus === null) {
-            return self::unavailable('self_status_not_readable', array(
-                $procRoot . '/self/status' => 'not_readable',
-            ));
-        }
-        $effectiveUid = self::effectiveUidFromStatus($selfStatus);
-        if ($effectiveUid === null) {
-            return self::unavailable('self_effective_uid_unavailable', array(
-                $procRoot . '/self/status:Uid' => 'missing_or_invalid',
-            ));
-        }
-        $selfPid = self::numericStatusField($selfStatus, 'Pid');
-        if ($selfPid === null) {
-            return self::unavailable('self_pid_unavailable', array(
-                $procRoot . '/self/status:Pid' => 'missing_or_invalid',
-            ));
-        }
-        $entries = @scandir($procRoot);
-        if (!is_array($entries)) {
-            return self::unavailable('proc_root_scan_failed', array(
-                'scandir(' . $procRoot . ')' => 'failed',
-            ));
-        }
-        $siblings = 0;
-        $readable = 0;
-        $unreadable = 0;
-        foreach ($entries as $entry) {
-            if (preg_match('/^\d+$/', (string)$entry) !== 1
-                    || !is_dir($procRoot . '/' . $entry)) {
-                continue;
-            }
-            $status = self::readProbeFile($procRoot . '/' . $entry . '/status');
-            $uid = $status === null ? null : self::effectiveUidFromStatus($status);
-            if ($uid === null) {
-                $unreadable++;
-                continue;
-            }
-            $readable++;
-            if ($uid === $effectiveUid && $entry !== $selfPid) {
-                $siblings++;
-            }
-        }
-        if ($readable === 0) {
-            $result = self::unavailable('no_readable_process_statuses', array(
-                $procRoot . '/[pid]/status' => 'none_readable',
-            ));
-            self::$sameUidProcessesByRequest[$cacheKey] = $result;
-            return $result;
-        }
-        $result = array(
-            'status' => 'available',
-            'effective_uid' => $effectiveUid,
-            'sibling_count' => $siblings,
-            'readable_processes' => $readable,
-            'unreadable_processes' => $unreadable,
-        );
-        self::$sameUidProcessesByRequest[$cacheKey] = $result;
-        return $result;
-    }
-
-    private static function effectiveUidFromStatus(string $raw): ?string {
-        foreach (preg_split('/\R/', $raw) ?: array() as $line) {
-            if (strpos((string)$line, 'Uid:') !== 0) {
-                continue;
-            }
-            $uids = preg_split('/\s+/', trim(substr((string)$line, 4)));
-            return is_array($uids) && isset($uids[1]) && preg_match('/^\d+$/', $uids[1]) === 1
-                ? $uids[1]
-                : null;
-        }
-        return null;
-    }
-
-    private static function numericStatusField(string $raw, string $field): ?string {
-        foreach (preg_split('/\R/', $raw) ?: array() as $line) {
-            if (strpos((string)$line, $field . ':') !== 0) {
-                continue;
-            }
-            $value = trim(substr((string)$line, strlen($field) + 1));
-            return preg_match('/^\d+$/', $value) === 1 ? $value : null;
-        }
-        return null;
-    }
-
     /** @param mixed $value */
     private static function readableScalar($value, int $maxLength): ?string {
         if (!is_scalar($value)) {
@@ -457,14 +225,6 @@ final class ABJ_404_Solution_HostPressureSampler {
         }
         $truncated = substr($ascii, 0, $maxLength);
         return is_string($truncated) ? $truncated : null;
-    }
-
-    private static function readProbeFile(string $path): ?string {
-        if (!@is_readable($path)) {
-            return null;
-        }
-        $raw = @file_get_contents($path);
-        return is_string($raw) ? $raw : null;
     }
 
     /**

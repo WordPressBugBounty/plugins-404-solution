@@ -28,6 +28,42 @@ require_once dirname(__DIR__) . '/services/PostResponseWorkerBudget.php';
  */
 class ABJ_404_Solution_FeedbackEnvironmentExtras_HostProbes {
 
+    /** @var array{values: array<string, mixed>, absent: array<int, array<string, string>>}|null */
+    private $iniRunbook = null;
+
+    /**
+     * One allowlisted, bounded INI snapshot shared by the runtime identity and
+     * OPcache probes. Missing or malformed directives keep a specific reason;
+     * an unavailable value is never misreported as a configured false/zero.
+     *
+     * @return array{values: array<string, mixed>, absent: array<int, array<string, string>>}
+     */
+    private function phpIniRunbook(): array {
+        if ($this->iniRunbook !== null) {
+            return $this->iniRunbook;
+        }
+        $out = array('values' => array(), 'absent' => array());
+        foreach (array('zlib.output_compression', 'output_handler', 'opcache.enable', 'memory_limit') as $directive) {
+            $available = function_exists('ini_get');
+            $raw = $available ? ini_get($directive) : false;
+            $reason = !$available ? 'function_unavailable' : ($raw === false ? 'directive_unavailable' : '');
+            $value = is_string($raw) && strlen($raw) <= 256
+                && preg_match('/^[\x20-\x7E]*$/D', $raw) === 1 ? $raw : null;
+            if ($directive === 'opcache.enable' && $value !== null) {
+                $booleans = array('1' => true, 'on' => true, 'yes' => true, 'true' => true,
+                    '' => false, '0' => false, 'off' => false, 'no' => false, 'false' => false);
+                $value = $booleans[strtolower($value)] ?? null;
+            }
+            if ($value === null) {
+                $out['absent'][] = array('directive' => $directive,
+                    'reason' => $reason !== '' ? $reason : 'invalid_value');
+            }
+            $out['values'][$directive] = $value;
+        }
+        $this->iniRunbook = $out;
+        return $out;
+    }
+
     /**
      * Free bytes available on the WP uploads directory's filesystem. Used
      * to triage "Table is full" reports (the logical table-full condition
@@ -42,11 +78,7 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_HostProbes {
             throw new \RuntimeException('disk_free_space unavailable');
         }
         $dir = $this->supportDiagnosticsDirectory();
-        $v = ABJ_404_Solution_PhpRuntimeCapabilityAdapter::diskFreeSpace($dir);
-        if ($v === false) {
-            throw new \RuntimeException('disk_free_space returned false for ' . $dir);
-        }
-        return (int)$v;
+        return $this->diskBytesOrThrow('disk_free_space', $dir);
     }
 
     /**
@@ -61,11 +93,27 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_HostProbes {
             throw new \RuntimeException('disk_total_space unavailable');
         }
         $dir = $this->supportDiagnosticsDirectory();
-        $v = ABJ_404_Solution_PhpRuntimeCapabilityAdapter::diskTotalSpace($dir);
-        if ($v === false) {
-            throw new \RuntimeException('disk_total_space returned false for ' . $dir);
+        return $this->diskBytesOrThrow('disk_total_space', $dir);
+    }
+
+    private function diskBytesOrThrow(string $function, string $path): int {
+        $captured = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($function, $path) {
+                return $function === 'disk_free_space'
+                    ? ABJ_404_Solution_PhpRuntimeCapabilityAdapter::diskFreeSpace($path)
+                    : ABJ_404_Solution_PhpRuntimeCapabilityAdapter::diskTotalSpace($path);
+            }
+        );
+        if ($captured['warning'] !== null && $captured['warning'] !== '') {
+            ABJ_404_Solution_FeedbackTransportLog::log(
+                'warn', $function . ' failed for ' . $path . ': ' . $captured['warning']
+            );
+            throw new \RuntimeException($function . ' warning for ' . $path . ': ' . $captured['warning']);
         }
-        return (int)$v;
+        if ($captured['result'] === false) {
+            throw new \RuntimeException($function . ' returned false for ' . $path);
+        }
+        return (int)$captured['result'];
     }
 
     /**
@@ -167,7 +215,7 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_HostProbes {
             'db_version_option' => null,
         );
         if (function_exists('get_option')) {
-            $t = get_option('abj404_installed_time', null);
+            $t = ABJ_404_Solution_OptionShapeRead::scalar('abj404_installed_time', null);
             $installedAt = ABJ_404_Solution_ExactInteger::read($t, 0);
             if ($installedAt !== null) {
                 $out['installed_at'] = $installedAt;
@@ -205,6 +253,7 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_HostProbes {
             'revalidate_freq'     => null,
             'validate_timestamps' => null,
             'enable_cli'          => null,
+            'enable'              => $this->phpIniRunbook()['values']['opcache.enable'],
         );
         if (!function_exists('ini_get')) {
             return $out;
@@ -304,7 +353,17 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_HostProbes {
         // which matches the install-method intent: if the file does
         // not yet exist and we cannot write the directory either, the
         // Apache-rule path cannot succeed.
-        return @is_writable($path);
+        $writable = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($path) { return is_writable($path); }
+        );
+        if ($writable['warning'] !== null) {
+            ABJ_404_Solution_FeedbackTransportLog::log(
+                'warn',
+                'probeHtaccessWritable failed for ' . $path . ': ' . $writable['warning']
+            );
+            return false;
+        }
+        return (bool)$writable['result'];
     }
 
     /**
@@ -342,15 +401,13 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_HostProbes {
         if (!ABJ_404_Solution_PhpRuntimeCapabilityAdapter::isFunctionAvailable('disk_free_space')) {
             throw new \RuntimeException('disk_free_space unavailable');
         }
-        $tmp = function_exists('sys_get_temp_dir') ? sys_get_temp_dir() : '';
+        // Optional probes must also tolerate an adapter retained across an update.
+        $tmp = is_callable(array(ABJ_404_Solution_PhpRuntimeCapabilityAdapter::class, 'temporaryDirectory'))
+            ? (ABJ_404_Solution_PhpRuntimeCapabilityAdapter::temporaryDirectory() ?? '') : '';
         if ($tmp === '') {
-            throw new \RuntimeException('sys_get_temp_dir returned empty');
+            throw new \RuntimeException('sys_get_temp_dir unavailable or returned empty');
         }
-        $v = ABJ_404_Solution_PhpRuntimeCapabilityAdapter::diskFreeSpace($tmp);
-        if ($v === false) {
-            throw new \RuntimeException('disk_free_space returned false for ' . $tmp);
-        }
-        return (int)$v;
+        return $this->diskBytesOrThrow('disk_free_space', $tmp);
     }
 
     /**
@@ -376,6 +433,7 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_HostProbes {
      * @return array<string, mixed>
      */
     public function collectPhpRuntimeIdentity(): array {
+        $ini = $this->phpIniRunbook();
         $obHandlerNames = array();
         foreach (function_exists('ob_get_status') ? ob_get_status(true) : array() as $obStatus) {
             if (is_array($obStatus) && isset($obStatus['name']) && is_string($obStatus['name'])) {
@@ -394,8 +452,13 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_HostProbes {
             'php_max_input_vars' => function_exists('ini_get') ? (int)ini_get('max_input_vars') : 0,
             'php_output_buffering' => function_exists('ini_get')
                 ? (string)ini_get('output_buffering') : '',
-            'php_zlib_output_compression' => function_exists('ini_get')
-                ? (string)ini_get('zlib.output_compression') : '',
+            'php_zlib_output_compression' => $ini['values']['zlib.output_compression'] ?? '',
+            'php_output_handler' => $ini['values']['output_handler'],
+            'php_memory_limit' => $ini['values']['memory_limit'],
+            'php_ini_absent' => $ini['absent'],
+            // A disabled WP runner requires external scheduling. Its actual
+            // system-cron installation is not observable from a PHP request.
+            'wp_cron_mode' => defined('DISABLE_WP_CRON') && DISABLE_WP_CRON ? 'disabled' : 'wp_cron',
             'php_ob_level_at_collect' => array(
                 'level' => function_exists('ob_get_level') ? (int)ob_get_level() : 0,
                 // Handler names identify stack ownership. Other status fields,

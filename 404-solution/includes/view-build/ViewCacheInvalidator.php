@@ -53,10 +53,24 @@ class ABJ_404_Solution_ViewCacheInvalidator {
     public function runWithDeferredInvalidation(callable $work) {
         $prior = ABJ_404_Solution_ViewReadRuntimeState::$bulkMutationInProgress;
         ABJ_404_Solution_ViewReadRuntimeState::$bulkMutationInProgress = true;
+        $failure = null;
         try {
             return $work();
+        } catch (Throwable $error) {
+            $failure = $error;
+            throw $error;
         } finally {
             ABJ_404_Solution_ViewReadRuntimeState::$bulkMutationInProgress = $prior;
+            // A partially successful import also changes the next table read.
+            // Do not load new modules into a request using an older class map.
+            if (class_exists('ABJ_404_Solution_AdminTableFlight', false)) {
+                try {
+                    ABJ_404_Solution_AdminTableFlight::flushDeferredMutation();
+                } catch (Throwable $storageError) {
+                    if ($failure === null) { throw $storageError; }
+                    abj_service('logging')->warnCaught('Could not invalidate table snapshots after a failed bulk mutation.', $storageError);
+                }
+            }
         }
     }
 
@@ -67,6 +81,15 @@ class ABJ_404_Solution_ViewCacheInvalidator {
      * @return void
      */
     public function invalidateStatusCountsCache(): void {
+        // Flight policy also invalidates response snapshots and defers bulk writes.
+        ABJ_404_Solution_RedirectMutationCompletion::complete(array(
+            'table-flight-generation' => static function (): void { if (class_exists('ABJ_404_Solution_AdminTableFlight')) { ABJ_404_Solution_AdminTableFlight::invalidate(); } },
+            'status-count-caches' => function (): void { $this->invalidateOrdinaryStatusCountsCache(); },
+        ));
+    }
+
+    /** @return void */
+    private function invalidateOrdinaryStatusCountsCache(): void {
         if (ABJ_404_Solution_ViewReadRuntimeState::$bulkMutationInProgress) {
             return;
         }

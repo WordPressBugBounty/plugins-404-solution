@@ -86,7 +86,7 @@ final class ABJ_404_Solution_RestApiReadService {
             "SELECT id, url, status, type, final_dest, code, timestamp, disabled
              FROM `{$redirectsTable}`
              WHERE status IN ({$statusIn}) AND disabled = 0
-             ORDER BY url ASC
+             ORDER BY url ASC, id ASC
              LIMIT %d, %d",
             ['query_params' => [$limitStart, $input['per_page']]]
         );
@@ -102,6 +102,7 @@ final class ABJ_404_Solution_RestApiReadService {
         try {
             $snapshot = $this->statsRepo->getStatsDashboardSnapshot(true);
             $data = is_array($snapshot['data']) ? $snapshot['data'] : array();
+            if ($data === array()) { return $this->presenter->statsPending($snapshot); }
             return $this->presenter->stats($data);
         } catch (\Throwable $e) {
             return $this->presenter->statsError($e);
@@ -110,9 +111,9 @@ final class ABJ_404_Solution_RestApiReadService {
 
     /**
      * @param array{page: int, per_page: int} $input
-     * @return \WP_REST_Response
+     * @return \WP_REST_Response|\WP_Error
      */
-    public function logs(array $input): \WP_REST_Response {
+    public function logs(array $input) {
         $tableOptions = array(
             'orderby' => 'timestamp',
             'order'   => 'DESC',
@@ -120,10 +121,18 @@ final class ABJ_404_Solution_RestApiReadService {
             'perpage' => $input['per_page'],
             'logsid'  => 0,
             'filter'  => '',
+            '_abj404_throw_on_view_query_error' => 1,
         );
 
-        $rows = $this->logsRepo->getLogRecords($tableOptions);
-        $total = $this->viewRead->getLogsCount(0);
+        try {
+            $rows = $this->logsRepo->getLogRecords($tableOptions);
+            $total = $this->viewRead->getLogsCount(0, $tableOptions);
+        } catch (ABJ_404_Solution_ViewQueryFailureException $failure) {
+            return new \WP_Error('logs_read_failed', $failure->getMessage(), array(
+                'status' => 500,
+                'diagnostics' => $failure->getDiagnostics(),
+            ));
+        }
 
         return $this->presenter->paginated(is_array($rows) ? $rows : array(), intval($total), $input['page'], $input['per_page']);
     }

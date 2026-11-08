@@ -42,6 +42,9 @@ if (!defined('ABSPATH')) {
  */
 final class ABJ_404_Solution_RedirectUpdate {
 
+    /** @var array<string, string|null> Empty preserves the stored mode. */
+    private $queryModeChange;
+
     /** @var int */
     private $id;
 
@@ -68,6 +71,7 @@ final class ABJ_404_Solution_RedirectUpdate {
 
     /**
      * @param int|null $startTs
+     * @param array<string, string|null> $queryModeChange Empty preserves the stored mode.
      * @param int|null $endTs
      */
     private function __construct(
@@ -78,8 +82,10 @@ final class ABJ_404_Solution_RedirectUpdate {
         string $code,
         string $statusType,
         $startTs,
-        $endTs
+        $endTs,
+        array $queryModeChange = array()
     ) {
+        $this->queryModeChange = $queryModeChange;
         $this->id = $id;
         $this->type = $type;
         $this->fromUrl = $fromUrl;
@@ -131,7 +137,9 @@ final class ABJ_404_Solution_RedirectUpdate {
             self::requiredString($fields, 'code'),
             self::requiredString($fields, 'statusType'),
             array_key_exists('startTs', $fields) ? self::nullableInt($fields, 'startTs') : null,
-            array_key_exists('endTs', $fields) ? self::nullableInt($fields, 'endTs') : null
+            array_key_exists('endTs', $fields) ? self::nullableInt($fields, 'endTs') : null,
+            array_key_exists('query_mode', $fields)
+                ? array('query_mode' => ABJ_404_Solution_QueryStringHelper::queryMode($fields['query_mode'])) : array()
         );
     }
 
@@ -174,6 +182,9 @@ final class ABJ_404_Solution_RedirectUpdate {
         }
         return (int)$fields[$name];
     }
+
+    /** @return array<string, string|null> */
+    public function getQueryModeChange(): array { return $this->queryModeChange; }
 
     public function getId(): int {
         return $this->id;

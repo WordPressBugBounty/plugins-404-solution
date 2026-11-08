@@ -1,6 +1,6 @@
 <?php
 
-// allow-no-test-found: covered by tests/SetupWizardTest.php through setup wizard admin entry points.
+// allow-no-test-found: covered by tests/SetupWizardFormSubmissionTest.php through setup wizard form submission entry points.
 
 if (!defined('ABSPATH')) {
     exit;
@@ -17,6 +17,9 @@ class ABJ_404_Solution_SetupWizardAnswerPolicy {
         'q2' => 'yes',
         'q3' => 'yes',
     );
+
+    /** Captured-404 count at which the weekly alert email is sent. */
+    public const ALERT_THRESHOLD = 50;
 
     /** @var array<string,array<int,string>> */
     private const ALLOWED_VALUES = array(
@@ -83,11 +86,11 @@ class ABJ_404_Solution_SetupWizardAnswerPolicy {
             $options[$key] = $value;
         }
 
-        $options['dest404page'] = '0|' . ABJ404_TYPE_404_DISPLAYED;
+        ABJ_404_Solution_SettingsRedirectPolicy::initializeSuggestionDestination($options);
         $options['capture_404'] = self::captures404s($answers) ? '1' : '0';
 
-        if ($answers['q3'] === 'yes') {
-            $options['admin_notification'] = '50';
+        if (self::sendsEmailAlerts($answers)) {
+            $options['admin_notification'] = (string)self::ALERT_THRESHOLD;
             $options['admin_notification_frequency'] = 'weekly';
             $options['admin_notification_email'] = $adminEmail;
         }
@@ -108,6 +111,16 @@ class ABJ_404_Solution_SetupWizardAnswerPolicy {
         }
 
         return $path;
+    }
+
+    /**
+     * Return whether the validated answers enable weekly captured-404 email alerts.
+     *
+     * @param array{q1:string,q2:string,q3:string} $answers Validated setup answers.
+     * @return bool
+     */
+    public static function sendsEmailAlerts(array $answers): bool {
+        return self::captures404s($answers) && $answers['q3'] === 'yes';
     }
 
     /**
@@ -146,11 +159,20 @@ class ABJ_404_Solution_SetupWizardAnswerPolicy {
      * @return array{q1:string,q2:string,q3:string}
      */
     private static function answersFromRaw(array $raw): array {
-        return array(
+        $answers = array(
             'q1' => self::validAnswerValue($raw['q1'] ?? '', self::ALLOWED_VALUES['q1'], self::DEFAULT_ANSWERS['q1']),
             'q2' => self::validAnswerValue($raw['q2'] ?? '', self::ALLOWED_VALUES['q2'], self::DEFAULT_ANSWERS['q2']),
             'q3' => self::validAnswerValue($raw['q3'] ?? '', self::ALLOWED_VALUES['q3'], self::DEFAULT_ANSWERS['q3']),
         );
+
+        // Email alerts are about captured 404s, so they cannot be on while capturing is off.
+        // The wizard disables the question in that case; a disabled radio group submits no
+        // value, so this is also what keeps the stored answer consistent with the form.
+        if (!self::captures404s($answers)) {
+            $answers['q3'] = 'no';
+        }
+
+        return $answers;
     }
 
     /**

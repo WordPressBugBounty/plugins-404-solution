@@ -28,8 +28,8 @@ interface ABJ_404_Solution_StatsRepositoryInterface {
     public function getStatsCount($query, array $valueParams);
 
     /**
+     * @throws RuntimeException Code 503 while the requested threshold has no publication.
      * @param int $sinceTimestamp
-     * @param string $notFoundDest
      * @return array{
      *   disp404:int,
      *   distinct404:int,
@@ -41,10 +41,10 @@ interface ABJ_404_Solution_StatsRepositoryInterface {
      *   distinctrefer:int
      * }
      */
-    public function getPeriodicStatsSummary($sinceTimestamp, $notFoundDest = '404');
+    public function getPeriodicStatsSummary($sinceTimestamp);
 
     /**
-     * @param string $notFoundDest
+     * @throws RuntimeException Code 503 before the first periodic publication.
      * @return array{
      *   today:array<string,int>,
      *   month:array<string,int>,
@@ -52,7 +52,7 @@ interface ABJ_404_Solution_StatsRepositoryInterface {
      *   all:array<string,int>
      * }
      */
-    public function getPeriodicStatsSummariesCached($notFoundDest = '404');
+    public function getPeriodicStatsSummariesCached();
 
     // =========================================================================
     // Dashboard snapshot

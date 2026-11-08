@@ -5,6 +5,8 @@ if (!defined('ABSPATH')) {
 }
 
 require_once __DIR__ . '/FeedbackTransportLog.php';
+require_once dirname(__DIR__) . '/core/FileSystemService.php';
+require_once dirname(__DIR__) . '/core/HostFilesystemCall.php';
 
 /**
  * Validates outbound report payloads against the shared server JSON Schema.
@@ -105,8 +107,16 @@ class ABJ_404_Solution_ReportPayloadJsonSchemaValidator {
 
         if (!$available) {
             $autoload = dirname(__DIR__) . '/vendor/autoload.php';
-            if (file_exists($autoload)) {
-                require_once $autoload;
+            $presence = ABJ_404_Solution_HostFilesystemCall::fileExists($autoload);
+            if ($presence['warning'] === null && $presence['result']) {
+                $load = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(static function() use ($autoload) {
+                    return require_once $autoload;
+                });
+                if ($load['warning'] !== null) {
+                    ABJ_404_Solution_FeedbackTransportLog::log('warn', 'Opis autoload failed: ' . $load['warning']);
+                }
+            } elseif ($presence['warning'] !== null) {
+                ABJ_404_Solution_FeedbackTransportLog::log('warn', 'Opis autoload presence probe failed: ' . $presence['warning']);
             }
             $available = class_exists('\Opis\JsonSchema\Validator') && class_exists('\Opis\JsonSchema\Errors\ErrorFormatter');
         }
@@ -134,7 +144,21 @@ class ABJ_404_Solution_ReportPayloadJsonSchemaValidator {
         $loaded = true;
 
         $path = dirname(__DIR__, 2) . '/' . self::SCHEMA_RELATIVE_PATH;
-        $raw = file_exists($path) ? file_get_contents($path) : false;
+        $presence = ABJ_404_Solution_HostFilesystemCall::fileExists($path);
+        if ($presence['warning'] !== null || !$presence['result']) {
+            if ($presence['warning'] !== null) {
+                ABJ_404_Solution_FeedbackTransportLog::log('warn', 'Report schema presence probe failed: ' . $presence['warning']);
+            }
+            return null;
+        }
+        $read = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(static function() use ($path) {
+            return file_get_contents($path);
+        });
+        if ($read['warning'] !== null) {
+            ABJ_404_Solution_FeedbackTransportLog::log('warn', 'Report schema read failed: ' . $read['warning']);
+            return null;
+        }
+        $raw = $read['result'];
         if (!is_string($raw) || $raw === '') {
             return null;
         }

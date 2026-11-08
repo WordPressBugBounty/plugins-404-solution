@@ -5,6 +5,9 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/../repositories/SiteResourceLock.php';
+require_once __DIR__ . '/../services/OptionCacheInvalidator.php';
+
 /**
  * AJAX handler for restoring plugin settings to canonical defaults.
  *
@@ -44,7 +47,7 @@ class ABJ_404_Solution_Ajax_RestoreDefaults {
      */
     static function init(): void {
         $me = ABJ_404_Solution_Ajax_RestoreDefaults::getInstance();
-        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404_restore_defaults',
+        ABJ_404_Solution_WPUtils::safeAddAction(ABJ_404_Solution_PluginAjaxActions::hook('abj404_restore_defaults'),
             array($me, 'handleRestoreDefaults'));
     }
 
@@ -66,17 +69,81 @@ class ABJ_404_Solution_Ajax_RestoreDefaults {
 
         $defaults = ABJ_404_Solution_PluginLogicDefaults::defaults();
 
-        // Preserve DB_VERSION so the restore does not appear as a schema
-        // downgrade to the upgrade engine.
-        $current = abj_service('options_repository')->getOptions(true);
-        if (is_array($current) && array_key_exists('DB_VERSION', $current)) {
-            $defaults['DB_VERSION'] = $current['DB_VERSION'];
+        $repository = abj_service('options_repository');
+        if (!is_callable(array($repository, 'getRawSettingsSnapshot'))
+            || !is_callable(array($repository, 'updateOptionsChecked'))) {
+            wp_send_json_error(array(
+                'message' => __('Settings could not be restored because the checked storage writer is unavailable.', '404-solution') . ' [ABJ404_SETTINGS_WRITER_UNAVAILABLE]',
+            ), 503);
+        }
+        $lock = new ABJ_404_Solution_SiteResourceLock('initialization');
+        if (!$lock->acquire()) {
+            wp_send_json_error(array(
+                'message' => __('Settings could not be restored because another update is in progress.', '404-solution') . ' [ABJ404_SETTINGS_WRITE_BUSY]',
+            ), 409);
+        }
+        try {
+            $restored = $this->restoreOptionsChecked($repository, $defaults, $lock);
+        } finally {
+            $lock->release();
         }
 
-        abj_service('options_repository')->updateOptions($defaults);
+        // JSON responses terminate PHP without running finally. Keep the
+        // response outside the connection-owned lock's lifetime.
+        if (!$restored) {
+            wp_send_json_error(array(
+                'message' => __('Settings could not be restored. Reload this page and try again.', '404-solution') . ' [ABJ404_SETTINGS_RESTORE_REFUSED]',
+            ), 409);
+        }
 
         wp_send_json_success(array(
             'message' => __('Settings restored to defaults.', '404-solution'),
         ));
+    }
+
+    /**
+     * Restore defaults only while their preserved values have a stable raw authority.
+     * @param ABJ_404_Solution_PluginLogicOptionsResolver $repository
+     * @param array<string,mixed> $defaults
+     */
+    private function restoreOptionsChecked($repository, array $defaults,
+        ABJ_404_Solution_SiteResourceLock $lock): bool {
+        ABJ_404_Solution_OptionCacheInvalidator::site('abj404_settings');
+        if (is_callable(array($repository, 'clearCache'))) {
+            call_user_func(array($repository, 'clearCache'));
+        }
+        // Preserve DB_VERSION so the restore does not appear as a schema
+        // downgrade to the upgrade engine.
+        $before = $repository->getRawSettingsSnapshot();
+        $current = $repository->getOptions(true);
+        $expected = $repository->getRawSettingsSnapshot();
+        if (!$this->sameRawSettingsSnapshot($before, $expected)) {
+            if (is_callable(array($repository, 'clearCache'))) {
+                call_user_func(array($repository, 'clearCache'));
+            }
+            ABJ_404_Solution_OptionCacheInvalidator::site('abj404_settings');
+            $before = $expected;
+            $current = $repository->getOptions(true);
+            $expected = $repository->getRawSettingsSnapshot();
+            if (!$this->sameRawSettingsSnapshot($before, $expected)) {
+                return false;
+            }
+        }
+        if (is_array($current) && array_key_exists('DB_VERSION', $current)) {
+            $defaults['DB_VERSION'] = $current['DB_VERSION'];
+        }
+        if ($repository->updateOptionsChecked($defaults, $expected, $lock) !== true) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * @param array{status:string,value:string} $left
+     * @param array{status:string,value:string} $right
+     */
+    private function sameRawSettingsSnapshot(array $left, array $right): bool {
+        return isset($left['status'], $left['value'], $right['status'], $right['value'])
+            && $left['status'] === $right['status'] && $left['value'] === $right['value'];
     }
 }

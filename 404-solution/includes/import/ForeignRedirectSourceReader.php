@@ -402,7 +402,7 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
         }
 
         foreach ($this->pageTableQuery(
-            "SELECT url, action_data, action_code, regex
+            "SELECT url, action_data, action_code, regex, match_data
              FROM `{$tableName}`
              WHERE status = 'enabled'"
         ) as $row) {
@@ -426,6 +426,7 @@ class ABJ_404_Solution_ForeignRedirectSourceReader {
                 'dest_url'   => $destUrl,
                 'code'       => $code,
                 'is_regex'   => $isRegex,
+                'match_data' => $row['match_data'] ?? null,
             );
         }
     }

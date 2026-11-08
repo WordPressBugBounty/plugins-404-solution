@@ -33,6 +33,7 @@ final class ABJ_404_Solution_PhpRuntimeCapabilityAdapter {
         'getrusage',
         'ini_set',
         'posix_geteuid',
+        'sys_get_temp_dir',
         'sys_getloadavg',
     );
 
@@ -116,6 +117,15 @@ final class ABJ_404_Solution_PhpRuntimeCapabilityAdapter {
             return null;
         }
         return posix_geteuid();
+    }
+
+    /** System temporary directory, or null when the host withholds it. */
+    public static function temporaryDirectory(): ?string {
+        if (!self::isFunctionAvailable('sys_get_temp_dir')) {
+            return null;
+        }
+        $directory = sys_get_temp_dir();
+        return $directory !== '' ? $directory : null;
     }
 
     /** @return float|false */

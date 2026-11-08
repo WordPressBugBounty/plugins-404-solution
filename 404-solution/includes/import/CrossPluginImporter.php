@@ -32,6 +32,9 @@ class ABJ_404_Solution_CrossPluginImporter {
     /** @var ABJ_404_Solution_ForeignRedirectSourceReader */
     private $sourceReader;
 
+    /** @var ABJ_404_Solution_ImportIssueSummary */
+    private $issueSummary;
+
     /**
      * @param ABJ_404_Solution_RedirectsRepositoryInterface $redirectsRepository
      * @param ABJ_404_Solution_Logging $logger
@@ -40,6 +43,7 @@ class ABJ_404_Solution_CrossPluginImporter {
     public function __construct($redirectsRepository, $logger, $dbQuery = null) {
         $this->redirectsRepository = $redirectsRepository;
         $this->logger = $logger;
+        $this->issueSummary = new ABJ_404_Solution_ImportIssueSummary();
         $this->sourceReader = new ABJ_404_Solution_ForeignRedirectSourceReader(
             $redirectsRepository,
             $logger,
@@ -116,45 +120,149 @@ class ABJ_404_Solution_CrossPluginImporter {
      * @return int
      */
     public function importFrom(string $source): int {
+        $result = $this->importRows($this->sourceReader->readSource($source), $source);
+        return $result['imported'];
+    }
+
+    /**
+     * Import already-normalized rows through the same writer and cycle
+     * handling used by the foreign-plugin path. The legacy Redirectioner
+     * reader supplies native status/type/disabled/timestamp fields, while
+     * foreign readers supply source_url/dest_url and are resolved here.
+     *
+     * @param iterable<int, array<string, mixed>> $rows
+     * @return array{imported: int, issues: array<int, string>, issues_omitted: int, issue_details: array<int, string>}
+     */
+    public function importRows(iterable $rows, string $source): array {
         $imported = 0;
-        foreach ($this->sourceReader->readSource($source) as $row) {
-            $sourceUrl = isset($row['source_url']) && is_string($row['source_url']) ? $row['source_url'] : '';
-            $destUrl   = isset($row['dest_url'])   && is_string($row['dest_url'])   ? $row['dest_url']   : '';
-            $code = ABJ_404_Solution_ExactInteger::readOr($row['code'] ?? null, 100, 301);
-            $isRegex   = isset($row['is_regex'])    && (bool)$row['is_regex'];
-
-            if ($sourceUrl === '' || $destUrl === '') {
-                continue;
+        $this->issueSummary = new ABJ_404_Solution_ImportIssueSummary();
+        try {
+            foreach ($rows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $prepared = $this->prepareImportRow($row, $source);
+                if ($prepared === null) {
+                    continue;
+                }
+                if ($this->writeImportRow($prepared, $source)) {
+                    $imported++;
+                }
             }
-
-            $status = $isRegex ? ABJ404_STATUS_REGEX : ABJ404_STATUS_MANUAL;
-
-            // Determine destination type and resolve internal paths to post IDs.
-            $resolved = $this->resolveDestinationType($destUrl);
-            $type = $resolved['type'];
-            $destUrl = $resolved['dest'];
-
-            $result = $this->redirectsRepository->setupRedirect(
-                ABJ_404_Solution_RedirectSpec::fromArray(array(
-                    'fromURL' => $sourceUrl,
-                    'status' => (string)$status,
-                    'type' => (string)$type,
-                    'finalDest' => $destUrl,
-                    'code' => (string)$code,
-                    'disabled' => 0,
-                ))
-            );
-
-            if ($result !== 0 && $result !== false) {
-                $imported++;
-            }
+        } catch (ABJ_404_Solution_ImportSourceReadException $e) {
+            // The source gateway logged the underlying read failure. Preserve
+            // completed writes and expose one bounded issue to the caller.
+            $this->issueSummary->add($source . ': ' . $e->getMessage());
         }
 
         $this->logger->infoMessage(
             'CrossPluginImporter: imported ' . $imported . ' redirect(s) from "' . $source . '".'
         );
 
-        return $imported;
+        return array(
+            'imported' => $imported,
+            'issues' => $this->issueSummary->messages(),
+            'issues_omitted' => $this->issueSummary->omittedCount(),
+            'issue_details' => $this->issueSummary->details(),
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array{source: string, fields: array<string, mixed>}|null
+     */
+    private function prepareImportRow(array $row, string $source): ?array {
+        $legacy = $source === 'redirectioner';
+        $sourceUrl = $this->scalarRowString($row, $legacy ? 'url' : 'source_url');
+        $destUrl = $this->scalarRowString($row, $legacy ? 'final_dest' : 'dest_url');
+        if ($sourceUrl === '' || $destUrl === '') {
+            return null;
+        }
+        $queryMode = null;
+        if (!$legacy) {
+            try {
+                $queryMode = ABJ_404_Solution_QueryStringHelper::importQueryMode($row, $source === 'redirection');
+            } catch (InvalidArgumentException $e) {
+                $this->recordImportIssue(array('source' => $sourceUrl, 'message' => $e->getMessage()));
+                return null;
+            }
+        }
+        $isRegex = !$legacy && !empty($row['is_regex']);
+        $status = $legacy ? $this->rowInt($row, 'status', ABJ404_STATUS_MANUAL)
+            : ($isRegex ? ABJ404_STATUS_REGEX : ABJ404_STATUS_MANUAL);
+        $type = $legacy ? $this->rowInt($row, 'type', ABJ404_TYPE_EXTERNAL) : 0;
+        if (!$legacy) {
+            $resolved = $this->resolveDestinationType($destUrl);
+            $type = $resolved['type'];
+            $destUrl = $resolved['dest'];
+        }
+        $fields = array(
+            'fromURL' => $sourceUrl,
+            'status' => (string)$status,
+            'type' => (string)$type,
+            'finalDest' => $destUrl,
+            'code' => (string)$this->rowInt($row, 'code', 301),
+            'disabled' => $legacy ? $this->rowInt($row, 'disabled', 0) : 0,
+        );
+        if ($queryMode !== null) {
+            $fields['query_mode'] = $queryMode;
+        }
+        if ($legacy) {
+            $timestamp = ABJ_404_Solution_ExactInteger::read($row['timestamp'] ?? null, 0);
+            if ($timestamp !== null) {
+                $fields['timestamp'] = $timestamp;
+            }
+        }
+        return array('source' => $sourceUrl, 'fields' => $fields);
+    }
+
+    /** @param array{source: string, fields: array<string, mixed>} $prepared */
+    private function writeImportRow(array $prepared, string $source): bool {
+        $sourceUrl = $prepared['source'];
+        $fields = $prepared['fields'];
+        $isLegacy = $source === 'redirectioner';
+        $writer = $isLegacy && method_exists($this->redirectsRepository, 'setupRedirectIfSourceAbsent')
+            ? 'setupRedirectIfSourceAbsent' : 'setupRedirect';
+        try {
+            $result = $this->redirectsRepository->{$writer}(
+                ABJ_404_Solution_RedirectSpec::fromArray($fields)
+            );
+        } catch (ABJ_404_Solution_RedirectCycleException $e) {
+            $this->recordImportIssue(array('source' => $sourceUrl, 'message' => $e->getMessage()));
+            return false;
+        }
+        if ($result !== 0 && $result !== false) {
+            return true;
+        }
+        if (method_exists($this->redirectsRepository, 'getLastWriteError')) {
+            $cycleError = (string)$this->redirectsRepository->getLastWriteError();
+            if ($cycleError !== '') {
+                $this->recordImportIssue(array('source' => $sourceUrl, 'message' => $cycleError));
+            }
+        }
+        return false;
+    }
+
+    /** @param array<string, mixed> $row */
+    private function scalarRowString(array $row, string $key): string {
+        $value = $row[$key] ?? '';
+        return is_scalar($value) ? (string)$value : '';
+    }
+
+    /** @param array<string, mixed> $row */
+    private function rowInt(array $row, string $key, int $default): int {
+        return ABJ_404_Solution_ExactInteger::readOr($row[$key] ?? null, PHP_INT_MIN, $default);
+    }
+
+    /** @param array{source: string, message: string} $issue */
+    private function recordImportIssue(array $issue): void {
+        $this->issueSummary->add($issue['source'] . ': ' . $issue['message']);
+        $this->logger->warn('CrossPluginImporter: ' . $issue['message'] . ' Source: ' . $issue['source']);
+    }
+
+    /** @return array<int, string> */
+    public function getLastIssues(): array {
+        return $this->issueSummary->messages();
     }
 
     /**

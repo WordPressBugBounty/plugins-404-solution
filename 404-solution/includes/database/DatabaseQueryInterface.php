@@ -30,6 +30,11 @@ interface ABJ_404_Solution_DatabaseQueryInterface {
      *     @type array       $last_result  wpdb last_result.
      *     @type int         $rows_affected Rows affected.
      *     @type int         $insert_id    Last INSERT ID.
+     *     @type bool        $query_succeeded True only when the raw driver
+     *                                        return was an accepted success.
+     *     @type int|null    $query_rows_affected Driver mutation count (including
+     *                                        timeout-wrapped statements),
+     *                                        or null for reads and malformed returns.
      *     @type float       $elapsed_time Seconds elapsed.
      *     @type bool        $timed_out    True when query timed out.
      * }

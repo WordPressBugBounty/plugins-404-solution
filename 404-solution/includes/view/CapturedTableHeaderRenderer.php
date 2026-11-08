@@ -64,7 +64,7 @@ class ABJ_404_Solution_CapturedTableHeaderRenderer {
         // Post-upgrade window: a URL sort whose narrow url_sort_key cannot be
         // served index-ordered yet would filesort the captured majority (a
         // max_statement_time risk on large sites). The query already serves the
-        // safe timestamp-DESC default (ViewQueryBuilder::resolveEffectiveSort), so
+        // safe timestamp-DESC default (ViewSortResolver::resolveEffectiveSort), so
         // render this header non-sortable with a progress tooltip rather than a
         // clickable sort link that would silently not take effect. Self-heals:
         // once the sort key is index-ready the header is sortable again with no
@@ -135,6 +135,10 @@ class ABJ_404_Solution_CapturedTableHeaderRenderer {
     }
 
     private function tagPendingSortTooltip(string $tooltipHtml, string $orderby): string {
+        $reader = abj_service_optional('admin_table_reader');
+        if ($reader instanceof ABJ_404_Solution_AdminTableReadRepository && $reader->isDegraded()) {
+            return $tooltipHtml;
+        }
         return str_replace(
             'class="abj404-header-tooltip lefty-tooltip"',
             'class="abj404-header-tooltip lefty-tooltip" data-abj404-pending-sort="' . esc_attr($orderby) . '"',

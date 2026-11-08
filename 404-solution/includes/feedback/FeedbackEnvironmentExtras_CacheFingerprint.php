@@ -4,6 +4,9 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once dirname(__DIR__) . '/core/FileSystemService.php';
+require_once dirname(__DIR__) . '/core/HostFilesystemCall.php';
+
 /**
  * Which cache implementation owns this site's request caches.
  *
@@ -107,14 +110,26 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_CacheFingerprint {
             }
         }
         $dropinPath = $contentDirectory . '/' . $dropinFiles[$dropinKey];
-        if (!is_file($dropinPath)) {
+        $presence = ABJ_404_Solution_HostFilesystemCall::isFile($dropinPath);
+        if ($presence['warning'] !== null) {
+            ABJ_404_Solution_FeedbackTransportLog::log('warn', 'Cache drop-in presence probe failed: ' . $presence['warning']);
+            return array('present' => false, 'owner' => '');
+        }
+        if (!$presence['result']) {
             return array('present' => false, 'owner' => '');
         }
         if (!function_exists('get_file_data')) {
             return array('present' => true, 'owner' => 'unknown');
         }
 
-        $headers = get_file_data($dropinPath, array('owner' => 'Plugin Name'), 'plugin');
+        $headersOutcome = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(static function() use ($dropinPath) {
+            return get_file_data($dropinPath, array('owner' => 'Plugin Name'), 'plugin');
+        });
+        if ($headersOutcome['warning'] !== null) {
+            ABJ_404_Solution_FeedbackTransportLog::log('warn', 'Cache drop-in header probe failed: ' . $headersOutcome['warning']);
+            return array('present' => true, 'owner' => 'unknown');
+        }
+        $headers = $headersOutcome['result'];
         if (!is_array($headers) || !isset($headers['owner']) || !is_scalar($headers['owner'])) {
             return array('present' => true, 'owner' => 'unknown');
         }
@@ -141,7 +156,18 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_CacheFingerprint {
             'using_ext_cache' => false,
             'backend'         => 'unknown',
             'backend_detail'  => '',
+            'dropin_class'    => null,
         );
+        $cache = $GLOBALS['wp_object_cache'] ?? null;
+        $class = is_object($cache) ? get_class($cache) : null;
+        // Anonymous PHP class names embed the source filename and a NUL byte.
+        // Only a bounded named-class identifier may leave the site.
+        if ($class !== null && strlen($class) <= 256
+            && preg_match('/^[A-Za-z_][A-Za-z0-9_\\\\]*$/D', $class) === 1) {
+            $out['dropin_class'] = $class;
+        } else {
+            $out['dropin_class_error'] = $cache === null ? 'not_loaded' : 'invalid_class_name';
+        }
         if (function_exists('wp_using_ext_object_cache')) {
             $out['using_ext_cache'] = (bool)wp_using_ext_object_cache();
         }

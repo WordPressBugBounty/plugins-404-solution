@@ -11,9 +11,6 @@ if (!defined('ABSPATH')) {
  */
 class ABJ_404_Solution_WPCLIImportExportCommandService {
 
-    /** @var ABJ_404_Solution_Clock */
-    private $clock;
-
     /** @var ABJ_404_Solution_DataAccess|null Injected aggregate root; null => resolve via the service locator. */
     private $dataAccess;
 
@@ -21,7 +18,6 @@ class ABJ_404_Solution_WPCLIImportExportCommandService {
     private $logging;
 
     /**
-     * @param ABJ_404_Solution_Clock|null $clock
      * @param ABJ_404_Solution_DataAccess|null $dataAccess Data-access aggregate root. When provided, the
      *     import/export collaborators (redirects + content repositories, view read service) are taken
      *     from it instead of the global service locator. Defaults to
@@ -30,10 +26,7 @@ class ABJ_404_Solution_WPCLIImportExportCommandService {
      *     without mutating global container state.
      * @param ABJ_404_Solution_Logging|null $logging Logger. Defaults to abj_service('logging').
      */
-    public function __construct($clock = null, $dataAccess = null, $logging = null) {
-        $this->clock = $clock instanceof ABJ_404_Solution_Clock
-            ? $clock
-            : $this->defaultClock();
+    public function __construct($dataAccess = null, $logging = null) {
         $this->dataAccess = $dataAccess instanceof ABJ_404_Solution_DataAccess ? $dataAccess : null;
         $this->logging = $logging instanceof ABJ_404_Solution_Logging ? $logging : null;
     }
@@ -126,61 +119,42 @@ class ABJ_404_Solution_WPCLIImportExportCommandService {
         // See includes/import/ImportService.php::doImportFile() for the
         // reference fix of this same resource-lifecycle shape.
         try {
-            $delimiter = $svc->detectCsvDelimiterFromFile($fileHandle);
+            $parser = new ABJ_404_Solution_ImportCsvParser();
+            $delimiter = $parser->detectCsvDelimiterFromFile($fileHandle);
             rewind($fileHandle);
 
             $rowResult = $this->viewReadService()->runWithDeferredInvalidation(function () use (
-                    $svc, $fileHandle, $delimiter, $dryRun) {
+                    $svc, $parser, $fileHandle, $delimiter, $dryRun) {
                 $local = array(
-                    'headerColumns' => null,
                     'processedRows' => 0,
                     'validRows' => 0,
                     'invalidRows' => 0,
-                    'anyIssuesToNote' => array(),
+                    'issueSummary' => new ABJ_404_Solution_ImportIssueSummary(),
                     'error' => null,
                 );
 
-                while (($row = fgetcsv($fileHandle, 0, $delimiter, '"', '\\')) !== false) {
-                    if (!is_array($row)) {
-                        $local['error'] = 'Could not parse CSV row.';
-                        return $local;
+                $rows = $parser->readRows($fileHandle, $delimiter);
+                $batchError = $svc->runImportBatches($rows, function (array $batch) use ($svc, $dryRun, &$local): bool {
+                    foreach ($batch as $entry) {
+                        $dataArray = $entry['data'];
+                        if (isset($dataArray['error'])) { $local['error'] = $dataArray['error']; return false; }
+                        if (isset($dataArray['from_url']) &&
+                                ($dataArray['from_url'] === 'from_url' || $dataArray['from_url'] === 'request')) {
+                            continue;
+                        }
+                        $local['processedRows']++;
+                        $issues = $svc->loadDataArrayFromFile($dataArray, $dryRun);
+                        if (count($issues) > 0) { $local['invalidRows']++; }
+                        else { $local['validRows']++; }
+                        foreach ($issues as $issue) {
+                            if (is_scalar($issue)) {
+                                $local['issueSummary']->add((string)$issue);
+                            }
+                        }
                     }
-                    $data = array_map(function($value) {
-                        return trim((string)$value);
-                    }, $row);
-
-                    if (count($data) === 1 && $data[0] === '') {
-                        continue;
-                    }
-
-                    if ($local['headerColumns'] === null && $svc->isCompatibleImportHeaderRow($data)) {
-                        $local['headerColumns'] = $svc->normalizeImportHeaders($data);
-                        continue;
-                    }
-
-                    $dataArray = ($local['headerColumns'] !== null)
-                        ? $svc->mapImportRowByHeaders($data, $local['headerColumns'])
-                        : $svc->mapImportRowWithoutHeaders($data);
-
-                    if (isset($dataArray['error'])) {
-                        $local['error'] = $dataArray['error'];
-                        return $local;
-                    }
-
-                    if (isset($dataArray['from_url']) &&
-                            ($dataArray['from_url'] === 'from_url' || $dataArray['from_url'] === 'request')) {
-                        continue;
-                    }
-
-                    $local['processedRows']++;
-                    $issues = $svc->loadDataArrayFromFile($dataArray, $dryRun);
-                    if (count($issues) > 0) {
-                        $local['invalidRows']++;
-                    } else {
-                        $local['validRows']++;
-                    }
-                    $local['anyIssuesToNote'] = array_merge($local['anyIssuesToNote'], $issues);
-                }
+                    return true;
+                }, $dryRun);
+                if ($batchError !== '') { $local['error'] = $batchError; }
                 return $local;
             });
         } finally {
@@ -194,7 +168,7 @@ class ABJ_404_Solution_WPCLIImportExportCommandService {
         $validRows = (int)$rowResult['validRows'];
         $invalidRows = (int)$rowResult['invalidRows'];
         $processedRows = (int)$rowResult['processedRows'];
-        $warnings = array_map('strval', array_slice($rowResult['anyIssuesToNote'], 0, 20));
+        $warnings = $rowResult['issueSummary']->messages(20);
 
         if ($dryRun) {
             return $this->line(
@@ -239,49 +213,50 @@ class ABJ_404_Solution_WPCLIImportExportCommandService {
             return array('type' => 'content', 'content' => $content);
         }
 
-        $tempFile = sys_get_temp_dir() . '/abj404_export_' . $this->clock->now() . '.csv';
-        if ($format === 'redirection') {
-            $nativeTemp = sys_get_temp_dir() . '/abj404_export_native_' . $this->clock->now() . '.csv';
-            $svc->writeNativeCsv($nativeTemp);
-            $error = $svc->convertExportCsvToRedirectionFormat($nativeTemp, $tempFile);
-            @unlink($nativeTemp);
-            if ($error !== '') {
-                return $this->error("Export conversion failed: {$error}");
+        $workspace = ABJ_404_Solution_RedirectExportWorkspace::create();
+        if ($workspace instanceof WP_Error) {
+            $message = 'Export failed (' . $workspace->get_error_code() . '): ' . $workspace->get_error_message();
+            $this->loggingService()->warn($message);
+            return $this->error($message);
+        }
+        try {
+            $tempFile = $workspace->csvPath($format);
+            if ($format === 'redirection') {
+                $nativeTemp = $workspace->csvPath();
+                $failure = $svc->writeNativeCsv($nativeTemp);
+                if ($failure instanceof WP_Error) {
+                    return $this->error('Export failed (' . $failure->get_error_code() . '): ' . $failure->get_error_message());
+                }
+                $error = $svc->convertExportCsvToRedirectionFormat($nativeTemp, $tempFile);
+                if ($error !== '') {
+                    return $this->error("Export conversion failed: {$error}");
+                }
+            } else {
+                $failure = $svc->writeNativeCsv($tempFile);
+                if ($failure instanceof WP_Error) {
+                    return $this->error('Export failed (' . $failure->get_error_code() . '): ' . $failure->get_error_message());
+                }
             }
-        } else {
-            $svc->writeNativeCsv($tempFile);
-        }
 
-        if (!file_exists($tempFile)) {
-            @unlink($tempFile);
-            return $this->line('No redirects to export.');
-        }
+            if (!file_exists($tempFile)) {
+                return $this->line('No redirects to export.');
+            }
 
-        if ($output !== '') {
-            if (!rename($tempFile, $output)) {
-                if (!copy($tempFile, $output)) {
-                    @unlink($tempFile);
+            if ($output !== '') {
+                if (!rename($tempFile, $output) && !copy($tempFile, $output)) {
                     return $this->error("Could not write to file: {$output}");
                 }
-                @unlink($tempFile);
+                return $this->success("Exported {$format} redirects to: {$output}");
             }
-            return $this->success("Exported {$format} redirects to: {$output}");
-        }
 
-        $csv = file_get_contents($tempFile);
-        @unlink($tempFile);
-        if ($csv === false) {
-            return $this->error('Could not read export temp file.');
+            $csv = file_get_contents($tempFile);
+            if ($csv === false) {
+                return $this->error('Could not read export temp file.');
+            }
+            return array('type' => 'content', 'content' => $csv);
+        } finally {
+            $workspace->close();
         }
-        return array('type' => 'content', 'content' => $csv);
-    }
-
-    private function defaultClock(): ABJ_404_Solution_Clock {
-        $clock = ABJ_404_Solution_ServiceContainer::safeGet('clock');
-        if ($clock instanceof ABJ_404_Solution_Clock) {
-            return $clock;
-        }
-        return new ABJ_404_Solution_SystemClock();
     }
 
     /**

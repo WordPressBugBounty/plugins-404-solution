@@ -7,6 +7,8 @@ if (!defined('ABSPATH')) {
 require_once __DIR__ . '/../../ngram/NGramNetworkOptionStore.php';
 require_once __DIR__ . '/../../ngram/NGramCacheRebuildScheduler.php';
 require_once __DIR__ . '/../../ngram/NGramCacheRebuildBatchRunner.php';
+require_once __DIR__ . '/../../ngram/NGramCronFallback.php';
+require_once __DIR__ . '/../../ngram/NGramCronFallbackCoordinator.php';
 require_once __DIR__ . '/../../ngram/NGramCacheSyncRebuilder.php';
 require_once __DIR__ . '/../../ngram/NGramCacheReconciler.php';
 require_once __DIR__ . '/../../ngram/NGramLastUpdatedEpochMigration.php';
@@ -37,6 +39,9 @@ require_once __DIR__ . '/../../ngram/NGramLastUpdatedEpochMigration.php';
  * surface while the collaborators stay pure.
  */
 class ABJ_404_Solution_DatabaseUpgradeNGram extends ABJ_404_Solution_DatabaseUpgradeComponent {
+
+    /** @var ABJ_404_Solution_NGramCronFallbackCoordinator|null */
+    private $ngramCronFallbackCoordinator = null;
 
     /**
      * Documented cron hook for the n-gram rebuild loop. Defined here
@@ -74,19 +79,16 @@ class ABJ_404_Solution_DatabaseUpgradeNGram extends ABJ_404_Solution_DatabaseUpg
      * @return bool
      */
     function scheduleNGramCacheRebuild() {
-        $lockKey = 'ngram_schedule';
-        $uniqueID = $this->syncUtils->synchronizerAcquireLockTry($lockKey);
+        return $this->newNGramCronFallbackCoordinator()->scheduleRebuild();
+    }
 
-        if (empty($uniqueID)) {
-            $this->logger->debugMessage("N-gram rebuild scheduling: Another process holds the lock. Skipping.");
-            return true;
-        }
-
-        try {
-            return $this->newScheduler()->scheduleRebuild();
-        } finally {
-            $this->syncUtils->synchronizerReleaseLock($uniqueID, $lockKey);
-        }
+    /**
+     * Register one post-response fallback for an authorized admin page.
+     *
+     * @return bool Whether this request was armed.
+     */
+    public function armNGramCronFallback(): bool {
+        return $this->newNGramCronFallbackCoordinator()->arm();
     }
 
     /**
@@ -340,6 +342,21 @@ class ABJ_404_Solution_DatabaseUpgradeNGram extends ABJ_404_Solution_DatabaseUpg
         );
     }
 
+    private function newNGramCronFallbackCoordinator(): ABJ_404_Solution_NGramCronFallbackCoordinator {
+        return $this->ngramCronFallbackCoordinator ??= new ABJ_404_Solution_NGramCronFallbackCoordinator(
+            $this->newOptionStore(),
+            $this->newScheduler(),
+            $this->dbCore->clock(),
+            array(
+                'logger' => $this->logger,
+                'syncUtils' => $this->syncUtils,
+                'runBatch' => function (): void {
+                    $this->newBatchRunner()->runAsyncBatch();
+                },
+            )
+        );
+    }
+
     private function newSyncRebuilder(): ABJ_404_Solution_NGramCacheSyncRebuilder {
         return new ABJ_404_Solution_NGramCacheSyncRebuilder(
             $this->dbCore,
@@ -390,7 +407,7 @@ class ABJ_404_Solution_DatabaseUpgradeNGram extends ABJ_404_Solution_DatabaseUpg
             return $legacy;
         }
         return new ABJ_404_Solution_NGramCacheRepository(
-            $this->typedDbCoreOrNull(),
+            $this->dbCore,
             $this->logger,
             new ABJ_404_Solution_NGramSimilarity(),
             function() {
@@ -411,7 +428,7 @@ class ABJ_404_Solution_DatabaseUpgradeNGram extends ABJ_404_Solution_DatabaseUpg
         if ($legacy !== null) {
             return $legacy;
         }
-        return new ABJ_404_Solution_NGramCoveragePolicy($this->typedDbCoreOrNull());
+        return new ABJ_404_Solution_NGramCoveragePolicy($this->dbCore);
     }
 
     /** @return object */
@@ -428,7 +445,7 @@ class ABJ_404_Solution_DatabaseUpgradeNGram extends ABJ_404_Solution_DatabaseUpg
         }
         return new ABJ_404_Solution_NGramRebuilder(
             new ABJ_404_Solution_NGramRebuilderDependencies(
-                $this->typedDbCoreOrNull(),
+                $this->dbCore,
                 $this->logger,
                 $this->f,
                 $this->resolveConcreteNGramExtractor(),
@@ -448,11 +465,6 @@ class ABJ_404_Solution_DatabaseUpgradeNGram extends ABJ_404_Solution_DatabaseUpg
             : null;
     }
 
-    /** @return ABJ_404_Solution_DatabaseCore */
-    private function typedDbCoreOrNull() {
-        return $this->dbCore;
-    }
-
     /** @return ABJ_404_Solution_NGramExtractor */
     private function resolveConcreteNGramExtractor() {
         if ($this->ngramExtractor instanceof ABJ_404_Solution_NGramExtractor) {
@@ -467,7 +479,7 @@ class ABJ_404_Solution_DatabaseUpgradeNGram extends ABJ_404_Solution_DatabaseUpg
             return $this->ngramCacheRepository;
         }
         return new ABJ_404_Solution_NGramCacheRepository(
-            $this->typedDbCoreOrNull(),
+            $this->dbCore,
             $this->logger,
             new ABJ_404_Solution_NGramSimilarity(),
             function() {
@@ -481,6 +493,6 @@ class ABJ_404_Solution_DatabaseUpgradeNGram extends ABJ_404_Solution_DatabaseUpg
         if ($this->ngramCoveragePolicy instanceof ABJ_404_Solution_NGramCoveragePolicy) {
             return $this->ngramCoveragePolicy;
         }
-        return new ABJ_404_Solution_NGramCoveragePolicy($this->typedDbCoreOrNull());
+        return new ABJ_404_Solution_NGramCoveragePolicy($this->dbCore);
     }
 }

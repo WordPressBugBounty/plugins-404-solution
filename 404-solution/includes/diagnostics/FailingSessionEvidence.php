@@ -125,7 +125,7 @@ final class ABJ_404_Solution_FailingSessionEvidence {
             $record['status'] = self::STATUS_COMPUTED;
             $record['failing_request_count'] = count($failing);
 
-            $traceSource = ABJ_404_Solution_AjaxTraceJournal::supportCollectionSource();
+            $traceSource = ABJ_404_Solution_AjaxTraceJournalReader::supportCollectionSource();
             $traceLines = ABJ_404_Solution_DiagnosticJournalExcerpt::readAllLines($traceSource['paths']);
             $sessionByRequestId = self::sessionsForFailingIds($traceLines, $failing);
 

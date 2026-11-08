@@ -59,7 +59,7 @@ class ABJ_404_Solution_UninstallFeedbackEmail {
             $headers[] = 'Reply-To: ' . $contactEmail;
         }
 
-        $to = defined('ABJ404_AUTHOR_EMAIL') ? ABJ404_AUTHOR_EMAIL : '404solution@ajexperience.com';
+        $to = defined('ABJ404_AUTHOR_EMAIL') ? ABJ404_AUTHOR_EMAIL : 'support@forethought-studio.com';
         return (bool) wp_mail($to, $subject, $body, $headers);
     }
 
@@ -164,6 +164,25 @@ class ABJ_404_Solution_UninstallFeedbackEmail {
             'Tag Count'         => $contentCounts['tags'],
             'Total Pages'       => $contentCounts['pages'],
             'Total Posts'       => $contentCounts['posts'],
+        ) + self::systemInfoStatisticsRows($pluginStats);
+    }
+
+    /**
+     * The plugin-statistics rows of the system info block. A statistic the
+     * reader could not determine (null) reads as "unknown", never as 0.
+     *
+     * @param array{
+     *     redirects: array{all:int,manual:int,auto:int,regex:int,trash:int},
+     *     captured: array{all:int,captured:int,ignored:int,later:int,trash:int},
+     *     log_count: int|null,
+     *     log_table_size_mb: int|float|null,
+     *     debug_file_size_mb: int|float,
+     *     _errors?: list<string>
+     * } $pluginStats Output of UninstallDiagnostics::getPluginStatistics().
+     * @return array<string, string|int|float>
+     */
+    public static function systemInfoStatisticsRows(array $pluginStats): array {
+        return array(
             'Redirects (active)' => $pluginStats['redirects']['all'],
             '  - Manual'        => $pluginStats['redirects']['manual'],
             '  - Automatic'     => $pluginStats['redirects']['auto'],
@@ -174,8 +193,9 @@ class ABJ_404_Solution_UninstallFeedbackEmail {
             '  - Ignored'       => $pluginStats['captured']['ignored'],
             '  - Later'         => $pluginStats['captured']['later'],
             '  - Trash'         => $pluginStats['captured']['trash'],
-            'Log Entries in DB' => $pluginStats['log_count'],
-            'Log Table Size'    => $pluginStats['log_table_size_mb'] . ' MB',
+            'Log Entries in DB' => $pluginStats['log_count'] ?? 'unknown',
+            'Log Table Size'    => $pluginStats['log_table_size_mb'] === null
+                ? 'unknown' : $pluginStats['log_table_size_mb'] . ' MB',
             'Debug File Size'   => $pluginStats['debug_file_size_mb'] . ' MB',
         );
     }

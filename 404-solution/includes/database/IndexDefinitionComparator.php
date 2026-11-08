@@ -145,4 +145,36 @@ class ABJ_404_Solution_IndexDefinitionComparator {
         }
         return $liveSignature !== $goalSignature;
     }
+
+    /**
+     * Count same-named composite indexes that lost a column from the shipped
+     * definition. Missing indexes and differences in prefixes or uniqueness
+     * alone are different diagnoses. Null means the metadata is incomplete,
+     * never a healthy zero; this observer performs no repair.
+     *
+     * @param array<string, array{name: string, columns: array<int, array{column: string, prefix: int|null}>, unique: bool, describable: bool}> $liveDefinitions
+     * @param array<string, array{name: string, columns: string, unique: bool}> $ddlSpecs
+     * @return int|null
+     */
+    public static function countNarrowedCompositeIndexes(array $liveDefinitions, array $ddlSpecs): ?int {
+        $count = 0;
+        foreach ($ddlSpecs as $name => $spec) {
+            $expected = ABJ_404_Solution_CreateTableIndexParser::ddlColumnList($spec['columns']);
+            if (count($expected) < 2) {
+                continue;
+            }
+            $live = $liveDefinitions[strtolower($name)] ?? null;
+            if ($live === null) {
+                continue;
+            }
+            if (self::signatureOfLiveDefinition($live) === null) {
+                return null;
+            }
+            if (self::isDriftedFromDdlSpec($live, $spec)
+                && array_diff(array_column($expected, 'column'), array_column($live['columns'], 'column')) !== array()) {
+                $count++;
+            }
+        }
+        return $count;
+    }
 }

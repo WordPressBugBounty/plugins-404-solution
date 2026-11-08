@@ -33,10 +33,14 @@ class ABJ_404_Solution_LogsLookupRepository {
      * @return int
      */
     public function insertLookupValueAndGetID($valueToInsert) {
-        global $wpdb;
         $query = "INSERT INTO {wp_abj404_lookup} (lkup_value) VALUES (%s) ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)";
-        $this->dbCore->queryAndGetResults($query, array('query_params' => array($valueToInsert)));
-        return intval($wpdb->insert_id);
+        $result = $this->dbCore->queryAndGetResults($query, array('query_params' => array($valueToInsert)));
+        // The query envelope snapshots native mutation metadata before nested
+        // diagnostics can replace wpdb's fields. It also handles timeout-wrapped
+        // INSERTs that WordPress does not recognize as mutations.
+        if (!empty($result['last_error'])) { return 0; }
+        $insertId = $result['insert_id'] ?? 0;
+        return is_scalar($insertId) ? intval($insertId) : 0;
     }
 
     /**

@@ -28,6 +28,36 @@ class ABJ_404_Solution_FileSystemService {
     /** @var callable(string,string,array<string,int|string|bool|null>,callable): mixed|null */
     private static $operationTracer = null;
 
+    /**
+     * Run one native filesystem operation while retaining its warnings for
+     * the caller, without allowing them to escape into the request.
+     *
+     * Every warning is kept, in order, joined by "; ". One failed call often
+     * raises two: fopen() outside open_basedir first names the restriction,
+     * then reports "Failed to open stream: Operation not permitted". The
+     * first is the cause, so keeping only the last would lose it.
+     *
+     * @template T
+     * @param callable():T $operation
+     * @return array{result:T,warning:?string}
+     */
+    public static function captureFilesystemWarnings(callable $operation): array {
+        $warning = null;
+        set_error_handler(static function($severity, $message) use (&$warning) {
+            if (($severity & (E_WARNING | E_USER_WARNING | E_NOTICE | E_USER_NOTICE)) !== 0) {
+                $warning = $warning === null ? (string)$message : $warning . '; ' . (string)$message;
+                return true;
+            }
+            return false;
+        }, E_WARNING | E_USER_WARNING | E_NOTICE | E_USER_NOTICE);
+        try {
+            $result = $operation();
+        } finally {
+            restore_error_handler();
+        }
+        return array('result' => $result, 'warning' => $warning);
+    }
+
     /** @param callable(string,string,array<string,int|string|bool|null>,callable): mixed|null $tracer */
     public static function setOperationTracer($tracer): void {
         self::$operationTracer = is_callable($tracer) ? $tracer : null;
@@ -38,33 +68,29 @@ class ABJ_404_Solution_FileSystemService {
      * @return boolean
      */
     static function safeUnlink($path) {
-        if (!file_exists($path)) {
-            return true;
-        }
+        $workflow = self::captureFilesystemWarnings(static function() use ($path) {
+            if (!file_exists($path)) {
+                return array('present' => false, 'unlinked' => null, 'remaining' => false);
+            }
 
-        $unlinkError = null;
-        set_error_handler(static function($errno, $errstr) use (&$unlinkError) {
-            $unlinkError = (string)$errstr;
-            return true;
+            $unlinked = unlink($path);
+            clearstatcache(true, (string)$path);
+            return array(
+                'present' => true,
+                'unlinked' => $unlinked,
+                'remaining' => file_exists($path),
+            );
         });
-        try {
-            $result = unlink($path);
-        } finally {
-            restore_error_handler();
+        $state = $workflow['result'];
+        if ($workflow['warning'] !== null) {
+            self::logWarning('Unable to unlink file: ' . (string)$path . ' (' . $workflow['warning'] . ')');
+            return false;
         }
-        if ($result !== false) {
+        if (!$state['present'] || $state['unlinked'] !== false || !$state['remaining']) {
             return true;
         }
 
-        clearstatcache(true, (string)$path);
-        if (!file_exists($path)) {
-            return true;
-        }
-
-        $reason = $unlinkError !== null
-            ? $unlinkError
-            : 'unknown unlink failure';
-        self::logWarning('Unable to unlink file: ' . (string)$path . ' (' . $reason . ')');
+        self::logWarning('Unable to unlink file: ' . (string)$path . ' (unknown unlink failure)');
         return false;
     }
 
@@ -117,32 +143,46 @@ class ABJ_404_Solution_FileSystemService {
      * @return boolean
      */
     static function createDirectoryWithErrorMessages($directory) {
-    	if (!is_dir($directory)) {
-    		if (file_exists($directory) || file_exists(rtrim($directory, '/'))) {
-    			$unlinkErr = null;
-    			if (!@unlink($directory)) {
-    				$lastErr = error_get_last();
-    				$unlinkErr = is_array($lastErr) ? $lastErr['message'] : 'unknown';
-    			}
+        $workflow = self::captureFilesystemWarnings(static function() use ($directory) {
+            if (!is_dir($directory)) {
+                if (file_exists($directory) || file_exists(rtrim($directory, '/'))) {
+                    $unlinked = @unlink($directory);
+                    if (file_exists($directory) || file_exists(rtrim($directory, '/'))) {
+                        return array(
+                            'state' => 'conflict',
+                            'unlinked' => $unlinked,
+                        );
+                    }
+                }
 
-    			if (file_exists($directory) || file_exists(rtrim($directory, '/'))) {
-					self::logWarning("Error creating the directory " .
-    						$directory . ". A file with that name already exists" .
-    						($unlinkErr !== null ? " and unlink() failed: " . $unlinkErr : "") .
-    						". Action: aborting directory creation, returning false.");
-    				return false;
-    			}
-
-    		} else if (!@mkdir($directory, 0755, true)) {
-    			$lastErr = error_get_last();
-    			$mkdirErr = is_array($lastErr) ? $lastErr['message'] : 'unknown';
-					self::logWarning("Error creating the directory " .
-    					$directory . ". mkdir() failed: " . $mkdirErr .
-    					". Action: aborting directory creation, returning false.");
-    			return false;
-    		}
-    	}
-    	return true;
+                if (!@mkdir($directory, 0755, true)) {
+                    return array('state' => 'mkdir_failed');
+                }
+            }
+            return array('state' => 'result', 'exists' => is_dir($directory));
+        });
+        $state = $workflow['result'];
+        if ($workflow['warning'] !== null) {
+            self::logWarning('Error creating the directory ' . $directory . '. Native filesystem warning: ' . $workflow['warning']);
+            return false;
+        }
+        if ($state['state'] === 'conflict') {
+            $unlinkErr = $state['unlinked'] === false ? 'unknown' : null;
+            self::logWarning('Error creating the directory ' .
+                $directory . '. A file with that name already exists' .
+                ($unlinkErr !== null ? ' and unlink() failed: ' . $unlinkErr : '') .
+                '. Action: aborting directory creation, returning false.');
+            return false;
+        }
+        if ($state['state'] === 'mkdir_failed') {
+            $lastErr = error_get_last();
+            $mkdirErr = is_array($lastErr) ? $lastErr['message'] : 'unknown';
+            self::logWarning('Error creating the directory ' .
+                $directory . '. mkdir() failed: ' . $mkdirErr .
+                '. Action: aborting directory creation, returning false.');
+            return false;
+        }
+        return (bool)$state['exists'];
     }
 
     /** Reads an entire file at once into a string and return it.

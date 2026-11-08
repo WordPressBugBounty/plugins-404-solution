@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 	Author:      Aaron J
 	Author URI:  https://www.ajexperience.com/404-solution/
 
-	Version: 4.3.6
+	Version: 4.4.0
 	Requires at least: 5.0
 	Requires PHP: 7.4
 
@@ -49,7 +49,7 @@ if (!defined('ABJ404_PATH')) {
 // Content-addressed release marker compiled into the earliest boot file.
 // DiagnosticModuleManifestTest recomputes it from every covered PHP module.
 if (!defined('ABJ404_DIAGNOSTIC_BUILD_ID')) {
-define('ABJ404_DIAGNOSTIC_BUILD_ID', 'd9a360884e5d34fda457b7c2767dc2702f786908');
+define('ABJ404_DIAGNOSTIC_BUILD_ID', '57f4644333e7aa17d0caf7b05731b6c0a1ac90e3');
 }
 
 // The plugin version is read from this file's own header (single source of
@@ -237,6 +237,11 @@ require_once __DIR__ . '/includes/root-boot/AdminInitHandlers.php';
 require_once __DIR__ . '/includes/root-boot/AdminPageCallback.php';
 require_once __DIR__ . '/includes/root-boot/Frontend404Listener.php';
 
+// Register the dynamic page-suggestions block after WordPress has loaded its
+// block APIs. The WordPress 5.0-compatible registration reuses the shortcode
+// callback, so both entry points render the same suggestions output.
+add_action('init', 'abj404_register_page_suggestions_block', 5);
+
 
 add_action('doing_it_wrong_run', function($function_name, $message, $version) {
 	if (strpos($message, '404-solution') !== false &&
@@ -323,7 +328,7 @@ if (file_exists($__abj404_loader_path)) {
 	}
 } else {
 	$GLOBALS['abj404_boot_ok'] = false;
-	$GLOBALS['abj404_missing_files'][] = $__abj404_loader_path;
+	abj404_record_missing_file($__abj404_loader_path);
 	$GLOBALS['abj404_boot_error'] = 'Loader.php is missing.';
 }
 unset($__abj404_loader_path);
@@ -431,8 +436,12 @@ add_action('abj404_cleanupCronAction', 'abj404_dailyMaintenanceCronJobListener')
 add_action('abj404_updateLogsHitsTableAction', 'abj404_updateLogsHitsTableListener');
 add_action('abj404_refresh_status_counts', 'abj404_refreshStatusCountsListener', 10, 1);
 add_action('abj404_repair_collations', 'abj404_repairCollationsListener');
+add_action('abj404_admin_table_repair', 'abj404_adminTableRepairListener');
+add_action('abj404_legacy_page_recovery', 'abj404_legacySuggestionPageRecoveryListener');
 add_action('abj404_logsv2_canonical_backfill', 'abj404_logsv2CanonicalUrlBackfillListener');
+add_action('abj404_logsv2_min_log_id_backfill', 'abj404_logsv2MinLogIdBackfillListener');
 add_action('abj404_redirects_denorm_backfill', 'abj404_redirectsDenormBackfillListener');
+add_action('abj404_redirects_denorm_reconcile_resume', 'abj404_redirectsDenormReconcileResumeListener', 10, 1);
 add_action('abj404_redirects_sort_key_backfill', 'abj404_redirectsSortKeyBackfillListener');
 add_action('abj404_updatePermalinkCacheAction', 'abj404_updatePermalinkCacheListener', 10, 2);
 add_action('abj404_send_digest', 'abj404_sendDigestCronListener');

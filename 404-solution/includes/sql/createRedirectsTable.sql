@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS {wp_abj404_redirects} (
     `score` decimal(5,2) DEFAULT NULL COMMENT 'Match confidence score (0-100), NULL for manual redirects',
     `start_ts` bigint(20) DEFAULT NULL COMMENT 'Unix timestamp when redirect becomes active (NULL = always)',
     `end_ts` bigint(20) DEFAULT NULL COMMENT 'Unix timestamp when redirect expires (NULL = never)',
+    `query_mode` varchar(16) DEFAULT NULL COMMENT 'v1: NULL routing match/pass query; exact full match; ignore routing match/drop query; pass path match/pass query',
     `canonical_url` varchar(2048) DEFAULT NULL COMMENT 'Cached CONCAT(/, TRIM(BOTH / FROM url)) so the captured-page JOIN to logs_hits.requested_url is index-friendly. NULL until backfilled by buildRedirectsCanonicalUrlChunk().',
     `logshits` bigint(20) NOT NULL DEFAULT 0 COMMENT 'Denormalized rolled-up 404 hit count for this redirect URL, copied from the wp_abj404_logs_hits rollup (the materialized COUNT-by-canonical-requested_url aggregate of logsv2) keyed on canonical_url. Maintained by real-time write-back + nightly reconcile; backfilled by backfillRedirectsDenormColumns(). 0 until backfilled. Do NOT re-aggregate raw logsv2 here: read logs_hits (report.md Finding 2).',
     `last_used` bigint(20) DEFAULT NULL COMMENT 'Denormalized last-hit timestamp for this redirect URL, copied from the wp_abj404_logs_hits rollup (its MAX(timestamp)-by-canonical-requested_url aggregate) keyed on canonical_url. NULL until backfilled.',

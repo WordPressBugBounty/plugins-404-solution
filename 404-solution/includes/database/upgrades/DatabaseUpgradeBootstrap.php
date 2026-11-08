@@ -220,6 +220,11 @@ class ABJ_404_Solution_DatabaseUpgradeBootstrap extends ABJ_404_Solution_Databas
         // converges on such a table the admin read falls back to the wide source
         // column (correct order, filesort bounded to the Page Redirects minority).
         $this->upgrades()->redirectsSortKeyBackfillUpgrade()->refreshSortKeyBackfillLatches();
+        // URL sorting on existing Logs rows converges out of band. The indexed
+        // NULL probe also catches restored data without retaining a stale latch.
+        if (!(new ABJ_404_Solution_LogsUrlSortRepository($this->dbCore))->isReady()) {
+            ABJ_404_Solution_DatabaseUpgradeSelfHeal::enqueueAdminTableRepair();
+        }
 
         // Adopt orphaned tables AFTER target tables exist (rename handles prefix mismatches).
         $this->renameAbj404TablesToLowerCase();
@@ -234,7 +239,7 @@ class ABJ_404_Solution_DatabaseUpgradeBootstrap extends ABJ_404_Solution_Databas
             ->scheduleRebuildIfUninitialized($updatingToNewVersion);
 
         // Run one-time migration to relative paths (Issue #24)
-        if (get_option('abj404_migrated_to_relative_paths') !== '1') {
+        if (ABJ_404_Solution_OptionShapeRead::scalar('abj404_migrated_to_relative_paths') !== '1') {
             $migrationResults = $this->upgrades()->pluginUpdateUpgrade()->migrateURLsToRelativePaths();
 
             // Show admin notice if migration occurred
@@ -277,7 +282,13 @@ class ABJ_404_Solution_DatabaseUpgradeBootstrap extends ABJ_404_Solution_Databas
 
     private function lowercaseRenamer(): ABJ_404_Solution_DatabaseTableLowercaseRenamer {
         return new ABJ_404_Solution_DatabaseTableLowercaseRenamer(
-            $this->upgrades(), $this->dbCore, $this->logger, $this->getActiveBlogPrefixesLowercase()
+            $this->upgrades(),
+            $this->dbCore,
+            $this->logger,
+            $this->getActiveBlogPrefixesLowercase(),
+            function (array $candidatePrefixes): array {
+                return $this->getForeignWordPressOptionsPrefixes($candidatePrefixes);
+            }
         );
     }
 

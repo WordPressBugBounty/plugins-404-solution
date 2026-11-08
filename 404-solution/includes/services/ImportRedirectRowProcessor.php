@@ -34,7 +34,7 @@ class ABJ_404_Solution_ImportRedirectRowProcessor {
      * @param bool $overwriteExisting
      * @return array<int, string>
      */
-    function loadDataArrayFromFile($dataArray, $dryRun = false, $overwriteExisting = false): array {
+    function importRow($dataArray, $dryRun = false, $overwriteExisting = false): array {
         $fromURL = isset($dataArray['from_url']) && is_string($dataArray['from_url']) ? $dataArray['from_url'] : '';
         if ($fromURL === 'from_url' || $fromURL === 'request') {
             return array();
@@ -51,13 +51,24 @@ class ABJ_404_Solution_ImportRedirectRowProcessor {
             return $regexIssues;
         }
 
+        try {
+            $queryMode = ABJ_404_Solution_QueryStringHelper::importQueryMode($dataArray);
+        } catch (InvalidArgumentException $e) {
+            $this->logger->warn($e->getMessage());
+            return array($e->getMessage());
+        }
+        if (!$explicitRegex) {
+            $fromURL = abj_service('query_string_helper')->redirectSourceKey($fromURL, $queryMode);
+        }
+
         $existingId = $this->existingRedirectId($fromURL);
         $duplicateIssues = $this->duplicateIssues($existingId, $overwriteExisting, $fromURL);
         if (count($duplicateIssues) > 0) {
             return $duplicateIssues;
         }
 
-        $destination = $this->resolveDestination($final_dest);
+        $nativeType = isset($dataArray['type']) && is_string($dataArray['type']) ? strtolower(trim($dataArray['type'])) : '';
+        $destination = $this->resolveDestination($final_dest, $nativeType);
         if (count($destination['issues']) > 0) {
             return $destination['issues'];
         }
@@ -75,6 +86,7 @@ class ABJ_404_Solution_ImportRedirectRowProcessor {
                 'destination' => (string)$destination['final_dest'],
                 'code' => $code,
                 'statusType' => (string)$status,
+                'query_mode' => $queryMode,
             )));
         }
 
@@ -86,6 +98,7 @@ class ABJ_404_Solution_ImportRedirectRowProcessor {
             'code' => $code,
             'disabled' => 0,
             'engine' => $this->redirectEngine($dataArray),
+            'query_mode' => $queryMode,
         )));
     }
 
@@ -159,13 +172,25 @@ class ABJ_404_Solution_ImportRedirectRowProcessor {
 
     /**
      * @param string $finalDest
+     * @param string $nativeType Native CSV destination label, empty for legacy URL-only imports.
      * @return array{type: int, final_dest: string|int, issues: array<int, string>}
      */
-    private function resolveDestination(string $finalDest): array {
-        if ($finalDest === '') {
+    private function resolveDestination(string $finalDest, string $nativeType): array {
+        $internalTypes = array(
+            'page/post' => $this->typeConstant('ABJ404_TYPE_POST', 1),
+            'category' => $this->typeConstant('ABJ404_TYPE_CAT', 2),
+            'tag' => $this->typeConstant('ABJ404_TYPE_TAG', 3),
+        );
+        // Native exports retain an unavailable destination's ID. Its type is
+        // part of that identity: post/term 5 must never become Homepage.
+        $storedId = ABJ_404_Solution_ExactInteger::read($finalDest, 1);
+        if (isset($internalTypes[$nativeType]) && $storedId !== null) {
+            return array('type' => $internalTypes[$nativeType], 'final_dest' => (string)$storedId, 'issues' => array());
+        }
+        if ($finalDest === '' && !isset($internalTypes[$nativeType])) {
             return array('type' => ABJ404_TYPE_404_DISPLAYED, 'final_dest' => ABJ404_TYPE_404_DISPLAYED, 'issues' => array());
         }
-        if ($finalDest === '5') {
+        if ($finalDest === '5' && ($nativeType === '' || $nativeType === 'homepage')) {
             return array('type' => ABJ404_TYPE_HOME, 'final_dest' => ABJ404_TYPE_HOME, 'issues' => array());
         }
         if (strpos($finalDest, 'http') !== false) {
@@ -221,7 +246,11 @@ class ABJ_404_Solution_ImportRedirectRowProcessor {
      * @return array<int, string> Empty on success, else the one row-save failure issue.
      */
     private function overwriteRedirect(ABJ_404_Solution_RedirectUpdate $update): array {
-        $err = $this->redirectsRepository->updateRedirect($update);
+        try {
+            $err = $this->redirectsRepository->updateRedirect($update);
+        } catch (ABJ_404_Solution_RedirectCycleException $e) {
+            return $this->rowSaveFailure($update->getFromUrl(), $e->getMessage());
+        }
         if (is_scalar($err) && (string)$err !== '') {
             return $this->rowSaveFailure($update->getFromUrl(), (string)$err);
         }
@@ -235,8 +264,17 @@ class ABJ_404_Solution_ImportRedirectRowProcessor {
      * @return array<int, string> Empty on success, else the one row-save failure issue.
      */
     private function insertRedirect(ABJ_404_Solution_RedirectSpec $spec): array {
-        $id = $this->redirectsRepository->setupRedirect($spec);
+        try {
+            $id = $this->redirectsRepository->setupRedirect($spec);
+        } catch (ABJ_404_Solution_RedirectCycleException $e) {
+            return $this->rowSaveFailure($spec->getFromURL(), $e->getMessage());
+        }
         if ((int)$id <= 0) {
+            $cycleError = method_exists($this->redirectsRepository, 'getLastWriteError')
+                ? (string)$this->redirectsRepository->getLastWriteError() : '';
+            if ($cycleError !== '') {
+                return $this->rowSaveFailure($spec->getFromURL(), $cycleError);
+            }
             return $this->rowSaveFailure($spec->getFromURL(), 'insert_returned_no_id');
         }
         return array();

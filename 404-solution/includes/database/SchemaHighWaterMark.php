@@ -36,7 +36,9 @@ class ABJ_404_Solution_SchemaHighWaterMark {
      *                     stored value is not a version string.
      */
     public static function read(): ?string {
-        $stored = get_option(self::OPTION, '');
+        // Shape-checked: an object cache answering with an array must not
+        // read as an unreadable record and engage the older-build guard.
+        $stored = ABJ_404_Solution_OptionShapeRead::scalar(self::OPTION, '');
         if ($stored === '') {
             return '';
         }
@@ -52,17 +54,26 @@ class ABJ_404_Solution_SchemaHighWaterMark {
      * @return void
      */
     public static function raiseTo(string $version): void {
-        $stored = self::read();
-        if ($stored === null) {
-            $raw = get_option(self::OPTION, '');
+        $unreadable = null;
+        $result = ABJ_404_Solution_OptionRowCompareAndSwap::update(array(
+            'optionName' => self::OPTION,
+            'compute' => static function (?string $stored) use ($version, &$unreadable): ?string {
+                $unreadable = null;
+                if ($stored === null || $stored === '') {
+                    return $version;
+                }
+                if (preg_match(self::VERSION_PATTERN, $stored) !== 1) {
+                    $unreadable = $stored;
+                    return $version;
+                }
+                return version_compare($stored, $version, '<') ? $version : null;
+            },
+        ));
+        // Report a repair only after its conditional write succeeded. A lost
+        // race may instead reveal a valid newer record, which must survive.
+        if ($result === ABJ_404_Solution_OptionRowCompareAndSwap::RESULT_SWAPPED && $unreadable !== null) {
             abj_service('logging')->warn("The schema high-water record (option " . self::OPTION .
-                ") held an unreadable value (" . (is_string($raw) ? '"' . $raw . '"' : gettype($raw)) .
-                "); replaced it with " . $version . ".");
-            update_option(self::OPTION, $version, false);
-            return;
-        }
-        if ($stored === '' || version_compare($stored, $version, '<')) {
-            update_option(self::OPTION, $version, false);
+                ") held an unreadable value (\"" . $unreadable . "\"); replaced it with " . $version . ".");
         }
     }
 

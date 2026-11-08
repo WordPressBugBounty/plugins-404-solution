@@ -19,6 +19,10 @@ if (!defined('ABSPATH')) {
  * a retention rule (delete fast-completing requests) silently erased the
  * evidence of the very requests under investigation. Retention now has one
  * home, one test surface, and exactly one bound: rotation.
+ *
+ * Reading the journal back for support collection is
+ * ABJ_404_Solution_AjaxTraceJournalReader's job. The reader learns this class's
+ * file names from the constants below; this class never calls the reader.
  */
 final class ABJ_404_Solution_AjaxTraceJournal {
 
@@ -30,14 +34,6 @@ final class ABJ_404_Solution_AjaxTraceJournal {
     const MAX_JOURNAL_BYTES = 524288;
     const MAX_PENDING_BYTES = 32768;
     const PROMOTION_LOCK_WAIT_TIMEOUT_US = 50000;
-
-    /**
-     * Share of the support payload's excerpt field this journal may claim.
-     * Smaller than the checkpoint journal's because a request costs ~11 stage
-     * records here against ~27 checkpoints. The per-section budgets are proven
-     * to sum inside the report contract by SupportExcerptBudgetContractTest.
-     */
-    const MAX_SUPPORT_EXCERPT_BYTES = 49152;
 
     /** @var string Trace directory, with a trailing separator. */
     private $directory;
@@ -65,8 +61,20 @@ final class ABJ_404_Solution_AjaxTraceJournal {
      * @param array<string, mixed> $record
      */
     public function append(array $record): void {
-        if (@is_file($this->pendingPath)) {
-            $size = @filesize($this->pendingPath);
+        $pendingExists = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            function () { return is_file($this->pendingPath); }
+        );
+        if ($pendingExists['warning'] !== null) {
+            $this->reportFailure('AJAX pending trace could not be inspected: '
+                . $this->pendingPath, $pendingExists['warning']);
+        }
+        if ($pendingExists['result']) {
+            $sizeResult = ABJ_404_Solution_HostFilesystemCall::filesize($this->pendingPath);
+            $size = $sizeResult['result'];
+            if ($sizeResult['warning'] !== null) {
+                $this->reportFailure('AJAX pending trace size could not be read: '
+                    . $this->pendingPath, $sizeResult['warning']);
+            }
             if (is_int($size) && $size >= self::MAX_PENDING_BYTES) {
                 $this->reportFailure('AJAX pending trace reached its size limit: ' . $this->pendingPath);
                 return;
@@ -81,50 +89,103 @@ final class ABJ_404_Solution_AjaxTraceJournal {
      * there is no outcome-based retention.
      */
     public function promote(): void {
-        if (!@is_file($this->pendingPath)) {
+        $pendingExists = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            function () { return is_file($this->pendingPath); }
+        );
+        if (!$pendingExists['result']) {
             return;
         }
-        $lock = @fopen($this->directory . self::LOCK_FILE, 'cb');
+        $lockResult = ABJ_404_Solution_HostFilesystemCall::fopen($this->directory . self::LOCK_FILE, 'cb');
+        $lock = $lockResult['result'];
         if ($lock === false) {
             $this->reportFailure('AJAX trace journal lock could not be opened. Pending evidence remains at '
-                . $this->pendingPath);
+                . $this->pendingPath, $lockResult['warning']);
             return;
         }
         if (!$this->acquirePromotionLock($lock)) {
-            @fclose($lock);
+            $closed = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($lock): bool { return fclose($lock); }
+            );
             $this->reportFailure('AJAX trace journal lock wait exceeded. Pending evidence remains at '
-                . $this->pendingPath);
+                . $this->pendingPath, $closed['warning']);
             return;
         }
         try {
-            $contents = @file_get_contents($this->pendingPath);
+            $contentsResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                function () { return file_get_contents($this->pendingPath); }
+            );
+            $contents = $contentsResult['result'];
             if (!is_string($contents)) {
-                $this->reportFailure('AJAX pending trace could not be read: ' . $this->pendingPath);
+                $this->reportFailure('AJAX pending trace could not be read: '
+                    . $this->pendingPath, $contentsResult['warning']);
                 return;
             }
             $journal = $this->directory . self::JOURNAL_FILE;
-            $size = @filesize($journal);
-            if (is_int($size) && ($size + strlen($contents)) > self::MAX_JOURNAL_BYTES) {
-                $old = $this->directory . self::ROTATED_FILE;
-                if (@is_file($old) && !@unlink($old)) {
-                    $this->reportFailure('AJAX rotated trace could not be removed: ' . $old);
-                    return;
-                }
-                if (@is_file($journal) && !@rename($journal, $old)) {
-                    $this->reportFailure('AJAX trace journal rotation failed: ' . $journal);
-                    return;
-                }
+            $journalExists = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($journal): bool { return is_file($journal); }
+            );
+            $size = 0;
+            if ($journalExists['result']) {
+                $journalSize = ABJ_404_Solution_HostFilesystemCall::filesize($journal);
+                $size = $journalSize['result'];
             }
-            $written = @file_put_contents($journal, $contents, FILE_APPEND | LOCK_EX);
+            if (is_int($size) && ($size + strlen($contents)) > self::MAX_JOURNAL_BYTES
+                    && !$this->rotateJournal($journal)) {
+                return;
+            }
+            $writtenResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($journal, $contents) {
+                    return file_put_contents($journal, $contents, FILE_APPEND | LOCK_EX);
+                }
+            );
+            $written = $writtenResult['result'];
             if ($written === false) {
-                $this->reportFailure('AJAX trace journal append failed: ' . $journal);
+                $this->reportFailure('AJAX trace journal append failed: ' . $journal,
+                    $writtenResult['warning']);
                 return;
             }
             $this->removePending();
         } finally {
-            @flock($lock, LOCK_UN);
-            @fclose($lock);
+            $unlocked = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($lock): bool { return flock($lock, LOCK_UN); }
+            );
+            $closed = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($lock): bool { return fclose($lock); }
+            );
+            if ($unlocked['warning'] !== null) {
+                $this->reportFailure('AJAX trace journal lock could not be released: '
+                    . $this->pendingPath, $unlocked['warning']);
+            }
+            if ($closed['warning'] !== null) {
+                $this->reportFailure('AJAX trace journal lock could not be closed: '
+                    . $this->pendingPath, $closed['warning']);
+            }
         }
+    }
+
+    private function rotateJournal(string $journal): bool {
+        $old = $this->directory . self::ROTATED_FILE;
+        $removed = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($old): bool {
+                return !is_file($old) || unlink($old);
+            }
+        );
+        if (!$removed['result']) {
+            $this->reportFailure('AJAX rotated trace could not be removed: ' . $old,
+                $removed['warning']);
+            return false;
+        }
+        $renamed = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($journal, $old): bool {
+                return !is_file($journal) || rename($journal, $old);
+            }
+        );
+        if (!$renamed['result']) {
+            $this->reportFailure('AJAX trace journal rotation failed: ' . $journal,
+                $renamed['warning']);
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -134,19 +195,37 @@ final class ABJ_404_Solution_AjaxTraceJournal {
      * request finished here".
      */
     public function recoverAbandoned(): void {
-        $matches = glob($this->directory . self::PENDING_GLOB);
+        $matches = self::pendingPaths($this->directory . self::PENDING_GLOB);
         $cutoff = $this->clock->now() - self::RECOVER_PENDING_AFTER_SECONDS;
         $ownPending = $this->pendingPath;
-        foreach (is_array($matches) ? $matches : array() as $path) {
-            $modified = @filemtime($path);
+        foreach ($matches as $path) {
+            $pathExists = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($path): bool { return is_file($path); }
+            );
+            $modified = false;
+            if ($pathExists['result']) {
+                $modifiedResult = ABJ_404_Solution_HostFilesystemCall::filemtime($path);
+                $modified = $modifiedResult['result'];
+            }
             if ($modified === false || $modified > $cutoff) {
                 continue;
             }
             $this->pendingPath = $path;
-            $handle = @fopen($path, 'rb');
-            $firstLine = is_resource($handle) ? @fgets($handle) : false;
+            $handleResult = ABJ_404_Solution_HostFilesystemCall::fopen($path, 'rb');
+            $handle = $handleResult['result'];
+            $firstLine = false;
             if (is_resource($handle)) {
-                @fclose($handle);
+                $firstLineResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                    static function () use ($handle) { return fgets($handle); }
+                );
+                $firstLine = $firstLineResult['result'];
+                $closed = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                    static function () use ($handle): bool { return fclose($handle); }
+                );
+                if ($closed['warning'] !== null) {
+                    $this->reportFailure('Abandoned AJAX trace handle could not be closed: ' . $path,
+                        $closed['warning']);
+                }
             }
             $originalContext = is_string($firstLine) ? json_decode($firstLine, true) : null;
             if (is_array($originalContext)) {
@@ -164,157 +243,14 @@ final class ABJ_404_Solution_AjaxTraceJournal {
         }
     }
 
-    /**
-     * Bounded recent journal lines for the existing support-request payload,
-     * newest files last. Pending spools are included on purpose: a request
-     * that is hung RIGHT NOW has written nothing to the journal yet, and it
-     * is the most interesting request in the file.
-     *
-     * This journal holds no client verdicts of its own -- they are written to
-     * the checkpoint journal -- so a caller that omits $knownFailingIds gets an
-     * excerpt that cannot tell a browser-lost request from a healthy one. See
-     * ABJ_404_Solution_DiagnosticJournalExcerpt::failureIndex().
-     *
-     * @param array<string, bool> $knownFailingIds
-     * @param array{paths: array<int, string>, manifest: array<string, mixed>}|null $fileSelection
-     *   Shared selection plan used by the primary support manifest.
-     */
-    public static function readRecentForSupport(
-        array $knownFailingIds = array(),
-        ?array $fileSelection = null
-    ): string {
-        try {
-            $directory = self::resolveSupportDirectory();
-            if ($directory === '') {
-                return '';
-            }
-            return ABJ_404_Solution_DiagnosticJournalExcerpt::compose(
-                self::supportExcerptPaths($directory),
-                self::MAX_SUPPORT_EXCERPT_BYTES,
-                "Recent AJAX stage traces (JSONL):\n",
-                $knownFailingIds,
-                null,
-                $fileSelection
-            );
-        } catch (Throwable $e) {
-            self::reportStaticFailure('AJAX trace support excerpt failed: ' . $e->getMessage());
-            return '';
+    /** @return array<int, string> */
+    private static function pendingPaths(string $pattern): array {
+        $result = ABJ_404_Solution_HostFilesystemCall::glob($pattern);
+        if ($result['warning'] !== null && $result['warning'] !== '') {
+            self::reportStaticFailure('AJAX trace pending glob failed: ' . $pattern
+                . ' (' . $result['warning'] . ')');
         }
-    }
-
-    /**
-     * What readRecentForSupport() will look at, whether or not any of it
-     * exists, so ABJ_404_Solution_DiagnosticCollectionManifest can state what
-     * was checked even when the answer is "nothing was there".
-     *
-     * The candidate list comes from the same private helper the reader itself
-     * uses: a manifest that described a DIFFERENT set of files than the read
-     * would be worse than no manifest at all.
-     *
-     * `writer_arming` is reported alongside, because a channel whose WRITER is
-     * opt-in has a second way to come back empty that stats of the directory
-     * cannot see. Support report 2026-08-27 (Azure App Service, plugin 4.3.4)
-     * spent the whole capture on that difference: usable directory, writable
-     * directory, zero files, and no way to learn that
-     * ABJ_404_Solution_AjaxDiagnosticRequestPolicy had never armed the writer
-     * on that site. "Nothing to record" and "recording was off" must not
-     * produce the same manifest.
-     *
-     * @return array{channel: string, directory: string, usable: bool, paths: array<int, string>,
-     *   writer_arming: array<string, mixed>}
-     */
-    public static function supportCollectionSource(): array {
-        try {
-            $directory = self::resolveSupportDirectory();
-            return array(
-                'channel' => 'ajax_stage_trace',
-                'directory' => $directory,
-                'usable' => $directory !== '',
-                'paths' => $directory === '' ? array() : self::supportExcerptPaths($directory),
-                'writer_arming' => self::writerArming(),
-            );
-        } catch (Throwable $e) {
-            self::reportStaticFailure('AJAX trace support source resolution failed: ' . $e->getMessage());
-            return array(
-                'channel' => 'ajax_stage_trace',
-                'directory' => '',
-                'usable' => false,
-                'paths' => array(),
-                'writer_arming' => self::writerArming(),
-            );
-        }
-    }
-
-    /**
-     * What the trace WRITER would do on this site right now. Never throws: a
-     * manifest that cannot describe the arming policy still has to describe the
-     * files, so an unavailable policy is reported as such rather than removing
-     * the field.
-     *
-     * @return array<string, mixed>
-     */
-    private static function writerArming(): array {
-        if (!class_exists('ABJ_404_Solution_AjaxDiagnosticRequestPolicy')) {
-            return array('status' => 'unavailable', 'reason' => 'policy_class_unavailable');
-        }
-        try {
-            return ABJ_404_Solution_AjaxDiagnosticRequestPolicy::armingState();
-        } catch (Throwable $e) {
-            self::reportStaticFailure('AJAX trace arming state failed: ' . $e->getMessage());
-            return array('status' => 'unavailable', 'reason' => 'policy_read_failed');
-        }
-    }
-
-    /**
-     * Rotated file, current journal, then any live pending spools -- oldest
-     * first, which is the order the excerpt reader breaks mtime ties on.
-     *
-     * @param string $directory With a trailing separator.
-     * @return array<int, string>
-     */
-    private static function supportExcerptPaths(string $directory): array {
-        $paths = array(
-            $directory . self::ROTATED_FILE,
-            $directory . self::JOURNAL_FILE,
-        );
-        $pendingPaths = glob($directory . self::PENDING_GLOB);
-        return is_array($pendingPaths) ? array_merge($paths, $pendingPaths) : $paths;
-    }
-
-    /**
-     * Existing journal and pending-spool files, for a channel that carries
-     * them WHOLE. See CheckpointJournalReader::supportArchivePaths().
-     *
-     * @return array<int, string>
-     */
-    public static function supportArchivePaths(): array {
-        try {
-            $directory = self::resolveSupportDirectory();
-            if ($directory === '') {
-                return array();
-            }
-            $paths = array();
-            foreach (array(self::JOURNAL_FILE, self::ROTATED_FILE) as $name) {
-                if (@is_file($directory . $name)) {
-                    $paths[] = $directory . $name;
-                }
-            }
-            $pendingPaths = glob($directory . self::PENDING_GLOB);
-            return is_array($pendingPaths) ? array_merge($paths, $pendingPaths) : $paths;
-        } catch (Throwable $e) {
-            self::reportStaticFailure('AJAX trace archive path resolution failed: ' . $e->getMessage());
-            return array();
-        }
-    }
-
-    /**
-     * The trace directory as the read-side callers see it, with a trailing
-     * separator, or '' when unavailable. Resolved through the same filter the
-     * writer uses so a site that relocates the directory relocates every
-     * reader with it.
-     */
-    private static function resolveSupportDirectory(): string {
-        return ABJ_404_Solution_DiagnosticDirectoryResolver::resolve();
+        return is_array($result['result']) ? $result['result'] : array();
     }
 
     /** @param array<string, mixed> $record */
@@ -334,7 +270,10 @@ final class ABJ_404_Solution_AjaxTraceJournal {
             self::PROMOTION_LOCK_WAIT_TIMEOUT_US
         );
         if ($acquired['status'] === 'failed') {
-            $this->reportFailure('AJAX trace file could not be opened: ' . $path);
+            $this->reportFailure(
+                'AJAX trace file could not be opened: ' . $path,
+                $acquired['warning'] !== '' ? $acquired['warning'] : null
+            );
             return false;
         }
         if ($acquired['status'] === 'lock_timeout') {
@@ -345,7 +284,10 @@ final class ABJ_404_Solution_AjaxTraceJournal {
             $written = ABJ_404_Solution_DiagnosticAppendStream::append($path, $json . "\n");
             $ok = $written['status'] === 'complete';
             if (!$ok) {
-                $this->reportFailure('AJAX trace append/flush failed: ' . $path);
+                $this->reportFailure(
+                    'AJAX trace append/flush failed: ' . $path,
+                    $written['warning'] !== '' ? $written['warning'] : null
+                );
             }
         } finally {
             ABJ_404_Solution_DiagnosticAppendStream::release($path);
@@ -357,8 +299,17 @@ final class ABJ_404_Solution_AjaxTraceJournal {
         // Drop the held descriptor BEFORE unlinking: a descriptor to a deleted
         // inode accepts writes that no reader can ever find.
         ABJ_404_Solution_DiagnosticAppendStream::invalidate($this->pendingPath);
-        if (@is_file($this->pendingPath) && !@unlink($this->pendingPath)) {
-            $this->reportFailure('AJAX pending trace could not be removed: ' . $this->pendingPath);
+        $isFile = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            function () { return is_file($this->pendingPath); }
+        );
+        if ($isFile['result']) {
+            $removed = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                function () { return unlink($this->pendingPath); }
+            );
+            if (!$removed['result']) {
+                $this->reportFailure('AJAX pending trace could not be removed: '
+                    . $this->pendingPath, $removed['warning']);
+            }
         }
     }
 
@@ -366,7 +317,10 @@ final class ABJ_404_Solution_AjaxTraceJournal {
     private function acquirePromotionLock($lock): bool {
         $started = $this->monotonicNanoseconds();
         do {
-            if (@flock($lock, LOCK_EX | LOCK_NB)) {
+            $locked = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($lock): bool { return flock($lock, LOCK_EX | LOCK_NB); }
+            );
+            if ($locked['result']) {
                 return true;
             }
             if ($this->elapsedMicroseconds($started) >= self::PROMOTION_LOCK_WAIT_TIMEOUT_US) {
@@ -386,12 +340,13 @@ final class ABJ_404_Solution_AjaxTraceJournal {
         return max(0, (int)round(($this->monotonicNanoseconds() - $started) / 1000));
     }
 
-    private function reportFailure(string $message): void {
+    private function reportFailure(string $message, ?string $nativeWarning = null): void {
         if ($this->failureReported) {
             return;
         }
         $this->failureReported = true;
-        self::reportStaticFailure($message);
+        $detail = $nativeWarning === null ? '' : ' (' . $nativeWarning . ')';
+        self::reportStaticFailure($message . $detail);
     }
 
     private static function reportStaticFailure(string $message): void {

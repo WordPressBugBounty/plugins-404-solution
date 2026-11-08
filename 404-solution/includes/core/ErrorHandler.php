@@ -42,10 +42,14 @@ class ABJ_404_Solution_ErrorHandler {
      */
     private static $bootWallTime = null;
 
+    /** @var array<string, mixed>|null Original fatal before WordPress teardown mutates PHP's last error. */
+    private static $shutdownFatal = null;
+
     /** Setup.
      * @return void
      */
     static function init(): void {
+        self::$shutdownFatal = null;
         // store the original error handler.
         self::$originalErrorHandler = set_error_handler(function(int $errno, string $errstr, string $errfile = '', int $errline = 0): bool { return false; });
         restore_error_handler();
@@ -57,6 +61,15 @@ class ABJ_404_Solution_ErrorHandler {
             self::$reservedMemory = str_repeat('R', 262144);
         }
         self::precomputeCrashBeaconPath();
+        self::precomputeCrashBeaconRequestContext();
+        // REST_REQUEST is defined after the earliest plugin bootstrap. Refresh
+        // the primitive snapshot at the REST lifecycle boundary before handlers
+        // can fail, so REST fatals are not mislabeled as front-end requests.
+        if (function_exists('add_action')) {
+            add_action('rest_api_init', static function (): void {
+                self::precomputeCrashBeaconRequestContext();
+            }, PHP_INT_MIN, 0);
+        }
         if (self::$bootWallTime === null) {
             try {
                 self::recordBootResourceSnapshot(ABJ_404_Solution_PhpRuntimeCapabilityAdapter::resourceUsage(), abj_clock()->nowFloat());
@@ -64,7 +77,86 @@ class ABJ_404_Solution_ErrorHandler {
                 abj404_logPhpFallback('boot-resource-snapshot', 'boot resource snapshot failed (code ' . $e->getCode() . '): ' . $e->getMessage());
             }
         }
+        // WordPress's shutdown action runs before our raw PHP callback. Its
+        // diagnostics and other plugins may warn or call error_clear_last().
+        // Preserve only the original fatal here; all processing stays below.
+        add_filter('wp_php_error_message', array(__CLASS__, 'rememberWordPressFatal'), PHP_INT_MIN, 2);
+        add_action('shutdown', array(__CLASS__, 'rememberFatalAtShutdown'), PHP_INT_MIN, 0);
+        add_action('shutdown', array(__CLASS__, 'retireShutdownCallbacksWithoutRuntime'), PHP_INT_MIN, 0);
+        // PHP shutdown registrations cannot be removed. During plugin
+        // uninstall or direct CLI deletion, this callback may run after the
+        // plugin directory is gone, so fatal processing must stay inert and
+        // avoid constructing collaborators that would autoload deleted files.
         register_shutdown_function('ABJ_404_Solution_ErrorHandler::FatalErrorHandler');
+    }
+
+    /**
+     * Whether the plugin runtime is still present for shutdown handling.
+     *
+     * The uninstall marker identifies this plugin's own teardown. Without it,
+     * a direct active-plugin deletion is detected by checking this class file
+     * before any service or autoloader work can occur.
+     *
+     * @return bool
+     */
+    private static function isRuntimeAvailable(): bool {
+        if (defined('WP_UNINSTALL_PLUGIN') && defined('ABJ404_NAME')
+            && WP_UNINSTALL_PLUGIN === ABJ404_NAME) {
+            return false;
+        }
+        clearstatcache(true, __FILE__);
+        return is_file(__FILE__);
+    }
+
+    /**
+     * Drop every WordPress shutdown callback defined in this plugin's files
+     * once its runtime is gone (its own uninstall, or `wp plugin delete` of
+     * the active plugin).
+     *
+     * The callbacks are registered in memory while the files are deleted by
+     * the same request, so each one that reaches a class not yet autoloaded
+     * (a repository, the logger in its own catch block) fatals with exit 255
+     * after WordPress reported success. Retiring them here, from the one
+     * callback that is already loaded and runs first, covers every current
+     * and future shutdown action without a guard in each. Priorities above
+     * PHP_INT_MIN only: callbacks at this priority are being iterated now.
+     * Nothing happens while the runtime is present.
+     */
+    public static function retireShutdownCallbacksWithoutRuntime(): void {
+        if (self::isRuntimeAvailable()) {
+            return;
+        }
+        $hook = isset($GLOBALS['wp_filter']['shutdown']) ? $GLOBALS['wp_filter']['shutdown'] : null;
+        if (!is_object($hook) || !isset($hook->callbacks) || !is_array($hook->callbacks)) {
+            return;
+        }
+        $pluginRoot = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR;
+        foreach ($hook->callbacks as $priority => $entries) {
+            if ($priority <= PHP_INT_MIN) {
+                continue;
+            }
+            foreach ($entries as $entry) {
+                if (self::isDefinedUnder($entry['function'], $pluginRoot)) {
+                    remove_action('shutdown', $entry['function'], $priority);
+                }
+            }
+        }
+    }
+
+    /**
+     * Whether a callable's code lives in a file under the given directory.
+     * A callable that cannot be inspected is treated as not ours and left alone.
+     *
+     * @param mixed $callback A WordPress hook callback.
+     * @param string $directory Directory path ending in a separator.
+     * @return bool
+     */
+    private static function isDefinedUnder($callback, string $directory): bool {
+        if (!is_callable($callback)) {
+            return false;
+        }
+        $file = (new ReflectionFunction(Closure::fromCallable($callback)))->getFileName();
+        return is_string($file) && strncmp($file, $directory, strlen($directory)) === 0;
     }
 
     /** Try to capture PHP errors.
@@ -91,7 +183,7 @@ class ABJ_404_Solution_ErrorHandler {
         // is 0 and `& $errno` is 0; on PHP 8.0+ the specific level bit is
         // cleared and `& $errno` is also 0. Returning false here lets
         // PHP's default handler honour the suppression.
-        if ((error_reporting() & $errno) === 0) {
+        if ((error_reporting() & $errno) === 0 || !self::isRuntimeAvailable()) {
             return false;
         }
 
@@ -191,8 +283,44 @@ class ABJ_404_Solution_ErrorHandler {
 
     /** @return bool */
     static function FatalErrorHandler(): bool {
-        $lasterror = error_get_last();
+        $lasterror = self::$shutdownFatal ?? error_get_last();
+        self::$shutdownFatal = null;
         return self::processFatalError($lasterror);
+    }
+
+    /**
+     * @param mixed $message
+     * @param mixed $error
+     * @return mixed
+     */
+    public static function rememberWordPressFatal($message, $error = null) {
+        // Core passes the original error even if recovery/template work has
+        // already changed error_get_last(). Leave its response untouched.
+        self::rememberFatal($error);
+        return $message;
+    }
+
+    /** Fallback for core's fatal handler being disabled or unavailable. */
+    public static function rememberFatalAtShutdown(): void {
+        self::rememberFatal(error_get_last());
+    }
+
+    /** @param mixed $error Snapshot only: no I/O, services, logging, or response work. */
+    private static function rememberFatal($error): void {
+        if (self::$shutdownFatal !== null || !is_array($error)
+            || !is_int($error['type'] ?? null)
+            || !in_array($error['type'], array(E_ERROR, E_PARSE, E_CORE_ERROR,
+                E_COMPILE_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR), true)
+            || !is_string($error['file'] ?? null) || $error['file'] === '') {
+            return;
+        }
+        self::releaseReservedMemory();
+        self::$shutdownFatal = array(
+            'type' => $error['type'],
+            'file' => substr($error['file'], 0, 4096),
+            'line' => is_int($error['line'] ?? null) ? $error['line'] : 0,
+            'message' => is_string($error['message'] ?? null) ? substr($error['message'], 0, 8192) : '',
+        );
     }
 
     /**
@@ -256,6 +384,32 @@ class ABJ_404_Solution_ErrorHandler {
     }
 
     /**
+     * Cache request identity while memory is healthy. Fatal shutdown reads only
+     * these primitive globals and does not inspect WordPress request state.
+     *
+     * @return void
+     */
+    private static function precomputeCrashBeaconRequestContext(): void {
+        try {
+            $kind = ABJ_404_Solution_RequestKind::current();
+            $GLOBALS['abj404_crash_beacon_request_kind'] = $kind;
+            $GLOBALS['abj404_crash_beacon_request_action'] = $kind === ABJ_404_Solution_RequestKind::KIND_ADMIN_AJAX
+                ? ABJ_404_Solution_RequestKind::currentAjaxAction() : null;
+        } catch (\Throwable $e) {
+            // Request identity is additive diagnostics. A missing identity
+            // must never prevent the fatal handler from registering the crash.
+            $GLOBALS['abj404_crash_beacon_request_kind'] = null;
+            $GLOBALS['abj404_crash_beacon_request_action'] = null;
+            $message = 'crash-beacon request context unavailable: ' . $e->getMessage();
+            if (function_exists('abj404_logPhpFallback')) {
+                abj404_logPhpFallback('crash-beacon-precompute', $message);
+            } else {
+                ABJ_404_Solution_PhpRuntimeCapabilityAdapter::writeErrorLog('404 Solution: ' . $message);
+            }
+        }
+    }
+
+    /**
      * Process a fatal error (shutdown handler).
      * Public for unit tests (allows injecting a fake last error).
      *
@@ -263,6 +417,9 @@ class ABJ_404_Solution_ErrorHandler {
      * @return bool
      */
     public static function processFatalError($lasterror): bool {
+        if (!self::isRuntimeAvailable()) {
+            return false;
+        }
         $processor = new ABJ_404_Solution_FatalErrorProcessor();
         return $processor->process($lasterror);
     }

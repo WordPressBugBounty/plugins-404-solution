@@ -96,8 +96,8 @@ class ABJ_404_Solution_Ajax_UninstallPrefs {
         if ($save_result === false) {
             // Read back the option to verify it was actually saved
             $saved_value = is_multisite() && self::isNetworkActivated()
-                ? get_site_option($option_name)
-                : get_option($option_name);
+                ? ABJ_404_Solution_OptionShapeRead::networkArrayValue($option_name)
+                : ABJ_404_Solution_OptionShapeRead::arrayValue($option_name);
 
             // If the saved value doesn't match what we tried to save, it's a real failure
             if ($saved_value !== $preferences) {

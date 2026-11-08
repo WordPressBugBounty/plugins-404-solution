@@ -290,6 +290,56 @@ class ABJ_404_Solution_ScheduledEventInspector {
     }
 
     /**
+     * The earliest due time of any event in the cron store, for any hook, or
+     * null when the store is empty or cannot be read.
+     *
+     * WP-Cron dispatches every due event regardless of which plugin owns it,
+     * so the oldest stored timestamp is site-wide evidence about dispatch:
+     * one event long past due means nothing is running the queue. Like
+     * anyEventIsStored(), this does not refresh the option cache itself.
+     */
+    public function oldestStoredEventTimestamp(): ?int {
+        if (!function_exists('_get_cron_array')) {
+            return null;
+        }
+        $crons = _get_cron_array();
+        if (!is_array($crons)) {
+            return null;
+        }
+        $oldest = null;
+        foreach ($crons as $timestamp => $eventsByHook) {
+            if (!is_int($timestamp) || !is_array($eventsByHook) || $eventsByHook === array()) {
+                continue;
+            }
+            $oldest = $oldest === null ? $timestamp : min($oldest, $timestamp);
+        }
+        return $oldest;
+    }
+
+    /**
+     * Prove a whole-hook removal, including every argument tuple. Unlike an
+     * advisory scheduling probe, an incomplete store cannot establish absence.
+     */
+    public function hookIsAbsent(string $hook): bool {
+        if (!function_exists('_get_cron_array')) {
+            throw new UnexpectedValueException('_get_cron_array unavailable while verifying removal of cron hook ' . $hook);
+        }
+        $crons = _get_cron_array();
+        if (!is_array($crons)) {
+            throw new UnexpectedValueException('_get_cron_array returned malformed data while verifying removal of cron hook ' . $hook);
+        }
+        foreach ($crons as $eventsByHook) {
+            if (!is_array($eventsByHook)) {
+                throw new UnexpectedValueException('Malformed cron event bucket while verifying removal of hook ' . $hook);
+            }
+            if (array_key_exists($hook, $eventsByHook) && $eventsByHook[$hook] !== []) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
      * Answer whether the event a removal targeted is gone from the cron store.
      *
      * The mirror image of {@see requestedEventIsStored}: wp_unschedule_event()
@@ -390,18 +440,14 @@ class ABJ_404_Solution_ScheduledEventInspector {
      * `cron` is autoloaded on a stock install, so it is served out of the
      * `alloptions` blob; a site that has flipped it to non-autoloaded caches it
      * under its own key, and a site that has never scheduled anything caches
-     * its absence in `notoptions`. Same three keys, and the same reason, as
-     * ABJ_404_Solution_FeedbackSiteTokenStore::clearOptionCaches().
+     * its absence in `notoptions`. Only a bundle containing cron is discarded;
+     * unrelated autoloaded values survive, using the same policy as
+     * ABJ_404_Solution_OptionCacheInvalidator::site().
      *
      * @return void
      */
     public function refreshCronStoreReads(): void {
-        if (!function_exists('wp_cache_delete')) {
-            return;
-        }
-        wp_cache_delete('cron', 'options');
-        wp_cache_delete('notoptions', 'options');
-        wp_cache_delete('alloptions', 'options');
+        ABJ_404_Solution_OptionCacheInvalidator::site('cron');
     }
 
     /**

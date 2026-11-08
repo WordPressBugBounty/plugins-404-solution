@@ -180,7 +180,20 @@ final class ABJ_404_Solution_AjaxTeardownRecorder {
             return;
         }
         $markerPath = $this->directory . self::SHUTDOWN_INVENTORY_MARKER;
-        $existingMarker = @file_get_contents($markerPath);
+        $markerExists = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($markerPath) { return is_file($markerPath); }
+        );
+        $existingMarker = false;
+        if ($markerExists['result']) {
+            $markerRead = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($markerPath) { return file_get_contents($markerPath); }
+            );
+            $existingMarker = $markerRead['result'];
+            if ($markerRead['warning'] !== null) {
+                abj404_logPhpFallback('logger-internal', 'Shutdown inventory marker could not be read: '
+                    . $markerPath . ' (' . $markerRead['warning'] . ')');
+            }
+        }
         if ($existingMarker === $generationKey) {
             self::$inventoryCapturedForRotation[$this->directory] = $generationKey;
             return;
@@ -190,7 +203,13 @@ final class ABJ_404_Solution_AjaxTeardownRecorder {
             'event' => 'shutdown_hook_inventory',
             'rotation_key' => $generationKey,
         ), ABJ_404_Solution_ShutdownEnvironmentInventory::capture()));
-        @file_put_contents($markerPath, $generationKey, LOCK_EX);
+        $markerWrite = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($markerPath, $generationKey) { return file_put_contents($markerPath, $generationKey, LOCK_EX); }
+        );
+        if ($markerWrite['warning'] !== null) {
+            abj404_logPhpFallback('logger-internal', 'Shutdown inventory marker could not be written: '
+                . $markerPath . ' (' . $markerWrite['warning'] . ')');
+        }
         // Promote here rather than relying on a later sentinel: the sentinel
         // that writes this may be the last one to run, and an unpromoted spool
         // waits 300 seconds for another request to recover it.
@@ -215,8 +234,26 @@ final class ABJ_404_Solution_AjaxTeardownRecorder {
      * the key is stable for the rest of the generation.
      */
     private function journalGenerationKey(): string {
-        $rotationMtime = @filemtime($this->directory . ABJ_404_Solution_AjaxTraceJournal::ROTATED_FILE);
-        $liveInode = @fileinode($this->directory . ABJ_404_Solution_AjaxTraceJournal::JOURNAL_FILE);
+        $rotatedPath = $this->directory . ABJ_404_Solution_AjaxTraceJournal::ROTATED_FILE;
+        $journalPath = $this->directory . ABJ_404_Solution_AjaxTraceJournal::JOURNAL_FILE;
+        $rotatedExists = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($rotatedPath) { return is_file($rotatedPath); }
+        );
+        $rotationMtime = false;
+        if ($rotatedExists['result']) {
+            $rotationMtimeResult = ABJ_404_Solution_HostFilesystemCall::filemtime($rotatedPath);
+            $rotationMtime = $rotationMtimeResult['result'];
+        }
+        $journalExists = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($journalPath) { return is_file($journalPath); }
+        );
+        $liveInode = false;
+        if ($journalExists['result']) {
+            $liveInodeResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($journalPath) { return fileinode($journalPath); }
+            );
+            $liveInode = $liveInodeResult['result'];
+        }
         return (is_int($rotationMtime) ? (string)$rotationMtime : 'never-rotated')
             . '|' . (is_int($liveInode) && $liveInode > 0 ? (string)$liveInode : 'absent');
     }

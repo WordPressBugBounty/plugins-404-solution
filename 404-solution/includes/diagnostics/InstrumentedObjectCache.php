@@ -4,6 +4,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// allow-no-test-found: exercised through the real AJAX table render entry point in tests/AjaxRowProgressAttributionTest.php
 /**
  * Transparent WordPress object-cache adapter used during a diagnostic scope.
  *
@@ -12,13 +13,14 @@ if (!defined('ABSPATH')) {
  * record budget. The original cache remains available for capability and
  * metrics inspection without the adapter making magic methods look real.
  *
- * allow-no-test-found: exercised through the real AJAX table render entry point in tests/AjaxRowProgressAttributionTest.php
  */
 final class ABJ_404_Solution_InstrumentedObjectCache {
     /** @var object */
     private $target;
     /** @var ABJ_404_Solution_CacheOperationTraceSink */
     private $tracer;
+    /** @var bool Cache work used by the observer itself must remain uninstrumented. */
+    private $tracing = false;
 
     public function __construct(
         object $target,
@@ -39,7 +41,7 @@ final class ABJ_404_Solution_InstrumentedObjectCache {
      * @return mixed
      */
     public function get($key, string $group = 'default', bool $force = false, &$found = null) {
-        return $this->tracer->traceCache('get', $key, $group, function () use ($key, $group, $force, &$found) {
+        return $this->traceCacheOperation('get', $key, $group, function () use ($key, $group, $force, &$found) {
             return $this->callTarget('get', array($key, $group, $force, &$found));
         });
     }
@@ -49,7 +51,7 @@ final class ABJ_404_Solution_InstrumentedObjectCache {
      * @return mixed
      */
     public function get_multiple(array $keys, string $group = 'default', bool $force = false) {
-        return $this->tracer->traceCache('get_multiple', $keys, $group, function () use ($keys, $group, $force) {
+        return $this->traceCacheOperation('get_multiple', $keys, $group, function () use ($keys, $group, $force) {
             return $this->callTarget('get_multiple', array($keys, $group, $force));
         });
     }
@@ -59,7 +61,7 @@ final class ABJ_404_Solution_InstrumentedObjectCache {
      * @return mixed
      */
     public function add_multiple(array $data, string $group = 'default', int $expire = 0) {
-        return $this->tracer->traceCache('add_multiple', $data, $group, function () use ($data, $group, $expire) {
+        return $this->traceCacheOperation('add_multiple', $data, $group, function () use ($data, $group, $expire) {
             return $this->callTarget('add_multiple', array($data, $group, $expire));
         });
     }
@@ -69,7 +71,7 @@ final class ABJ_404_Solution_InstrumentedObjectCache {
      * @return mixed
      */
     public function set_multiple(array $data, string $group = 'default', int $expire = 0) {
-        return $this->tracer->traceCache('set_multiple', $data, $group, function () use ($data, $group, $expire) {
+        return $this->traceCacheOperation('set_multiple', $data, $group, function () use ($data, $group, $expire) {
             return $this->callTarget('set_multiple', array($data, $group, $expire));
         });
     }
@@ -79,7 +81,7 @@ final class ABJ_404_Solution_InstrumentedObjectCache {
      * @return mixed
      */
     public function delete_multiple(array $keys, string $group = 'default') {
-        return $this->tracer->traceCache('delete_multiple', $keys, $group, function () use ($keys, $group) {
+        return $this->traceCacheOperation('delete_multiple', $keys, $group, function () use ($keys, $group) {
             return $this->callTarget('delete_multiple', array($keys, $group));
         });
     }
@@ -90,7 +92,7 @@ final class ABJ_404_Solution_InstrumentedObjectCache {
      * @return mixed
      */
     public function set($key, $value, string $group = 'default', int $expire = 0) {
-        return $this->tracer->traceCache('set', $key, $group, function () use ($key, $value, $group, $expire) {
+        return $this->traceCacheOperation('set', $key, $group, function () use ($key, $value, $group, $expire) {
             return $this->callTarget('set', array($key, $value, $group, $expire));
         });
     }
@@ -101,7 +103,7 @@ final class ABJ_404_Solution_InstrumentedObjectCache {
      * @return mixed
      */
     public function add($key, $value, string $group = 'default', int $expire = 0) {
-        return $this->tracer->traceCache('add', $key, $group, function () use ($key, $value, $group, $expire) {
+        return $this->traceCacheOperation('add', $key, $group, function () use ($key, $value, $group, $expire) {
             return $this->callTarget('add', array($key, $value, $group, $expire));
         });
     }
@@ -112,7 +114,7 @@ final class ABJ_404_Solution_InstrumentedObjectCache {
      * @return mixed
      */
     public function replace($key, $value, string $group = 'default', int $expire = 0) {
-        return $this->tracer->traceCache('replace', $key, $group, function () use ($key, $value, $group, $expire) {
+        return $this->traceCacheOperation('replace', $key, $group, function () use ($key, $value, $group, $expire) {
             return $this->callTarget('replace', array($key, $value, $group, $expire));
         });
     }
@@ -122,7 +124,7 @@ final class ABJ_404_Solution_InstrumentedObjectCache {
      * @return mixed
      */
     public function delete($key, string $group = 'default', bool $deprecated = false) {
-        return $this->tracer->traceCache('delete', $key, $group, function () use ($key, $group, $deprecated) {
+        return $this->traceCacheOperation('delete', $key, $group, function () use ($key, $group, $deprecated) {
             return $this->callTarget('delete', array($key, $group, $deprecated));
         });
     }
@@ -132,7 +134,7 @@ final class ABJ_404_Solution_InstrumentedObjectCache {
      * @return mixed
      */
     public function incr($key, int $offset = 1, string $group = 'default') {
-        return $this->tracer->traceCache('incr', $key, $group, function () use ($key, $offset, $group) {
+        return $this->traceCacheOperation('incr', $key, $group, function () use ($key, $offset, $group) {
             return $this->callTarget('incr', array($key, $offset, $group));
         });
     }
@@ -142,7 +144,7 @@ final class ABJ_404_Solution_InstrumentedObjectCache {
      * @return mixed
      */
     public function decr($key, int $offset = 1, string $group = 'default') {
-        return $this->tracer->traceCache('decr', $key, $group, function () use ($key, $offset, $group) {
+        return $this->traceCacheOperation('decr', $key, $group, function () use ($key, $offset, $group) {
             return $this->callTarget('decr', array($key, $offset, $group));
         });
     }
@@ -167,6 +169,30 @@ final class ABJ_404_Solution_InstrumentedObjectCache {
 
     public function __isset(string $name): bool {
         return isset($this->target->$name);
+    }
+
+    /**
+     * Forward observer-owned cache work without tracing it again. A failed
+     * checkpoint can log a warning whose timestamp reads WordPress options;
+     * tracing that cache read would try the same failed checkpoint before the
+     * logger reaches its own line-write recursion guard.
+     *
+     * @template T
+     * @param mixed $key
+     * @param mixed $group
+     * @param callable():T $work
+     * @return T
+     */
+    private function traceCacheOperation(string $operation, $key, $group, callable $work) {
+        if ($this->tracing || ABJ_404_Solution_AjaxCheckpointLogger::isRecording()) {
+            return $work();
+        }
+        $this->tracing = true;
+        try {
+            return $this->tracer->traceCache($operation, $key, $group, $work);
+        } finally {
+            $this->tracing = false;
+        }
     }
 
     /**

@@ -58,16 +58,18 @@ class ABJ_404_Solution_BulkActionHandler implements ABJ_404_Solution_AdminAction
     }
 
     public function handle(string $action, string &$sub): string {
-        if (!isset($_POST['idnum']) || !is_array($_POST['idnum'])) {
+        $rawIds = $_POST['idnum'] ?? null;
+        if (!is_array($rawIds)) {
             $this->parent->getLogger()->debugMessage(
                 "No ID(s) specified for bulk action: " . esc_html($action));
             echo sprintf(__("Error: No ID(s) specified for bulk action. (%s)", '404-solution'),
                 esc_html($action));
             return '';
         }
-        if (count($_POST['idnum']) > self::MAX_BULK_ACTION_IDS) {
+        $requestedCount = count($rawIds);
+        if ($requestedCount > self::MAX_BULK_ACTION_IDS) {
             $this->parent->getLogger()->debugMessage(
-                "Too many ID(s) specified for bulk action (" . count($_POST['idnum']) .
+                "Too many ID(s) specified for bulk action (" . $requestedCount .
                 ", max " . self::MAX_BULK_ACTION_IDS . "): " . esc_html($action));
             echo sprintf(
                 __("Error: Too many ID(s) specified for bulk action (maximum %d). (%s)", '404-solution'),
@@ -75,9 +77,10 @@ class ABJ_404_Solution_BulkActionHandler implements ABJ_404_Solution_AdminAction
             return '';
         }
         $ids = array();
-        foreach ($_POST['idnum'] as $rawId) {
+        foreach ($rawIds as $rawId) {
             if (is_scalar($rawId)) {
-                $ids[] = absint($rawId);
+                $id = ABJ_404_Solution_ExactInteger::readOr($rawId, 1, 0);
+                if ($id > 0) { $ids[] = $id; }
             }
         }
         $message = $this->doBulkAction($action, $ids);
@@ -102,36 +105,21 @@ class ABJ_404_Solution_BulkActionHandler implements ABJ_404_Solution_AdminAction
         $logger->debugMessage("In doBulkAction. Action: " .
                 esc_html($action == '' ? '(none)' : $action) . ", ids: " . wp_kses_post((string)json_encode($ids)));
 
-        if ($action == "bulkignore" || $action == "bulkcaptured" || $action == "bulklater" ||
-                $action == "bulk_trash_restore") {
-
-            $status = 0;
-            if ($action == "bulkignore") {
-                $status = ABJ404_STATUS_IGNORED;
-            } else if ($action == "bulkcaptured") {
-                $status = ABJ404_STATUS_CAPTURED;
-            } else if ($action == "bulklater") {
-                $status = ABJ404_STATUS_LATER;
-            }
-
+        if ($this->isStatusOrRestoreAction($action)) {
+            $status = $this->statusForBulkAction($action);
             $count = 0;
+            $cycleIssues = array();
             foreach ($ids as $id) {
-                $s = $redirectsRepo->moveRedirectsToTrash($id, 0);
-                if ($action != "bulk_trash_restore") {
-                    $s = $redirectsRepo->updateRedirectTypeStatus($id, (string)$status);
-                }
+                $s = $this->restoreAndSetStatus(array('id' => $id, 'status' => $status));
                 if ($s == "") {
                     $count++;
+                } else {
+                    $cycleIssues[] = $s;
                 }
             }
-            if ($action == "bulkignore") {
-                $message = $count . " " . __('URL(s) marked as Ignored.', '404-solution');
-            } else if ($action == "bulkcaptured") {
-                $message = $count . " " . __('URL(s) marked as Captured.', '404-solution');
-            } else if ($action == "bulklater") {
-                $message = $count . " " . __('URL(s) marked as Later.', '404-solution');
-            } else {
-                $message = $count . " " . __('URL(s) restored.', '404-solution');
+            $message = $this->bulkStatusMessage($action, $count);
+            if (!empty($cycleIssues)) {
+                $message .= ' ' . implode(' | ', array_map('esc_html', $cycleIssues));
             }
 
         } else if ($action == "bulk_trash_delete_permanently") {
@@ -157,5 +145,55 @@ class ABJ_404_Solution_BulkActionHandler implements ABJ_404_Solution_AdminAction
             echo sprintf(__("Error: Unrecognized bulk action. (%s)", '404-solution'), esc_html($action));
         }
         return $message;
+    }
+
+    private function isStatusOrRestoreAction(string $action): bool {
+        return in_array($action, array(
+            'bulkignore', 'bulkcaptured', 'bulklater', 'bulk_trash_restore'
+        ), true);
+    }
+
+    private function statusForBulkAction(string $action): ?int {
+        $statuses = array(
+            'bulkignore' => ABJ404_STATUS_IGNORED,
+            'bulkcaptured' => ABJ404_STATUS_CAPTURED,
+            'bulklater' => ABJ404_STATUS_LATER,
+        );
+        return isset($statuses[$action]) ? $statuses[$action] : null;
+    }
+
+    private function bulkStatusMessage(string $action, int $count): string {
+        $labels = array(
+            'bulkignore' => __('URL(s) marked as Ignored.', '404-solution'),
+            'bulkcaptured' => __('URL(s) marked as Captured.', '404-solution'),
+            'bulklater' => __('URL(s) marked as Later.', '404-solution'),
+            'bulk_trash_restore' => __('URL(s) restored.', '404-solution'),
+        );
+        return $count . ' ' . $labels[$action];
+    }
+
+    /**
+     * Admit the final status and untrash together. Captured or Ignored is
+     * non-redirecting, so no intermediate enabled redirect is needed. A pure
+     * restore preserves the stored status and its cycle admission.
+     *
+     * @param array{id: int, status: int|null} $request
+     * @return string
+     */
+    private function restoreAndSetStatus(array $request): string {
+        $id = ABJ_404_Solution_ExactInteger::readOr($request['id'], 1, 0);
+        $status = $request['status'];
+        $repository = $this->parent->getRedirectsRepo();
+        // Custom implementations of the legacy interface can omit this additive
+        // capability. Refuse safely; two legacy writes would reintroduce partial state.
+        if (!method_exists($repository, 'restoreRedirect') || !is_callable(array($repository, 'restoreRedirect'))) {
+            return 'Atomic redirect restore is unavailable for this repository.';
+        }
+        try {
+            $message = $repository->restoreRedirect(array('id' => $id, 'status' => $status));
+            return is_string($message) ? $message : 'Atomic redirect restore returned an invalid response (' . gettype($message) . ').';
+        } catch (ABJ_404_Solution_RedirectCycleException $e) {
+            return $e->getMessage();
+        }
     }
 }

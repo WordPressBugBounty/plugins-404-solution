@@ -148,27 +148,26 @@ final class ABJ_404_Solution_DrainedTelemetryBuffer {
                 : json_last_error_msg();
             return $unparseable;
         }
-        $records = array();
-        $carriesExcerpts = false;
-        foreach ($decoded as $record) {
-            $carriesExcerpts = $carriesExcerpts
-                || (is_array($record) && array_key_exists('bodyExcerpt', $record));
-            $records[] = $record;
+        if (!class_exists('ABJ_404_Solution_ClientTransportReport')
+                || !in_array('normalizeRecord', get_class_methods('ABJ_404_Solution_ClientTransportReport'), true)) {
+            // The old composer echoes raw input on parse failure. This input
+            // did parse; describe omitted records without forwarding any of them.
+            $marker = '{"client_evidence_status":"unavailable","reason":"normalizer_updating"}';
+            return array(
+                'json' => strlen($marker) <= $budgetBytes ? $marker : '[]',
+                'parsed' => true, 'kept' => 0, 'dropped' => count($decoded),
+                'raw_length' => $rawLength, 'error' => 'client record normalization unavailable',
+            );
         }
-        if ($carriesExcerpts) {
-            // Excerpts are response TEXT, so they are redacted before this
-            // buffer can be embedded in the support payload, and the raw
-            // verbatim shortcut below is skipped: only records that carry an
-            // excerpt pay for the redaction pass, older clients keep their
-            // exact bytes.
-            $records = array_map(
-                static function ($record) {
-                    return is_array($record)
-                        ? ABJ_404_Solution_ClientTransportReport::redactReportBodyExcerpt($record)
-                        : $record;
-                },
-                $records);
-        } elseif ($rawLength <= self::MAX_DRAINED_BUFFER_INPUT_BYTES
+        $records = array();
+        $changed = false;
+        foreach ($decoded as $record) {
+            $normalized = is_array($record)
+                ? ABJ_404_Solution_ClientTransportReport::normalizeRecord($record) : $record;
+            $changed = $changed || $normalized !== $record;
+            $records[] = $normalized;
+        }
+        if (!$changed && $rawLength <= self::MAX_DRAINED_BUFFER_INPUT_BYTES
                 && $rawLength <= $budgetBytes) {
             return array(
                 'json' => $raw, 'parsed' => true, 'kept' => count($records), 'dropped' => 0,

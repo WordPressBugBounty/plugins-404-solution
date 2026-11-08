@@ -54,12 +54,16 @@ class ABJ_404_Solution_PluginLogicPageOrdering {
      * @param string $location Base redirect destination.
      * @param string $requestedURL Original requested URL (used for custom 404 ref tracking).
      * @param bool $isCustom404 Whether we are redirecting to a custom 404 page.
+     * @param string|null $queryMode Persisted query policy; ignore drops the visitor query.
      * @return string Redirect destination suitable for wp_redirect().
      */
-    public function buildFinalRedirectDestination($location, $requestedURL = '', $isCustom404 = false) {
+    public function buildFinalRedirectDestination($location, $requestedURL = '', $isCustom404 = false, ?string $queryMode = null) {
         $location = $this->urlNormalization->maybeTranslateRedirectUrl($location, $requestedURL);
 
         $commentPartAndQueryPart = $this->notFoundResponse->getCommentPartAndQueryPartOfRequest();
+        if ($queryMode === 'ignore') {
+            $commentPartAndQueryPart = explode('?', $commentPartAndQueryPart, 2)[0];
+        }
         $finalDestination = (string)$location . $commentPartAndQueryPart;
 
         if ($isCustom404 && is_string($requestedURL) && $requestedURL !== '') {

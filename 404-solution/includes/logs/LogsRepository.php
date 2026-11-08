@@ -137,18 +137,23 @@ class ABJ_404_Solution_LogsRepository implements ABJ_404_Solution_LogsRepository
     }
 
     /** @inheritDoc */
-    function getLogsIDandURL($specificURL = '') {
-        return $this->reads->getLogsIDandURL($specificURL);
+    function getLogsIDandURL($specificURL = '', array $tableOptions = array()) {
+        return $this->reads->getLogsIDandURL($specificURL, $tableOptions);
     }
 
     /** @inheritDoc */
-    function getLogsIDandURLLike($specificURL, $limitResults) {
-        return $this->reads->getLogsIDandURLLike($specificURL, $limitResults);
+    function getLogsIDandURLLike($specificURL, $limitResults, array $tableOptions = array()) {
+        return $this->reads->getLogsIDandURLLike($specificURL, $limitResults, $tableOptions);
     }
 
     /** @inheritDoc */
     function getLogRecords($tableOptions) {
         return $this->reads->getLogRecords($tableOptions);
+    }
+
+    /** @inheritDoc */
+    public function lastLogRecordsReadWasIncomplete(): bool {
+        return $this->reads->lastLogRecordsReadWasIncomplete();
     }
 
     /** @inheritDoc */

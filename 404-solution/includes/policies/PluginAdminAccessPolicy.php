@@ -4,6 +4,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/PluginAdminAuthorization.php';
+
 /**
  * Authorization policy: decides whether the current WordPress user
  * counts as a "plugin admin" for 404 Solution and grants the
@@ -85,20 +87,7 @@ class ABJ_404_Solution_PluginAdminAccessPolicy {
      * @return bool
      */
     public static function currentUserCanAccessPluginAdmin(): bool {
-        try {
-            $policy = function_exists('abj_service_optional') ? abj_service_optional('admin_access_policy') : null;
-            if (is_object($policy) && method_exists($policy, 'isPluginAdmin')) {
-                return (bool)$policy->isPluginAdmin();
-            }
-
-            self::warnStaticPolicyResolutionFailure(
-                'plugin admin access policy resolution failed because admin_access_policy is unavailable.'
-            );
-            return false;
-        } catch (\Throwable $e) {
-            self::warnStaticPolicyResolutionFailure('plugin admin access policy resolution failed', $e);
-            return false;
-        }
+        return ABJ_404_Solution_PluginAdminAuthorization::currentUserCanAccessPluginAdmin();
     }
 
     /**
@@ -303,21 +292,6 @@ class ABJ_404_Solution_PluginAdminAccessPolicy {
         }
 
         abj404_logPhpFallback('service-resolution-fallback', $message);
-    }
-
-    private static function warnStaticPolicyResolutionFailure(string $message, ?\Throwable $throwable = null): void {
-        if (function_exists('abj404_logRuntimeWarning')) {
-            abj404_logRuntimeWarning($message, $throwable);
-            return;
-        }
-
-        $line = $message;
-        if ($throwable !== null) {
-            $line .= ' (code ' . (string)$throwable->getCode() . ') at ' .
-                $throwable->getFile() . ':' . (string)$throwable->getLine() .
-                ': ' . $throwable->getMessage();
-        }
-        abj404_logPhpFallback('service-resolution-fallback', $line);
     }
 
     /**

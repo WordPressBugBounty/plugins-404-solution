@@ -105,7 +105,12 @@ class ABJ_404_Solution_AdminTableColumnHeaders {
         if ($pendingTooltip !== '') {
             $sortState['isSortable'] = false;
             $column['title_attr'] = $pendingTooltip;
-            $column['pending_sort_orderby'] = (string)$orderby;
+            $reader = abj_service_optional('admin_table_reader');
+            if (!$reader instanceof ABJ_404_Solution_AdminTableReadRepository || !$reader->isDegraded()) {
+                // The lazy drain only owns URL/Destination preparation. A
+                // general degraded read queues maintenance independently.
+                $column['pending_sort_orderby'] = (string)$orderby;
+            }
             unset($column['title_attr_html']);
         }
 
@@ -168,7 +173,7 @@ class ABJ_404_Solution_AdminTableColumnHeaders {
      * redirects sort keys), or no readiness service was supplied. Delegates the
      * readiness + percentage + message to View_Shared::pendingSortTooltipText so
      * the captured-tab renderer (View_CapturedURLsTable) shares the same source.
-     * See ViewQueryBuilder::resolveEffectiveSort for the matching query-side
+     * See ViewSortResolver::resolveEffectiveSort for the matching query-side
      * substitution (the list shows newest-first meanwhile).
      *
      * @param string $sub

@@ -39,7 +39,7 @@ class ABJ_404_Solution_Ajax_PrivacyDelete {
     /** @return void */
     public static function init(): void {
         $me = self::getInstance();
-        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404_privacy_delete', array($me, 'handleRequest'));
+        ABJ_404_Solution_WPUtils::safeAddAction(ABJ_404_Solution_PluginAjaxActions::hook('abj404_privacy_delete'), array($me, 'handleRequest'));
     }
 
     /** @return void */

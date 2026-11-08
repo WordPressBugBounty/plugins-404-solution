@@ -109,13 +109,13 @@ class ABJ_404_Solution_View_RedirectsTable extends ABJ_404_Solution_ViewComponen
         $tableOptions = array_replace($tableOptions, $tableOptionOverrides);
         $columns = $this->buildRedirectsColumnDefs($tableOptions);
 
+        $rows = $this->viewReadService->getRedirectsForView($sub, $tableOptions);
         $headerColumns = ABJ_404_Solution_TableRenderTranslationTracer::traceScope(
             'redirect_column_headers',
             'select all|sort URL|tooltip|header templates',
             fn(): string => $this->logs->getTableColumns($sub, $columns)
         );
 
-        $rows = $this->viewReadService->getRedirectsForView($sub, $tableOptions);
         /** @var array<int, array<string, mixed>> $typedRedirectRows */
         $typedRedirectRows = array_values(array_filter($rows, 'is_array'));
         $this->shared->rememberTableDataSignature($sub, $typedRedirectRows);
@@ -142,17 +142,19 @@ class ABJ_404_Solution_View_RedirectsTable extends ABJ_404_Solution_ViewComponen
         }
         $progress->finish();
         if ($displayed == 0) {
-            // The single-table denorm read (denorm Step 3b) is always complete
-            // and serveable, so zero displayed rows is a genuinely empty
-            // listing. There is no "still preparing" state to distinguish.
+            // No matches in a bounded candidate window cannot prove that the
+            // full source is empty. Keep the existing quiet pending affordance.
+            $incomplete = !empty($tableOptions['_abj404_allow_degraded_read'])
+                && abj_service('admin_table_reader')->isDegraded();
             $bodyRows .= ABJ_404_Solution_TableRenderTranslationTracer::traceScope(
                 'redirect_empty_state',
                 'No Redirect Records To Display|Redirects will appear here once created',
                 fn(): string => $this->f->str_replace(
                     array('{title}', '{help}'),
                     array(
-                        __('No Redirect Records To Display', '404-solution'),
-                        __('Redirects will appear here once created.', '404-solution'),
+                        $incomplete ? __('Preparing the redirects table.', '404-solution') : __('No Redirect Records To Display', '404-solution'),
+                        $incomplete ? $this->shared->pendingSortTooltipText('url', $this->viewReadService)
+                            : __('Redirects will appear here once created.', '404-solution'),
                     ),
                     $this->tpl('viewRedirectsTableRedirectsEmptyState.html')
                 )

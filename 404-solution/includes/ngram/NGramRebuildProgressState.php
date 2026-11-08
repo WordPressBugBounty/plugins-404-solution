@@ -234,7 +234,7 @@ class ABJ_404_Solution_NGramRebuildProgressState {
      * @return void
      */
     private function migrateToKeysetWalk(): void {
-        $legacyPendingList = $this->optionStore->getOption(self::OPTION_PENDING_SITES, null);
+        $legacyPendingList = $this->optionStore->getArrayOption(self::OPTION_PENDING_SITES, null);
         $hasCursor = $this->optionStore->getOption(self::OPTION_LAST_SITE_ID, null) !== null;
         $walkInFlight = $this->optionStore->getOption(self::OPTION_TOTAL_SITES, null) !== null;
 

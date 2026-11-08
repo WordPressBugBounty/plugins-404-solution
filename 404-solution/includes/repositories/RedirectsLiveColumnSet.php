@@ -24,7 +24,7 @@ if (!defined('ABSPATH')) {
  * base redirect row: guessing that a column exists can make the entire INSERT
  * fail on the schema-drifted installs this class protects.
  *
- * // allow-no-test-found: exercised by DataAccessSchemaDriftTest
+ * // allow-no-test-found: exercised by RedirectInsertSchemaDriftIntegrationTest
  */
 class ABJ_404_Solution_RedirectsLiveColumnSet {
 

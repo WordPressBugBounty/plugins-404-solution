@@ -4,6 +4,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// allow-no-test-found: exercised through real AJAX hook dispatch in tests/OptionPersistenceTracerTest.php and tests/AjaxHookCallbackAttributionTest.php
 /**
  * Privacy-safe identity for WordPress hook callbacks and their source code.
  *
@@ -11,7 +12,6 @@ if (!defined('ABSPATH')) {
  * stable hashes, and source files become either a component hash, a WordPress
  * core label, or an opaque path hash.
  *
- * allow-no-test-found: exercised through real AJAX hook dispatch in tests/OptionPersistenceTracerTest.php and tests/AjaxHookCallbackAttributionTest.php
  */
 final class ABJ_404_Solution_HookCallbackIdentity {
 

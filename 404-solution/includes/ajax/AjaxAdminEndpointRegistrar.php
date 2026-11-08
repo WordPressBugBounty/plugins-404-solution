@@ -25,7 +25,7 @@ if (!defined('ABSPATH')) {
 class ABJ_404_Solution_AjaxAdminEndpointRegistrar {
 
     /** Compiled marker for mixed-generation comparison at AJAX dispatch. */
-    const DIAGNOSTIC_BUILD_ID = 'd9a360884e5d34fda457b7c2767dc2702f786908';
+    const DIAGNOSTIC_BUILD_ID = '57f4644333e7aa17d0caf7b05731b6c0a1ac90e3';
 
     /**
      * Wire each admin-table AJAX action to its handler. Safe to call once
@@ -34,7 +34,7 @@ class ABJ_404_Solution_AjaxAdminEndpointRegistrar {
      * @return void
      */
     public static function register() {
-        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_ajaxUpdatePaginationLinks',
+        ABJ_404_Solution_WPUtils::safeAddAction(ABJ_404_Solution_PluginAjaxActions::hook('ajaxUpdatePaginationLinks'),
                 function() {
                     // Boot lifecycle waypoint (Bruno timeout cause matrix, gap
                     // G3): the moment WordPress dispatches to our own handler,
@@ -50,15 +50,15 @@ class ABJ_404_Solution_AjaxAdminEndpointRegistrar {
                     ));
                     (new ABJ_404_Solution_Ajax_GetPaginationLinks())->handle();
                 });
-        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_ajaxRefreshStatsDashboard',
+        ABJ_404_Solution_WPUtils::safeAddAction(ABJ_404_Solution_PluginAjaxActions::hook('ajaxRefreshStatsDashboard'),
                 function() { (new ABJ_404_Solution_Ajax_RefreshStatsDashboard())->handle(); });
-        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_ajaxRefreshHealthBar',
+        ABJ_404_Solution_WPUtils::safeAddAction(ABJ_404_Solution_PluginAjaxActions::hook('ajaxRefreshHealthBar'),
                 function() { (new ABJ_404_Solution_Ajax_RefreshHealthBar())->handle(); });
-        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_ajaxRefreshAdminNonces',
+        ABJ_404_Solution_WPUtils::safeAddAction(ABJ_404_Solution_PluginAjaxActions::hook('ajaxRefreshAdminNonces'),
                 function() { (new ABJ_404_Solution_Ajax_RefreshAdminNonces())->handle(); });
-        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_abj404_run_lazy_backfill',
+        ABJ_404_Solution_WPUtils::safeAddAction(ABJ_404_Solution_PluginAjaxActions::hook('abj404_run_lazy_backfill'),
                 function() { (new ABJ_404_Solution_Ajax_RunLazyBackfill())->handle(); });
-        ABJ_404_Solution_WPUtils::safeAddAction('wp_ajax_ajaxRunCanaryStep',
+        ABJ_404_Solution_WPUtils::safeAddAction(ABJ_404_Solution_PluginAjaxActions::hook('ajaxRunCanaryStep'),
                 function() {
                     // See the ajaxUpdatePaginationLinks closure above.
                     ABJ_404_Solution_BootWaypointRecorder::record('ajax_dispatch', array(

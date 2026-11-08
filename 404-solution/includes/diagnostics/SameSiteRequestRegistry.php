@@ -4,6 +4,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/../database/OptionRowCompareAndSwap.php';
+
 /**
  * Storage for the set of PHP requests this site currently has in flight.
  *
@@ -23,6 +25,10 @@ if (!defined('ABSPATH')) {
  * split this subsystem already uses for
  * ABJ_404_Solution_AjaxCheckpointLogger and its journal writer.
  *
+ * Handing an abandoned row to the stranded-request ledger before it is
+ * deleted is one transaction across two stores, and belongs to
+ * ABJ_404_Solution_SameSiteCensusHandoff.
+ *
  * @phpstan-import-type Row from ABJ_404_Solution_SameSiteRequestRowCodec
  * @phpstan-import-type Entry from ABJ_404_Solution_SameSiteRequestRowCodec
  */
@@ -35,6 +41,9 @@ final class ABJ_404_Solution_SameSiteRequestRegistry {
      * class never wrote.
      */
     const OPTION_PREFIX = 'abj404inflight';
+
+    /** Rows handed off for durable ledger recording, but not yet deleted. */
+    const PENDING_PREFIX = 'abj404reaping';
 
     /**
      * Rows read at once. A real reading is a handful; the ceiling exists so a
@@ -143,28 +152,63 @@ final class ABJ_404_Solution_SameSiteRequestRegistry {
     }
 
     /**
-     * Every registered request, decoded, oldest option name first.
+     * Registered requests, decoded, oldest option name first, at most
+     * MAX_ENTRIES_READ of them.
      *
      * `truncated` says the read ceiling was reached, so a reader can tell a
      * bounded reading from a complete one instead of quietly believing the
-     * smaller number.
+     * smaller number. A reader that must see every row (the nightly sweep)
+     * resumes with the `last_option_name` of the page before: rows are walked
+     * by option name, so a page full of live rows can never hide the leftovers
+     * sorted after it.
      *
-     * @return array{status: string, reason: string, entries: array<int, Entry>, truncated: bool}
+     * @param string $afterOptionName resume after this row; '' reads from the start.
+     * @return array{status: string, reason: string, entries: array<int, Entry>, truncated: bool, last_option_name: string}
+     *   `last_option_name` is the last row examined, decodable or not, so a page of
+     *   rows this codec cannot read still advances the walk; '' when no row was read.
      */
-    public static function readAll(): array {
+    public static function readAll(string $afterOptionName = ''): array {
+        return self::readNamespace(self::OPTION_PREFIX, $afterOptionName);
+    }
+
+    /**
+     * Pending handoffs are intentionally a separate namespace: ordinary
+     * census reads must never count them as live requests, while the bounded
+     * nightly sweep can resume them after a disposer process dies.
+     *
+     * @param string $afterOptionName resume after this pending row.
+     * @return array{status: string, reason: string, entries: array<int, Entry>, truncated: bool, last_option_name: string}
+     */
+    public static function readPending(string $afterOptionName = ''): array {
+        return self::readNamespace(self::PENDING_PREFIX, $afterOptionName);
+    }
+
+    /**
+     * Read one bounded option namespace by name. The codec retains the exact
+     * raw value so a later destructive step can fence against any update or
+     * retirement that happened after the snapshot.
+     *
+     * @return array{status: string, reason: string, entries: array<int, Entry>, truncated: bool, last_option_name: string}
+     */
+    private static function readNamespace(string $prefix, string $afterOptionName): array {
         $dbCore = self::dbCore();
         if ($dbCore === null) {
             return self::unreadable('dao_unavailable');
         }
-        $result = $dbCore->queryAndGetResults(
-            "SELECT option_name, option_value FROM {wp_options} "
-            . "WHERE option_name LIKE %s ORDER BY option_name LIMIT " . (self::MAX_ENTRIES_READ + 1),
-            array('query_params' => array(self::OPTION_PREFIX . '%'))
-        );
-        if (!empty($result['last_error'])) {
+        $limit = " ORDER BY option_name LIMIT " . (self::MAX_ENTRIES_READ + 1);
+        $result = $afterOptionName === ''
+            ? $dbCore->queryAndGetResults(
+                "SELECT option_name, option_value FROM {wp_options} WHERE option_name LIKE %s" . $limit,
+                array('query_params' => array($prefix . '%')))
+            : $dbCore->queryAndGetResults(
+                "SELECT option_name, option_value FROM {wp_options} WHERE option_name LIKE %s "
+                . "AND option_name > %s" . $limit,
+                array('query_params' => array($prefix . '%', $afterOptionName)));
+        if (!self::querySucceeded($result) || !array_key_exists('rows', $result)
+                || !is_array($result['rows'])) {
             return self::unreadable('read_failed');
         }
-        $rows = isset($result['rows']) && is_array($result['rows']) ? $result['rows'] : array();
+        $rows = $result['rows'];
         $truncated = count($rows) > self::MAX_ENTRIES_READ;
         if ($truncated) {
             $rows = array_slice($rows, 0, self::MAX_ENTRIES_READ);
@@ -177,7 +221,23 @@ final class ABJ_404_Solution_SameSiteRequestRegistry {
             }
         }
         return array('status' => 'available', 'reason' => '', 'entries' => $entries,
-            'truncated' => $truncated);
+            'truncated' => $truncated, 'last_option_name' => self::lastOptionName($rows));
+    }
+
+    /**
+     * The option name of the last row, or '' when there is none. Case-insensitive
+     * on the column name for the same reason decodeRow() is.
+     *
+     * @param array<int, mixed> $rows
+     */
+    private static function lastOptionName(array $rows): string {
+        $last = end($rows);
+        if (!is_array($last)) {
+            return '';
+        }
+        $last = array_change_key_case($last, CASE_LOWER);
+        return isset($last['option_name']) && is_scalar($last['option_name'])
+            ? (string)$last['option_name'] : '';
     }
 
     /**
@@ -207,6 +267,18 @@ final class ABJ_404_Solution_SameSiteRequestRegistry {
             0,
             count($optionNames)
         );
+    }
+
+    /**
+     * Compatibility boundary for the pre-handoff caller. The old generation
+     * may still invoke this method while files are replaced independently;
+     * absence of the new capability must therefore be inert, never a delete.
+     *
+     * @param mixed $optionName
+     * @return bool always false; this API no longer owns a destructive claim.
+     */
+    public static function claim($optionName): bool {
+        return false;
     }
 
     /**
@@ -349,11 +421,22 @@ final class ABJ_404_Solution_SameSiteRequestRegistry {
     }
 
     /**
-     * @return array{status: string, reason: string, entries: array<int, Entry>, truncated: bool}
+     * @return array{status: string, reason: string, entries: array<int, Entry>, truncated: bool, last_option_name: string}
      */
     private static function unreadable(string $reason): array {
         return array('status' => 'unavailable', 'reason' => $reason, 'entries' => array(),
-            'truncated' => false);
+            'truncated' => false, 'last_option_name' => '');
+    }
+
+    /** A destructive handoff requires a complete, successful SQL envelope. */
+    /** @param array<string,mixed> $result */
+    private static function querySucceeded(array $result): bool {
+        return array_key_exists('query_succeeded', $result)
+            && $result['query_succeeded'] === true
+            && array_key_exists('last_error', $result)
+            && is_string($result['last_error'])
+            && $result['last_error'] === ''
+            && (!array_key_exists('timed_out', $result) || $result['timed_out'] === false);
     }
 
     /**

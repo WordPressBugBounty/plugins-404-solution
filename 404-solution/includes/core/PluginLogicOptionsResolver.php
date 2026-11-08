@@ -6,7 +6,11 @@ if (!defined('ABSPATH')) {
 
 require_once __DIR__ . '/PluginLogicDefaults.php';
 require_once __DIR__ . '/../settings/StorageOptionContracts.php';
-require_once __DIR__ . '/../policies/SettingsSuggestionPolicy.php';
+require_once __DIR__ . '/../settings/SettingsVersionStamp.php';
+require_once __DIR__ . '/../repositories/SiteResourceLock.php';
+require_once __DIR__ . '/../repositories/SettingsOptionWriter.php';
+require_once __DIR__ . '/../repositories/SettingsBookkeepingWriter.php';
+require_once __DIR__ . '/StoredSettingsReconciler.php';
 
 /**
  * Owns the plugin's persistent settings option (`abj404_settings`):
@@ -30,6 +34,12 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
 
     /** @var array<string, mixed>|null */
     private $resolvedWithDbCheck = null;
+
+    /** @var int|null Site owning the cached option snapshots. */
+    private $cachedBlogId = null;
+
+    /** @var array<int, bool> Sites whose first settings snapshot is being built. */
+    private $initializingBlogs = array();
 
     /** @var self|null */
     private static $instance = null;
@@ -58,6 +68,14 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
         $this->resolvedWithDbCheck = null;
     }
 
+    /** Whether callbacks are re-entering this site's unfinished first settings read. */
+    public function isInitializingSettings(): bool {
+        $blogId = function_exists('get_current_blog_id') ? get_current_blog_id() : 1;
+        return isset($this->initializingBlogs[$blogId])
+            || ABJ_404_Solution_SettingsBookkeepingWriter::hasInitializationContext(
+                ABJ_404_Solution_SettingsBookkeepingWriter::siteContextKey());
+    }
+
     /**
      * Return only the delegated plugin-admin option needed by the
      * authorization policy. This intentionally avoids the full getOptions()
@@ -68,7 +86,7 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
      * @return mixed String, array, or default value accepted by the policy normalizer.
      */
     public function getPluginAdminUsersOption() {
-        $optionResult = get_option('abj404_settings');
+        $optionResult = ABJ_404_Solution_OptionShapeRead::arrayValue('abj404_settings');
         if (!is_array($optionResult)) {
             return ABJ_404_Solution_PluginLogicDefaults::defaults()['plugin_admin_users'];
         }
@@ -106,11 +124,22 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
      * @return mixed The raw stored value, or $default.
      */
     public function getRawSettingValue(string $key, $default = null) {
-        $raw = get_option('abj404_settings');
+        $raw = ABJ_404_Solution_OptionShapeRead::arrayValue('abj404_settings');
         if (is_array($raw) && array_key_exists($key, $raw)) {
             return $raw[$key];
         }
         return $default;
+    }
+
+    /**
+     * Return the exact uncached settings-row snapshot used by guarded writers.
+     * The array shape is intentionally local rather than a new value object:
+     * callers must carry the database's found/absent/failed state explicitly.
+     *
+     * @return array{status:string,value:string}
+     */
+    public function getRawSettingsSnapshot(): array {
+        return ABJ_404_Solution_SettingsOptionWriter::readSnapshot();
     }
 
     /**
@@ -121,31 +150,24 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
      * last-sent-line counter) without re-entering the settings pipeline,
      * and by any caller that needs to update a single bookkeeping key
      * (e.g. EmailDigest's admin_notification_last_sent cadence timestamp).
-     * Other keys already in the row are preserved (read-modify-write of the
-     * single key), so it narrows the write to just this one key instead of
-     * writing back a whole options snapshot a caller may have read much
-     * earlier (e.g. at the top of a slow request). This is NOT atomic: the
-     * read and the write here are still two separate WordPress option
-     * calls, so a write from another request landing in between is still
-     * possible in principle, just a far smaller window than a caller doing
-     * its own getOptions()-then-updateOptions() round trip. Acceptable for
-     * low-stakes bookkeeping keys; do not use this for values a lost update
-     * would meaningfully harm.
+     * Other keys already in the row are preserved by a direct byte-level
+     * compare-and-swap. This path intentionally bypasses native option hooks
+     * to stay below the logging recursion boundary. Every existing
+     * non-destination bookkeeping key remains supported, including dynamic
+     * logging-state keys. It never creates an absent settings row; the full
+     * initializer is the sole creator. Destination-bearing settings must use
+     * updateOptionsChecked().
      *
      * @param string $key Setting key inside abj404_settings.
      * @param mixed $value Value to store.
      * @return void
      */
     public function setRawSettingValue(string $key, $value): void {
-        $raw = get_option('abj404_settings');
-        if (!is_array($raw)) {
-            $raw = array();
+        if (ABJ_404_Solution_SettingsBookkeepingWriter::set($key, $value)) {
+            // A later full getOptions() must re-read the row rather than serve
+            // a snapshot taken before this raw CAS (or while the write is queued).
+            $this->clearCache();
         }
-        $raw[$key] = $value;
-        update_option('abj404_settings', $raw);
-        // A later full getOptions() must re-read the row rather than serve a
-        // snapshot taken before this raw write.
-        $this->clearCache();
     }
 
     /**
@@ -157,16 +179,23 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
      * @return array<string, mixed>
      */
     public function getOptions(bool $skip_db_check = false): array {
-        if (!$skip_db_check && is_array($this->resolvedWithDbCheck)) {
-            return $this->resolvedWithDbCheck;
+        $blogId = function_exists('get_current_blog_id') ? get_current_blog_id() : 1;
+        if ($this->isInitializingSettings()) {
+            // wp_insert_post fires save_post before it returns. Those callbacks
+            // may read settings while the first suggestion destination is still
+            // being built. Serve an inert snapshot, without caching, upgrading
+            // or publishing it over the initializer's eventual complete result.
+            return ABJ_404_Solution_PluginLogicDefaults::defaults();
         }
-        if ($skip_db_check) {
-            if (is_array($this->resolvedSkipDbCheck)) {
-                return $this->resolvedSkipDbCheck;
-            }
-            if (is_array($this->resolvedWithDbCheck)) {
-                return $this->resolvedWithDbCheck;
-            }
+        if ($this->cachedBlogId !== $blogId) {
+            $this->clearCache();
+            $this->cachedBlogId = $blogId;
+        }
+        if ($skip_db_check && is_array($this->resolvedSkipDbCheck)) {
+            return $this->resolvedSkipDbCheck;
+        }
+        if (is_array($this->resolvedWithDbCheck)) {
+            return $this->resolvedWithDbCheck;
         }
 
         $legacyOptions = $this->legacyPluginLogicOptionsOverride();
@@ -174,35 +203,47 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
             return array_merge(ABJ_404_Solution_PluginLogicDefaults::defaults(), $legacyOptions);
         }
 
+        $reconciler = new ABJ_404_Solution_StoredSettingsReconciler(
+            array($this, 'getRawSettingsSnapshot'),
+            array($this, 'updateOptionsChecked'),
+            array($this, 'clearCache'),
+            static fn() => ABJ_404_Solution_OptionShapeRead::arrayValue('abj404_settings')
+        );
+
         if ($this->rawCache === null) {
-            $optionResult = get_option('abj404_settings');
-            if (is_array($optionResult)) {
-                $normalizedOptions = ABJ_404_Solution_StorageOptionContracts::normalizeForRead(
-                    ABJ_404_Solution_StorageOptionContracts::OPTION_SETTINGS,
-                    $optionResult
-                );
-                $this->rawCache = $normalizedOptions;
-                if ($normalizedOptions !== $optionResult) {
-                    $this->updateOptions($normalizedOptions);
-                }
-            } else {
-                $this->rawCache = null;
+            $this->initializingBlogs[$blogId] = true;
+            try {
+                $this->rawCache = $reconciler->initialize();
+            } finally {
+                unset($this->initializingBlogs[$blogId]);
+            }
+            if ($this->rawCache === null) {
+                // Initialization is deferred: a concurrent initializer owns the
+                // final write, or WordPress cannot create the suggestion page
+                // yet. Do not persist or cache a fallback that could overwrite
+                // the destination the real initialization writes.
+                return ABJ_404_Solution_PluginLogicDefaults::defaults();
             }
         }
         $options = $this->rawCache;
 
-        if (!is_array($options)) {
-            add_option('abj404_settings', '', '', false);
-            $options = array();
-        }
-
-        $options = $this->mergeDefaults($options);
-
         if ($skip_db_check == false) {
-            if (!array_key_exists('DB_VERSION', $options) || $options['DB_VERSION'] != ABJ404_VERSION) {
+            if (ABJ_404_Solution_SettingsVersionStamp::isStale($options)) {
+                try {
+                    if (abj_service('db_core')->transactionExecutor()->hasActiveTransaction()) {
+                        // CREATE/ALTER would implicitly commit the post writer.
+                        // Keep this read uncached as "checked" so a later safe
+                        // request can run the still-required schema upgrade.
+                        return $options;
+                    }
+                } catch (ABJ_404_Solution_DatabaseMutationFailedException $failure) {
+                    $this->warn('Schema upgrade deferred because transaction ownership could not be established: '
+                        . $failure->getMessage());
+                    return $options;
+                }
                 $versionUpgrade = abj_service('version_upgrade');
                 if (is_object($versionUpgrade) && method_exists($versionUpgrade, 'upgradeIfNeeded')) {
-                    $options = $versionUpgrade->upgradeIfNeeded($options);
+                    $options = ABJ_404_Solution_StoredSettingsReconciler::servedForm($versionUpgrade->upgradeIfNeeded($options));
                 } else {
                     $this->warn('version_upgrade service unavailable while reading options; skipped upgrade check.');
                 }
@@ -213,39 +254,12 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
         // directly instead of resolving plugin_logic (which constructed
         // PluginLogic, DataAccess, LogsRepository, ViewReadService and
         // LogsMetricsReader on every request just to read settings).
-        if (ABJ_404_Solution_SettingsSuggestionPolicy::normalizeTemplateOptions($options)) {
-            $this->updateOptions($options);
-        }
+        $options = $reconciler->repairTemplates($options);
 
         if ($skip_db_check) {
             $this->resolvedSkipDbCheck = $options;
         } else {
             $this->resolvedWithDbCheck = $options;
-        }
-
-        return $options;
-    }
-
-    /**
-     * Fill unset options from the defaults and persist when anything was
-     * added. Split out of getOptions() unchanged to keep that method under
-     * the project's cyclomatic-complexity gate.
-     *
-     * @param array<string, mixed> $options
-     * @return array<string, mixed>
-     */
-    private function mergeDefaults(array $options): array {
-        $defaults = ABJ_404_Solution_PluginLogicDefaults::defaults();
-        $missing = false;
-        foreach ($defaults as $key => $value) {
-            if (!isset($options[$key]) || $options[$key] === '') {
-                $options[$key] = $value;
-                $missing = true;
-            }
-        }
-
-        if ($missing) {
-            $this->updateOptions($options);
         }
 
         return $options;
@@ -259,29 +273,101 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
      * @return void
      */
     public function updateOptions(array $options): void {
-        $options = ABJ_404_Solution_OptionPersistenceTracer::traceCurrent(
-            'options_normalization',
-            static function () use ($options): array {
-                $merged = array_merge(ABJ_404_Solution_PluginLogicDefaults::defaults(), $options);
-                return ABJ_404_Solution_StorageOptionContracts::prepareForWrite(
-                    ABJ_404_Solution_StorageOptionContracts::OPTION_SETTINGS,
-                    $merged
-                );
+        $lock = null;
+        $lockHeld = false;
+        try {
+            $lock = new ABJ_404_Solution_SiteResourceLock('initialization');
+            if (!$lock->acquire()) {
+                $this->clearCache();
+                $this->warn('Settings write deferred because the initialization lock was unavailable.');
+                return;
             }
-        );
-        ABJ_404_Solution_OptionPersistenceTracer::traceCurrentStorageWrite(
-            static function () use ($options): void {
-                update_option('abj404_settings', $options);
+            $lockHeld = true;
+            $writeExpected = $this->getRawSettingsSnapshot();
+            if (!$this->updateOptionsChecked($options, $writeExpected, $lock)) {
+                $this->clearCache();
+                $this->warn('Settings write refused because its raw snapshot, destination, or lock ownership changed.');
             }
-        );
-        ABJ_404_Solution_OptionPersistenceTracer::traceCurrent(
-            'repository_cache_refresh',
-            function () use ($options): void {
-                $this->rawCache = $options;
-                $this->resolvedSkipDbCheck = null;
-                $this->resolvedWithDbCheck = null;
+        } catch (Throwable $e) {
+            $this->clearCache();
+            $this->warn('Settings write failed before confirmation: ' . $e->getMessage());
+            throw $e;
+        } finally {
+            if ($lockHeld && $lock !== null) {
+                $lock->release();
             }
-        );
+        }
+    }
+
+    /**
+     * Checked settings writer for workflows that must report refusal instead
+     * of treating the legacy void updateOptions() boundary as success.
+     *
+     * @param array<string,mixed> $options
+     * @param array{status:string,value:string} $expected
+     */
+    public function updateOptionsChecked(array $options, array $expected,
+        ?ABJ_404_Solution_SiteResourceLock $lock = null): bool {
+        $ownedHere = false;
+        if ($lock === null) {
+            $lock = new ABJ_404_Solution_SiteResourceLock('initialization');
+            if (!$lock->acquire()) {
+                $this->clearCache();
+                return false;
+            }
+            $ownedHere = true;
+        } elseif (!$lock->isOwned()) {
+            $this->clearCache();
+            return false;
+        }
+
+        try {
+            $this->cachedBlogId = function_exists('get_current_blog_id') ? get_current_blog_id() : 1;
+            $prepared = ABJ_404_Solution_OptionPersistenceTracer::traceCurrent(
+                'options_normalization',
+                static function () use ($options): array {
+                    $merged = array_merge(ABJ_404_Solution_PluginLogicDefaults::defaults(), $options);
+                    return ABJ_404_Solution_StorageOptionContracts::prepareForWrite(
+                        ABJ_404_Solution_StorageOptionContracts::OPTION_SETTINGS,
+                        $merged
+                    );
+                }
+            );
+            if (!(new ABJ_404_Solution_Dest404PageFence())->isFreshlyPublishable($prepared, $expected)) {
+                $this->clearCache();
+                return false;
+            }
+            $writer = new ABJ_404_Solution_SettingsOptionWriter();
+            $written = ABJ_404_Solution_OptionPersistenceTracer::traceCurrentStorageWrite(
+                function () use ($writer, $prepared, $expected, $lock): bool {
+                    return $writer->write($prepared, $expected, $lock);
+                }
+            );
+            if (!$written) {
+                $this->clearCache();
+                return false;
+            }
+            $confirmedStringKeys = ABJ_404_Solution_StoredSettingsReconciler::confirmedSettings(
+                $this->getRawSettingsSnapshot()
+            );
+            if ($confirmedStringKeys === null) {
+                $this->clearCache();
+                return false;
+            }
+            ABJ_404_Solution_OptionPersistenceTracer::traceCurrent(
+                'repository_cache_refresh',
+                function () use ($confirmedStringKeys): void {
+                    $this->rawCache = $confirmedStringKeys;
+                    $this->resolvedSkipDbCheck = null;
+                    $this->resolvedWithDbCheck = null;
+                }
+            );
+            return true;
+        } finally {
+            if ($ownedHere) {
+                $lock->release();
+            }
+        }
     }
 
     /**
@@ -309,7 +395,7 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
         if (!class_exists('ABJ_404_Solution_PluginLogic', false)) {
             return null;
         }
-        $pluginLogic = $this->readPluginLogicInstance();
+        $pluginLogic = ABJ_404_Solution_PluginLogic::peekInstance();
         if (!is_object($pluginLogic)) {
             return null;
         }
@@ -334,18 +420,6 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
         return null;
     }
 
-    /** @return object|null PluginLogic singleton instance, or null when reflection fails. */
-    private function readPluginLogicInstance() {
-        try {
-            $instanceProperty = new ReflectionProperty('ABJ_404_Solution_PluginLogic', 'instance');
-            $value = $instanceProperty->getValue();
-            return is_object($value) ? $value : null;
-        } catch (Throwable $e) {
-            $this->warn('PluginLogicOptionsResolver could not read PluginLogic::$instance via reflection (' . $e->getMessage() . '); falling back to WordPress options.');
-            return null;
-        }
-    }
-
     /**
      * @param ABJ_404_Solution_PluginLogic $pluginLogic Real PluginLogic instance (caller verified).
      * @return array<string, mixed>|null Seeded options array, or null when the property is absent / non-array.
@@ -353,6 +427,9 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
     private function readPluginLogicOptionsProperty($pluginLogic) {
         try {
             $optionsProperty = new ReflectionProperty('ABJ_404_Solution_PluginLogic', 'options');
+            if (PHP_VERSION_ID < 80100) {
+                $optionsProperty->setAccessible(true);
+            }
             $options = $optionsProperty->getValue($pluginLogic);
             if (!is_array($options)) {
                 return null;

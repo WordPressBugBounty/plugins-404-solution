@@ -58,6 +58,22 @@ class ABJ_404_Solution_DatabaseSchemaErrorTaxonomy {
         'check that it exists',         // Same, as MySQL 8.0.29+ and MariaDB word it.
     );
 
+    /**
+     * The engines' two ways of saying that an index cannot hold its columns
+     * once a statement widens them (a latin1 to utf8mb4 conversion, a MyISAM
+     * to InnoDB move): ER_INDEX_COLUMN_TOO_LONG 1709 ("Index column size too
+     * large. The maximum column size is 767 bytes.") for a full-column key,
+     * and ER_TOO_LONG_KEY 1071 ("Specified key was too long; max key length is
+     * 767 bytes") for a key or prefix past the row format's limit. Public so a
+     * caller passes the same list as queryAndGetResults' ignore_errors.
+     *
+     * @var array<int, string>
+     */
+    public const INDEX_TOO_LARGE_TO_WIDEN_MARKERS = array(
+        'Index column size too large',
+        'Specified key was too long',
+    );
+
     /** @var ABJ_404_Solution_Functions */
     private $f;
 
@@ -76,12 +92,20 @@ class ABJ_404_Solution_DatabaseSchemaErrorTaxonomy {
         return stripos($errorText, 'is marked as crashed') !== false;
     }
 
-    /** @param string $errorText @return bool */
+    /**
+     * A MyISAM index file the engine says is corrupt: "Incorrect key file for
+     * table" (MySQL), or "Index for table '...' is corrupt; try to repair it",
+     * the wording MariaDB reports for the same corruption (observed on MariaDB
+     * 13.0.2 with a truncated .MYI).
+     *
+     * @param string $errorText @return bool
+     */
     public function isIncorrectKeyFileError(string $errorText): bool {
         if ($errorText === '') {
             return false;
         }
-        return stripos($errorText, 'Incorrect key file') !== false;
+        return stripos($errorText, 'Incorrect key file') !== false
+            || preg_match("/Index for table '[^']*' is corrupt/i", $errorText) === 1;
     }
 
     /** @param string $errorText @return bool */
@@ -203,6 +227,21 @@ class ABJ_404_Solution_DatabaseSchemaErrorTaxonomy {
         $lower = strtolower($errorText);
         foreach (self::REDUNDANT_SCHEMA_CHANGE_MARKERS as $marker) {
             if ($this->f->strpos($lower, $marker) !== false) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a widening schema change failed only because an index cannot
+     * hold the widened columns, the failure that dropping the secondary
+     * indexes and retrying clears. Static and engine-text only, so the upgrade
+     * components ask it without a DAO classifier.
+     */
+    public static function isIndexTooLargeToWidenError(string $errorText): bool {
+        foreach (self::INDEX_TOO_LARGE_TO_WIDEN_MARKERS as $marker) {
+            if (stripos($errorText, $marker) !== false) {
                 return true;
             }
         }

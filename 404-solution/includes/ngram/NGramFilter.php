@@ -408,6 +408,11 @@ class ABJ_404_Solution_NGramFilter {
         return $this->repo->getCacheCount();
     }
 
+    /** @return bool Whether missing page entries make post prefiltering unsafe. */
+    public function hasUnindexedPermalinks(): bool {
+        return $this->coveragePolicy->hasUnindexedPermalinks();
+    }
+
     /**
      * @param string $type
      * @return int

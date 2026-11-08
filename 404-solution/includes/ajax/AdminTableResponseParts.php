@@ -32,7 +32,7 @@ class ABJ_404_Solution_AdminTableResponseParts {
     /**
      * Per-query time budget for a foreground table build. The browser is
      * waiting on this, so a query that cannot finish inside the budget must
-     * fail rather than hold the worker.
+     * fall back to a bounded page rather than hold the worker.
      */
     private const QUERY_TIMEOUT_SECONDS = 20;
 
@@ -91,10 +91,10 @@ class ABJ_404_Solution_AdminTableResponseParts {
     public static function queryBudgetOptionsForSeconds(int $timeoutSeconds): array {
         return array(
             '_abj404_query_timeout' => max(1, $timeoutSeconds),
-            // This endpoint owns a structured, admin-only failure envelope.
-            // Let view-query failures reach it instead of converting them to
-            // an HTTP 200 empty/pending table that discards index diagnostics.
+            // Unknown errors still reach the structured failure envelope.
+            // Budget/plan failures retain their diagnostics alongside rows.
             '_abj404_throw_on_view_query_error' => 1,
+            '_abj404_allow_degraded_read' => 1,
         );
     }
 
@@ -126,7 +126,8 @@ class ABJ_404_Solution_AdminTableResponseParts {
     }
 
     /**
-     * The requested part, or every part when 'all' was asked for.
+     * The requested part, or every part when 'all' was asked for. A degraded
+     * read always returns a complete envelope for one consistent bounded page.
      *
      * @param array{part: string, subpage: string, view: ABJ_404_Solution_View,
      *   viewReadService: ABJ_404_Solution_ViewReadServiceInterface,
@@ -150,14 +151,94 @@ class ABJ_404_Solution_AdminTableResponseParts {
         );
         $parts = $request['part'] === 'all' ? array_keys($builders) : array($request['part']);
         $data = array();
-        foreach ($parts as $part) {
-            $method = $builders[$part] ?? '';
-            if ($method === '') {
-                continue;
+        try {
+            foreach ($parts as $part) {
+                $method = $builders[$part] ?? '';
+                if ($method === '') {
+                    continue;
+                }
+                $data = array_merge($data, self::$method($request, $context));
             }
-            $data = array_merge($data, self::$method($request, $context));
+            $reader = abj_service_optional('admin_table_reader');
+            if ($reader instanceof ABJ_404_Solution_AdminTableReadRepository && $reader->isDegraded()) {
+                // Degradation is request-scoped. Complete the envelope here so
+                // a later, independent part cannot restore full-list controls
+                // around bounded rows. Pagination comes last: a count timeout
+                // on Logs needs the bounded rows to establish its cached-count
+                // key before the authoritative strip is rendered.
+                foreach ($builders as $part => $method) {
+                    if (in_array($part, $parts, true) && $part !== 'pagination') {
+                        continue;
+                    }
+                    $data = array_merge($data, self::$method($request, $context));
+                }
+            }
+        } finally {
+            // Even an unavailable fallback owes immediate background repair.
+            $metadata = self::readMetadata($context);
+        }
+        if ($metadata !== array()) { $data['meta'] = array('table_read' => $metadata); }
+        return $data;
+    }
+
+    /** Reset only the request-scoped reader; no database or repair work. */
+    public static function beginRead(): void {
+        $reader = abj_service_optional('admin_table_reader');
+        if ($reader instanceof ABJ_404_Solution_AdminTableReadRepository) { $reader->begin(); }
+    }
+
+    /**
+     * Build either a foreground response or the renderless background signature.
+     * Logs retain their full bounded path; redirects/captured never turn a poll
+     * into a foreground render. Admission and emission live outside assembly.
+     * @param array{part:string,subpage:string,view:ABJ_404_Solution_View,
+     *   viewReadService:ABJ_404_Solution_ViewReadServiceInterface,
+     *   queryTimeoutSeconds?:int,tableOptions?:array<string,mixed>,
+     *   detectOnly:bool,currentSignature:string} $request
+     * @param array<string,mixed> $context
+     * @return array<string,mixed>
+     */
+    public static function buildForMode(array $request, array &$context): array {
+        $view = $request['view'];
+        $subpage = $request['subpage'];
+        // View forwards component APIs through __call(); concrete-method
+        // introspection would silently turn this poll into a full render.
+        if ($request['detectOnly'] && self::canComputeCheapSignature($subpage)
+            && is_callable(array($view, 'computeTableDataSignature'))) {
+            try {
+                $signature = (string)ABJ_404_Solution_AjaxStageDiagnostics::runStage(
+                    $context, 'detectOnlySignature',
+                    static fn() => $view->computeTableDataSignature($subpage, self::budgetFor($request)));
+                $data = array('tableSignature' => $signature);
+            } finally {
+                $metadata = self::readMetadata($context);
+            }
+            if ($metadata !== array()) { $data['meta']['table_read'] = $metadata; }
+        } else {
+            $data = self::build($request, $context);
+        }
+        if ($request['detectOnly'] && isset($data['tableSignature'])) {
+            $signature = is_scalar($data['tableSignature']) ? (string)$data['tableSignature'] : '';
+            $data['hasUpdate'] = self::hasSignatureUpdate($request['currentSignature'], $signature);
         }
         return $data;
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     * @return array<string, mixed>
+     */
+    public static function readMetadata(array $context): array {
+        $reader = abj_service_optional('admin_table_reader');
+        if (!$reader instanceof ABJ_404_Solution_AdminTableReadRepository) { return array(); }
+        $repairEnqueued = ($reader->isDegraded() || $reader->hasPendingSorts())
+            && ABJ_404_Solution_DatabaseUpgradeSelfHeal::enqueueAdminTableRepair();
+        if (!$reader->isDegraded()) { return array(); }
+        $metadata = $reader->metadata();
+        $metadata['repair_enqueued'] = $repairEnqueued;
+        $requestId = is_string($context['request_id'] ?? null) ? $context['request_id'] : '';
+        ABJ_404_Solution_AjaxCheckpointLogger::record($requestId, 'admin_table_degraded', $metadata);
+        return $metadata;
     }
 
     /**
@@ -169,9 +250,10 @@ class ABJ_404_Solution_AdminTableResponseParts {
      * @return array<string, int>
      */
     private static function budgetFor(array $request): array {
-        return isset($request['queryTimeoutSeconds'])
+        $budget = isset($request['queryTimeoutSeconds'])
             ? self::queryBudgetOptionsForSeconds((int)$request['queryTimeoutSeconds'])
             : self::queryBudgetOptions();
+        return array_merge($request['tableOptions'] ?? array(), $budget);
     }
 
     /**
@@ -189,6 +271,7 @@ class ABJ_404_Solution_AdminTableResponseParts {
         $view = $request['view'];
         $viewReadService = $request['viewReadService'];
         $budget = self::budgetFor($request);
+        if ($request['part'] === 'all') { $budget['_abj404_prepare_count'] = 1; }
         if (!isset(self::TABLE_RENDERERS[$subpage])) {
             return array('table' => 'Error: Unexpected subpage requested.');
         }
@@ -206,6 +289,15 @@ class ABJ_404_Solution_AdminTableResponseParts {
                         'sort_readiness' => $viewReadService->sortReadinessStatusForOrderby($orderby),
                     ));
                 }
+                /**
+                 * Fires after the authorized request has entered its named table stage and
+                 * immediately before the production renderer runs. Observers may correlate
+                 * host or database activity with the exact renderer boundary.
+                 *
+                 * @param string $subpage Admin table identifier.
+                 * @param string $method Production View renderer method.
+                 */
+                do_action('abj404_ajax_before_table_render', $subpage, $method);
                 return array(
                     'table' => $view->$method($subpage, $budget),
                     'tableSignature' => self::currentTableSignature($view, $subpage),
@@ -316,7 +408,8 @@ class ABJ_404_Solution_AdminTableResponseParts {
      * @param ABJ_404_Solution_View $view
      */
     private static function currentTableSignature($view, string $subpage): string {
-        if (is_object($view) && method_exists($view, 'getCurrentTableDataSignature')) {
+        // The facade exposes this component method through __call().
+        if (is_object($view) && is_callable(array($view, 'getCurrentTableDataSignature'))) {
             return (string)$view->getCurrentTableDataSignature($subpage);
         }
         return '';

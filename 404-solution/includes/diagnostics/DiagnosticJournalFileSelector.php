@@ -77,7 +77,8 @@ final class ABJ_404_Solution_DiagnosticJournalFileSelector {
      * @param array<string, bool> $knownFailingIds
      * @return array<int, array{path: string, modified: int, order: int,
      *   requestIds: array<int, string>, knownFailure: bool, serverFailure: bool,
-     *   classificationIssues: array<int, string>, pinned: bool}>
+     *   classificationIssues: array<int, string>, pinned: bool,
+     *   existenceProven: bool}>
      */
     private static function classifyFiles(array $paths, array $knownFailingIds): array {
         $files = self::oldestFirstExistingFiles($paths);
@@ -86,11 +87,15 @@ final class ABJ_404_Solution_DiagnosticJournalFileSelector {
             $facts = self::requestFactsInFile(
                 $file['path'],
                 $knownFailingIds,
-                $requestGroups
+                $requestGroups,
+                $file['preclassificationIssues'] ?? array()
             );
             $files[$index]['requestIds'] = $facts['requestIds'];
             $files[$index]['knownFailure'] = $facts['knownFailure'];
-            $files[$index]['classificationIssues'] = $facts['classificationIssues'];
+            $files[$index]['classificationIssues'] = array_values(array_unique(array_merge(
+                $file['preclassificationIssues'] ?? array(),
+                $facts['classificationIssues']
+            )));
         }
 
         $serverFailingIds = array();
@@ -140,7 +145,7 @@ final class ABJ_404_Solution_DiagnosticJournalFileSelector {
 
     /**
      * @param array<int, array{path: string, requestIds: array<int, string>,
-     *   classificationIssues: array<int, string>}> $files
+     *   classificationIssues: array<int, string>, existenceProven: bool}> $files
      * @param array<int, bool> $selectedIndexes
      * @return array{paths: array<int, string>, manifest: array<string, mixed>}
      */
@@ -153,11 +158,15 @@ final class ABJ_404_Solution_DiagnosticJournalFileSelector {
         int $pinnedFiles
     ): array {
         $selectedPaths = array();
+        $existingFiles = 0;
         $droppedNames = array();
         $droppedRequestIds = array();
         $seenDroppedRequestIds = array();
         $classificationIssues = array();
         foreach ($files as $index => $file) {
+            if (($file['existenceProven'] ?? false) === true) {
+                $existingFiles++;
+            }
             if ($file['classificationIssues'] !== array()) {
                 $classificationIssues[] = array(
                     'name' => basename($file['path']),
@@ -182,7 +191,7 @@ final class ABJ_404_Solution_DiagnosticJournalFileSelector {
             'manifest' => array(
                 'policy' => 'failure_and_uncertain_evidence_then_newest',
                 'max_recent_files' => self::MAX_RECENT_FILES,
-                'existing_files' => count($files),
+                'existing_files' => $existingFiles,
                 'selected_files' => count($selectedPaths),
                 'known_failure_files' => $knownFailureFiles,
                 'server_failure_files' => $serverFailureFiles,
@@ -209,14 +218,50 @@ final class ABJ_404_Solution_DiagnosticJournalFileSelector {
      * Existing paths ordered by mtime, with caller order breaking ties.
      *
      * @param array<int, string> $paths
-     * @return array<int, array{path: string, modified: int, order: int}>
+     * @return array<int, array{path: string, modified: int, order: int,
+     *   existenceProven: bool}>
      */
     private static function oldestFirstExistingFiles(array $paths): array {
         $files = array();
         foreach (array_values($paths) as $order => $path) {
-            $modified = @filemtime($path);
+            $fileResult = ABJ_404_Solution_HostFilesystemCall::isFile($path);
+            if ($fileResult['warning'] !== null) {
+                self::reportFailure('Diagnostic journal file check warning: ' . $path
+                    . ' (' . $fileResult['warning'] . ')');
+                $files[] = array(
+                    'path' => $path,
+                    'modified' => 0,
+                    'order' => $order,
+                    'preclassificationIssues' => array('is_file_warning'),
+                    'existenceProven' => false,
+                );
+                continue;
+            }
+            if (!$fileResult['result']) {
+                continue;
+            }
+            $modifiedResult = ABJ_404_Solution_HostFilesystemCall::filemtime($path);
+            if ($modifiedResult['warning'] !== null) {
+                self::reportFailure('Diagnostic journal mtime warning: ' . $path
+                    . ' (' . $modifiedResult['warning'] . ')');
+                $files[] = array(
+                    'path' => $path,
+                    'modified' => 0,
+                    'order' => $order,
+                    'preclassificationIssues' => array('filemtime_warning'),
+                    'existenceProven' => true,
+                );
+                continue;
+            }
+            $modified = $modifiedResult['result'];
             if (is_int($modified)) {
-                $files[] = array('path' => $path, 'modified' => $modified, 'order' => $order);
+                $files[] = array(
+                    'path' => $path,
+                    'modified' => $modified,
+                    'order' => $order,
+                    'preclassificationIssues' => array(),
+                    'existenceProven' => true,
+                );
             }
         }
         usort($files, static function (array $left, array $right): int {
@@ -233,16 +278,42 @@ final class ABJ_404_Solution_DiagnosticJournalFileSelector {
      *
      * @param array<string, bool> $knownFailingIds
      * @param array<string, ABJ_404_Solution_DiagnosticRequestGroup> $requestGroups
+     * @param list<string> $preclassificationIssues
      * @return array{requestIds: array<int, string>, knownFailure: bool,
      *   classificationIssues: array<int, string>}
      */
     private static function requestFactsInFile(
         string $path,
         array $knownFailingIds,
-        array &$requestGroups
+        array &$requestGroups,
+        array $preclassificationIssues = array()
     ): array {
-        $handle = @fopen($path, 'rb');
-        if ($handle === false) {
+        if ($preclassificationIssues !== array()) {
+            return array(
+                'requestIds' => array(),
+                'knownFailure' => false,
+                'classificationIssues' => $preclassificationIssues,
+            );
+        }
+        $openResult = ABJ_404_Solution_HostFilesystemCall::fopen($path, 'rb');
+        if ($openResult['warning'] !== null) {
+            self::reportFailure('Diagnostic journal open warning: ' . $path
+                . ' (' . $openResult['warning'] . ')');
+            if (is_resource($openResult['result'])) {
+                $closeResult = ABJ_404_Solution_HostFilesystemCall::fclose($openResult['result']);
+                if ($closeResult['warning'] !== null) {
+                    self::reportFailure('Diagnostic journal close warning: ' . $path
+                        . ' (' . $closeResult['warning'] . ')');
+                }
+            }
+            return array(
+                'requestIds' => array(),
+                'knownFailure' => false,
+                'classificationIssues' => array('fopen_warning'),
+            );
+        }
+        $handle = $openResult['result'];
+        if (!is_resource($handle)) {
             self::reportFailure('Diagnostic journal could not be scanned: ' . $path);
             return array(
                 'requestIds' => array(),
@@ -255,7 +326,18 @@ final class ABJ_404_Solution_DiagnosticJournalFileSelector {
         $classificationIssues = array();
         $nonEmptyLines = 0;
         try {
-            while (($line = @fgets($handle)) !== false) {
+            while (true) {
+                $lineResult = ABJ_404_Solution_HostFilesystemCall::fgets($handle);
+                if ($lineResult['warning'] !== null) {
+                    self::reportFailure('Diagnostic journal read warning: ' . $path
+                        . ' (' . $lineResult['warning'] . ')');
+                    $classificationIssues['fgets_warning'] = true;
+                    break;
+                }
+                $line = $lineResult['result'];
+                if ($line === false) {
+                    break;
+                }
                 if (trim($line) === '') {
                     continue;
                 }
@@ -283,7 +365,12 @@ final class ABJ_404_Solution_DiagnosticJournalFileSelector {
                 $requestGroups[$requestId]->applyRecord($record);
             }
         } finally {
-            @fclose($handle);
+            $closeResult = ABJ_404_Solution_HostFilesystemCall::fclose($handle);
+            if ($closeResult['warning'] !== null) {
+                self::reportFailure('Diagnostic journal close warning: ' . $path
+                    . ' (' . $closeResult['warning'] . ')');
+                $classificationIssues['fclose_warning'] = true;
+            }
         }
         if ($nonEmptyLines === 0) {
             $classificationIssues['no_records'] = true;

@@ -44,6 +44,9 @@ class ABJ_404_Solution_DatabaseTableLowercaseRenamer {
     /** @var array<int, string> */
     private $activeBlogPrefixesLowercase;
 
+    /** @var callable|null Resolves foreign-install prefixes through the shared component boundary. */
+    private $foreignWordPressOptionsPrefixResolver;
+
     /**
      * @param ABJ_404_Solution_DatabaseUpgradeCoordinator $coordinator
      * @param ABJ_404_Solution_DatabaseCore $dbCore Deliberately untyped at the
@@ -59,14 +62,17 @@ class ABJ_404_Solution_DatabaseTableLowercaseRenamer {
      *   prefixes of every active site on the network (or just the current
      *   prefix on single-site), computed once by the caller before
      *   construction since it's a pure read with no per-call state.
+     * @param callable|null $foreignWordPressOptionsPrefixResolver Existing
+     *   tenant-boundary reader supplied by the owning component.
      */
     public function __construct(ABJ_404_Solution_DatabaseUpgradeCoordinator $coordinator,
             $dbCore, ABJ_404_Solution_Logging $logger,
-            array $activeBlogPrefixesLowercase) {
+            array $activeBlogPrefixesLowercase, ?callable $foreignWordPressOptionsPrefixResolver = null) {
         $this->coordinator = $coordinator;
         $this->dbCore = $dbCore;
         $this->logger = $logger;
         $this->activeBlogPrefixesLowercase = $activeBlogPrefixesLowercase;
+        $this->foreignWordPressOptionsPrefixResolver = $foreignWordPressOptionsPrefixResolver;
     }
 
     /** Makes all plugin table names lowercase, in case someone thought it was funny to use
@@ -81,7 +87,7 @@ class ABJ_404_Solution_DatabaseTableLowercaseRenamer {
         // are already treated as lowercase internally. Renaming is pointless and
         // can cause issues on some hosting setups.
         // DAO-bypass-approved: Schema-bootstrap inside renameAbj404TablesToLowerCase(). Runs before plugin DAO is fully wired during DB upgrades.
-        $lctnResult = $wpdb->get_row("SHOW VARIABLES LIKE 'lower_case_table_names'", ARRAY_A);
+        $lctnResult = ABJ_404_Solution_DatabaseDriverCall::getRow($wpdb, "SHOW VARIABLES LIKE 'lower_case_table_names'", ARRAY_A);
         if (is_array($lctnResult)) {
             $lctnValue = null;
             foreach ($lctnResult as $key => $value) {
@@ -104,21 +110,9 @@ class ABJ_404_Solution_DatabaseTableLowercaseRenamer {
             $this->logger->warn("Could not determine database name for lowercase rename.");
             return;
         }
-        // Both values are bound, not spliced: the executor rewrites `{wp_...}`
-        // tokens over the statement text before it binds query_params. The
-        // LIKE pattern is bound too, so its percent signs never reach prepare()
-        // as a placeholder.
-        $query = "SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = %s
-            AND LOWER(table_name) LIKE %s";
-        $results = $this->dbCore->queryAndGetResults(
-            $query,
-            array('query_params' => array($dbNameRaw, '%abj404%'))
-        );
-
-        if (!is_array($results['rows'])) {
-            $this->logger->warn("Could not query information_schema tables for lowercase rename.");
+        $inventory = $this->readTableInventory($dbNameRaw);
+        if ($inventory === null) {
+            $this->logger->warn("Could not verify information_schema tables for lowercase rename; deferring rename.");
             return;
         }
 
@@ -129,46 +123,92 @@ class ABJ_404_Solution_DatabaseTableLowercaseRenamer {
         // active-blog set and is still renamed so adoption can recover it.
         $currentPrefix = $this->dbCore->tableNameResolver()->getLowercasePrefix();
         $activeBlogPrefixes = $this->activeBlogPrefixesLowercase;
-
-        foreach ($results['rows'] as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-            // Case-insensitive key lookup: MySQL drivers return information_schema
-            // column names in varying cases (table_name, TABLE_NAME, Table_Name).
-            $tableName = null;
-            foreach ($row as $key => $value) {
-                    if (strtolower((string)$key) === 'table_name' && is_scalar($value)) {
-                        $tableName = (string)$value;
-                    break;
-                }
-            }
-
-            if (!empty($tableName)) {
-                $lowercaseName = strtolower($tableName);
-
-                // Check if the table name is already lowercase, skip if it is
-                if ($tableName !== $lowercaseName) {
-                    $tablePrefix = $this->prefixOfAbj404Table($lowercaseName);
-                    if ($tablePrefix !== null && $tablePrefix !== $currentPrefix
-                            && in_array($tablePrefix, $activeBlogPrefixes, true)) {
-                        // Belongs to a different active subsite. Leave it alone.
-                        continue;
-                    }
-                    // Rename the table to lowercase
-                    $renameQuery = "RENAME TABLE `{$tableName}` TO `{$lowercaseName}`";
-                    $this->dbCore->queryAndGetResults($renameQuery,
-                        ['ignore_errors' => ["already exists"]]);
-                    $this->logger->infoMessage("Renamed table {$tableName} to {$lowercaseName}\n");
-                }
-            } else {
-                $this->logger->warn("I didn't find a table name in the results of this row: " .
-                    print_r($row, true));
-            }
-        }
+        $foreign = $this->resolveForeignPrefixes($inventory['candidatePrefixes']);
+        $this->renameTableNames($inventory['tableNames'], $currentPrefix, $activeBlogPrefixes,
+            $foreign['prefixes'], $foreign['available']);
 
         // After renaming, check for orphaned tables under old prefixes.
         $this->coordinator->orphanAdoptionUpgrade()->adoptOrphanedTables();
+    }
+
+    /** @return array{tableNames:array<int,string>,candidatePrefixes:array<int,string>}|null */
+    private function readTableInventory(string $dbName): ?array {
+        // Both values are bound, not spliced: the executor rewrites `{wp_...}`
+        // tokens before binding query_params. Binding the LIKE pattern keeps
+        // its percent signs out of prepare() placeholder processing.
+        $results = $this->dbCore->queryAndGetResults(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = %s AND LOWER(table_name) LIKE %s",
+            array('query_params' => array($dbName, '%abj404%'))
+        );
+        $lastError = $results['last_error'] ?? null;
+        if (($results['query_succeeded'] ?? null) !== true || !is_string($lastError) || $lastError !== ''
+            || (array_key_exists('timed_out', $results) && $results['timed_out'] !== false)
+            || !is_array($results['rows'] ?? null)) {
+            return null;
+        }
+        $names = array();
+        $prefixes = array();
+        foreach ($results['rows'] as $row) {
+            if (!is_array($row)) { continue; }
+            $name = null;
+            // Drivers vary the case of information_schema column names.
+            foreach ($row as $key => $value) {
+                if (strtolower((string)$key) === 'table_name' && is_scalar($value)) { $name = (string)$value; break; }
+            }
+            if ($name === null || $name === '') {
+                $this->logger->warn("I didn't find a table name in the results of this row: " . print_r($row, true));
+                continue;
+            }
+            $names[] = $name;
+            $prefix = $this->prefixOfAbj404Table(strtolower($name));
+            if ($prefix !== null) { $prefixes[] = $prefix; }
+        }
+        return array('tableNames' => $names, 'candidatePrefixes' => $prefixes);
+    }
+
+    /**
+     * @param array<int,string> $candidatePrefixes
+     * @return array{prefixes:array<int,string>,available:bool}
+     */
+    private function resolveForeignPrefixes(array $candidatePrefixes): array {
+        if ($candidatePrefixes === array()) { return array('prefixes' => array(), 'available' => false); }
+        if ($this->foreignWordPressOptionsPrefixResolver === null) {
+            $this->logger->warn('Foreign-install tenant authority is unavailable; deferring non-current table renames.');
+            return array('prefixes' => array(), 'available' => false);
+        }
+        try {
+            $resolved = call_user_func($this->foreignWordPressOptionsPrefixResolver, array_values(array_unique($candidatePrefixes)));
+            if (is_array($resolved) && count(array_filter($resolved, 'is_string')) === count($resolved)) {
+                $prefixes = array();
+                foreach ($resolved as $prefix) { if (is_string($prefix)) { $prefixes[] = $prefix; } }
+                return array('prefixes' => $prefixes, 'available' => true);
+            }
+        } catch (Throwable $e) {
+            $this->logger->warn('Foreign-install tenant authority could not be read; deferring non-current table renames.');
+            return array('prefixes' => array(), 'available' => false);
+        }
+        $this->logger->warn('Foreign-install tenant authority returned malformed data; deferring non-current table renames.');
+        return array('prefixes' => array(), 'available' => false);
+    }
+
+    /**
+     * @param array<int,string> $tableNames
+     * @param array<int,string> $activePrefixes
+     * @param array<int,string> $foreignPrefixes
+     */
+    private function renameTableNames(array $tableNames, string $currentPrefix, array $activePrefixes,
+            array $foreignPrefixes, bool $foreignAvailable): void {
+        foreach ($tableNames as $tableName) {
+            $lower = strtolower($tableName);
+            if ($tableName === $lower) { continue; }
+            $prefix = $this->prefixOfAbj404Table($lower);
+            if ($prefix !== null && $prefix !== $currentPrefix
+                && (in_array($prefix, $activePrefixes, true)
+                    || !$foreignAvailable || in_array($prefix, $foreignPrefixes, true))) { continue; }
+            $this->dbCore->queryAndGetResults("RENAME TABLE `{$tableName}` TO `{$lower}`",
+                array('ignore_errors' => array('already exists')));
+            $this->logger->infoMessage("Renamed table {$tableName} to {$lower}\n");
+        }
     }
 
     /**

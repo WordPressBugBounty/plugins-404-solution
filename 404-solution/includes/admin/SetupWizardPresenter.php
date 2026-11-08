@@ -44,34 +44,47 @@ class ABJ_404_Solution_SetupWizardPresenter {
             dirname(__DIR__) . '/html/setupWizardModal.html'
         );
         $answers = ABJ_404_Solution_SetupWizardAnswerPolicy::defaultAnswers();
+        $alertsAvailable = ABJ_404_Solution_SetupWizardAnswerPolicy::captures404s($answers);
+        $adminEmail = ABJ_404_Solution_SetupWizardOptionStore::adminEmail();
 
         echo self::fillTpl($templatePath, 'setup wizard modal template', array(
             'nonce_field' => self::renderNonceField(),
             'welcome_heading' => esc_html__('Welcome to 404 Solution', '404-solution'),
-            'close_label' => esc_attr__('Close', '404-solution'),
-            'intro_primary' => esc_html__('404 Solution helps you automatically handle 404 errors and broken links on your site.', '404-solution'),
-            'intro_secondary' => esc_html__("Let's configure how it handles missing pages. You can always change these settings later.", '404-solution'),
+            'intro' => esc_html__('Choose how missing pages are handled. You can change these settings later in Options.', '404-solution'),
             'q1_heading' => esc_html__('When a page is not found, what should happen?', '404-solution'),
             'q1_redirect_checked' => self::checkedAttribute($answers['q1'], 'redirect'),
-            'q1_redirect_label' => esc_html__('Automatically redirect to similar page (recommended)', '404-solution'),
-            'q1_redirect_desc' => esc_html__('When a match is found, redirect visitors automatically', '404-solution'),
+            'q1_redirect_label' => esc_html__('Redirect to the closest match (recommended)', '404-solution'),
+            'q1_redirect_desc' => esc_html__('When no close match is found, show a 404 page that suggests similar pages.', '404-solution'),
             'q1_default_checked' => self::checkedAttribute($answers['q1'], 'default'),
-            'q1_default_label' => esc_html__('Just show the default 404 page', '404-solution'),
-            'q1_default_desc' => esc_html__("Use WordPress's standard \"Page not found\" screen. Manual redirects still work.", '404-solution'),
+            'q1_default_label' => esc_html__('Show a 404 page that suggests similar pages', '404-solution'),
+            'q1_default_desc' => esc_html__('Visitors are never redirected automatically. Redirects you create yourself still work.', '404-solution'),
             'q2_heading' => esc_html__('Log 404 errors for review?', '404-solution'),
             'q2_yes_checked' => self::checkedAttribute($answers['q2'], 'yes'),
             'q2_yes_label' => esc_html__('Yes, log 404 errors', '404-solution'),
-            'q2_yes_desc' => esc_html__('Track missing pages so you can create redirects later', '404-solution'),
+            'q2_yes_desc' => esc_html__('Missing URLs are listed under Captured 404s so you can create redirects for them.', '404-solution'),
             'q2_no_checked' => self::checkedAttribute($answers['q2'], 'no'),
             'q2_no_label' => esc_html__("No, don't log 404s", '404-solution'),
-            'q2_no_desc' => esc_html__('Only handle manually created redirects', '404-solution'),
-            'q3_heading' => esc_html__('Get email alerts about 404 problems?', '404-solution'),
+            'q2_no_desc' => esc_html__('Missing URLs are not recorded. This does not change how visitors are redirected.', '404-solution'),
+            'q3_heading' => esc_html__('Email me about missing pages?', '404-solution'),
+            'q3_group_disabled' => $alertsAvailable ? '' : ' disabled',
             'q3_yes_checked' => self::checkedAttribute($answers['q3'], 'yes'),
-            'q3_yes_label' => esc_html__('Yes, email me a weekly summary (recommended)', '404-solution'),
-            'q3_yes_desc' => esc_html__('Get notified when captured 404 URLs exceed 50', '404-solution'),
+            'q3_yes_label' => esc_html(sprintf(
+                /* translators: %d is the number of captured 404 URLs that triggers an email. */
+                __('Yes, email me when %d or more 404s have been captured (recommended)', '404-solution'),
+                ABJ_404_Solution_SetupWizardAnswerPolicy::ALERT_THRESHOLD
+            )),
+            'q3_yes_desc' => esc_html($adminEmail === ''
+                ? __("Checked weekly. The email is sent to the site administrator.", '404-solution')
+                : sprintf(
+                    /* translators: %s is the site administrator's email address. */
+                    __('Checked weekly. The email is sent to %s.', '404-solution'),
+                    $adminEmail
+                )),
             'q3_no_checked' => self::checkedAttribute($answers['q3'], 'no'),
             'q3_no_label' => esc_html__("No, I'll check manually", '404-solution'),
             'q3_no_desc' => esc_html__('You can always enable email alerts later in Options', '404-solution'),
+            'q3_unavailable_hidden' => $alertsAvailable ? ' hidden' : '',
+            'q3_unavailable_note' => esc_html__('Email alerts need the list of missing pages, so they are off while logging is off.', '404-solution'),
             'skip_label' => esc_html__('Skip Setup', '404-solution'),
             'save_label' => esc_html__('Save & Get Started', '404-solution'),
         ));

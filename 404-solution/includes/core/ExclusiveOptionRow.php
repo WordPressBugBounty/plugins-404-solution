@@ -112,7 +112,7 @@ class ABJ_404_Solution_ExclusiveOptionRow {
             'description' => 'claiming the options row "' . $optionName . '"',
             'operation' => function () use ($wpdb, $table, $boundRow) {
                 // DAO-bypass-approved: guarded options-row lock claim must remain available while the DAO bootstraps.
-                return $wpdb->query("INSERT IGNORE INTO `" . $table . "` "
+                return ABJ_404_Solution_DatabaseDriverCall::query($wpdb, "INSERT IGNORE INTO `" . $table . "` "
                     . "(option_name, option_value, autoload) VALUES (" . $boundRow . ", 'no')");
             },
         ));
@@ -160,7 +160,7 @@ class ABJ_404_Solution_ExclusiveOptionRow {
             'description' => 'reading the options row "' . $optionName . '"',
             'operation' => function () use ($wpdb, $table, $boundName) {
                 // DAO-bypass-approved: guarded lock-owner read bypasses WordPress's process-local option cache.
-                return $wpdb->get_var("SELECT option_value FROM `" . $table . "` "
+                return ABJ_404_Solution_DatabaseDriverCall::getVar($wpdb, "SELECT option_value FROM `" . $table . "` "
                     . "WHERE option_name = " . $boundName . " LIMIT 1");
             },
         ));
@@ -223,7 +223,7 @@ class ABJ_404_Solution_ExclusiveOptionRow {
             'description' => 'renewing the options row "' . $replacement['optionName'] . '"',
             'operation' => function () use ($wpdb, $table, $boundReplacement, $boundName, $boundCurrent) {
                 // DAO-bypass-approved: guarded lease renewal must stay on the same raw coordination row.
-                return $wpdb->query("UPDATE `" . $table . "` SET option_value = " . $boundReplacement
+                return ABJ_404_Solution_DatabaseDriverCall::query($wpdb, "UPDATE `" . $table . "` SET option_value = " . $boundReplacement
                     . " WHERE option_name = " . $boundName . " AND option_value = " . $boundCurrent);
             },
         ));
@@ -264,7 +264,7 @@ class ABJ_404_Solution_ExclusiveOptionRow {
             'description' => 'releasing the options row "' . $optionName . '"',
             'operation' => function () use ($wpdb, $sql) {
                 // DAO-bypass-approved: guarded conditional release runs during finally/shutdown paths outside DAO lifetime.
-                return $wpdb->query($sql);
+                return ABJ_404_Solution_DatabaseDriverCall::query($wpdb, $sql);
             },
         ));
 

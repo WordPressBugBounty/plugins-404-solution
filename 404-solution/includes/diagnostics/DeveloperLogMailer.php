@@ -23,24 +23,24 @@ class ABJ_404_Solution_DeveloperLogMailer {
     /** @var callable */
     private $debugLogger;
     /** @var callable */
-    private $errorLogger;
+    private $warnLogger;
 
     /**
      * @param ABJ_404_Solution_ErrorEmailBodyFormatter $formatter
      * @param ABJ_404_Solution_DebugLogArchiveBuilder $archiveBuilder
      * @param callable $debugLogger Receives debug-message strings.
-     * @param callable $errorLogger Receives error-message strings.
+     * @param callable $warnLogger Receives warning-message strings.
      */
     public function __construct(
         ABJ_404_Solution_ErrorEmailBodyFormatter $formatter,
         ABJ_404_Solution_DebugLogArchiveBuilder $archiveBuilder,
         callable $debugLogger,
-        callable $errorLogger
+        callable $warnLogger
     ) {
         $this->formatter = $formatter;
         $this->archiveBuilder = $archiveBuilder;
         $this->debugLogger = $debugLogger;
-        $this->errorLogger = $errorLogger;
+        $this->warnLogger = $warnLogger;
     }
 
     /**
@@ -76,24 +76,36 @@ class ABJ_404_Solution_DeveloperLogMailer {
         $headers[] = 'From: ' . (is_scalar($adminEmail) ? (string)$adminEmail : '');
 
         $attachments = array();
-        if ($logFileZip !== '' && file_exists($logFileZip)) {
+        if ($logFileZip !== '' && $this->zipExists($logFileZip)) {
             $attachments[] = $logFileZip;
         }
 
         call_user_func($this->debugLogger, "Sending error log zip file as attachment.");
         $result = wp_mail($to, $subject, $body, $headers, $attachments);
 
-        if ($logFileZip !== '' && file_exists($logFileZip)) {
+        if ($logFileZip !== '' && $this->zipExists($logFileZip)) {
             ABJ_404_Solution_FileSystemService::safeUnlink($logFileZip);
         }
         if ((bool)$result) {
             call_user_func($this->debugLogger, "Mail sent. Log zip file deleted.");
         } else {
-            call_user_func($this->errorLogger,
+            // A WARN, never an ERROR: a host whose mail cannot be sent is an
+            // environment condition the plugin cannot repair, and only ERROR
+            // lines reach the developer error-report email.
+            call_user_func($this->warnLogger,
                 "wp_mail() returned false while sending the developer error/heartbeat log email. " .
                 "Recipient: " . $to . ". Subject: " . $subject);
         }
         return (bool)$result;
+    }
+
+    private function zipExists(string $path): bool {
+        $result = ABJ_404_Solution_HostFilesystemCall::fileExists($path);
+        if ($result['warning'] !== null && $result['warning'] !== '') {
+            call_user_func($this->warnLogger,
+                'Developer log zip existence check failed for ' . $path . ': ' . $result['warning']);
+        }
+        return $result['warning'] === null && (bool)$result['result'];
     }
 
     /**
@@ -110,8 +122,8 @@ class ABJ_404_Solution_DeveloperLogMailer {
         if (class_exists('ABJ_404_Solution_CheckpointJournalReader')) {
             $paths = array_merge($paths, ABJ_404_Solution_CheckpointJournalReader::supportArchivePaths());
         }
-        if (class_exists('ABJ_404_Solution_AjaxTraceJournal')) {
-            $paths = array_merge($paths, ABJ_404_Solution_AjaxTraceJournal::supportArchivePaths());
+        if (class_exists('ABJ_404_Solution_AjaxTraceJournalReader')) {
+            $paths = array_merge($paths, ABJ_404_Solution_AjaxTraceJournalReader::supportArchivePaths());
         }
         return $paths;
     }

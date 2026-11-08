@@ -25,6 +25,7 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 	$tableDifferences = is_array($tableDifferences) ? $tableDifferences : [];
 	$updateCols = is_array($tableDifferences['updateTheseColumns']) ? $tableDifferences['updateTheseColumns'] : [];
 	$createCols = is_array($tableDifferences['createTheseColumns']) ? $tableDifferences['createTheseColumns'] : [];
+	$columnsInitiallyMissing = $createCols;
 	if (count($updateCols) > 0 ||
 		count($createCols) > 0) {
 		$updatesWereNeeded = true;
@@ -32,25 +33,18 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 	// make the changes
 	$this->updateATableBasedOnDifferences($tableName, $tableDifferences);
 
-	// Data migrations can outlive the DDL request that created their column.
-	// Keep their retry path reachable on every schema verification.
-	if (strpos($tableName, 'abj404_logsv2') !== false &&
-		in_array('min_log_id',
-			ABJ_404_Solution_CreateTableColumnParser::columnNames($createTableStatementGoal),
-			true)) {
-		$this->upgrades()->addedColumnBackfillUpgrade()->runPendingBackfills($tableName);
-	}
-
 	// verify that there are now no changes that need to be made.
 	$tableDifferences = $this->getTableDifferences($tableName, $createTableStatementGoal);
 	$tableDifferences = is_array($tableDifferences) ? $tableDifferences : [];
 	$updateCols = is_array($tableDifferences['updateTheseColumns']) ? $tableDifferences['updateTheseColumns'] : [];
 	$createCols = is_array($tableDifferences['createTheseColumns']) ? $tableDifferences['createTheseColumns'] : [];
+	$this->runPendingColumnBackfills(array('tableName' => $tableName, 'goalDDL' => $createTableStatementGoal,
+		'initiallyMissing' => $columnsInitiallyMissing, 'currentlyMissing' => $createCols));
 
 	if (count($updateCols) > 0 ||
 		count($createCols) > 0) {
 
-		if (count($createCols) === 0 && $this->isOlderBuildThanRecordedSchema()) {
+		if (count($createCols) === 0 && ABJ_404_Solution_SchemaHighWaterMark::isNewerThan(ABJ404_VERSION)) {
 			// An older build deliberately leaves existing columns as the newer
 			// build shaped them, so their remaining differences are expected.
 			// Every MISSING column is still created, so a missing column that
@@ -74,6 +68,21 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 	}
     }
 
+    /** @param array{tableName:string,goalDDL:string,initiallyMissing:array<mixed>,currentlyMissing:array<mixed>} $context */
+    private function runPendingColumnBackfills(array $context): void {
+        // Retry only after metadata confirms presence. A fresh url_length ADD
+        // already attempted invalidation and must not deliberately retry it.
+        $table = $context['tableName'];
+        $goals = ABJ_404_Solution_CreateTableColumnParser::columnNames($context['goalDDL']);
+        if ((strpos($table, 'abj404_logsv2') !== false && in_array('min_log_id', $goals, true)
+                && !in_array('min_log_id', $context['currentlyMissing'], true))
+            || (strpos($table, 'abj404_permalink_cache') !== false && in_array('url_length', $goals, true)
+                && !in_array('url_length', $context['currentlyMissing'], true)
+                && !in_array('url_length', $context['initiallyMissing'], true))) {
+            $this->upgrades()->addedColumnBackfillUpgrade()->runPendingBackfills($table);
+        }
+    }
+
     /**
      * @param string $tableName
      * @param string $createTableStatementGoal
@@ -88,10 +97,9 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 	$createTableStatementGoal = strtolower(
 		$this->removeCommentsFromColumns($createTableStatementGoal));
 
-	// remove the "COLLATE xxx" from the columns.
+	// Ignore inherited live collations for comparison; retain goal declarations for emitted DDL.
 	$removeCollatePattern = '/collate[= ]\w+ ?/';
 	$existingTableSQL = preg_replace($removeCollatePattern, "", $existingTableSQL) ?? '';
-	$createTableStatementGoal = preg_replace($removeCollatePattern, "", $createTableStatementGoal) ?? '';
 
 	// remove the int size format from columns because it doesn't matter.
 	$removeIntSizePattern = '/( \w*?int)(\(\d+\))/m';
@@ -241,7 +249,7 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 	// An older build must not reshape a schema a newer build already shaped: it
 	// would drop or rewrite columns the newer build relies on. Missing columns are
 	// still created below, so the older build can still run.
-	$isOlderBuild = $this->isOlderBuildThanRecordedSchema();
+	$isOlderBuild = ABJ_404_Solution_SchemaHighWaterMark::isNewerThan(ABJ404_VERSION);
 	$skippedByOlderBuildGuard = [];
 	if ($isOlderBuild) {
 		$skippedByOlderBuildGuard = array_map(
@@ -263,6 +271,7 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 	// Normalize $goalMatchesSub using the same normalizeColumnDDL() that
 	// getTableDifferences() uses, so array_search() can find the right index.
 	$goalMatchesSub = is_array($goalTableMatches[1] ?? null) ? $this->stringValues($goalTableMatches[1]) : [];
+	$declaredColumns = $goalMatchesSub;
 	$goalMatchesSub = array_map([$this, 'normalizeColumnDDL'], $goalMatchesSub);
 	foreach ($updateTheseColumns as $colDDL) {
 		$colDDL = (string)$colDDL;
@@ -276,7 +285,9 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 			? (string)$goalTableMatchesColumnNames[$matchIndex]
 			: '';
 
+		$colDDL = $declaredColumns[$matchIndex];
 		// if the column exists then update it. otherwise create it.
+		$created = array();
 		if (!in_array($colName, $createTheseColumns) && $isOlderBuild) {
 			// an older build leaves an existing column as the newer build shaped it.
 			$skippedByOlderBuildGuard[] = "change " . $colName;
@@ -286,19 +297,19 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 			// ALTER TABLE `mywp_abj404_redirects` CHANGE `status` `status` BIGINT(19) NOT NULL;
 			$updateColStatement = "alter table " . $tableName . " change " . $colName .
 			" " . $colDDL;
-			$this->dbCore->queryAndGetResults($updateColStatement);
+			$created = $this->dbCore->queryAndGetResults($updateColStatement);
 			$this->logger->infoMessage("I updated a column: " . $updateColStatement);
 
 		} else {
-			// create the column.
-			$createColStatement = "alter table " . $tableName . " add " . $colDDL;
-			$this->dbCore->queryAndGetResults($createColStatement);
-			$this->logger->infoMessage("I added a column: " . $createColStatement);
+			$created = $this->createMissingColumn(array('tableName' => $tableName,
+				'colName' => $colName, 'definition' => $colDDL));
 		}
 
 		$this->runAddedColumnBackfill(array(
 			'tableName' => $tableName,
 			'colName' => $colName,
+			'creationResult' => $created,
+			'columnsInitiallyMissing' => $createTheseColumns,
 		));
 	}
 
@@ -309,6 +320,23 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 			"), so it left the existing columns of " . $tableName . " unchanged. Skipped: " .
 			implode(', ', $skippedByOlderBuildGuard));
 	}
+    }
+
+    /**
+     * @param array{tableName:string,colName:string,definition:string} $column
+     * @return array<string,mixed>
+     */
+    private function createMissingColumn(array $column): array {
+        // A missing column invalidates its checkpoint before an ADD can commit
+        // with an uncertain receipt. Keep the column absent if reset fails.
+        if ($column['colName'] === 'min_log_id' && strpos($column['tableName'], 'abj404_logsv2') !== false
+                && !$this->upgrades()->addedColumnBackfillUpgrade()->resetMinLogIdBackfill($column['tableName'])) {
+            return array();
+        }
+        $sql = 'alter table ' . $column['tableName'] . ' add ' . $column['definition'];
+        $result = $this->dbCore->queryAndGetResults($sql);
+        $this->logger->infoMessage('I added a column: ' . $sql);
+        return $result;
     }
 
     /**
@@ -367,26 +395,25 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 	}
     }
 
-    /**
-     * Whether this build is older than the newest version that shaped the schema.
-     *
-     * @return bool
-     */
-    private function isOlderBuildThanRecordedSchema() {
-	return ABJ_404_Solution_SchemaHighWaterMark::isNewerThan(ABJ404_VERSION);
-    }
-
-    /**
-     * @param array{tableName: string, colName: string} $context
-     * @return void
-     */
-    private function runAddedColumnBackfill(array $context) {
-	// min_log_id is drained once per verification by runPendingBackfills(),
-	// including on later requests after the column already exists.
-	if ($context['colName'] === 'min_log_id') {
+    /** @param array{tableName:string,colName:string,creationResult:array<string,mixed>,columnsInitiallyMissing:array<int,string>} $context */
+    private function runAddedColumnBackfill(array $context): void {
+	$backfill = $this->upgrades()->addedColumnBackfillUpgrade();
+	$creationResult = is_array($context['creationResult'] ?? null) ? $context['creationResult'] : array();
+	$creationSucceeded = ($creationResult['query_succeeded'] ?? null) === true
+		&& ($creationResult['last_error'] ?? null) === ''
+		&& (!array_key_exists('timed_out', $creationResult) || $creationResult['timed_out'] === false);
+	if (!$creationSucceeded) {
 		return;
 	}
-	$this->upgrades()->addedColumnBackfillUpgrade()->runBackfillsForAddedColumn($context);
+	// min_log_id gets one bounded slice from verifyColumns() after all column DDL.
+	if ($context['colName'] === 'min_log_id') {
+		if (strpos($context['tableName'], 'abj404_logsv2') !== false
+				&& !in_array('min_log_id', $context['columnsInitiallyMissing'], true)) {
+			$backfill->resetMinLogIdBackfill($context['tableName']);
+		}
+		return;
+	}
+	$backfill->runBackfillsForAddedColumn($context);
     }
 
     /** Create table DDL is returned without SQL comments of any kind.
@@ -423,10 +450,19 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
     function normalizeColumnDDL($ddl): string {
 	$ddlStr = is_string($ddl) ? $ddl : '';
 	$normalized = strtolower(str_replace('`', '', trim($ddlStr)));
+	$normalized = preg_replace('/collate[= ]\w+ ?/', '', $normalized) ?? $normalized;
 	$normalized = preg_replace("/default '(\d+)'/", 'default $1', $normalized) ?? $normalized;
-	// MySQL omits DEFAULT NULL for nullable columns — strip it so DDL file
-	// and SHOW CREATE TABLE produce identical normalized strings.
-	$normalized = preg_replace('/\s+default\s+null\b/', '', $normalized) ?? $normalized;
+	// Explicit NULL and DEFAULT NULL spell implicit nullability. Preserve
+	// NOT NULL and quoted SQL text while comparing native engine spellings.
+	$nullablePattern = <<<'SQL'
+~'(?:''|\\.|[^'\\])*'(*SKIP)(*F)|"(?:""|\\.|[^"\\])*"(*SKIP)(*F)|\bnot\s+null\b(*SKIP)(*F)|\s+(?:default\s+)?null\b~i
+SQL;
+	$normalized = preg_replace($nullablePattern, '', $normalized) ?? $normalized;
+	// MariaDB spells zero-precision CURRENT_TIMESTAMP with parentheses; quoted SQL text and fractional precision stay significant.
+	$timestampPattern = <<<'SQL'
+~'(?:''|\\.|[^'\\])*'(*SKIP)(*F)|"(?:""|\\.|[^"\\])*"(*SKIP)(*F)|\bcurrent_timestamp\s*\(\s*(?:0\s*)?\)~i
+SQL;
+	$normalized = preg_replace($timestampPattern, 'current_timestamp', $normalized) ?? $normalized;
 	return $normalized;
     }
 
@@ -442,43 +478,6 @@ class ABJ_404_Solution_DatabaseUpgradeSchemaDiff extends ABJ_404_Solution_Databa
 		}
 	}
 	return $result;
-    }
-
-    /**
-     * @param string $tableName
-     * @return void
-     */
-    function deleteIndexes($tableName) {
-
-	// get the indexes list.
-	$results = $this->dbCore->queryAndGetResults("show index from " . $tableName .
-		" where key_name != 'PRIMARY'");
-	/** @var array<int, array<string, mixed>> $rows */
-	$rows = isset($results['rows']) && is_array($results['rows']) ? $results['rows'] : [];
-
-	if (empty($rows)) {
-		return;
-	}
-
-	// find the key_name column because the case can be different on different systems.
-	$keyNameColumn = 'key_name';
-	$aRow = $rows[0];
-	foreach (array_keys($aRow) as $someKey) {
-		if ($this->f->strtolower((string)$someKey) == 'key_name') {
-			$keyNameColumn = (string)$someKey;
-			break;
-		}
-	}
-
-	foreach ($rows as $row) {
-		// delete them
-		$indexName = $row[$keyNameColumn] ?? '';
-		if (!is_string($indexName) || $indexName === '') {
-			continue;
-		}
-		$query = "alter table " . $tableName . " drop index " . $indexName;
-		$this->dbCore->queryAndGetResults($query);
-	}
     }
 
 }

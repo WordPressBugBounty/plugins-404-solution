@@ -29,17 +29,12 @@ class ABJ_404_Solution_EditRedirectHandler {
     private $resolver;
 
     /**
-     * Cardinality cap on the conditions[] POST payload. Every accepted
-     * condition becomes its own INSERT statement inside
-     * RedirectConditionsRepository::saveRedirectConditions()'s replacement
-     * transaction, so this bounds the SQL workload (and in-memory statement
-     * array) a single edit request can generate. The admin UI's "+ Add
-     * Condition" button has no client-side cap, but a redirect with dozens
-     * of conditions is already an edge case -- 50 is comfortably above any
-     * realistic legitimate use while still rejecting a forged or accidental
-     * oversized request (e.g. 50,000 conditions).
+     * The cardinality cap on the conditions[] payload is enforced by
+     * SubmittedRedirectConditions; this is the handler's public name for the
+     * same value (EditRedirectConditionsCapTest reads it here) so the two can
+     * never disagree.
      */
-    const MAX_REDIRECT_CONDITIONS = 50;
+    const MAX_REDIRECT_CONDITIONS = ABJ_404_Solution_SubmittedRedirectConditions::MAX_CONDITIONS;
 
     public function __construct(
         ABJ_404_Solution_PluginLogicAdminActions $parent,
@@ -59,23 +54,11 @@ class ABJ_404_Solution_EditRedirectHandler {
      * @return string
      */
     public function handle(&$sub, &$action): string {
-        $message = "";
-
         if (!array_key_exists('action', $_POST) || $_POST['action'] != "editRedirect") {
-            return $message;
-        }
-
-        $f = $this->parent->getFunctions();
-        $id = ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('id');
-        $ids = ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitize('ids_multiple');
-        if ($id === '' && $ids === '') {
-            return $message;
-        }
-        if (!$f->regexMatch('[0-9]+', '' . $id) && !$f->regexMatch('[0-9]+', '' . $ids)) {
-            return $message;
+            return '';
         }
         if (!is_admin() || !$this->parent->verifyLinkNonce('abj404editRedirect')) {
-            return $message;
+            return '';
         }
 
         $message = $this->updateRedirectData();
@@ -86,7 +69,11 @@ class ABJ_404_Solution_EditRedirectHandler {
         $redirect = $this->buildPostEditRedirect();
 
         if (!headers_sent()) {
-            wp_safe_redirect(admin_url($this->getMenuParentScript() . $redirect['redirect_url']));
+            $destination = admin_url($this->getMenuParentScript() . $redirect['redirect_url']);
+            if (!is_callable(array('ABJ_404_Solution_RedirectLoopGuard', 'permitsDestination'))
+                || ABJ_404_Solution_RedirectLoopGuard::permitsDestination($destination)) {
+                wp_safe_redirect($destination);
+            }
         }
 
         $sub = $redirect['source_page'];
@@ -104,6 +91,13 @@ class ABJ_404_Solution_EditRedirectHandler {
      * @return string
      */
     public function updateRedirectData(): string {
+        try {
+            if (array_key_exists('query_mode', $_POST)) {
+                ABJ_404_Solution_QueryStringHelper::queryMode(wp_unslash($_POST['query_mode']));
+            }
+        } catch (InvalidArgumentException $e) {
+            return esc_html($e->getMessage());
+        }
         $target = $this->resolveUpdateTarget();
         $message = $target['message'];
         $logger = $this->parent->getLogger();
@@ -177,7 +171,26 @@ class ABJ_404_Solution_EditRedirectHandler {
         if (
             (!array_key_exists('url', $_POST) || $_POST['url'] == "") &&
             (array_key_exists('ids_multiple', $_POST) && $_POST['ids_multiple'] != "")) {
-            $idsMultiple = array_map('absint', explode(',', (string)$_POST['ids_multiple']));
+            $rawIds = $_POST['ids_multiple'];
+            if (is_string($rawIds)) {
+                $requestedCount = substr_count($rawIds, ',') + 1;
+                if ($requestedCount > ABJ_404_Solution_RedirectEditRequest::MAX_SELECTED_IDS) {
+                    $message .= sprintf(
+                        /* translators: 1: number of redirects selected. 2: maximum allowed. */
+                        __('You selected %1$s redirects. At most %2$s can be edited at once, so nothing was changed. Please select fewer and try again.', '404-solution'),
+                        number_format_i18n($requestedCount),
+                        number_format_i18n(ABJ_404_Solution_RedirectEditRequest::MAX_SELECTED_IDS)
+                    ) . "<BR/>";
+                } else {
+                    $idsMultiple = array_values(array_filter(array_map(
+                        static fn(string $value): int => ABJ_404_Solution_ExactInteger::readOr($value, 1, 0),
+                        explode(',', $rawIds)
+                    ), static fn(int $value): bool => $value > 0));
+                }
+            }
+            if (empty($idsMultiple) && $message === '') {
+                $message .= __('Error: Data not formatted properly.', '404-solution') . "<BR/>";
+            }
 
         } else if (array_key_exists('url', $_POST) && $_POST['url'] != "" &&
             (!array_key_exists('ids_multiple', $_POST) || $_POST['ids_multiple'] == "")) {
@@ -235,8 +248,12 @@ class ABJ_404_Solution_EditRedirectHandler {
         string $originalFromURL
     ): string {
         $redirectsRepo = $this->parent->getRedirectsRepo();
-        $id = isset($_POST['id']) && is_scalar($_POST['id']) ? (int)$_POST['id'] : 0;
-        $updateError = $redirectsRepo->updateRedirect(ABJ_404_Solution_RedirectUpdate::fromArray(array(
+        $id = ABJ_404_Solution_ExactInteger::readOr($_POST['id'] ?? null, 1, 0);
+        if ($id === 0) {
+            return __('Error: Data not formatted properly.', '404-solution') . "<BR/>";
+        }
+        $updateError = $redirectsRepo->updateRedirect(ABJ_404_Solution_RedirectUpdate::fromArray((array_key_exists('query_mode', $_POST)
+            ? array('query_mode' => ABJ_404_Solution_QueryStringHelper::queryMode(wp_unslash($_POST['query_mode']))) : array()) + array(
             'id' => $id,
             'type' => $context['tdType'],
             'fromUrl' => (string)$fromURL,
@@ -260,16 +277,18 @@ class ABJ_404_Solution_EditRedirectHandler {
         }
 
         if ($id > 0) {
-            $sanitized = $this->sanitizeRedirectConditions();
-            $conditionsError = $redirectsRepo->saveRedirectConditions($id, $sanitized['conditions']);
+            $submitted = ABJ_404_Solution_SubmittedRedirectConditions::fromRawConditions(
+                (isset($_POST['conditions']) && is_array($_POST['conditions'])) ? $_POST['conditions'] : []
+            );
+            $conditionsError = $redirectsRepo->saveRedirectConditions($id, $submitted->conditions());
             if ($conditionsError !== '') {
                 return $this->formatSaveConditionsError($conditionsError) . "<BR/>";
             }
             // After the save, not instead of it: the conditions that fit were
             // stored and the rest of the edit stands. This reports what did
             // not fit so the admin is not left believing all of it was kept.
-            if ($sanitized['droppedOverMaximum'] > 0) {
-                return $this->formatConditionsCappedNotice($sanitized['droppedOverMaximum']) . "<BR/>";
+            if ($submitted->droppedOverMaximum() > 0) {
+                return $this->formatConditionsCappedNotice($submitted->droppedOverMaximum()) . "<BR/>";
             }
         }
         return '';
@@ -282,7 +301,10 @@ class ABJ_404_Solution_EditRedirectHandler {
     private function updateMultipleRedirects(array $idsMultiple, array $context): string {
         $message = "";
         $redirectsRepo = $this->parent->getRedirectsRepo();
-        $redirectsMultiple = $redirectsRepo->getRedirectsByIDs($idsMultiple);
+        $redirectsRead = $redirectsRepo->readRedirectsByIDs($idsMultiple);
+        // A refused read does not mean the rows are gone: report it, write nothing.
+        if ($redirectsRead['last_error'] !== '') { return $this->formatUpdateRedirectError($redirectsRead['last_error']) . "<BR/>"; }
+        $redirectsMultiple = $redirectsRead['rows'];
         if (empty($redirectsMultiple)) {
             // Every selected row is gone: another admin deleted them, or
             // deleteOldRedirectsCron did, while the list page holding the
@@ -307,16 +329,17 @@ class ABJ_404_Solution_EditRedirectHandler {
             ) . "<BR/>";
         }
         foreach ($redirectsMultiple as $redirect) {
-            $redirectUrl = is_string($redirect['url']) ? $redirect['url'] : '';
             $redirectId = is_scalar($redirect['id']) ? (int)$redirect['id'] : 0;
-            $updateError = $redirectsRepo->updateRedirect(ABJ_404_Solution_RedirectUpdate::fromArray(array(
-                'id' => $redirectId,
-                'type' => $context['tdType'],
-                'fromUrl' => (string)$redirectUrl,
-                'destination' => $context['tdDest'],
-                'code' => $context['code'],
-                'statusType' => (string)$context['statusType'],
-            )));
+            $updateError = $redirectsRepo->updateRedirectFromStoredRow($redirectId, function (array $row) use ($context, $redirectId) {
+                return ABJ_404_Solution_RedirectUpdate::fromArray(array(
+                    'id' => $redirectId,
+                    'type' => $context['tdType'],
+                    'fromUrl' => isset($row['url']) && is_string($row['url']) ? $row['url'] : '',
+                    'destination' => $context['tdDest'],
+                    'code' => $context['code'],
+                    'statusType' => (string)$context['statusType'],
+                ));
+            });
             $errorCode = is_scalar($updateError) ? (string)$updateError : '';
             if ($errorCode !== '') {
                 $message .= $this->formatUpdateRedirectError($errorCode) . "<BR/>";
@@ -327,6 +350,9 @@ class ABJ_404_Solution_EditRedirectHandler {
     }
 
     private function formatUpdateRedirectError(string $errorCode): string {
+        if (strpos($errorCode, 'Redirect loop:') === 0) {
+            return __('Error:', '404-solution') . ' ' . esc_html($errorCode);
+        }
         if ($errorCode === 'bad_update_request') {
             return __('Error: Bad data passed for update redirect request.', '404-solution');
         }
@@ -395,73 +421,6 @@ class ABJ_404_Solution_EditRedirectHandler {
     private function getMenuParentScript(): string {
         $options = abj_service('options_repository')->getOptions(true);
         return ABJ_404_Solution_AdminPageUrlBuilder::pageFile(is_array($options) ? $options : array());
-    }
-
-    /**
-     * Sanitize the conditions[] POST payload into the shape redirectsRepo
-     * accepts. Whitelists condition types and operators; coerces logic to
-     * AND/OR.
-     *
-     * Reports how many were dropped for being over the maximum, separately
-     * from the ones the loop below skips for being unrecognized. The two are
-     * not the same event: an unknown condition type is garbage and dropping it
-     * silently is right, while a VALID rule dropped for arriving 51st changes
-     * how the redirect behaves versus what the admin configured, and the only
-     * signal they would otherwise get is the rows being absent next time they
-     * happen to open the screen.
-     *
-     * @return array{conditions: array<int, array<string, mixed>>, droppedOverMaximum: int}
-     */
-    private function sanitizeRedirectConditions(): array {
-        $rawConditions = (isset($_POST['conditions']) && is_array($_POST['conditions']))
-            ? $_POST['conditions'] : [];
-        // Enforce the domain maximum before sanitizing/inserting, rather than
-        // rejecting the entire edit over an oversized payload: the rest of the
-        // save is the admin's real work and is valid.
-        $droppedOverMaximum = max(0, count($rawConditions) - self::MAX_REDIRECT_CONDITIONS);
-        if ($droppedOverMaximum > 0) {
-            $rawConditions = array_slice($rawConditions, 0, self::MAX_REDIRECT_CONDITIONS);
-        }
-        $sanitizedConditions = [];
-        $allowedConditionTypes = [
-            'login_status', 'user_role', 'referrer',
-            'user_agent', 'ip_range', 'http_header',
-        ];
-        $allowedOperators = [
-            'equals', 'not_equals', 'contains',
-            'not_contains', 'regex', 'cidr',
-        ];
-        foreach ($rawConditions as $rawCond) {
-            if (!is_array($rawCond)) {
-                continue;
-            }
-            $condType = isset($rawCond['condition_type']) && is_string($rawCond['condition_type'])
-                ? sanitize_text_field($rawCond['condition_type']) : '';
-            if (!in_array($condType, $allowedConditionTypes, true)) {
-                continue;
-            }
-            $condLogic = (isset($rawCond['logic']) && strtoupper((string)$rawCond['logic']) === 'OR') ? 'OR' : 'AND';
-            $condOperator = isset($rawCond['operator']) && is_string($rawCond['operator'])
-                ? sanitize_text_field($rawCond['operator']) : 'equals';
-            if (!in_array($condOperator, $allowedOperators, true)) {
-                $condOperator = 'equals';
-            }
-            $condValue = isset($rawCond['value']) && is_string($rawCond['value'])
-                ? sanitize_text_field(wp_unslash($rawCond['value'])) : '';
-            $condSortOrder = isset($rawCond['sort_order']) ? absint($rawCond['sort_order']) : 0;
-
-            $sanitizedConditions[] = [
-                'logic'          => $condLogic,
-                'condition_type' => $condType,
-                'operator'       => $condOperator,
-                'value'          => $condValue,
-                'sort_order'     => $condSortOrder,
-            ];
-        }
-        return array(
-            'conditions' => $sanitizedConditions,
-            'droppedOverMaximum' => $droppedOverMaximum,
-        );
     }
 
     /**

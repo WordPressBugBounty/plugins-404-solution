@@ -35,6 +35,9 @@ if (!defined('ABSPATH')) {
  */
 class ABJ_404_Solution_FeedbackEnvironmentExtras_DebugLogSignatures {
 
+    /** Bound a physical log line before the tail scanner discards it. */
+    const MAX_PHYSICAL_LINE_BYTES = 65537;
+
     /**
      * Severity words that must never be consumed as a timezone abbreviation
      * while folding an embedded wall-clock stamp.
@@ -120,41 +123,130 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_DebugLogSignatures {
             throw new \RuntimeException('logging service unavailable for recent_error_signatures probe');
         }
         $path = (string)$log->getDebugFilePath();
-        if ($path === '' || !is_file($path) || !is_readable($path)) {
+        if ($path === '') {
             return $out;
         }
-        $size = @filesize($path);
-        if ($size === false || $size === 0) {
+        $size = $this->readableLogSize($path);
+        if ($size === null || $size === 0) {
             return $out;
         }
-        $readBytes = 262144; // 256 KB
-        $offset = $size > $readBytes ? $size - $readBytes : 0;
-        $fh = @fopen($path, 'rb');
-        if (!is_resource($fh)) {
+        $tail = $this->readBoundedLogTail($path, $size);
+        if ($tail === null) {
             return $out;
-        }
-        $tail = '';
-        try {
-            if ($offset > 0) {
-                @fseek($fh, $offset);
-                // Discard the partial first line so we only group on whole records.
-                @fgets($fh);
-            }
-            $chunk = @fread($fh, $readBytes);
-            if (is_string($chunk)) {
-                $tail = $chunk;
-            }
-        } finally {
-            @fclose($fh);
         }
         if ($tail === '') {
             return $out;
         }
-        $cutoff = abj_clock()->now() - 7 * 86400;
+        return $this->aggregateRecentSignatures($tail, abj_clock()->now() - 7 * 86400, $log);
+    }
+
+    /** @return int|null Null means an admitted filesystem probe failed. */
+    private function readableLogSize(string $path): ?int {
+        $fileResult = ABJ_404_Solution_HostFilesystemCall::isFile($path);
+        if ($fileResult['warning'] !== null) {
+            $this->reportFilesystemWarning('debug log file check', $path, $fileResult['warning']);
+            return null;
+        }
+        if (!$fileResult['result']) {
+            return 0;
+        }
+        $readableResult = ABJ_404_Solution_HostFilesystemCall::isReadable($path);
+        if ($readableResult['warning'] !== null) {
+            $this->reportFilesystemWarning('debug log readability check', $path, $readableResult['warning']);
+            return null;
+        }
+        if (!$readableResult['result']) {
+            return 0;
+        }
+        $sizeResult = ABJ_404_Solution_HostFilesystemCall::filesize($path);
+        if ($sizeResult['warning'] !== null) {
+            $this->reportFilesystemWarning('debug log size read', $path, $sizeResult['warning']);
+            return null;
+        }
+        return is_int($sizeResult['result']) ? $sizeResult['result'] : null;
+    }
+
+    /**
+     * Read at most the bounded tail, retaining all native warning causes and
+     * closing an acquired stream even when seek or read fails.
+     */
+    private function readBoundedLogTail(string $path, int $size): ?string {
+        $readBytes = 262144; // 256 KB
+        $offset = $size > $readBytes ? $size - $readBytes : 0;
+        $openResult = ABJ_404_Solution_HostFilesystemCall::fopen($path, 'rb');
+        if ($openResult['warning'] !== null) {
+            $this->reportFilesystemWarning('debug log open', $path, $openResult['warning']);
+            if (is_resource($openResult['result'])) {
+                $closeResult = ABJ_404_Solution_HostFilesystemCall::fclose($openResult['result']);
+                if ($closeResult['warning'] !== null) {
+                    $this->reportFilesystemWarning('debug log close', $path, $closeResult['warning']);
+                }
+            }
+            return null;
+        }
+        $fh = $openResult['result'];
+        if (!is_resource($fh)) {
+            return null;
+        }
+        $tail = '';
+        $readWarning = null;
+        try {
+            if ($offset > 0) {
+                $seekResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                    static function () use ($fh, $offset) { return fseek($fh, $offset); }
+                );
+                if ($seekResult['warning'] !== null || $seekResult['result'] !== 0) {
+                    $readWarning = $seekResult['warning'] ?? 'fseek returned false';
+                }
+                // Discard the partial first line so we only group on whole records.
+                if ($readWarning === null) {
+                    $firstLineResult = ABJ_404_Solution_HostFilesystemCall::fgets(
+                        $fh,
+                        self::MAX_PHYSICAL_LINE_BYTES
+                    );
+                    if ($firstLineResult['warning'] !== null) {
+                        $readWarning = $firstLineResult['warning'];
+                    }
+                }
+            }
+            $chunkResult = $readWarning === null
+                ? ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                    static function () use ($fh, $readBytes) { return fread($fh, $readBytes); }
+                )
+                : array('result' => false, 'warning' => null);
+            if ($chunkResult['warning'] !== null) {
+                $readWarning = $chunkResult['warning'];
+            }
+            if ($readWarning === null && is_string($chunkResult['result'])) {
+                $tail = $chunkResult['result'];
+            }
+        } finally {
+            $closeResult = ABJ_404_Solution_HostFilesystemCall::fclose($fh);
+            if ($closeResult['warning'] !== null) {
+                $readWarning = $readWarning === null ? $closeResult['warning']
+                    : $readWarning . '; ' . $closeResult['warning'];
+            }
+        }
+        if ($readWarning !== null) {
+            $this->reportFilesystemWarning('debug log read', $path, $readWarning);
+            return null;
+        }
+        return $tail;
+    }
+
+    /**
+     * Group admitted tail lines by normalized signature. Keeping timestamp
+     * admission and signature aggregation separate makes the bounded-read
+     * stage auditable without changing its seven-day or top-five policy.
+     *
+     * @param object $log
+     * @return array<int, array<string, mixed>>
+     */
+    private function aggregateRecentSignatures(string $tail, int $cutoff, $log): array {
         $byKey = array();
         $lines = preg_split('/\r?\n/', $tail);
         if (!is_array($lines)) {
-            return $out;
+            return array();
         }
         foreach ($lines as $line) {
             if (!is_string($line) || $line === '') { continue; }
@@ -187,10 +279,9 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_DebugLogSignatures {
                 continue;
             }
             if ($ts < $cutoff) { continue; }
-            $level = $m[2];
             $msg = trim($m[3]);
             if ($msg === '') { continue; }
-            $sig = $level . ':' . substr($this->normalizeErrorSignature($msg), 0, 200);
+            $sig = $m[2] . ':' . substr($this->normalizeErrorSignature($msg), 0, 200);
             if (!isset($byKey[$sig])) {
                 $byKey[$sig] = array('signature' => $sig, 'count' => 0, 'last_seen_at' => 0);
             }
@@ -199,16 +290,21 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_DebugLogSignatures {
                 $byKey[$sig]['last_seen_at'] = $ts;
             }
         }
-        if (empty($byKey)) {
-            return $out;
-        }
         $list = array_values($byKey);
         usort($list, function ($a, $b) {
             $cmp = $b['count'] - $a['count'];
-            if ($cmp !== 0) { return $cmp; }
-            return $b['last_seen_at'] - $a['last_seen_at'];
+            return $cmp !== 0 ? $cmp : $b['last_seen_at'] - $a['last_seen_at'];
         });
         return array_slice($list, 0, 5);
+    }
+
+    private function reportFilesystemWarning(string $operation, string $path, string $warning): void {
+        $message = $operation . ' failed for ' . $path . ': ' . $warning;
+        if (class_exists('ABJ_404_Solution_FeedbackTransportLog')) {
+            ABJ_404_Solution_FeedbackTransportLog::log('warn', $message);
+        } elseif (function_exists('abj404_logPhpFallback')) {
+            abj404_logPhpFallback('feedback-fallback', $message);
+        }
     }
 
     /**
@@ -266,7 +362,19 @@ class ABJ_404_Solution_FeedbackEnvironmentExtras_DebugLogSignatures {
      * @return string
      */
     public function normalizeErrorSignature(string $msg): string {
-        $s = $msg;
+        // Local probe logs retain native details; historical tails cross the same
+        // outbound boundary as freshly collected logs. Never re-export their
+        // exception text, table names or paths through the signature channel.
+        $probeFailure = '/^(?:FeedbackEnvironmentExtras probe '
+            . '|collectPluginTableSizes probe failed |probeIndexCardinality failed |probeDbCollation probe failed '
+            . '|probeActiveConnectionCount failed:|serverVersionString probe failed:'
+            . '|probeTimezone offset probe failed:|probePluginLifecycle options_repository probe failed:'
+            . '|probeMultisiteRole network-activated check failed:|probeHtaccessWritable failed for '
+            . '|disk_(?:free|total)_space failed for '
+            . '|debug log (?:file check|readability check|size read|open|close|read) failed for '
+            . '|Cache drop-in (?:header|presence) probe failed:'
+            . '|FeedbackTransport (?:SELECT VERSION\(\)|db_version|PDO driver|wp_get_db_schema|db_server_info) probe failed:)/';
+        $s = preg_match($probeFailure, $msg) === 1 ? 'Feedback environment probe failed' : $msg;
         // Cut the per-request/environment envelope first: it is the largest
         // and most variable part, and removing it also keeps the caller's
         // 200-char signature window for message text that discriminates.

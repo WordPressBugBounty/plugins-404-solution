@@ -38,8 +38,8 @@ class ABJ_404_Solution_LogsHitsCanonicalUrlJoinHelper {
     /**
      * Request-scoped cache for isRedirectsCanonicalUrlBackfillComplete().
      * Null = not yet evaluated this request; bool = cached decision.
-     * Both checks carry a NULL re-probe, so the results are cached to keep
-     * the rebuild pipeline at one extra LIMIT 1 query per column at most.
+     * Both checks carry a NULL re-probe. An empty cursor tail also checks
+     * the whole backlog before caching the result for this request.
      *
      * @var bool|null
      */
@@ -60,11 +60,14 @@ class ABJ_404_Solution_LogsHitsCanonicalUrlJoinHelper {
      * Resolve the collation from the abj404_redirects.canonical_url column,
      * the actual join partner for the hits rebuild phase2 JOIN.
      *
+     * @param (callable():array<string,mixed>)|null $queryOptionsFactory Per-query admission policy.
      * @return string Sanitized collation identifier.
      */
-    public function resolveHitsJoinCollation(): string {
+    public function resolveHitsJoinCollation(?callable $queryOptionsFactory = null): string {
         $redirectsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
-        return $this->dbCore->collationHelper()->getColumnCollationString($redirectsTable, 'canonical_url');
+        return $this->dbCore->collationHelper()->getColumnCollationString(
+            $redirectsTable, 'canonical_url', $queryOptionsFactory
+        );
     }
 
     /**
@@ -79,26 +82,30 @@ class ABJ_404_Solution_LogsHitsCanonicalUrlJoinHelper {
      * it records that a backfill ran, not that every row currently in the
      * table went through it.
      *
+     * @param (callable():array<string,mixed>)|null $queryOptionsFactory Per-query admission policy.
      * @return bool
      */
-    public function isLogsv2CanonicalUrlBackfillComplete(): bool {
+    public function isLogsv2CanonicalUrlBackfillComplete(?callable $queryOptionsFactory = null): bool {
         return $this->backfillCompleteWithNullReprobe(
             'abj404_logsv2_canonical_url_backfill_complete',
             '{wp_abj404_logsv2}',
-            $this->logsv2CanonicalBackfillCompleteCache
+            $this->logsv2CanonicalBackfillCompleteCache,
+            $queryOptionsFactory
         );
     }
 
     /**
      * Redirects-side backfill completion check with defensive NULL re-probe.
      *
+     * @param (callable():array<string,mixed>)|null $queryOptionsFactory Per-query admission policy.
      * @return bool
      */
-    public function isRedirectsCanonicalUrlBackfillComplete(): bool {
+    public function isRedirectsCanonicalUrlBackfillComplete(?callable $queryOptionsFactory = null): bool {
         return $this->backfillCompleteWithNullReprobe(
             'abj404_redirects_canonical_url_backfill_complete',
             '{wp_abj404_redirects}',
-            $this->redirectsCanonicalBackfillCompleteCache
+            $this->redirectsCanonicalBackfillCompleteCache,
+            $queryOptionsFactory
         );
     }
 
@@ -120,33 +127,28 @@ class ABJ_404_Solution_LogsHitsCanonicalUrlJoinHelper {
      * @param string $optionName wp_options flag recording that a backfill ran.
      * @param string $tableToken Table placeholder to probe for NULL canonical_url.
      * @param bool|null $cache Request-scoped memo slot, by reference. Bounds the
-     *        rebuild pipeline to one extra LIMIT 1 query per column per request.
+     *        rebuild pipeline to one completion check per column per request.
+     * @param (callable():array<string,mixed>)|null $queryOptionsFactory Per-query admission policy.
      * @return bool
      */
     private function backfillCompleteWithNullReprobe(
         string $optionName,
         string $tableToken,
-        ?bool &$cache
+        ?bool &$cache,
+        ?callable $queryOptionsFactory = null
     ): bool {
         if ($cache !== null) {
             return $cache;
         }
-        if (!function_exists('get_option') || !(bool) get_option($optionName)) {
+        if (!function_exists('get_option') || !(bool) ABJ_404_Solution_OptionShapeRead::scalar($optionName)) {
             return $cache = false;
         }
         $table = $this->dbCore->doTableNameReplacements($tableToken);
-        $probe = $this->dbCore->queryAndGetResults(
-            "SELECT 1 FROM " . $table . " WHERE canonical_url IS NULL LIMIT 1",
-            array('log_too_slow' => false, 'log_errors' => false)
-        );
-        $probeRows = is_array($probe['rows'] ?? null) ? $probe['rows'] : array();
-        $probeError = isset($probe['last_error']) && is_string($probe['last_error']) ? $probe['last_error'] : '';
-        // Treat any probe error as "do not drop the wrap" so the defensive
-        // form runs and reads stay correct.
-        if ($probeError !== '' || !empty($probeRows)) {
-            return $cache = false;
-        }
-        return $cache = true;
+        $cursorOption = str_replace('_complete', '_cursor', $optionName);
+        $cursor = ABJ_404_Solution_ExactInteger::read(ABJ_404_Solution_OptionShapeRead::scalar($cursorOption, 0), 0) ?? 0;
+        return $cache = $this->canonicalUrlBacklogIsEmpty(array(
+            'table' => $table, 'after_id' => $cursor, 'quiet_schema_probe' => true,
+        ), $queryOptionsFactory) === true;
     }
 
     /**
@@ -158,6 +160,40 @@ class ABJ_404_Solution_LogsHitsCanonicalUrlJoinHelper {
     public function resetRedirectsCanonicalBackfillCompleteCacheForTests(): void {
         $this->redirectsCanonicalBackfillCompleteCache = null;
         $this->logsv2CanonicalBackfillCompleteCache = null;
+    }
+
+    /**
+     * Check actual canonical NULL rows, including holes behind a persisted cursor.
+     *
+     * The cursor is an optimization hint, never proof of completion: an empty
+     * tail is followed by a whole-backlog probe. Unknown query results stay
+     * unknown so neither upgrades nor JOIN readers publish false readiness.
+     *
+     * @param array{table:string,after_id?:int,quiet_schema_probe?:bool} $options
+     * @param (callable():array<string,mixed>)|null $queryOptionsFactory Per-query admission policy.
+     * @return bool|null True when empty, false when rows remain, null unknown.
+     */
+    public function canonicalUrlBacklogIsEmpty(array $options, ?callable $queryOptionsFactory = null): ?bool {
+        $cursor = $options['after_id'] ?? 0;
+        $scope = $cursor > 0 ? 'id > ' . $cursor . ' AND ' : '';
+        $queryOptions = ($options['quiet_schema_probe'] ?? false)
+            ? array('log_too_slow' => false, 'log_errors' => false) : array();
+        $queryOptions = array_merge($queryOptions,
+            $queryOptionsFactory !== null ? $queryOptionsFactory() : array());
+        $result = $this->dbCore->queryAndGetResults(
+            'SELECT 1 FROM ' . $options['table'] . ' WHERE ' . $scope . 'canonical_url IS NULL LIMIT 1',
+            $queryOptions
+        );
+        if (($result['query_succeeded'] ?? null) !== true
+            || ($result['last_error'] ?? null) !== ''
+            || (array_key_exists('timed_out', $result) && $result['timed_out'] !== false)
+            || !array_key_exists('rows', $result) || !is_array($result['rows'])) {
+            return null;
+        }
+        if ($cursor > 0 && empty($result['rows'])) {
+            return $this->canonicalUrlBacklogIsEmpty(array_replace($options, array('after_id' => 0)), $queryOptionsFactory);
+        }
+        return empty($result['rows']);
     }
 
     /** @param string $sql @return string */
@@ -182,15 +218,16 @@ class ABJ_404_Solution_LogsHitsCanonicalUrlJoinHelper {
      * serve the JOIN probe.
      *
      * @param string $resolvedCollation
+     * @param (callable():array<string,mixed>)|null $queryOptionsFactory Per-query admission policy.
      * @return string The SQL fragment for the JOIN's RHS, e.g.
      *   "r.canonical_url" or
      *   "(COALESCE(r.canonical_url, CONCAT('/', TRIM(BOTH '/' FROM r.url))) COLLATE utf8mb4_unicode_ci)".
      */
-    public function buildPhase2JoinRhs(string $resolvedCollation): string {
-        $redirectsCanonicalExpr = $this->isRedirectsCanonicalUrlBackfillComplete()
+    public function buildPhase2JoinRhs(string $resolvedCollation, ?callable $queryOptionsFactory = null): string {
+        $redirectsCanonicalExpr = $this->isRedirectsCanonicalUrlBackfillComplete($queryOptionsFactory)
             ? "r.canonical_url"
             : "COALESCE(r.canonical_url, CONCAT('/', TRIM(BOTH '/' FROM r.url)))";
-        $collateClause = $this->joinCollateClauseCanBeOmitted($resolvedCollation)
+        $collateClause = $this->joinCollateClauseCanBeOmitted($resolvedCollation, $queryOptionsFactory)
             ? ""
             : " COLLATE " . $resolvedCollation;
         return $collateClause === ''
@@ -203,16 +240,18 @@ class ABJ_404_Solution_LogsHitsCanonicalUrlJoinHelper {
      * The logsv2 canonical_url column remains bare and indexable; the redirects
      * expression is converted to that column's actual runtime collation.
      *
+     * @param (callable():array<string,mixed>)|null $queryOptionsFactory Per-query admission policy.
      * @return string
      */
-    public function buildDirectJoinRhs(): string {
-        $redirectsCanonicalExpr = $this->isRedirectsCanonicalUrlBackfillComplete()
+    public function buildDirectJoinRhs(?callable $queryOptionsFactory = null): string {
+        $redirectsCanonicalExpr = $this->isRedirectsCanonicalUrlBackfillComplete($queryOptionsFactory)
             ? '{wp_abj404_redirects}.canonical_url'
             : "COALESCE({wp_abj404_redirects}.canonical_url, CONCAT('/', TRIM(BOTH '/' FROM {wp_abj404_redirects}.url)))";
         $logsv2Table = $this->dbCore->doTableNameReplacements('{wp_abj404_logsv2}');
         return $this->dbCore->collationHelper()->coerceExpressionToColumnCollation(
             $redirectsCanonicalExpr,
-            array('table' => $logsv2Table, 'column' => 'canonical_url')
+            array('table' => $logsv2Table, 'column' => 'canonical_url'),
+            $queryOptionsFactory
         );
     }
 
@@ -225,16 +264,17 @@ class ABJ_404_Solution_LogsHitsCanonicalUrlJoinHelper {
      * can use idx_canonical_url.
      *
      * @param string $resolvedCollation
+     * @param (callable():array<string,mixed>)|null $queryOptionsFactory Per-query admission policy.
      * @return bool
      */
-    public function joinCollateClauseCanBeOmitted(string $resolvedCollation): bool {
+    public function joinCollateClauseCanBeOmitted(string $resolvedCollation, ?callable $queryOptionsFactory = null): bool {
         if ($resolvedCollation === '') {
             return false;
         }
         $logsv2Table = $this->dbCore->doTableNameReplacements('{wp_abj404_logsv2}');
         $redirectsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
-        $logsv2Collation = $this->dbCore->collationHelper()->getColumnCollationString($logsv2Table, 'canonical_url');
-        $redirectsCollation = $this->dbCore->collationHelper()->getColumnCollationString($redirectsTable, 'canonical_url');
+        $logsv2Collation = $this->dbCore->collationHelper()->getColumnCollationString($logsv2Table, 'canonical_url', $queryOptionsFactory);
+        $redirectsCollation = $this->dbCore->collationHelper()->getColumnCollationString($redirectsTable, 'canonical_url', $queryOptionsFactory);
         return $logsv2Collation === $resolvedCollation && $redirectsCollation === $resolvedCollation;
     }
 }

@@ -53,7 +53,7 @@ final class ABJ_404_Solution_EncodedTableResponseSize {
             return self::noEncodedSize('unavailable');
         }
         try {
-            $traceSource = ABJ_404_Solution_AjaxTraceJournal::supportCollectionSource();
+            $traceSource = ABJ_404_Solution_AjaxTraceJournalReader::supportCollectionSource();
             $source = ABJ_404_Solution_CheckpointJournalReader::supportCollectionSource();
             return self::fromLines(
                 ABJ_404_Solution_DiagnosticJournalExcerpt::readAllLines($traceSource['paths']),

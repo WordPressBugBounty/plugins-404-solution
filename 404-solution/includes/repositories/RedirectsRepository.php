@@ -80,13 +80,12 @@ class ABJ_404_Solution_RedirectsRepository implements ABJ_404_Solution_Redirects
             : new ABJ_404_Solution_RedirectRegexCacheStore();
         $this->writeService = $writeService !== null
             ? $writeService
-            : new ABJ_404_Solution_RedirectWriteService(
-                $dbCore,
-                $this->f,
-                $this->logger,
-                $this->regexCacheStore,
-                $urlNormalization
-            );
+            : new ABJ_404_Solution_RedirectWriteService($dbCore, array(
+                'functions' => $this->f,
+                'logging' => $this->logger,
+                'regexCacheStore' => $this->regexCacheStore,
+                'urlNormalization' => $urlNormalization,
+            ));
         $this->exportReader = $exportReader !== null
             ? $exportReader
             : new ABJ_404_Solution_RedirectExportReader($dbCore);
@@ -119,9 +118,12 @@ class ABJ_404_Solution_RedirectsRepository implements ABJ_404_Solution_Redirects
         return new ABJ_404_Solution_RedirectsRetentionService($this->dbCore, $this, $this->f, $this->logger);
     }
 
-    /** Legacy facade retained for integrations that still call RedirectsRepository directly. */
-    function deleteOldRedirectsCron() {
-        return $this->retentionService()->deleteOldRedirectsCron();
+    /**
+     * Legacy facade retained for integrations that still call RedirectsRepository directly.
+     * @param mixed $passId
+     */
+    function deleteOldRedirectsCron($passId = null) {
+        return $this->retentionService()->deleteOldRedirectsCron($passId);
     }
 
     /**
@@ -202,9 +204,90 @@ class ABJ_404_Solution_RedirectsRepository implements ABJ_404_Solution_Redirects
         return $this->writeService->setupRedirect($spec);
     }
 
+    public function getLastWriteError(): string {
+        return $this->writeService->getLastWriteError();
+    }
+
+    /** @return ''|'source-owned' Distinguishes source admission from a transient storage refusal. */
+    public function getLastWriteRefusalReason(): string {
+        return $this->writeService->getLastWriteRefusalReason();
+    }
+
+    /** @inheritDoc */
+    public function moveSourceRedirectsToTrash(int $id): string {
+        return $this->writeService->moveSourceRedirectsToTrash($id);
+    }
+
     /** @inheritDoc */
     public function setupRedirectIfSourceAbsent(ABJ_404_Solution_RedirectSpec $spec): int {
         return $this->writeService->setupRedirectIfSourceAbsent($spec);
+    }
+
+    /** @inheritDoc */
+    public function runWithImportBatch(callable $operation): string {
+        $started = false;
+        $error = $this->runWithGraphOwnership(function () use ($operation, &$started): void {
+            $started = true;
+            ABJ_404_Solution_RedirectRegexCacheStore::runWithManualSnapshot($operation);
+        });
+        if (!$started) {
+            // Grouping is optional. Every row still acquires and verifies its
+            // ordinary mutex when the shared scope could not be established.
+            $operation();
+            return '';
+        }
+        return $error;
+    }
+
+    /**
+     * Require rollback-capable redirect storage before an intent transaction
+     * writes anything. Engine recovery belongs to normal safe-request upgrades;
+     * doing ALTER here would commit the very transaction we must preserve.
+     *
+     * @throws ABJ_404_Solution_DatabaseMutationFailedException
+     */
+    public function requireTransactionalStorage(ABJ_404_Solution_DatabaseTransactionConnection $connection): void {
+        global $wpdb;
+        $table = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
+        // DAO-bypass-approved: $wpdb->prepare is read-only string formatting; leased connection executes the query.
+        $sql = $wpdb->prepare('SHOW TABLE STATUS WHERE `Name` = %s', $table);
+        if (!is_string($sql) || $sql === '') {
+            throw new ABJ_404_Solution_StatementPreparationException('redirect storage engine verification');
+        }
+        $result = $connection->execute($sql);
+        if (!$result['query_succeeded'] || $result['last_error'] !== '') {
+            throw new ABJ_404_Solution_DatabaseMutationFailedException(
+                ABJ_404_Solution_DatabaseMutationFailedException::SETUP_FAILED,
+                $result['last_error'] !== '' ? $result['last_error'] : 'The redirect storage engine could not be verified.',
+                $result['cause']);
+        }
+        $row = isset($result['rows'][0]) && is_array($result['rows'][0])
+            ? array_change_key_case($result['rows'][0], CASE_LOWER) : array();
+        if (!isset($row['engine']) || !is_string($row['engine'])
+                || strcasecmp($row['engine'], 'InnoDB') !== 0) {
+            throw new ABJ_404_Solution_DatabaseMutationFailedException(
+                ABJ_404_Solution_DatabaseMutationFailedException::SETUP_FAILED,
+                'Deferred redirect delivery requires InnoDB redirect storage; the intent remains pending until normal engine recovery succeeds.');
+        }
+    }
+
+    /**
+     * Hold graph ownership through the entire operation, including a caller's
+     * owned commit. Unlike import batching, this does not preload every manual
+     * rule. Failed acquisition refuses the operation without a fallback write.
+     *
+     * @param callable(callable():bool):void $operation Receives a guard to check before committing dependent writes.
+     * @return string Empty on success, the actual lock error on refusal.
+     */
+    public function runWithGraphOwnership(callable $operation): string {
+        $lock = new ABJ_404_Solution_RedirectGraphLock($this->dbCore->doTableNameReplacements('{wp_abj404_redirects}'));
+        return $lock->withOwnership(function () use ($operation, $lock): string {
+            $operation(static function () use ($lock): bool { return $lock->isOwned(); });
+            return '';
+        }, array(
+            'onFailure' => static fn(string $error): string => $error,
+            'onReleaseFailure' => function (string $error): void { $this->logger->warn($error); },
+        ));
     }
 
     /** @inheritDoc */
@@ -232,6 +315,11 @@ class ABJ_404_Solution_RedirectsRepository implements ABJ_404_Solution_Redirects
     }
 
     /** @inheritDoc */
+    public function readRedirectConditions(int $redirectId): array {
+        return $this->conditionsRepository->readRedirectConditions($redirectId);
+    }
+
+    /** @inheritDoc */
     public function saveRedirectConditions(int $redirectId, array $conditions): string {
         return $this->conditionsRepository->saveRedirectConditions($redirectId, $conditions);
     }
@@ -246,8 +334,18 @@ class ABJ_404_Solution_RedirectsRepository implements ABJ_404_Solution_Redirects
     }
 
     /** @inheritDoc */
+    public function updateRedirectFromStoredRow(int $id, callable $buildUpdate): string {
+        return $this->writeService->updateRedirectFromStoredRow($id, $buildUpdate);
+    }
+
+    /** @inheritDoc */
     function getRedirectsByIDs($ids) {
-        return $this->writeService->getRedirectsByIDs($ids);
+        return (new ABJ_404_Solution_RedirectLookupRepository($this->dbCore, $this->f))->getRedirectsByIDs($ids);
+    }
+
+    /** @inheritDoc */
+    public function readRedirectsByIDs($ids) {
+        return (new ABJ_404_Solution_RedirectLookupRepository($this->dbCore, $this->f))->readRedirectsByIDs($ids);
     }
 
     /** @inheritDoc */
@@ -258,6 +356,15 @@ class ABJ_404_Solution_RedirectsRepository implements ABJ_404_Solution_Redirects
     /** @inheritDoc */
     function moveRedirectsToTrash($id, $trash) {
         return $this->writeService->moveRedirectsToTrash($id, $trash);
+    }
+
+    /** Atomic restore capability, additive to the legacy repository interface.
+     * @param array{id: mixed, status?: int|null} $request Null/omitted status preserves it;
+     *   otherwise use Captured, Ignored or Later. Invalid/missing IDs refuse the write.
+     * @return string Empty on success or the underlying refusal cause.
+     */
+    public function restoreRedirect(array $request): string {
+        return $this->writeService->restoreRedirect($request);
     }
 
 }

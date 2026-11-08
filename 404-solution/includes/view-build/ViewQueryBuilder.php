@@ -29,12 +29,16 @@ class ABJ_404_Solution_ViewQueryBuilder {
     /** @var ABJ_404_Solution_ViewQueryPolicy */
     private $policy;
 
+    /** @var ABJ_404_Solution_ViewSortResolver */
+    private $sortResolver;
+
     /**
      * @param ABJ_404_Solution_DatabaseCore $dbCore
      */
     public function __construct(ABJ_404_Solution_DatabaseCore $dbCore) {
         $this->dbCore = $dbCore;
         $this->policy = new ABJ_404_Solution_ViewQueryPolicy();
+        $this->sortResolver = new ABJ_404_Solution_ViewSortResolver($this->policy);
     }
 
     /** @return string */
@@ -79,9 +83,7 @@ class ABJ_404_Solution_ViewQueryBuilder {
     public function queryRegexRedirectsPage(array $page): array {
         $afterId = max(0, (int)($page['after_id'] ?? 0));
         $limit = $page['limit'] ?? null;
-        $query = "select \n  {wp_abj404_redirects}.id,\n  {wp_abj404_redirects}.url,\n  {wp_abj404_redirects}.status,\n"
-            . "  {wp_abj404_redirects}.type,\n  {wp_abj404_redirects}.final_dest,\n  {wp_abj404_redirects}.code,\n"
-            . "  {wp_abj404_redirects}.timestamp,\n {wp_posts}.id as wp_post_id\n "
+        $query = "select {wp_abj404_redirects}.*, {wp_posts}.id as wp_post_id\n "
             . "from {wp_abj404_redirects}\n "
             . "  LEFT OUTER JOIN {wp_posts} \n "
             . "    on {wp_abj404_redirects}.final_dest = {wp_posts}.id \n "
@@ -96,7 +98,7 @@ class ABJ_404_Solution_ViewQueryBuilder {
         }
 
         $results = $this->dbCore->queryAndGetResults($query);
-        $rows = is_array($results['rows'] ?? null) ? $results['rows'] : array();
+        $rows = $this->normalizeReadResult($results, 'regex redirect lookup', true);
         /** @var array<int, array<string, mixed>> $rows */
         return $rows;
     }
@@ -139,19 +141,24 @@ class ABJ_404_Solution_ViewQueryBuilder {
      */
     public function readRedirectsSingleTable(string $sub, array $tableOptions, bool $derivedPresent = true): array {
         $query = $this->buildRedirectsSingleTableReadQuery($sub, $tableOptions, $derivedPresent);
+        if (!empty($tableOptions['_abj404_allow_degraded_read'])) {
+            $fallbackOptions = array_replace($tableOptions, array(
+                'paged' => 1, 'perpage' => min(ABJ_404_Solution_AdminTableReadRepository::PAGE_LIMIT,
+                    ABJ_404_Solution_ExactInteger::readOr($tableOptions['perpage'] ?? null, 1, 25)),
+                'orderby' => 'id', 'order' => 'DESC', '_abj404_bounded_first_page' => true,
+            ));
+            return abj_service('admin_table_reader')->read(array(
+                'statement' => $query,
+                'fallback' => $this->buildRedirectsSingleTableReadQuery($sub, $fallbackOptions, $derivedPresent),
+                'subpage' => $sub, 'tableOptions' => $tableOptions,
+                'sortPending' => $this->sortResolver->wideColumnSortPendingBackfill($tableOptions),
+            ));
+        }
         $result = $this->dbCore->queryAndGetResults(
             $query['sql'],
             array_merge($this->resolveReadTimeoutOptions($tableOptions), array('query_params' => $query['params']))
         );
-        $lastErrorRaw = $result['last_error'] ?? '';
-        $lastError = is_scalar($lastErrorRaw) ? trim((string)$lastErrorRaw) : '';
-        if (!empty($result['timed_out']) || $lastError !== '') {
-            $message = !empty($result['timed_out'])
-                ? 'Redirect row query timed out.'
-                : 'Redirect row query failed: ' . $lastError;
-            throw new ABJ_404_Solution_ViewQueryFailureException($message);
-        }
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+        $rows = $this->normalizeReadResult($result, 'redirect row query');
         /** @var array<int, array<string, mixed>> $rows */
         return $rows;
     }
@@ -183,19 +190,17 @@ class ABJ_404_Solution_ViewQueryBuilder {
      */
     public function countRedirectsSingleTable(string $sub, array $tableOptions, bool $derivedPresent = true): int {
         $query = $this->buildRedirectsSingleTableCountQuery($sub, $tableOptions, $derivedPresent);
+        if (!empty($tableOptions['_abj404_allow_degraded_read'])) {
+            return abj_service('admin_table_reader')->count(array(
+                'statement' => $query, 'subpage' => $sub, 'tableOptions' => $tableOptions,
+                'operation' => 'getRedirectsForViewCount',
+            ));
+        }
         $result = $this->dbCore->queryAndGetResults(
             $query['sql'],
             array_merge($this->resolveReadTimeoutOptions($tableOptions), array('query_params' => $query['params']))
         );
-        $lastErrorRaw = $result['last_error'] ?? '';
-        $lastError = is_scalar($lastErrorRaw) ? trim((string)$lastErrorRaw) : '';
-        if (!empty($result['timed_out']) || $lastError !== '') {
-            $message = !empty($result['timed_out'])
-                ? 'Filtered redirect count query timed out.'
-                : 'Filtered redirect count query failed: ' . $lastError;
-            throw new ABJ_404_Solution_ViewQueryFailureException($message);
-        }
-        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
+        $rows = $this->normalizeReadResult($result, 'filtered redirect count query');
         if (empty($rows) || !is_array($rows[0])) {
             throw new ABJ_404_Solution_ViewQueryFailureException(
                 'Filtered redirect count query returned no aggregate row.'
@@ -211,13 +216,42 @@ class ABJ_404_Solution_ViewQueryBuilder {
     }
 
     /**
+     * Keep failed or malformed read envelopes from becoming an empty result.
+     * Empty rows are valid only after the executor has explicitly reported a
+     * successful query; callers then decide whether an empty page/count is
+     * meaningful for their operation.
+     *
+     * @param mixed $result
+     * @param string $operation
+     * @return array<int, mixed>
+     * @param bool $includeDiagnostics Preserve the regex reader's structured
+     *   operation marker; single-table callers let their coordinator collect
+     *   the full view diagnostics envelope.
+     * @throws ABJ_404_Solution_ViewQueryFailureException
+     */
+    private function normalizeReadResult($result, string $operation, bool $includeDiagnostics = false): array {
+        // The validator owns what makes a read envelope trustworthy; this
+        // method owns only how a refusal is delivered here: a typed exception.
+        $confirmed = ABJ_404_Solution_DatabaseReadResultValidator::confirm($result, ucfirst($operation));
+        if ($confirmed['last_error'] !== '') {
+            // Keep the existing machine-readable operation slug stable for
+            // callers/log consumers while allowing human-readable failure text.
+            throw new ABJ_404_Solution_ViewQueryFailureException(
+                $confirmed['last_error'],
+                $includeDiagnostics ? array('operation' => str_replace(' ', '_', $operation)) : array()
+            );
+        }
+        return $confirmed['rows'];
+    }
+
+    /**
      * @param string $sub
      * @param array<string, mixed> $tableOptions
      * @param bool $derivedPresent
      * @return SqlFragment The statement text and the values to bind, in placeholder order.
      */
     public function buildRedirectsSingleTableReadQuery(string $sub, array $tableOptions, bool $derivedPresent = true): array {
-        $effectiveSort = $this->resolveEffectiveSort($tableOptions, $derivedPresent);
+        $effectiveSort = $this->sortResolver->resolveEffectiveSort($tableOptions, $derivedPresent);
         $orderBy = $effectiveSort['orderby'];
         $order = $effectiveSort['order'];
 
@@ -243,16 +277,51 @@ class ABJ_404_Solution_ViewQueryBuilder {
         // instead of sorting the whole active-redirect set. See
         // RedirectsDerivedSortExplainPlanTest. id is unique, so the ordering is
         // still fully deterministic for pagination.
+        // The Status sort is the exception: its ties break on `timestamp, id`
+        // (see statusTieBreak()), so the id never rides on an index's implicit
+        // primary-key suffix.
         $where = $this->buildSingleTableWhere($sub, $tableOptions, $derivedPresent);
+        // LIMIT inside the derived table prevents optimizer merging: even a
+        // non-sargable search can examine only this many primary-key candidates.
+        $bounded = !empty($tableOptions['_abj404_bounded_first_page']);
+        $source = $bounded
+            ? $this->boundedRedirectsSource($sub, $tableOptions)
+            : '{wp_abj404_redirects}';
         return array(
-            'sql' => "SELECT id, url, status, type, final_dest, code, timestamp, engine, score"
+            'sql' => 'SELECT ' . ($bounded ? '/* abj404 bounded admin page */ ' : '')
+                . "id, url, status, type, final_dest, code, timestamp, engine, score"
                 . $derivedProjection . "\n"
-                . "FROM {wp_abj404_redirects}\n"
+                . 'FROM ' . $source . "\n"
                 . $where['sql']
-                . "ORDER BY " . $orderBy . " " . $order . ", id " . $order . "\n"
+                . "ORDER BY " . $orderBy . " " . $order . ", " . $this->tieBreak($orderBy, $order) . "\n"
                 . "LIMIT " . $limitStart . ", " . $perpage,
             'params' => $where['params'],
         );
+    }
+
+    /**
+     * The ORDER BY terms after the sorted column: the primary-key id in the sort
+     * direction, preceded by `timestamp` for the Status sort.
+     *
+     * Why Status differs: `status IN (...) ORDER BY status <dir>, id <dir> LIMIT n`
+     * is served by `status` / `idx_status_disabled`, which carry `id` only as
+     * InnoDB's implicit primary-key suffix. MySQL 8.0.35 up to 8.4.10 and 9.x up
+     * to 9.7.1 (bugs 117598 and 119198, never fixed in 8.0) drop the sort for
+     * that shape, scan the multi-range reverse and so return the ids ascending
+     * inside a descending page. Adding `timestamp` makes the index that serves
+     * the sort `idx_status_disabled_timestamp_id`, which names every key part
+     * explicitly, so no engine can mis-order it; the user-visible rule is
+     * newest first inside a status group. RedirectsViewSortOrderEveryIndexTest
+     * forces every index of the table onto every sort to hold this.
+     *
+     * @param string $orderBy The effective sorted column.
+     * @param string $order 'ASC' or 'DESC'.
+     * @return string SQL terms, no leading comma.
+     */
+    private function tieBreak(string $orderBy, string $order): string {
+        return $orderBy === 'status'
+            ? 'timestamp ' . $order . ', id ' . $order
+            : 'id ' . $order;
     }
 
     /**
@@ -269,6 +338,27 @@ class ABJ_404_Solution_ViewQueryBuilder {
                 . $where['sql'],
             'params' => $where['params'],
         );
+    }
+
+    /** @param array<string, mixed> $options A bounded candidate source, never a full-source filesort. */
+    private function boundedRedirectsSource(string $sub, array $options): string {
+        $index = $options['_abj404_bounded_status_index'] ?? '';
+        if (!in_array($index, array('idx_status_disabled_timestamp_id', 'idx_status_disabled', 'status'), true)) {
+            return '(SELECT * FROM {wp_abj404_redirects} FORCE INDEX (PRIMARY) ORDER BY id DESC LIMIT '
+                . ABJ_404_Solution_AdminTableReadRepository::CANDIDATE_LIMIT . ') recent_redirects';
+        }
+        $statuses = explode(',', $this->policy->resolveStatusTypeList($sub, $options));
+        $limit = max(1, intdiv(ABJ_404_Solution_AdminTableReadRepository::CANDIDATE_LIMIT, max(1, count($statuses))));
+        $branches = array();
+        foreach ($statuses as $status) {
+            // allow-unbounded-select: every branch ends with " LIMIT $limit" (CANDIDATE_LIMIT split across the statuses); the LIMIT lands in a separate concatenated string than SELECT/FROM
+            $branches[] = 'SELECT * FROM {wp_abj404_redirects} FORCE INDEX (`' . $index . '`) WHERE status = ' . (int)$status
+                . ($index === 'status' ? '' : ' AND disabled = ' . $this->policy->resolveTrashValue($options))
+                . ($index === 'idx_status_disabled_timestamp_id' ? ' ORDER BY timestamp DESC, id DESC' : '')
+                . ' LIMIT ' . $limit;
+        }
+        $union = count($branches) === 1 ? $branches[0] : '(' . implode(') UNION ALL (', $branches) . ')';
+        return '(' . $union . ') recent_redirects';
     }
 
     /**
@@ -297,133 +387,6 @@ class ABJ_404_Solution_ViewQueryBuilder {
                 . " " . $filterTextClause['sql'] . "\n",
             'params' => $filterTextClause['params'],
         );
-    }
-
-    /**
-     * Effective (orderby column, direction) for the single-table read ORDER BY.
-     *
-     * On EITHER tab, a URL or Destination sort that cannot be served index-ordered
-     * right now (its narrow sort key is not ready: column missing, composite index
-     * missing, or the legacy-row drain not yet converged -- see
-     * RedirectsDenormSchemaReadiness::sortKeyReadyForColumn) would force a filesort over
-     * the wide source column (varchar(2048), prefix-only). On a large table that
-     * scan can exceed a shared host's max_statement_time, the server kills the
-     * query, and the tab is stuck on its loading placeholder every load. Until the
-     * sort key is ready we therefore serve the always-indexed safe default
-     * (timestamp DESC, "newest first") instead. This is display-only: the user's
-     * saved sort preference is left untouched and resumes automatically once the
-     * sort key is ready -- and the column header is rendered non-sortable with a
-     * progress tooltip meanwhile (captured tab: View_CapturedURLsTable; Page
-     * Redirects tab: ABJ_404_Solution_AdminTableColumnHeaders).
-     *
-     * Applied to BOTH tabs (the literal "no wide-column filesort" rule): the
-     * Page Redirects status filter does not make the wide-url filesort safe at
-     * scale, and the readiness predicate self-heals so the real sort resumes the
-     * moment the key is index-ordered.
-     *
-     * @param array<string, mixed> $tableOptions
-     * @param bool $derivedPresent
-     * @return array{orderby: string, order: string}
-     */
-    private function resolveEffectiveSort(array $tableOptions, bool $derivedPresent): array {
-        $rawOrderBy = strtolower(is_string($tableOptions['orderby'] ?? null) ? $tableOptions['orderby'] : '');
-        if ($this->wideColumnSortPendingBackfill($rawOrderBy, $tableOptions)) {
-            return array('orderby' => 'timestamp', 'order' => 'DESC');
-        }
-        return array(
-            'orderby' => $this->resolveSingleTableOrderByColumn($tableOptions, $derivedPresent),
-            'order' => $this->policy->resolveOrderDirection($tableOptions),
-        );
-    }
-
-    /**
-     * Whether the requested sort targets a narrow sort-key-backed column
-     * (url -> url_sort_key, dest -> dest_sort_key) that cannot be served
-     * index-ordered yet. The coordinator sets the matching
-     * _abj404_*_sort_key_present flag true only when the column exists AND its
-     * composite indexes exist AND its drain latch is set
-     * (RedirectsDenormSchemaReadiness::sortKeyReadyForColumn); a falsey flag means the
-     * only available ordering is a wide-column filesort. Sorts on real
-     * always-populated columns (logshits, last_used, score, code, type, status,
-     * timestamp) are never pending and are not substituted.
-     *
-     * @param string $rawOrderBy Lowercased requested orderby.
-     * @param array<string, mixed> $tableOptions
-     * @return bool
-     */
-    private function wideColumnSortPendingBackfill(string $rawOrderBy, array $tableOptions): bool {
-        if ($rawOrderBy === 'url') {
-            return empty($tableOptions['_abj404_url_sort_key_present']);
-        }
-        if ($rawOrderBy === 'dest' || $rawOrderBy === 'final_dest') {
-            return empty($tableOptions['_abj404_dest_sort_key_present']);
-        }
-        return false;
-    }
-
-    /**
-     * Resolve the ORDER BY column for the single-table read.
-     *
-     * A sort on a derived column (logshits / last_used / dest) uses the real
-     * column whenever the four denorm columns exist. The only fallback is
-     * schema-drift tolerance: when the columns are absent entirely (the column-add
-     * ALTER never completed) a derived sort would reference a missing column, so
-     * it falls back to the always-present native url column.
-     *
-     * No backfill-completion flag is consulted. Each derived column degrades
-     * gracefully for not-yet-backfilled rows by construction, so ordering on it is
-     * always meaningful and self-heals as rows are resolved:
-     *   - logshits is NOT NULL and defaults to 0, so an un-backfilled row simply
-     *     sorts as 0 hits and rises into place once the rollup is written;
-     *   - last_used is NULL for no-hit rows, which sort last;
-     *   - the dest_for_view ordering groups NULL/empty destinations last via its
-     *     CASE expression (see ViewQueryPolicy::resolveOrderByColumn).
-     *
-     * The previous implementation gated these sorts on the obsolete denorm
-     * backfill-complete option and fell back to url order until it flipped. That
-     * option was flipped only when no row had dest_for_view NULL, a condition a
-     * live 404 site never reaches: every newly captured 404 is inserted with
-     * dest_for_view NULL, so the option stayed false forever and the Hits / Last
-     * Used / Destination columns were permanently sorted by url instead of by
-     * their own values (the rendered Hits column looked random).
-     *
-     * @param array<string, mixed> $tableOptions
-     * @param bool $derivedPresent Whether the four denorm columns exist on the
-     *   table. False (schema drift) is the only case that forces the url fallback.
-     * @return string
-     */
-    private function resolveSingleTableOrderByColumn(array $tableOptions, bool $derivedPresent = true): string {
-        $rawOrderByValue = $tableOptions['orderby'] ?? '';
-        $rawOrderBy = strtolower(is_string($rawOrderByValue) ? $rawOrderByValue : '');
-        $derivedSorts = array('logshits', 'last_used', 'dest', 'final_dest');
-        if (in_array($rawOrderBy, $derivedSorts, true) && !$derivedPresent) {
-            return 'url';
-        }
-        // Destination sort: ORDER BY the narrow indexable dest_sort_key
-        // (uniform direction -> (disabled, dest_sort_key, id) /
-        // (status, disabled, dest_sort_key, id) serve it without a filesort) when
-        // the column exists. Blank/NULL destinations then sort naturally (first
-        // ascending, last descending) rather than the old always-last CASE, which
-        // was the very thing that forced a filesort (computed expression over a
-        // varchar(2048) prefix-only column). When the column is absent (an install
-        // mid-upgrade), fall back to the CASE-on-dest_for_view filesort so the
-        // sort still works -- just unindexed -- until the column-add completes.
-        if (($rawOrderBy === 'dest' || $rawOrderBy === 'final_dest')
-                && !empty($tableOptions['_abj404_dest_sort_key_present'])) {
-            return 'dest_sort_key';
-        }
-        // URL sort (incl. the Page Redirects default): ORDER BY the narrow
-        // indexable url_sort_key so (disabled, url_sort_key, id) /
-        // (status, disabled, url_sort_key, id) serve it without a filesort. url is
-        // varchar(2048), prefix-only, so ORDER BY url itself always filesorts even
-        // when every value is short (MySQL will not order by a prefix index). When
-        // the column is absent (an install mid-upgrade) fall back to raw url so the
-        // sort still works -- unindexed -- until the column-add completes. URLs
-        // longer than 191 chars sharing a 191-char prefix tie-break by id.
-        if ($rawOrderBy === 'url' && !empty($tableOptions['_abj404_url_sort_key_present'])) {
-            return 'url_sort_key';
-        }
-        return $this->policy->resolveOrderByColumn($tableOptions);
     }
 
     /**

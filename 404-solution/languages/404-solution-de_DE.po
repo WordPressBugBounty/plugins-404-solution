@@ -201,6 +201,9 @@ msgstr "* Verwenden Sie ein Sternchen (*) für beliebige Muster.\""
 msgid "404 Page Suggestions"
 msgstr "404-Seitenvorschläge"
 
+msgid "404 Suggestions"
+msgstr "404-Vorschläge"
+
 msgid "404 URL marked as %s successfully!"
 msgstr "404-URL erfolgreich als %s markiert!"
 
@@ -2065,6 +2068,9 @@ msgstr "Weiterleitungen"
 msgid "Showing %1$d-%2$d of %3$d %4$s"
 msgstr "%1$d–%2$d von %3$d %4$s werden angezeigt"
 
+msgid "Showing a limited set of matching records while sorting and search are being prepared. The full list returns automatically."
+msgstr "Während Sortierung und Suche vorbereitet werden, wird eine begrenzte Auswahl passender Einträge angezeigt. Die vollständige Liste wird automatisch wieder angezeigt."
+
 msgid "Redirects will appear here once created."
 msgstr "Weiterleitungen werden hier angezeigt, sobald sie erstellt wurden."
 
@@ -3746,6 +3752,9 @@ msgstr "Tabellendaten werden im Hintergrund vorbereitet."
 msgid "Preparing the redirects view table. Please wait."
 msgstr "Die Weiterleitungstabelle wird vorbereitet. Bitte warten."
 
+msgid "Preparing the redirects table."
+msgstr "Die Weiterleitungstabelle wird vorbereitet."
+
 #: includes/DataAccessTrait_ViewQueriesStaged.php
 msgid "(404 page)"
 msgstr "(404-Seite)"
@@ -4557,3 +4566,154 @@ msgstr "Anfragen mit Zeitüberschreitung"
 #: includes/view/ShortcodeSuggestionsPresenter.php:260
 msgid "Show suggested pages"
 msgstr "Vorgeschlagene Seiten anzeigen"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Query strings"
+msgstr "Abfrageparameter"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Routing parameters, pass query (default)"
+msgstr "Routingparameter, Abfrage weitergeben (Standard)"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Exact URL, pass query"
+msgstr "Exakte URL, Abfrage weitergeben"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Routing parameters, discard query"
+msgstr "Routingparameter, Abfrage verwerfen"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Path only, pass query"
+msgstr "Nur Pfad, Abfrage weitergeben"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Choose how missing pages are handled. You can change these settings later in Options."
+msgstr "Legen Sie fest, wie fehlende Seiten behandelt werden. Sie können diese Einstellungen später unter Optionen ändern."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Redirect to the closest match (recommended)"
+msgstr "Zur ähnlichsten Seite weiterleiten (empfohlen)"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "When no close match is found, show a 404 page that suggests similar pages."
+msgstr "Wenn keine ähnliche Seite gefunden wird, wird eine 404-Seite mit Vorschlägen für ähnliche Seiten angezeigt."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Show a 404 page that suggests similar pages"
+msgstr "Eine 404-Seite mit Vorschlägen für ähnliche Seiten anzeigen"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Visitors are never redirected automatically. Redirects you create yourself still work."
+msgstr "Besucher werden nie automatisch weitergeleitet. Von Ihnen erstellte Weiterleitungen funktionieren weiterhin."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Missing URLs are listed under Captured 404s so you can create redirects for them."
+msgstr "Fehlende URLs werden unter Erfasste 404s aufgelistet, damit Sie dafür Weiterleitungen erstellen können."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Missing URLs are not recorded. This does not change how visitors are redirected."
+msgstr "Fehlende URLs werden nicht aufgezeichnet. Dies ändert nichts daran, wie Besucher weitergeleitet werden."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Email me about missing pages?"
+msgstr "E-Mail zu fehlenden Seiten erhalten?"
+
+#. translators: %d is the number of captured 404 URLs that triggers an email.
+#: includes/admin/SetupWizardPresenter.php
+#, php-format
+msgid "Yes, email me when %d or more 404s have been captured (recommended)"
+msgstr "Ja, E-Mail senden, sobald %d oder mehr 404s erfasst wurden (empfohlen)"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Checked weekly. The email is sent to the site administrator."
+msgstr "Wird wöchentlich geprüft. Die E-Mail geht an den Administrator der Website."
+
+#. translators: %s is the site administrator's email address.
+#: includes/admin/SetupWizardPresenter.php
+#, php-format
+msgid "Checked weekly. The email is sent to %s."
+msgstr "Wird wöchentlich geprüft. Die E-Mail geht an %s."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Email alerts need the list of missing pages, so they are off while logging is off."
+msgstr "E-Mail-Benachrichtigungen benötigen die Liste der fehlenden Seiten und sind daher aus, solange die Protokollierung aus ist."
+
+#: includes/redirects/RedirectChainWalker.php
+#, php-format
+msgid "Redirect loop: %s. Choose a destination outside this loop."
+msgstr "Weiterleitungsschleife: %s. Wählen Sie ein Ziel außerhalb dieser Schleife."
+
+#: includes/redirects/RedirectChainWalker.php
+#, php-format
+msgid "Redirect not saved: the redirect loop check could not run (%s)."
+msgstr "Weiterleitung nicht gespeichert: Die Prüfung auf Weiterleitungsschleifen konnte nicht ausgeführt werden (%s)."
+
+#: includes/php/wordpress/WPNotices.php
+msgid "A redirect loop was stopped:"
+msgstr "Eine Weiterleitungsschleife wurde gestoppt:"
+
+#: includes/php/wordpress/WPNotices.php
+#, php-format
+msgid "A redirect loop was stopped: %s. Edit these rules in Page Redirects."
+msgstr "Eine Weiterleitungsschleife wurde gestoppt: %s. Bearbeiten Sie diese Regeln unter Seitenweiterleitungen."
+
+#: includes/view/View_Shared.php
+msgid "Sorting by this column is being prepared. It becomes available automatically."
+msgstr "Die Sortierung nach dieser Spalte wird vorbereitet. Sie wird automatisch verfügbar."
+
+#: includes/redirects/RedirectChainWalker.php
+msgid "Reload this page and try again. If the error continues, send this message to support."
+msgstr "Laden Sie diese Seite neu und versuchen Sie es erneut. Wenn der Fehler weiterhin auftritt, senden Sie diese Meldung an den Support."
+
+#: includes/repositories/RedirectConditionsRepository.php
+msgid "The redirect conditions table is unavailable; conditions were not saved. [ABJ404_CONDITIONS_TABLE_UNAVAILABLE]"
+msgstr "Die Tabelle für Weiterleitungsbedingungen ist nicht verfügbar; die Bedingungen wurden nicht gespeichert. [ABJ404_CONDITIONS_TABLE_UNAVAILABLE]"
+
+#: includes/redirects/RedirectWriteAdmissionPolicy.php
+#: includes/repositories/RedirectLifecycleService.php
+#: includes/repositories/RedirectWriteService.php
+#, php-format
+msgid "A live row already owns this source URL: %s [ABJ404_SOURCE_CONFLICT] Edit or move the existing redirect to the trash before trying again."
+msgstr "Eine aktive Zeile besitzt bereits diese Quell-URL: %s [ABJ404_SOURCE_CONFLICT] Bearbeiten Sie die vorhandene Weiterleitung oder verschieben Sie sie in den Papierkorb, bevor Sie es erneut versuchen."
+#: includes/core/PluginLogicSettingsUpdate.php:159
+#: includes/core/SetupWizard.php:125
+msgid "Settings could not be saved because the checked storage writer is unavailable. Reload this page and try again."
+msgstr "Die Einstellungen konnten nicht gespeichert werden, weil der geprüfte Speicher nicht verfügbar ist. Laden Sie diese Seite neu und versuchen Sie es erneut."
+
+#: includes/core/PluginLogicSettingsUpdate.php:165
+#: includes/core/SetupWizard.php:132
+msgid "Settings could not be saved because another update is in progress. Reload this page and try again."
+msgstr "Die Einstellungen konnten nicht gespeichert werden, weil gerade ein anderes Update läuft. Laden Sie diese Seite neu und versuchen Sie es erneut."
+
+#: includes/core/PluginLogicSettingsUpdate.php:182
+#: includes/core/SetupWizard.php:153
+msgid "Settings could not be saved. Reload this page and try again."
+msgstr "Die Einstellungen konnten nicht gespeichert werden. Laden Sie diese Seite neu und versuchen Sie es erneut."
+#: includes/ajax/Ajax_RestoreDefaults.php:76
+msgid "Settings could not be restored because the checked storage writer is unavailable."
+msgstr "Die Einstellungen konnten nicht wiederhergestellt werden, weil der geprüfte Speicher nicht verfügbar ist."
+
+#: includes/ajax/Ajax_RestoreDefaults.php:82
+msgid "Settings could not be restored because another update is in progress."
+msgstr "Die Einstellungen konnten nicht wiederhergestellt werden, weil gerade ein anderes Update läuft."
+
+#: includes/ajax/Ajax_RestoreDefaults.php:99
+msgid "Settings could not be restored. Reload this page and try again."
+msgstr "Die Einstellungen konnten nicht wiederhergestellt werden. Laden Sie diese Seite neu und versuchen Sie es erneut."
+
+#. translators: %d = number of import issue details not displayed.
+#: includes/import/ImportIssueSummary.php
+#, php-format
+msgid "Additional import issues omitted: %d."
+msgstr "Weitere ausgelassene Importprobleme: %d."
+
+#. translators: %s = legacy plugin redirect table name.
+#: includes/repositories/PluginUpdateMetadataRepository.php
+#, php-format
+msgid "[ABJ404-IMPORT-SOURCE-NOT-FOUND] Legacy Redirectioner source table \"%s\" was not found; no records were imported. Confirm that the legacy redirects are present in this WordPress installation before retrying the import."
+msgstr "[ABJ404-IMPORT-SOURCE-NOT-FOUND] Die Legacy-Redirectioner-Quelltabelle „%s“ wurde nicht gefunden; es wurden keine Datensätze importiert. Prüfen Sie vor einem erneuten Import, ob die alten Weiterleitungen in dieser WordPress-Installation vorhanden sind."
+
+#: includes/import/ForeignSourceQueryGateway.php
+msgid "The database did not confirm a successful source read. Check the source plugin data and database connection before retrying."
+msgstr "Die Datenbank hat keinen erfolgreichen Lesevorgang der Quelldaten bestätigt. Prüfen Sie vor einem erneuten Versuch die Daten des Quell-Plugins und die Datenbankverbindung."

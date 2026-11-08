@@ -81,6 +81,9 @@ final class ABJ_404_Solution_RequestPhaseTimeline {
     /** @var string Response part, truncated, never carrying the delimiter. */
     private static $part = '';
 
+    /** @var string Allowlisted admin subpage, safe to retain in diagnostics. */
+    private static $subpage = '';
+
     /** @var int|null Client send time in epoch ms, on the client's clock. */
     private static $clientSentAtMs = null;
 
@@ -185,7 +188,7 @@ final class ABJ_404_Solution_RequestPhaseTimeline {
      * current request.
      *
      * @param array<string, mixed> $input requestId, retryCount,
-     *   retryParentId, part and clientSentAt as received.
+     *   retryParentId, part, subpage and clientSentAt as received.
      * @return void
      */
     public static function describeRequest(array $input): void {
@@ -202,6 +205,9 @@ final class ABJ_404_Solution_RequestPhaseTimeline {
         self::$retryParentId = ABJ_404_Solution_AjaxRequestLedger::normalizeId(
             $input['retryParentId'] ?? '', '');
         self::$part = str_replace('|', '', ABJ_404_Solution_Utf8SafeRecord::clip($part, self::MAX_PART_CHARS));
+        $subpage = $input['subpage'] ?? '';
+        self::$subpage = in_array($subpage, array('abj404_redirects', 'abj404_captured', 'abj404_logs'), true)
+            ? $subpage : '';
         self::$clientSentAtMs = $clientSentAt === 0 ? null : $clientSentAt;
     }
 
@@ -257,19 +263,21 @@ final class ABJ_404_Solution_RequestPhaseTimeline {
 
     /**
      * The timeline shape. Stable across calls: nothing in it measures the
-     * moment of reading.
+     * moment of reading. Additive fields retain v1 so the previous decoder
+     * can read persisted timelines after a rollback; it ignores extra keys.
      *
-     * @return array{v: int, rid: string, rc: int, rp: string, part: string,
+     * @return array{v: int, rid: string, rc: int, rp: string, part: string, subpage: string,
      *   cs: int|null, rt: int|null, bo: int|null, t: array<string, int>,
      *   db: array{n: int, ms: int}, bytes: int|null, cpu: int|null}
      */
     public static function toArray(): array {
-        return array(
+        $timeline = array(
             'v' => 1,
             'rid' => self::$requestId,
             'rc' => self::$retryCount,
             'rp' => self::$retryParentId,
             'part' => self::$part,
+            'subpage' => self::$subpage,
             'cs' => self::$clientSentAtMs,
             'rt' => self::$requestStartMs,
             'bo' => self::$bootOffsetMs,
@@ -278,6 +286,11 @@ final class ABJ_404_Solution_RequestPhaseTimeline {
             'bytes' => self::$responseBytes,
             'cpu' => self::$cpuMs,
         );
+        if (class_exists('ABJ_404_Solution_RequestFailureFrame', false)) {
+            $frame = ABJ_404_Solution_RequestFailureFrame::snapshot();
+            if ($frame !== null) { $timeline['failure_frame'] = $frame; }
+        }
+        return $timeline;
     }
 
     /**
@@ -293,13 +306,14 @@ final class ABJ_404_Solution_RequestPhaseTimeline {
         if (!self::$booted) {
             return '';
         }
-        return ABJ_404_Solution_Utf8SafeRecord::encode(self::toArray(), 'request phase timeline');
+        return self::bound(ABJ_404_Solution_Utf8SafeRecord::encode(self::toArray(), 'request phase timeline'));
     }
 
     /**
      * The inverse of encode(), or null when the value is not an encoded
      * timeline of an understood version. A row with no timeline decodes to
-     * null, not to an empty shape.
+     * null, not to an empty shape. Keep accepting v2 for timelines persisted
+     * before the additive subpage field was restored to the v1 contract.
      *
      * @param string $encoded
      * @return array<string, mixed>|null
@@ -308,11 +322,37 @@ final class ABJ_404_Solution_RequestPhaseTimeline {
         if ($encoded === '') {
             return null;
         }
-        $decoded = json_decode($encoded, true);
-        if (!is_array($decoded) || ($decoded['v'] ?? null) !== 1) {
+        $decoded = json_decode($encoded, true, 16);
+        if (!is_array($decoded) || !in_array($decoded['v'] ?? null, array(1, 2), true)) {
             return null;
         }
+        if (array_key_exists('failure_frame', $decoded)) {
+            $frame = ABJ_404_Solution_RequestFailureFrame::normalize($decoded['failure_frame']);
+            $decoded['failure_frame'] = $frame !== null && $frame['request_id'] === ($decoded['rid'] ?? null)
+                ? $frame : null;
+        }
         return $decoded;
+    }
+
+    /** Shed complete optional detail within the existing census row budget. Never byte-cut JSON. */
+    public static function bound(string $encoded): string {
+        $timeline = self::decode($encoded);
+        if ($timeline === null) { return ''; }
+        $json = ABJ_404_Solution_Utf8SafeRecord::encode($timeline, 'bounded request timeline');
+        if (strlen($json) <= ABJ_404_Solution_SameSiteRequestRowCodec::MAX_TIMELINE_CHARS) { return $json; }
+        $stamps = is_array($timeline['t'] ?? null) ? $timeline['t'] : array();
+        $timeline = array_intersect_key($timeline, array_flip(array('v', 'rid', 'rc', 'rp', 'part',
+            'subpage', 'rt', 'bo', 'cs', 'bytes', 'cpu', 'db', 'failure_frame')));
+        $timeline['t'] = array_slice($stamps, -2, null, true);
+        $timeline['timeline_truncated'] = true;
+        if (is_array($timeline['failure_frame'] ?? null)) { $timeline['failure_frame']['truncated'] = true; }
+        $json = ABJ_404_Solution_Utf8SafeRecord::encode($timeline, 'reduced request timeline');
+        if (strlen($json) <= ABJ_404_Solution_SameSiteRequestRowCodec::MAX_TIMELINE_CHARS) { return $json; }
+        // Malformed/oversized legacy detail cannot evict the original runtime,
+        // named identity or terminal state. The loss remains machine-readable.
+        $timeline = array_intersect_key($timeline, array_flip(array('v', 'rid', 'failure_frame', 'timeline_truncated')));
+        $json = ABJ_404_Solution_Utf8SafeRecord::encode($timeline, 'minimal request timeline');
+        return strlen($json) <= ABJ_404_Solution_SameSiteRequestRowCodec::MAX_TIMELINE_CHARS ? $json : '';
     }
 
     /**
@@ -343,6 +383,7 @@ final class ABJ_404_Solution_RequestPhaseTimeline {
         self::$retryCount = 0;
         self::$retryParentId = '';
         self::$part = '';
+        self::$subpage = '';
         self::$clientSentAtMs = null;
         self::$stamps = array();
         self::$queryCount = 0;
@@ -350,6 +391,9 @@ final class ABJ_404_Solution_RequestPhaseTimeline {
         self::$responseBytes = null;
         self::$cpuMs = null;
         self::$monotonicSource = null;
+        if (class_exists('ABJ_404_Solution_RequestFailureFrame', false)) {
+            ABJ_404_Solution_RequestFailureFrame::reset();
+        }
     }
 
     /**

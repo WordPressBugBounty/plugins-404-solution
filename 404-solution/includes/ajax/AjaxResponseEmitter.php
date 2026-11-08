@@ -37,6 +37,7 @@ final class ABJ_404_Solution_AjaxResponseEmitter {
      * @return void
      */
     public static function sendJsonResponseAndExit($payload, $httpStatus = 200) {
+        ABJ_404_Solution_RequestFailureFrame::response((int)$httpStatus);
         $scopes = ABJ_404_Solution_AjaxRequestIdScopes::fromGlobalContext();
         $checkpointRequestId = $scopes->checkpoint();
         $payload = ABJ_404_Solution_AjaxRequestLedger::stampOnPayload($payload, $scopes->ledger());

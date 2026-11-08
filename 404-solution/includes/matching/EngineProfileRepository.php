@@ -42,6 +42,14 @@ final class ABJ_404_Solution_EngineProfileRepository {
     /** @var bool Whether the last admin read filled MAX_ADMIN_PROFILES. */
     private $adminReadTruncated = false;
 
+    /** @var string Error captured from the most recent profile write. */
+    private $lastWriteError = '';
+
+    /** Return the native error captured by the most recent INSERT/UPDATE/DELETE. */
+    public function getLastWriteError(): string {
+        return $this->lastWriteError;
+    }
+
     /**
      * Lazy dbCore accessor, deferring resolution until first use so unit tests
      * that exercise pure-logic methods never boot the database layer.
@@ -147,7 +155,7 @@ final class ABJ_404_Solution_EngineProfileRepository {
         $profiles = [];
         foreach ($rows as $row) {
             if (is_array($row)) {
-                $profiles[] = $row;
+                $profiles[] = array_filter($row, 'is_string', ARRAY_FILTER_USE_KEY);
             }
         }
 
@@ -171,6 +179,7 @@ final class ABJ_404_Solution_EngineProfileRepository {
      * @return int|false Inserted/updated row ID, or false on failure.
      */
     public function insertOrUpdate(array $data) {
+        $this->lastWriteError = '';
         $table = $this->tableName();
 
         $id = ABJ_404_Solution_ExactInteger::readOr($data['id'] ?? null, 0, 0);
@@ -186,7 +195,8 @@ final class ABJ_404_Solution_EngineProfileRepository {
                 ['query_params' => [$name, $urlPattern, $isRegex, $enabledEngines, $priority, $status, $id]]
             );
             $updateError = isset($queryResult['last_error']) && is_string($queryResult['last_error']) ? $queryResult['last_error'] : '';
-            return $updateError === '' ? $id : false;
+            $this->lastWriteError = $updateError;
+            return $updateError === '' && $this->querySucceeded($queryResult) ? $id : false;
         }
 
         $queryResult = $this->dbCore()->queryAndGetResults(
@@ -195,7 +205,8 @@ final class ABJ_404_Solution_EngineProfileRepository {
             ['query_params' => [$name, $urlPattern, $isRegex, $enabledEngines, $priority, $status]]
         );
         $lastError = isset($queryResult['last_error']) && is_string($queryResult['last_error']) ? $queryResult['last_error'] : '';
-        if ($lastError !== '') {
+        $this->lastWriteError = $lastError;
+        if ($lastError !== '' || !$this->querySucceeded($queryResult)) {
             return false;
         }
         $insertId = isset($queryResult['insert_id']) && is_scalar($queryResult['insert_id']) ? (int)$queryResult['insert_id'] : 0;
@@ -237,13 +248,15 @@ final class ABJ_404_Solution_EngineProfileRepository {
 
     /** Delete a profile by ID. */
     public function delete(int $id): bool {
+        $this->lastWriteError = '';
         $table = $this->tableName();
         $queryResult = $this->dbCore()->queryAndGetResults(
             "DELETE FROM `{$table}` WHERE `id` = %d",
             ['query_params' => [$id]]
         );
         $deleteError = isset($queryResult['last_error']) && is_string($queryResult['last_error']) ? $queryResult['last_error'] : '';
-        return $deleteError === '';
+        $this->lastWriteError = $deleteError;
+        return $deleteError === '' && $this->querySucceeded($queryResult);
     }
 
     /**
@@ -274,5 +287,11 @@ final class ABJ_404_Solution_EngineProfileRepository {
         }
         $firstValue = reset($first);
         return $firstValue !== $table;
+    }
+
+    /** @param array<string, mixed> $result */
+    private function querySucceeded(array $result): bool {
+        return array_key_exists('query_succeeded', $result) && $result['query_succeeded'] === true
+            && (!array_key_exists('timed_out', $result) || $result['timed_out'] === false);
     }
 }

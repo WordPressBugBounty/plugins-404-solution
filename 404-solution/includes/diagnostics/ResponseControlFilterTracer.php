@@ -4,6 +4,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// allow-no-test-found: exercised through the real ajaxUpdatePaginationLinks response entry point in tests/ResponseControlFilterTracerTest.php.
 /**
  * Durable attribution for the response-control filter dispatches on the
  * instrumented table AJAX response tail (Bruno timeout cause matrix, gap-hunt
@@ -46,8 +47,6 @@ if (!defined('ABSPATH')) {
  * on through bounded support extraction. Callback arguments, filter values, and
  * source paths never enter these records.
  *
- * allow-no-test-found: exercised through the real ajaxUpdatePaginationLinks
- * response entry point in tests/ResponseControlFilterTracerTest.php.
  */
 final class ABJ_404_Solution_ResponseControlFilterTracer {
 

@@ -201,6 +201,9 @@ msgstr "* Använd en asterisk (*) för att matcha \"vilket mönster som helst.\"
 msgid "404 Page Suggestions"
 msgstr "404-sidförslag"
 
+msgid "404 Suggestions"
+msgstr "404-förslag"
+
 msgid "404 URL marked as %s successfully!"
 msgstr "404-URL har markerats som %s."
 
@@ -2064,6 +2067,9 @@ msgstr "omdirigeringar"
 msgid "Showing %1$d-%2$d of %3$d %4$s"
 msgstr "Visar %1$d–%2$d av %3$d %4$s"
 
+msgid "Showing a limited set of matching records while sorting and search are being prepared. The full list returns automatically."
+msgstr "Ett begränsat urval av matchande poster visas medan sortering och sökning förbereds. Hela listan visas automatiskt igen."
+
 msgid "Redirects will appear here once created."
 msgstr "Omdirigeringar visas här när de har skapats."
 
@@ -3747,6 +3753,9 @@ msgstr "Förbereder tabelldata i bakgrunden."
 msgid "Preparing the redirects view table. Please wait."
 msgstr "Förbereder tabellen med omdirigeringar. Vänligen vänta."
 
+msgid "Preparing the redirects table."
+msgstr "Förbereder tabellen med omdirigeringar."
+
 #: includes/DataAccessTrait_ViewQueriesStaged.php
 msgid "(404 page)"
 msgstr "(404-sida)"
@@ -4558,3 +4567,154 @@ msgstr "Förfrågningar som överskred tidsgränsen"
 #: includes/view/ShortcodeSuggestionsPresenter.php:260
 msgid "Show suggested pages"
 msgstr "Visa föreslagna sidor"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Query strings"
+msgstr "Frågeparametrar"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Routing parameters, pass query (default)"
+msgstr "Routningsparametrar, vidarebefordra frågan (standard)"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Exact URL, pass query"
+msgstr "Exakt URL, vidarebefordra frågan"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Routing parameters, discard query"
+msgstr "Routningsparametrar, ta bort frågan"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Path only, pass query"
+msgstr "Endast sökväg, vidarebefordra frågan"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Choose how missing pages are handled. You can change these settings later in Options."
+msgstr "Välj hur sidor som saknas ska hanteras. Du kan ändra de här inställningarna senare under Alternativ."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Redirect to the closest match (recommended)"
+msgstr "Omdirigera till närmaste träff (rekommenderas)"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "When no close match is found, show a 404 page that suggests similar pages."
+msgstr "Om ingen nära träff hittas visas en 404-sida som föreslår liknande sidor."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Show a 404 page that suggests similar pages"
+msgstr "Visa en 404-sida som föreslår liknande sidor"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Visitors are never redirected automatically. Redirects you create yourself still work."
+msgstr "Besökare omdirigeras aldrig automatiskt. Omdirigeringar som du skapar själv fungerar fortfarande."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Missing URLs are listed under Captured 404s so you can create redirects for them."
+msgstr "Saknade URL:er listas under Fångade 404:or så att du kan skapa omdirigeringar för dem."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Missing URLs are not recorded. This does not change how visitors are redirected."
+msgstr "Saknade URL:er sparas inte. Det ändrar inte hur besökare omdirigeras."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Email me about missing pages?"
+msgstr "Vill du få e-post om sidor som saknas?"
+
+#. translators: %d is the number of captured 404 URLs that triggers an email.
+#: includes/admin/SetupWizardPresenter.php
+#, php-format
+msgid "Yes, email me when %d or more 404s have been captured (recommended)"
+msgstr "Ja, skicka e-post när %d eller fler 404:or har fångats (rekommenderas)"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Checked weekly. The email is sent to the site administrator."
+msgstr "Kontrolleras varje vecka. E-postmeddelandet skickas till webbplatsens administratör."
+
+#. translators: %s is the site administrator's email address.
+#: includes/admin/SetupWizardPresenter.php
+#, php-format
+msgid "Checked weekly. The email is sent to %s."
+msgstr "Kontrolleras varje vecka. E-postmeddelandet skickas till %s."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Email alerts need the list of missing pages, so they are off while logging is off."
+msgstr "E-postaviseringar behöver listan över sidor som saknas, så de är av så länge loggningen är av."
+
+#: includes/redirects/RedirectChainWalker.php
+#, php-format
+msgid "Redirect loop: %s. Choose a destination outside this loop."
+msgstr "Omdirigeringsloop: %s. Välj ett mål utanför denna loop."
+
+#: includes/redirects/RedirectChainWalker.php
+#, php-format
+msgid "Redirect not saved: the redirect loop check could not run (%s)."
+msgstr "Omdirigeringen sparades inte: kontrollen av omdirigeringsslingor kunde inte köras (%s)."
+
+#: includes/php/wordpress/WPNotices.php
+msgid "A redirect loop was stopped:"
+msgstr "En omdirigeringsloop stoppades:"
+
+#: includes/php/wordpress/WPNotices.php
+#, php-format
+msgid "A redirect loop was stopped: %s. Edit these rules in Page Redirects."
+msgstr "En omdirigeringsloop stoppades: %s. Redigera dessa regler under Sidomdirigeringar."
+
+#: includes/view/View_Shared.php
+msgid "Sorting by this column is being prepared. It becomes available automatically."
+msgstr "Sortering efter den här kolumnen förbereds. Den blir tillgänglig automatiskt."
+
+#: includes/redirects/RedirectChainWalker.php
+msgid "Reload this page and try again. If the error continues, send this message to support."
+msgstr "Ladda om den här sidan och försök igen. Om felet kvarstår skickar du det här meddelandet till supporten."
+
+#: includes/repositories/RedirectConditionsRepository.php
+msgid "The redirect conditions table is unavailable; conditions were not saved. [ABJ404_CONDITIONS_TABLE_UNAVAILABLE]"
+msgstr "Tabellen med omdirigeringsvillkor är inte tillgänglig; villkoren sparades inte. [ABJ404_CONDITIONS_TABLE_UNAVAILABLE]"
+
+#: includes/redirects/RedirectWriteAdmissionPolicy.php
+#: includes/repositories/RedirectLifecycleService.php
+#: includes/repositories/RedirectWriteService.php
+#, php-format
+msgid "A live row already owns this source URL: %s [ABJ404_SOURCE_CONFLICT] Edit or move the existing redirect to the trash before trying again."
+msgstr "En aktiv rad äger redan denna käll-URL: %s [ABJ404_SOURCE_CONFLICT] Redigera den befintliga omdirigeringen eller flytta den till papperskorgen innan du försöker igen."
+#: includes/core/PluginLogicSettingsUpdate.php:159
+#: includes/core/SetupWizard.php:125
+msgid "Settings could not be saved because the checked storage writer is unavailable. Reload this page and try again."
+msgstr "Inställningarna kunde inte sparas eftersom den kontrollerade lagringsfunktionen inte är tillgänglig. Ladda om sidan och försök igen."
+
+#: includes/core/PluginLogicSettingsUpdate.php:165
+#: includes/core/SetupWizard.php:132
+msgid "Settings could not be saved because another update is in progress. Reload this page and try again."
+msgstr "Inställningarna kunde inte sparas eftersom en annan uppdatering pågår. Ladda om sidan och försök igen."
+
+#: includes/core/PluginLogicSettingsUpdate.php:182
+#: includes/core/SetupWizard.php:153
+msgid "Settings could not be saved. Reload this page and try again."
+msgstr "Inställningarna kunde inte sparas. Ladda om sidan och försök igen."
+#: includes/ajax/Ajax_RestoreDefaults.php:76
+msgid "Settings could not be restored because the checked storage writer is unavailable."
+msgstr "Inställningarna kunde inte återställas eftersom den kontrollerade lagringsfunktionen inte är tillgänglig."
+
+#: includes/ajax/Ajax_RestoreDefaults.php:82
+msgid "Settings could not be restored because another update is in progress."
+msgstr "Inställningarna kunde inte återställas eftersom en annan uppdatering pågår."
+
+#: includes/ajax/Ajax_RestoreDefaults.php:99
+msgid "Settings could not be restored. Reload this page and try again."
+msgstr "Inställningarna kunde inte återställas. Ladda om sidan och försök igen."
+
+#. translators: %d = number of import issue details not displayed.
+#: includes/import/ImportIssueSummary.php
+#, php-format
+msgid "Additional import issues omitted: %d."
+msgstr "Ytterligare importproblem som utelämnats: %d."
+
+#. translators: %s = legacy plugin redirect table name.
+#: includes/repositories/PluginUpdateMetadataRepository.php
+#, php-format
+msgid "[ABJ404-IMPORT-SOURCE-NOT-FOUND] Legacy Redirectioner source table \"%s\" was not found; no records were imported. Confirm that the legacy redirects are present in this WordPress installation before retrying the import."
+msgstr "[ABJ404-IMPORT-SOURCE-NOT-FOUND] Källtabellen för Legacy Redirectioner \"%s\" hittades inte; inga poster importerades. Kontrollera att de gamla omdirigeringarna finns i denna WordPress-installation innan du försöker importera igen."
+
+#: includes/import/ForeignSourceQueryGateway.php
+msgid "The database did not confirm a successful source read. Check the source plugin data and database connection before retrying."
+msgstr "Databasen bekräftade inte att källdata kunde läsas. Kontrollera källtilläggets data och databasanslutningen innan du försöker igen."

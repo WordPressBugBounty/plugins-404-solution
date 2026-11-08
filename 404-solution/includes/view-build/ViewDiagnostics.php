@@ -13,6 +13,8 @@ if (!defined('ABSPATH')) {
  */
 class ABJ_404_Solution_ViewDiagnostics {
 
+    private const DIAGNOSTIC_BUDGET_EXHAUSTED = 'error: diagnostic budget exhausted';
+
     /** @var ABJ_404_Solution_DatabaseCore */
     private $dbCore;
 
@@ -21,6 +23,9 @@ class ABJ_404_Solution_ViewDiagnostics {
 
     /** @var ABJ_404_Solution_ViewQueryExplainDiagnostics */
     private $explainDiagnostics;
+
+    /** @var float|null Shared deadline for a bounded diagnostics capture. */
+    private $diagnosticDeadline;
 
     /**
      * @param ABJ_404_Solution_DatabaseCore $dbCore
@@ -97,48 +102,61 @@ class ABJ_404_Solution_ViewDiagnostics {
             $diag['elapsed_time_seconds'] = (float)$queryResult['elapsed_time'];
         }
 
-        global $wpdb;
-        $redirectsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
-        $logsv2Table = $this->dbCore->doTableNameReplacements('{wp_abj404_logsv2}');
-        $postsTable = $this->resolvePostsTableName();
-
-        $diag['explain'] = $this->explainDiagnostics->collect($sub, $failedQuery, $queryResult);
-        $diag['db_version'] = $this->safeProbeDbVersion();
-
-        $diag['redirects_count']['active'] = $this->safeProbeCount(
-            "SELECT COUNT(*) AS count FROM `" . $redirectsTable . "` WHERE disabled = 0"
-        );
-        $diag['redirects_count']['trashed'] = $this->safeProbeCount(
-            "SELECT COUNT(*) AS count FROM `" . $redirectsTable . "` WHERE disabled = 1"
-        );
-        $diag['logsv2_count'] = $this->safeProbeCount(
-            "SELECT COUNT(*) AS count FROM `" . $logsv2Table . "`"
-        );
-        if ($postsTable !== '') {
-            $diag['wp_posts_count'] = $this->safeProbeCount(
-                "SELECT COUNT(*) AS count FROM `" . $postsTable . "`"
-            );
+        $budget = $tableOptions['_abj404_diagnostics_budget'] ?? null;
+        $this->diagnosticDeadline = null;
+        if (is_numeric($budget) && (float)$budget > 0 && function_exists('abj_clock')) {
+            $this->diagnosticDeadline = abj_clock()->nowFloat() + (float)$budget;
         }
 
-        $diag['tables'] = $this->safeProbeTableEnginesAndCollations(array($redirectsTable, $logsv2Table));
+        try {
+            $redirectsTable = $this->dbCore->doTableNameReplacements('{wp_abj404_redirects}');
+            $logsv2Table = $this->dbCore->doTableNameReplacements('{wp_abj404_logsv2}');
+            $postsTable = $this->resolvePostsTableName();
 
-        $diag['expected_indexes'] = array(
-            $redirectsTable => $this->safeProbeIndexCoverage($redirectsTable, array(
-                'PRIMARY', 'status', 'type', 'code', 'timestamp', 'disabled', 'url', 'final_dest',
-                'idx_url_disabled_status', 'idx_status_disabled', 'idx_canonical_url',
-            ), 'createRedirectsTable.sql'),
-            $logsv2Table => $this->safeProbeIndexCoverage($logsv2Table, array(
-                'PRIMARY', 'timestamp', 'requested_url', 'username', 'min_log_id',
-                'idx_requested_url_timestamp', 'idx_canonical_url',
-            ), 'createLogTable.sql'),
-        );
+            if (array_key_exists('explain', $queryResult)) {
+                $diag['explain'] = $queryResult['explain'];
+            } else if ($this->diagnosticDeadline !== null) {
+                $diag['explain'] = self::DIAGNOSTIC_BUDGET_EXHAUSTED;
+            } else {
+                $diag['explain'] = $this->explainDiagnostics->collect($sub, $failedQuery, $queryResult);
+            }
+            $diag['db_version'] = $this->safeProbeDbVersion();
 
-        $diag['canonical_url_state'] = array(
-            $redirectsTable => $this->safeProbeCanonicalUrlState($redirectsTable),
-            $logsv2Table => $this->safeProbeCanonicalUrlState($logsv2Table),
-        );
+            $diag['redirects_count']['active'] = $this->safeProbeCount(
+                "SELECT COUNT(*) AS count FROM `" . $redirectsTable . "` WHERE disabled = 0"
+            );
+            $diag['redirects_count']['trashed'] = $this->safeProbeCount(
+                "SELECT COUNT(*) AS count FROM `" . $redirectsTable . "` WHERE disabled = 1"
+            );
+            $diag['logsv2_count'] = $this->safeProbeCount("SELECT COUNT(*) AS count FROM `" . $logsv2Table . "`");
+            if ($postsTable !== '') {
+                $diag['wp_posts_count'] = $this->safeProbeCount(
+                    "SELECT COUNT(*) AS count FROM `" . $postsTable . "`"
+                );
+            }
 
-        return $diag;
+            $diag['tables'] = $this->safeProbeTableEnginesAndCollations(array($redirectsTable, $logsv2Table));
+
+            $diag['expected_indexes'] = array(
+                $redirectsTable => $this->safeProbeIndexCoverage($redirectsTable, array(
+                    'PRIMARY', 'status', 'type', 'code', 'timestamp', 'disabled', 'url', 'final_dest',
+                    'idx_url_disabled_status', 'idx_status_disabled', 'idx_canonical_url',
+                ), 'createRedirectsTable.sql'),
+                $logsv2Table => $this->safeProbeIndexCoverage($logsv2Table, array(
+                    'PRIMARY', 'timestamp', 'requested_url', 'username', 'min_log_id',
+                    'idx_requested_url_timestamp', 'idx_canonical_url',
+                ), 'createLogTable.sql'),
+            );
+
+            $diag['canonical_url_state'] = array(
+                $redirectsTable => $this->safeProbeCanonicalUrlState($redirectsTable),
+                $logsv2Table => $this->safeProbeCanonicalUrlState($logsv2Table, $diag['logsv2_count']),
+            );
+
+            return $diag;
+        } finally {
+            $this->diagnosticDeadline = null;
+        }
     }
 
     /**
@@ -177,6 +195,36 @@ class ABJ_404_Solution_ViewDiagnostics {
         return $out;
     }
 
+    /**
+     * Run one diagnostic query under the capture-wide deadline.
+     *
+     * @param string $query
+     * @return array<string, mixed>
+     */
+    private function runDiagnosticProbe(string $query): array {
+        $timeout = 5;
+        if ($this->diagnosticDeadline !== null) {
+            $remaining = $this->diagnosticDeadline - abj_clock()->nowFloat();
+            if ($remaining < 1) {
+                return array(
+                    'rows' => array(),
+                    'last_error' => self::DIAGNOSTIC_BUDGET_EXHAUSTED,
+                    'timed_out' => false,
+                    '_abj404_diagnostics_budget_exhausted' => true,
+                );
+            }
+            // DatabaseQueryExecutor accepts exact integer seconds. Passing a
+            // fractional remainder would be rejected by its normalization and
+            // silently restore the unbounded default timeout.
+            $timeout = max(1, min(5, (int)floor($remaining)));
+        }
+        return $this->dbCore->queryAndGetResults($query, array(
+            'timeout' => $timeout,
+            'log_errors' => false,
+            'skip_repair' => true,
+        ));
+    }
+
     /** @return string */
     private function resolvePostsTableName(): string {
         global $wpdb;
@@ -195,11 +243,7 @@ class ABJ_404_Solution_ViewDiagnostics {
      */
     private function safeProbeCount(string $countQuery) {
         try {
-            $result = $this->dbCore->queryAndGetResults($countQuery, array(
-                'timeout' => 5,
-                'log_errors' => false,
-                'skip_repair' => true,
-            ));
+            $result = $this->runDiagnosticProbe($countQuery);
             $lastErrorRaw = $result['last_error'] ?? '';
             $err = is_string($lastErrorRaw) ? $lastErrorRaw : '';
             if ($err !== '' || !empty($result['timed_out'])) {
@@ -220,11 +264,11 @@ class ABJ_404_Solution_ViewDiagnostics {
     /** @return string */
     private function safeProbeDbVersion(): string {
         try {
-            $result = $this->dbCore->queryAndGetResults('SELECT VERSION() AS version', array(
-                'timeout' => 5,
-                'log_errors' => false,
-                'skip_repair' => true,
-            ));
+            $result = $this->runDiagnosticProbe('SELECT VERSION() AS version');
+            $lastError = is_string($result['last_error'] ?? null) ? $result['last_error'] : '';
+            if ($lastError !== '') {
+                return $lastError;
+            }
             $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
             if (empty($rows)) {
                 return '';
@@ -256,32 +300,20 @@ class ABJ_404_Solution_ViewDiagnostics {
             }
             $query = "SELECT TABLE_NAME, ENGINE, TABLE_COLLATION FROM information_schema.TABLES "
                 . "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (" . implode(',', $list) . ")";
-            $result = $this->dbCore->queryAndGetResults($query, array(
-                'timeout' => 5,
-                'log_errors' => false,
-                'skip_repair' => true,
-            ));
+            $result = $this->runDiagnosticProbe($query);
+            $lastError = is_string($result['last_error'] ?? null) ? $result['last_error'] : '';
+            if ($lastError !== '') {
+                foreach (array_keys($out) as $name) {
+                    $out[$name]['engine'] = $lastError;
+                }
+                return $out;
+            }
             $rows = is_array($result['rows'] ?? null) ? $result['rows'] : array();
             foreach ($rows as $row) {
                 if (!is_array($row)) {
                     continue;
                 }
-                $name = '';
-                $engine = '';
-                $collation = '';
-                foreach ($row as $key => $value) {
-                    $k = strtolower((string)$key);
-                    if ($k === 'table_name' && is_scalar($value)) {
-                        $name = (string)$value;
-                    } else if ($k === 'engine' && is_scalar($value)) {
-                        $engine = (string)$value;
-                    } else if ($k === 'table_collation' && is_scalar($value)) {
-                        $collation = (string)$value;
-                    }
-                }
-                if ($name !== '' && array_key_exists($name, $out)) {
-                    $out[$name] = array('engine' => $engine, 'collation' => $collation);
-                }
+                $this->applyTableEngineRow($row, $out);
             }
         } catch (Throwable $e) {
             foreach (array_keys($out) as $name) {
@@ -291,6 +323,30 @@ class ABJ_404_Solution_ViewDiagnostics {
             }
         }
         return $out;
+    }
+
+    /**
+     * @param array<string|int, mixed> $row
+     * @param array<string, array{engine:string, collation:string}> $out
+     * @return void
+     */
+    private function applyTableEngineRow(array $row, array &$out): void {
+        $name = '';
+        $engine = '';
+        $collation = '';
+        foreach ($row as $key => $value) {
+            $k = strtolower((string)$key);
+            if ($k === 'table_name' && is_scalar($value)) {
+                $name = (string)$value;
+            } else if ($k === 'engine' && is_scalar($value)) {
+                $engine = (string)$value;
+            } else if ($k === 'table_collation' && is_scalar($value)) {
+                $collation = (string)$value;
+            }
+        }
+        if ($name !== '' && array_key_exists($name, $out)) {
+            $out[$name] = array('engine' => $engine, 'collation' => $collation);
+        }
     }
 
     /**
@@ -322,11 +378,7 @@ class ABJ_404_Solution_ViewDiagnostics {
             'drifted' => array(),
         );
         try {
-            $result = $this->dbCore->queryAndGetResults('SHOW INDEX FROM `' . $tableName . '`', array(
-                'timeout' => 5,
-                'log_errors' => false,
-                'skip_repair' => true,
-            ));
+            $result = $this->runDiagnosticProbe('SHOW INDEX FROM `' . $tableName . '`');
             $lastErrorRaw = $result['last_error'] ?? '';
             $err = is_string($lastErrorRaw) ? $lastErrorRaw : '';
             if ($err !== '') {
@@ -401,20 +453,22 @@ class ABJ_404_Solution_ViewDiagnostics {
 
     /**
      * @param string $tableName
+     * @param int|string|null $preObservedTotalCount
      * @return array{column_exists: bool, null_count: int|string|null, total_count: int|string|null, error?: string}
      */
-    private function safeProbeCanonicalUrlState(string $tableName): array {
+    private function safeProbeCanonicalUrlState(string $tableName, $preObservedTotalCount = null): array {
         $out = array(
             'column_exists' => false,
             'null_count' => null,
             'total_count' => null,
         );
         try {
-            $colResult = $this->dbCore->queryAndGetResults('SHOW COLUMNS FROM `' . $tableName . '`', array(
-                'timeout' => 5,
-                'log_errors' => false,
-                'skip_repair' => true,
-            ));
+            $colResult = $this->runDiagnosticProbe('SHOW COLUMNS FROM `' . $tableName . '`');
+            $lastError = is_string($colResult['last_error'] ?? null) ? $colResult['last_error'] : '';
+            if ($lastError !== '') {
+                $out['error'] = $lastError;
+                return $out;
+            }
             $colRows = is_array($colResult['rows'] ?? null) ? $colResult['rows'] : array();
             foreach ($colRows as $row) {
                 if (!is_array($row)) {
@@ -434,9 +488,8 @@ class ABJ_404_Solution_ViewDiagnostics {
             $out['null_count'] = $this->safeProbeCount(
                 "SELECT COUNT(*) AS count FROM `" . $tableName . "` WHERE canonical_url IS NULL"
             );
-            $out['total_count'] = $this->safeProbeCount(
-                "SELECT COUNT(*) AS count FROM `" . $tableName . "`"
-            );
+            $out['total_count'] = $preObservedTotalCount !== null ? $preObservedTotalCount
+                : $this->safeProbeCount("SELECT COUNT(*) AS count FROM `" . $tableName . "`");
         } catch (Throwable $e) {
             $out['error'] = $e->getMessage();
         }

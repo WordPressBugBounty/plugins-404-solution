@@ -128,14 +128,16 @@ class ABJ_404_Solution_RedirectEditRequest {
      * See ABJ_404_Solution_RequestedRedirectIds.
      */
     public function getRequestedIds(): ?ABJ_404_Solution_RequestedRedirectIds {
-        if (isset($_GET['id']) && is_scalar($_GET['id']) && $this->f->regexMatch('^[0-9]+$', (string)$_GET['id'])) {
+        $getId = $_GET['id'] ?? null;
+        $postId = $_POST['id'] ?? null;
+        if (is_scalar($getId) && $this->f->regexMatch('^[0-9]+$', (string)$getId)) {
             return ABJ_404_Solution_RequestedRedirectIds::single(
-                self::SOURCE_GET_ID, absint($_GET['id']));
+                self::SOURCE_GET_ID, absint($getId));
         }
 
-        if (isset($_POST['id']) && is_scalar($_POST['id']) && $this->f->regexMatch('^[0-9]+$', (string)$_POST['id'])) {
+        if (is_scalar($postId) && $this->f->regexMatch('^[0-9]+$', (string)$postId)) {
             return ABJ_404_Solution_RequestedRedirectIds::single(
-                self::SOURCE_POST_ID, absint($_POST['id']));
+                self::SOURCE_POST_ID, absint($postId));
         }
 
         // Presence only, read straight from the superglobals. This used to lead

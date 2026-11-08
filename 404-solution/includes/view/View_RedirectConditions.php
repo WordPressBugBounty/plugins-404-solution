@@ -18,10 +18,12 @@ class ABJ_404_Solution_View_RedirectConditions extends ABJ_404_Solution_ViewComp
      */
     public function echoRedirectConditionsSection(): void {
         $redirectId = 0;
-        if (isset($_GET['id']) && is_scalar($_GET['id']) && $this->f->regexMatch('[0-9]+', (string)$_GET['id'])) {
-            $redirectId = absint($_GET['id']);
-        } elseif (isset($_POST['id']) && is_scalar($_POST['id']) && $this->f->regexMatch('[0-9]+', (string)$_POST['id'])) {
-            $redirectId = absint($_POST['id']);
+        $getId = $_GET['id'] ?? null;
+        $postId = $_POST['id'] ?? null;
+        if (is_scalar($getId) && $this->f->regexMatch('[0-9]+', (string)$getId)) {
+            $redirectId = absint($getId);
+        } elseif (is_scalar($postId) && $this->f->regexMatch('[0-9]+', (string)$postId)) {
+            $redirectId = absint($postId);
         }
 
         $existingConditions = ($redirectId > 0) ? $this->redirectsRepository->getRedirectConditions($redirectId) : [];

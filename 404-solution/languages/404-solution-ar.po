@@ -205,6 +205,9 @@ msgstr "* استخدم علامة النجمة (*) لمطابقة \"أي نمط.
 msgid "404 Page Suggestions"
 msgstr "اقتراحات صفحة 404"
 
+msgid "404 Suggestions"
+msgstr "اقتراحات 404"
+
 msgid "404 URL marked as %s successfully!"
 msgstr "تم وضع علامة على رابط 404 كـ %s بنجاح!"
 
@@ -2077,6 +2080,9 @@ msgstr "إعادة توجيه"
 msgid "Showing %1$d-%2$d of %3$d %4$s"
 msgstr "عرض العناصر من %1$d إلى %2$d من أصل %3$d %4$s"
 
+msgid "Showing a limited set of matching records while sorting and search are being prepared. The full list returns automatically."
+msgstr "يتم عرض مجموعة محدودة من السجلات المطابقة أثناء تجهيز الفرز والبحث. ستعود القائمة الكاملة تلقائيًا."
+
 msgid "Redirects will appear here once created."
 msgstr "ستظهر إعادة التوجيه هنا بمجرد إنشائها."
 
@@ -3767,6 +3773,9 @@ msgstr "جارٍ تحضير بيانات الجدول في الخلفية."
 msgid "Preparing the redirects view table. Please wait."
 msgstr "جارٍ تحضير جدول عمليات إعادة التوجيه. يُرجى الانتظار."
 
+msgid "Preparing the redirects table."
+msgstr "جارٍ تجهيز جدول إعادة التوجيه."
+
 #: includes/DataAccessTrait_ViewQueriesStaged.php
 msgid "(404 page)"
 msgstr "(صفحة 404)"
@@ -4590,3 +4599,154 @@ msgstr "الطلبات التي تجاوزت الحد الزمني"
 #: includes/view/ShortcodeSuggestionsPresenter.php:260
 msgid "Show suggested pages"
 msgstr "عرض الصفحات المقترحة"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Query strings"
+msgstr "معلمات الاستعلام"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Routing parameters, pass query (default)"
+msgstr "معلمات التوجيه، تمرير الاستعلام (افتراضي)"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Exact URL, pass query"
+msgstr "عنوان مطابق تمامًا، تمرير الاستعلام"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Routing parameters, discard query"
+msgstr "معلمات التوجيه، تجاهل الاستعلام"
+
+#: includes/view/RedirectEditFormPresenter.php
+msgid "Path only, pass query"
+msgstr "المسار فقط، تمرير الاستعلام"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Choose how missing pages are handled. You can change these settings later in Options."
+msgstr "اختر كيفية التعامل مع الصفحات المفقودة. يمكنك تغيير هذه الإعدادات لاحقًا من الخيارات."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Redirect to the closest match (recommended)"
+msgstr "إعادة التوجيه إلى أقرب تطابق (موصى به)"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "When no close match is found, show a 404 page that suggests similar pages."
+msgstr "عند عدم العثور على تطابق قريب، تُعرض صفحة 404 تقترح صفحات مشابهة."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Show a 404 page that suggests similar pages"
+msgstr "عرض صفحة 404 تقترح صفحات مشابهة"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Visitors are never redirected automatically. Redirects you create yourself still work."
+msgstr "لا تتم إعادة توجيه الزوار تلقائيًا أبدًا. تظل عمليات إعادة التوجيه التي تنشئها بنفسك تعمل."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Missing URLs are listed under Captured 404s so you can create redirects for them."
+msgstr "تُدرج عناوين URL المفقودة ضمن أخطاء 404 الملتقطة حتى تتمكن من إنشاء عمليات إعادة توجيه لها."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Missing URLs are not recorded. This does not change how visitors are redirected."
+msgstr "لا يتم تسجيل عناوين URL المفقودة. هذا لا يغيّر طريقة إعادة توجيه الزوار."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Email me about missing pages?"
+msgstr "هل تريد رسالة بريد إلكتروني بشأن الصفحات المفقودة؟"
+
+#. translators: %d is the number of captured 404 URLs that triggers an email.
+#: includes/admin/SetupWizardPresenter.php
+#, php-format
+msgid "Yes, email me when %d or more 404s have been captured (recommended)"
+msgstr "نعم، أرسل لي رسالة عند التقاط %d من أخطاء 404 أو أكثر (موصى به)"
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Checked weekly. The email is sent to the site administrator."
+msgstr "يتم الفحص أسبوعيًا. تُرسل الرسالة إلى مسؤول الموقع."
+
+#. translators: %s is the site administrator's email address.
+#: includes/admin/SetupWizardPresenter.php
+#, php-format
+msgid "Checked weekly. The email is sent to %s."
+msgstr "يتم الفحص أسبوعيًا. تُرسل الرسالة إلى %s."
+
+#: includes/admin/SetupWizardPresenter.php
+msgid "Email alerts need the list of missing pages, so they are off while logging is off."
+msgstr "تحتاج تنبيهات البريد الإلكتروني إلى قائمة الصفحات المفقودة، لذلك تكون متوقفة أثناء إيقاف التسجيل."
+
+#: includes/redirects/RedirectChainWalker.php
+#, php-format
+msgid "Redirect loop: %s. Choose a destination outside this loop."
+msgstr "حلقة إعادة توجيه: %s. اختر وجهة خارج هذه الحلقة."
+
+#: includes/redirects/RedirectChainWalker.php
+#, php-format
+msgid "Redirect not saved: the redirect loop check could not run (%s)."
+msgstr "لم يتم حفظ إعادة التوجيه: تعذّر تشغيل فحص حلقة إعادة التوجيه (%s)."
+
+#: includes/php/wordpress/WPNotices.php
+msgid "A redirect loop was stopped:"
+msgstr "تم إيقاف حلقة إعادة توجيه:"
+
+#: includes/php/wordpress/WPNotices.php
+#, php-format
+msgid "A redirect loop was stopped: %s. Edit these rules in Page Redirects."
+msgstr "تم إيقاف حلقة إعادة توجيه: %s. عدّل هذه القواعد في إعادة توجيه الصفحات."
+
+#: includes/view/View_Shared.php
+msgid "Sorting by this column is being prepared. It becomes available automatically."
+msgstr "جارٍ إعداد الفرز حسب هذا العمود. سيصبح متاحًا تلقائيًا."
+
+#: includes/redirects/RedirectChainWalker.php
+msgid "Reload this page and try again. If the error continues, send this message to support."
+msgstr "أعد تحميل هذه الصفحة وحاول مرة أخرى. إذا استمر الخطأ، فأرسل هذه الرسالة إلى الدعم."
+
+#: includes/repositories/RedirectConditionsRepository.php
+msgid "The redirect conditions table is unavailable; conditions were not saved. [ABJ404_CONDITIONS_TABLE_UNAVAILABLE]"
+msgstr "جدول شروط إعادة التوجيه غير متاح؛ لم يتم حفظ الشروط. [ABJ404_CONDITIONS_TABLE_UNAVAILABLE]"
+
+#: includes/redirects/RedirectWriteAdmissionPolicy.php
+#: includes/repositories/RedirectLifecycleService.php
+#: includes/repositories/RedirectWriteService.php
+#, php-format
+msgid "A live row already owns this source URL: %s [ABJ404_SOURCE_CONFLICT] Edit or move the existing redirect to the trash before trying again."
+msgstr "يوجد صف نشط يملك عنوان URL المصدر هذا: %s [ABJ404_SOURCE_CONFLICT] حرّر إعادة التوجيه الحالية أو انقلها إلى سلة المهملات قبل المحاولة مرة أخرى."
+#: includes/core/PluginLogicSettingsUpdate.php:159
+#: includes/core/SetupWizard.php:125
+msgid "Settings could not be saved because the checked storage writer is unavailable. Reload this page and try again."
+msgstr "تعذر حفظ الإعدادات لأن أداة تخزين التحقق غير متاحة. أعد تحميل هذه الصفحة وحاول مرة أخرى."
+
+#: includes/core/PluginLogicSettingsUpdate.php:165
+#: includes/core/SetupWizard.php:132
+msgid "Settings could not be saved because another update is in progress. Reload this page and try again."
+msgstr "تعذر حفظ الإعدادات لأن تحديثًا آخر قيد التنفيذ. أعد تحميل هذه الصفحة وحاول مرة أخرى."
+
+#: includes/core/PluginLogicSettingsUpdate.php:182
+#: includes/core/SetupWizard.php:153
+msgid "Settings could not be saved. Reload this page and try again."
+msgstr "تعذر حفظ الإعدادات. أعد تحميل هذه الصفحة وحاول مرة أخرى."
+#: includes/ajax/Ajax_RestoreDefaults.php:76
+msgid "Settings could not be restored because the checked storage writer is unavailable."
+msgstr "تعذر استعادة الإعدادات لأن أداة تخزين التحقق غير متاحة."
+
+#: includes/ajax/Ajax_RestoreDefaults.php:82
+msgid "Settings could not be restored because another update is in progress."
+msgstr "تعذر استعادة الإعدادات لأن تحديثًا آخر قيد التنفيذ."
+
+#: includes/ajax/Ajax_RestoreDefaults.php:99
+msgid "Settings could not be restored. Reload this page and try again."
+msgstr "تعذر استعادة الإعدادات. أعد تحميل هذه الصفحة وحاول مرة أخرى."
+
+#. translators: %d = number of import issue details not displayed.
+#: includes/import/ImportIssueSummary.php
+#, php-format
+msgid "Additional import issues omitted: %d."
+msgstr "مشكلات الاستيراد الإضافية التي لم تُعرض: %d."
+
+#. translators: %s = legacy plugin redirect table name.
+#: includes/repositories/PluginUpdateMetadataRepository.php
+#, php-format
+msgid "[ABJ404-IMPORT-SOURCE-NOT-FOUND] Legacy Redirectioner source table \"%s\" was not found; no records were imported. Confirm that the legacy redirects are present in this WordPress installation before retrying the import."
+msgstr "[ABJ404-IMPORT-SOURCE-NOT-FOUND] لم يتم العثور على جدول مصدر Legacy Redirectioner «%s»؛ لم يتم استيراد أي سجلات. تأكد من وجود عمليات إعادة التوجيه القديمة في تثبيت WordPress هذا قبل إعادة محاولة الاستيراد."
+
+#: includes/import/ForeignSourceQueryGateway.php
+msgid "The database did not confirm a successful source read. Check the source plugin data and database connection before retrying."
+msgstr "لم تؤكد قاعدة البيانات نجاح قراءة المصدر. تحقق من بيانات الإضافة المصدر واتصال قاعدة البيانات قبل إعادة المحاولة."

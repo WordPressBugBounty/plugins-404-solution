@@ -6,6 +6,7 @@ if (!defined('ABSPATH')) {
 
 require_once __DIR__ . '/DatabaseErrorClassifier.php';
 require_once __DIR__ . '/DatabaseRepairPolicy.php';
+require_once __DIR__ . '/DatabaseNoticeRecoveryPolicy.php';
 require_once __DIR__ . '/DatabaseSqlErrorReporter.php';
 require_once __DIR__ . '/DatabaseCollationHelper.php';
 require_once __DIR__ . '/DatabaseTableRepairer.php';
@@ -36,6 +37,9 @@ class ABJ_404_Solution_DatabaseRecoveryServices {
     /** @var ABJ_404_Solution_DatabaseRepairPolicy */
     private $repairPolicy;
 
+    /** @var ABJ_404_Solution_DatabaseNoticeRecoveryPolicy */
+    private $noticeRecoveryPolicy;
+
     /** @var ABJ_404_Solution_DatabaseSqlErrorReporter */
     private $sqlErrorReporter;
 
@@ -62,16 +66,29 @@ class ABJ_404_Solution_DatabaseRecoveryServices {
         ABJ_404_Solution_DatabaseQueryExecutor $queryExecutor
     ) {
         $this->errorClassifier = new ABJ_404_Solution_DatabaseErrorClassifier($core, $functions, $logger);
+        $this->noticeRecoveryPolicy = new ABJ_404_Solution_DatabaseNoticeRecoveryPolicy(
+            $noticeState,
+            $core->queryTimeoutManager(),
+            function (): bool {
+                return $this->errorClassifier->isQuotaCooldownActive();
+            }
+        );
         $this->repairPolicy = new ABJ_404_Solution_DatabaseRepairPolicy($core, $this->errorClassifier, $functions, $logger);
-        $this->sqlErrorReporter = new ABJ_404_Solution_DatabaseSqlErrorReporter($core, $logger);
+        $this->sqlErrorReporter = new ABJ_404_Solution_DatabaseSqlErrorReporter(
+            $core,
+            $logger,
+            $this->noticeRecoveryPolicy
+        );
         $this->collationHelper = new ABJ_404_Solution_DatabaseCollationHelper(
             function (string $query, array $options) use ($core): array {
                 return $core->queryAndGetResults($query, $options);
             },
-            function (string $tableName) use ($core): string {
+            function (string $tableName, ?callable $queryOptionsFactory = null) use ($core): string {
                 // Call through $core so test-stub subclass overrides of
                 // getCreateTableDDL are honored, matching pre-extraction behavior.
-                return $core->tableNameResolver()->getCreateTableDDL($tableName);
+                return $queryOptionsFactory === null
+                    ? $core->tableNameResolver()->getCreateTableDDL($tableName)
+                    : $core->tableNameResolver()->getCreateTableDDL($tableName, $queryOptionsFactory);
             },
             function (string $key) use ($noticeState) {
                 return $noticeState->getRuntimeFlag($key);
@@ -110,6 +127,11 @@ class ABJ_404_Solution_DatabaseRecoveryServices {
     /** @return ABJ_404_Solution_DatabaseRepairPolicy */
     public function repairPolicy(): ABJ_404_Solution_DatabaseRepairPolicy {
         return $this->repairPolicy;
+    }
+
+    /** @return ABJ_404_Solution_DatabaseNoticeRecoveryPolicy */
+    public function noticeRecoveryPolicy(): ABJ_404_Solution_DatabaseNoticeRecoveryPolicy {
+        return $this->noticeRecoveryPolicy;
     }
 
     /** @return ABJ_404_Solution_DatabaseSqlErrorReporter */

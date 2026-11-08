@@ -19,32 +19,35 @@ if (!defined('ABSPATH')) {
 class ABJ_404_Solution_NativeRedirectCsvWriter {
 
     /** Header row of the native CSV; the importer matches columns by these names. */
-    const HEADER = array('from_url', 'status', 'type', 'to_url', 'wp_type', 'engine', 'code');
+    const HEADER = array('from_url', 'status', 'type', 'to_url', 'wp_type', 'engine', 'code', 'query_mode');
 
     /**
      * Write the native CSV to $tempFile, replacing any file already there.
      *
-     * A null $rows means the export query could not run: any old file is
-     * removed and none is created, so callers see "nothing to export". An
+     * A WP_Error preserves a failed query for the caller: any old file is
+     * removed and none is created. Legacy null sources also create no file. An
      * empty $rows (a query that ran and returned no redirects) still writes
      * the header-only file.
      *
      * @param string $tempFile Path of the CSV to create.
-     * @param iterable<int, array<string, mixed>>|null $rows Raw export rows, or
-     *        null when the export query failed.
-     * @return void
+     * @param iterable<int, array<string, mixed>>|WP_Error|null $rows Raw export rows, or
+     *        the database error when the query failed.
+     * @return WP_Error|null The original failure, or null on success.
      */
-    public static function write(string $tempFile, ?iterable $rows): void {
+    public static function write(string $tempFile, $rows): ?WP_Error {
         if (file_exists($tempFile)) {
             ABJ_404_Solution_FileSystemService::safeUnlink($tempFile);
         }
+        if ($rows instanceof WP_Error) {
+            return $rows;
+        }
         if ($rows === null) {
-            return;
+            return null;
         }
 
         $fh = fopen($tempFile, 'w');
         if ($fh === false) {
-            return;
+            return null;
         }
         // try/finally: a row source that throws mid-stream (mysqli's default
         // error mode, MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT since PHP 8.1,
@@ -60,5 +63,6 @@ class ABJ_404_Solution_NativeRedirectCsvWriter {
         } finally {
             fclose($fh);
         }
+        return null;
     }
 }

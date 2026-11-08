@@ -28,10 +28,14 @@ class ABJ_404_Solution_SlugChangeHandler {
     /** @var ABJ_404_Solution_RemovedPostParentResolver|null */
     private $parentResolver = null;
 
+    /** @var ABJ_404_Solution_PostChangeRedirectDelivery|null Injected by runtime composition. */
+    private $redirectDelivery;
+
     /**
-     * Track post IDs already processed within the current request.
-     * WordPress fires save_post multiple times per save; this prevents duplicate redirects.
-     * @var array<int, bool>
+     * Saves (by ABJ_404_Solution_PostRef::saveKey()) and removals (by post ID)
+     * already processed within the current request. WordPress fires save_post
+     * multiple times per save; this prevents duplicate redirects.
+     * @var array<int|string, bool>
      */
     private static $processedPosts = [];
 
@@ -50,11 +54,13 @@ class ABJ_404_Solution_SlugChangeHandler {
      * @param ABJ_404_Solution_ContentRepository|null $contentRepository Content repository
      * @param ABJ_404_Solution_RedirectsRepository|null $redirectsRepository Redirects repository
      * @param ABJ_404_Solution_Logging|null $logging Logging service
+     * @param ABJ_404_Solution_PostChangeRedirectDelivery|null $redirectDelivery Runtime transaction-aware delivery.
      */
-    public function __construct($contentRepository = null, $redirectsRepository = null, $logging = null) {
+    public function __construct($contentRepository = null, $redirectsRepository = null, $logging = null, $redirectDelivery = null) {
         $this->contentRepository = $contentRepository;
         $this->redirectsRepository = $redirectsRepository;
         $this->logger = $logging !== null ? $logging : abj_service('logging');
+        $this->redirectDelivery = $redirectDelivery;
     }
 
     /** @return mixed */
@@ -89,16 +95,33 @@ class ABJ_404_Solution_SlugChangeHandler {
     }
 
     /**
-     * @param ABJ_404_Solution_RedirectSpec $spec Built from named fields, so the
-     *     source path, destination and engine label cannot be transposed.
-     * @return void
+     * @param ABJ_404_Solution_RedirectSpec $spec Built from named source/destination fields.
+     * @param int|string $processedKey Request guard key for this save or removal.
+     * @return 'stored'|'queued'|'refused'
      */
-    private function setupRedirect(ABJ_404_Solution_RedirectSpec $spec): void {
-        $repository = $this->getRedirectsRepository();
-        if (!is_object($repository) || !method_exists($repository, 'setupRedirect')) {
-            return;
+    private function setupRedirect(ABJ_404_Solution_RedirectSpec $spec, $processedKey): string {
+        $delivery = 'refused';
+        try {
+            if ($this->redirectDelivery !== null) {
+                $delivery = $this->redirectDelivery->deliver($spec);
+                return $delivery;
+            }
+            $repository = $this->getRedirectsRepository();
+            if (!is_object($repository) || !method_exists($repository, 'setupRedirect')) {
+                return $delivery;
+            }
+            $id = call_user_func(array($repository, 'setupRedirect'), $spec);
+            $delivery = ABJ_404_Solution_ExactInteger::read($id, 1) !== null ? 'stored' : 'refused';
+            return $delivery;
+        } finally {
+            // A queued intent belongs to the caller's transaction. If it rolls
+            // back and retries in this request, a request-local guard must not
+            // suppress re-enqueue. The durable natural key deduplicates repeated
+            // hooks while that same transaction remains active.
+            if ($delivery !== 'stored') {
+                unset(self::$processedPosts[$processedKey]);
+            }
         }
-        call_user_func(array($repository, 'setupRedirect'), $spec);
     }
 
     /**
@@ -116,7 +139,7 @@ class ABJ_404_Solution_SlugChangeHandler {
      */
     public static function getInstance() {
         if (self::$instance == null) {
-            self::$instance = new ABJ_404_Solution_SlugChangeHandler();
+            self::$instance = abj_service('slug_change_handler');
         }
         return self::$instance;
     }
@@ -130,6 +153,9 @@ class ABJ_404_Solution_SlugChangeHandler {
         add_action('save_post', array($me, 'save_postHandler'), 10, 3);
         add_action('transition_post_status', array($me, 'postStatusTransitionHandler'), 10, 3);
         add_action('before_delete_post', array($me, 'beforeDeletePostHandler'), 10, 2);
+        if ($me->redirectDelivery !== null) {
+            $me->redirectDelivery->register();
+        }
     }
 
     /** We'll just make sure the permalink gets updated in case it's changed.
@@ -146,9 +172,12 @@ class ABJ_404_Solution_SlugChangeHandler {
             // (not delegated to a private *Impl() method) so a static audit
             // of the registered handler can verify it holds without having
             // to follow call graphs. See HookLifecycleAuditTest (Pattern 11).
-            if (isset(self::$processedPosts[$post_id])) {
+            // Keyed by the save, not the post: a second rename of the post
+            // in this request must still leave a redirect from its slug.
+            $saveKey = ABJ_404_Solution_PostRef::saveKey($post_id, $post);
+            if (isset(self::$processedPosts[$saveKey])) {
                 $this->logger->debugMessage(__CLASS__ . "/" . __FUNCTION__ .
-                    ": Already processed post ID " . $post_id . " in this request (skipped).");
+                    ": Already processed this save of post ID " . $post_id . " in this request (skipped).");
                 return;
             }
 
@@ -174,7 +203,7 @@ class ABJ_404_Solution_SlugChangeHandler {
         $abj404logging = $this->logger;
 
         // Request-level dedup is enforced by the caller, save_postHandler(),
-        // before this method is ever invoked (self::$processedPosts[$post_id]
+        // before this method is ever invoked (the self::$processedPosts[$saveKey]
         // guard). Not re-checked here since this method is private and has
         // exactly one call site.
 
@@ -266,11 +295,9 @@ class ABJ_404_Solution_SlugChangeHandler {
                 return;
         }
 
-        // Mark as processed before creating redirect to prevent duplicates
-        self::$processedPosts[$post_id] = true;
-
-        // create a redirect from the old to the new.
-        $this->setupRedirect(ABJ_404_Solution_RedirectSpec::fromArray(array(
+        // Prepare the immutable spec before claiming the request guard. A
+        // preparation failure must leave a later hook free to retry.
+        $spec = ABJ_404_Solution_RedirectSpec::fromArray(array(
             'fromURL' => $oldSlug,
             'status' => (string)ABJ404_STATUS_AUTO,
             'type' => (string)ABJ404_TYPE_POST,
@@ -278,9 +305,18 @@ class ABJ_404_Solution_SlugChangeHandler {
             'code' => $this->defaultRedirectCode($options),
             'disabled' => 0,
             'engine' => 'slug change',
-        )));
-        $abj404logging->infoMessage("Added automatic redirect after slug change from " .
-            $oldURL . ' to ' . $newURL . " for post ID " . $post_id);
+        ));
+
+        // Mark this save processed before creating redirect to prevent duplicates
+        self::$processedPosts[ABJ_404_Solution_PostRef::saveKey($post_id, $post)] = true;
+
+        // create a redirect from the old to the new.
+        $delivery = $this->setupRedirect($spec, ABJ_404_Solution_PostRef::saveKey($post_id, $post));
+        if ($delivery !== 'refused') {
+            $abj404logging->infoMessage(($delivery === 'queued' ? 'Queued' : 'Added')
+                . " automatic redirect after slug change from " . $oldURL . ' to ' . $newURL
+                . " for post ID " . $post_id);
+        }
     }
 
     /**
@@ -428,19 +464,30 @@ class ABJ_404_Solution_SlugChangeHandler {
 
         self::$processedPosts[$postId] = true;
 
-        $target = $this->getParentResolver()->resolve($post);
+        try {
+            $target = $this->getParentResolver()->resolve($post);
+            $spec = ABJ_404_Solution_RedirectSpec::fromArray(array(
+                'fromURL' => $oldURLParsed['path'],
+                'status' => (string)ABJ404_STATUS_AUTO,
+                'type' => (string)$target['type'],
+                'finalDest' => (string)$target['dest'],
+                'code' => $this->defaultRedirectCode($options),
+                'disabled' => 0,
+                'engine' => $event . ': ' . $target['reason'],
+            ));
+        } catch (\Throwable $failure) {
+            // setupRedirect owns cleanup only after delivery begins. Keep
+            // target/spec preparation failures retryable in this request too.
+            unset(self::$processedPosts[$postId]);
+            throw $failure;
+        }
 
-        $this->setupRedirect(ABJ_404_Solution_RedirectSpec::fromArray(array(
-            'fromURL' => $oldURLParsed['path'],
-            'status' => (string)ABJ404_STATUS_AUTO,
-            'type' => (string)$target['type'],
-            'finalDest' => (string)$target['dest'],
-            'code' => $this->defaultRedirectCode($options),
-            'disabled' => 0,
-            'engine' => $event . ': ' . $target['reason'],
-        )));
+        $delivery = $this->setupRedirect($spec, $postId);
 
-        $this->logger->infoMessage("Added automatic redirect to " . $target['reason'] . " (" .
-            $target['dest'] . ") after " . $event . ". ID: " . $postId . ", old URL: " . $oldURL);
+        if ($delivery !== 'refused') {
+            $this->logger->infoMessage(($delivery === 'queued' ? 'Queued' : 'Added')
+                . " automatic redirect to " . $target['reason'] . " (" . $target['dest']
+                . ") after " . $event . ". ID: " . $postId . ", old URL: " . $oldURL);
+        }
     }
 }

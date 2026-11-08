@@ -69,7 +69,7 @@ final class ABJ_404_Solution_CanaryReceiptEvidence {
             return $record;
         }
         try {
-            $traceSource = ABJ_404_Solution_AjaxTraceJournal::supportCollectionSource();
+            $traceSource = ABJ_404_Solution_AjaxTraceJournalReader::supportCollectionSource();
             $checkpointSource = ABJ_404_Solution_CheckpointJournalReader::supportCollectionSource();
             $traceLines = ABJ_404_Solution_DiagnosticJournalExcerpt::readAllLines(
                 $traceSource['paths']

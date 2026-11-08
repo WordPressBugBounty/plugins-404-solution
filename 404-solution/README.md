@@ -12,11 +12,11 @@ Stop losing visitors and search rankings to broken links. **404 Solution automat
 
 Most redirect plugins fall into two categories: tools that require you to manually write every rule, or tools that blindly send every 404 to your homepage. 404 Solution does neither.
 
-* **A spell-checking algorithm that actually matches typos.** Using Levenshtein distance and N-gram scoring, 404 Solution catches `/prodcut/`, `/categroy/`, and `/wooocmmerce/` and finds the real destination — something no other free plugin does.
+* **A spell-checking algorithm that actually matches typos.** Using Levenshtein distance and N-gram scoring, 404 Solution catches `/prodcut/`, `/categroy/`, and `/wooocmmerce/` and finds the real destination.
 * **7 matching engines, in sequence.** Slug match > URL fix > Title keywords > Category/tag paths > Content search > Spelling similarity > Archive fallback. The first engine with a confident match wins.
 * **Automatic, from day one.** Install and activate. 404 Solution starts capturing and redirecting immediately. You can tune it; you don't have to.
 * **Redirect management when you need it.** Full manual redirect editor, regex support, bulk actions, and CSV/JSON import compatible with Redirection's export format.
-* **Debug mode that shows its work.** Enable debug logging and see exactly which engine chose a redirect and why — a level of transparency no competing plugin offers.
+* **Debug mode that shows its work.** Enable debug logging and see exactly which engine chose a redirect and why.
 * **Built for real-world hosting.** Self-healing database tables, auto-recovery from corruption, automatic log trimming, and zero wp-admin-wide banners.
 * **Ships with extras most plugins sell separately.** HTTP 410 Gone, 307/308/451 status codes, Google Search Console integration, REST API, WP-CLI support, email digest reports, and security probe detection — all free.
 
@@ -53,6 +53,8 @@ The whole process adds no perceptible latency for visitors on non-404 pages. The
 
 * Manual redirect editor with bulk actions
 * Full regular expression support
+* Conditional redirects: match on login status, user role, referrer, user agent, IP range or HTTP header, combined with AND/OR
+* Scheduled redirects with optional start and end dates
 * CSV and JSON import/export (compatible with Redirection plugin format)
 * .htaccess and Nginx server-level export
 * Per-post and per-term exclusion via meta box
@@ -113,7 +115,7 @@ The two plugins are complementary. Many sites run both: Redirection for planned 
 
 ### How is this different from 404 to 301? ###
 
-404 to 301 redirects ALL 404 errors to one fixed destination (usually the homepage). 404 Solution finds the actual page the visitor was looking for. Sending visitors to your homepage is poor UX and can create soft 404 problems in Google Search Console.
+404 to 301 sends every 404 that has no custom rule to one fallback destination (usually the homepage). 404 Solution finds the actual page the visitor was looking for. Sending visitors to your homepage is poor UX and can create soft 404 problems in Google Search Console.
 
 ### How is this different from WP 404 Auto Redirect to Similar Post? ###
 
@@ -205,6 +207,28 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 ![6. Email Digest](https://plugins.svn.wordpress.org/404-solution/trunk/assets/screenshot-6.jpg)
 
 ## Changelog ##
+
+## Version 4.4.0 (November 5, 2026) ##
+
+**New Features**
+
+* Added redirect options for matching query strings and passing or discarding query parameters. These options are included in CSV imports and exports.
+* Added a 404 Suggestions block for the WordPress editor and first-run setup for displaying similar pages, with improved keyboard and screen-reader support.
+
+**Bug Fixes**
+
+* Stopped tracking parameters, such as UTM tags, from creating duplicate automatic redirects.
+* Preserved redirects after page and category URL changes, including changes affecting child pages, and improved redirect-loop prevention.
+* Fixed cached 404 pages hiding new redirects by clearing affected entries in W3 Total Cache, WP Super Cache and LiteSpeed Cache.
+* Fixed the blank Match Confidence chart and corrected email digest dates to use the site's timezone.
+* Fixed errors during plugin updates when older requests were still running.
+* Kept the redirect tables available when the database temporarily refuses writes.
+* Corrected multisite uninstall cleanup to respect each site's saved data-retention choices.
+
+**Improvements**
+
+* Improved table loading and pagination on large sites, corrected URL searches containing punctuation, and moved statistics refresh work into the background.
+* Improved recovery of unfinished upgrades and background rebuilds when WordPress scheduled tasks are stalled.
 
 ## Version 4.3.6 (September 29, 2026) ##
 

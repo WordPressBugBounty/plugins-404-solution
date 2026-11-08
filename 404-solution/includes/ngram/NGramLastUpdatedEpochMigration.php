@@ -171,7 +171,7 @@ class ABJ_404_Solution_NGramLastUpdatedEpochMigration {
         // Schema-bootstrap migration for a system-generated plugin table name.
         // Runs before generic schema diff to avoid unsafe datetime-to-bigint coercion.
         // DAO-bypass-approved: one-shot schema/data migration over a system-generated plugin table name.
-        $result = $wpdb->query($query);
+        $result = ABJ_404_Solution_DatabaseDriverCall::query($wpdb, $query);
         $lastError = isset($wpdb->last_error) && is_string($wpdb->last_error) ? $wpdb->last_error : '';
         if ($result !== false && $lastError === '') {
             return true;

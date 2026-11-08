@@ -7,7 +7,7 @@ if (!defined('ABSPATH')) {
 /**
  * Decides whether a computed redirect destination can actually terminate.
  *
- * Every redirect the plugin emits passes through
+ * Destination-mapping redirects pass through
  * {@see ABJ_404_Solution_NotFoundResponseService::forceRedirect()}, which
  * resolves a target and then appends the current request's comment-page and
  * query-string parts to it. Both of those steps can produce a destination that
@@ -16,13 +16,17 @@ if (!defined('ABSPATH')) {
  * resolved target, and it answers with a destination that terminates, or false
  * meaning "emit no redirect at all".
  *
- * Two independent loops are recognized, because they are visible in different
+ * Four independent loops are recognized, because they are visible in different
  * places:
+ *   - The stored-rule chain: same-site destinations lead back to an earlier
+ *     request, even without a cookie.
  *   - The cookie loop (avoidInfiniteRedirect): request A redirects to B and B
  *     redirects back to A. Only visible across requests, via the previous
  *     request cookie.
  *   - The self loop (avoidSelfRedirect): the destination IS the request. Visible
  *     within the single request being answered, with no cookie involved.
+ *   - A repeated source within a short window, even when another owner emits
+ *     every other hop. Direct canonical/admin emitters consult this guard too.
  *
  * Business logic only: no data access, no response writing.
  *
@@ -39,17 +43,25 @@ class ABJ_404_Solution_RedirectLoopGuard {
     /** @var ABJ_404_Solution_PreviousRequestCookieTracker */
     private $previousRequestCookieTracker;
 
+    /** @var ABJ_404_Solution_RedirectChainWalker|null */
+    private $chainWalker;
+
     /**
      * @param ABJ_404_Solution_Functions|null $functions
      * @param ABJ_404_Solution_Logging|null $logging
      * @param ABJ_404_Solution_PreviousRequestCookieTracker|null $previousRequestCookieTracker
+     * @param ABJ_404_Solution_RedirectChainWalker|null $chainWalker
      */
-    function __construct($functions = null, $logging = null, $previousRequestCookieTracker = null) {
+    function __construct($functions = null, $logging = null, $previousRequestCookieTracker = null, $chainWalker = null) {
         $this->functions = $functions !== null ? $functions : abj_service('functions');
         $this->logger = $logging !== null ? $logging : abj_service('logging');
         $this->previousRequestCookieTracker = $previousRequestCookieTracker !== null
             ? $previousRequestCookieTracker
             : abj_service('previous_request_cookie_tracker');
+        $resolvedChainWalker = $chainWalker !== null ? $chainWalker
+            : (function_exists('abj_service_optional') ? abj_service_optional('redirect_chain_walker') : null);
+        $this->chainWalker = $resolvedChainWalker instanceof ABJ_404_Solution_RedirectChainWalker
+            ? $resolvedChainWalker : null;
     }
 
     /**
@@ -62,18 +74,149 @@ class ABJ_404_Solution_RedirectLoopGuard {
     function terminatingDestination(array $request) {
         $finalDestination = $request['finalDestination'];
         $location = $request['location'];
+        $chainSafeDestination = $this->avoidRedirectChain($finalDestination, $location);
+        if ($chainSafeDestination === false) {
+            return false;
+        }
         $loopSafeDestination = $this->avoidInfiniteRedirect(array(
-            'finalDestination' => $finalDestination,
+            'finalDestination' => $chainSafeDestination,
             'location' => $location,
         ));
         if ($loopSafeDestination === false) {
             return false;
         }
 
-        return $this->avoidSelfRedirect(array(
+        $destination = $this->avoidSelfRedirect(array(
             'finalDestination' => $loopSafeDestination,
             'location' => $location,
         ));
+        // A destination refused by another guard is not a redirect answer.
+        if ($destination === false || $this->repeatedSource($destination)) {
+            return false;
+        }
+        return $destination;
+    }
+
+    /**
+     * Decision boundary for direct emitters that must not append request query
+     * parts (canonical normalization and admin post/action destinations).
+     *
+     * @param string $destination Exact destination about to be emitted.
+     * @return bool Whether the emitter may send its redirect.
+     */
+    public static function permitsDestination(string $destination): bool {
+        $guard = new self();
+        $permitted = $guard->terminatingDestination(array(
+            'finalDestination' => $destination, 'location' => $destination,
+        )) !== false;
+        if (!$permitted && class_exists('ABJ_404_Solution_WPNotices')) {
+            $source = isset($_SERVER['REQUEST_URI']) && is_string($_SERVER['REQUEST_URI'])
+                ? $_SERVER['REQUEST_URI'] : '';
+            ABJ_404_Solution_WPNotices::queueRedirectCycle(array($source, $destination, $source));
+        }
+        return $permitted;
+    }
+
+    /** @return bool Whether this request's source has become a bounce loop. */
+    private function repeatedSource(string $destination): bool {
+        $uri = isset($_SERVER['REQUEST_URI']) && is_string($_SERVER['REQUEST_URI'])
+            ? $_SERVER['REQUEST_URI'] : '';
+        if ($uri === '' || $destination === '') {
+            return false;
+        }
+        $authority = $this->normalizeAuthority(
+            isset($_SERVER['HTTP_HOST']) && is_string($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : ''
+        );
+        $sourceKey = $this->urlIdentityKey(array('url' => $uri, 'requestAuthority' => $authority));
+        if (!is_object($this->previousRequestCookieTracker)
+            || !method_exists($this->previousRequestCookieTracker, 'repeatedRedirectSource')
+            || !$this->previousRequestCookieTracker->repeatedRedirectSource($sourceKey)) {
+            return false;
+        }
+        $path = array($uri, $destination, $uri);
+        $this->logger->warn('A redirect loop was stopped: repeated source within '
+            . ABJ_404_Solution_PreviousRequestCookieTracker::LOOP_WINDOW_SECONDS . ' seconds: ' . $uri);
+        if (class_exists('ABJ_404_Solution_WPNotices')) {
+            ABJ_404_Solution_WPNotices::queueRedirectCycle($path);
+        }
+        return true;
+    }
+
+    /**
+     * Refuse a same-site redirect whose next hops return to an earlier URL.
+     * Same-resource destinations are deliberately left for avoidSelfRedirect:
+     * that check can drop an appended query and preserve the configured target.
+     *
+     * @param string $finalDestination
+     * @param string $location Resolved target before request suffixes are appended.
+     * @return string|false
+     */
+    private function avoidRedirectChain(string $finalDestination, string $location) {
+        $requestUri = isset($_SERVER['REQUEST_URI']) && is_string($_SERVER['REQUEST_URI'])
+            ? $_SERVER['REQUEST_URI'] : '';
+        if ($finalDestination === '' || $requestUri === '') {
+            return $finalDestination;
+        }
+        $authority = isset($_SERVER['HTTP_HOST']) && is_string($_SERVER['HTTP_HOST'])
+            ? $_SERVER['HTTP_HOST'] : '';
+        if ($this->targetsCurrentRequest(array(
+            'requestUri' => $requestUri, 'authority' => $authority,
+            'targets' => array($finalDestination, $location),
+        ))) {
+            return $finalDestination;
+        }
+        $walker = $this->chainWalker;
+        if (!is_object($walker) || !method_exists($walker, 'walk')) {
+            return $finalDestination;
+        }
+        $requestUrl = $authority === '' ? $requestUri : '//' . $authority . $requestUri;
+        $result = $walker->walk($finalDestination, array($requestUrl));
+        // An 'unverifiable' walk keeps the redirect: admission already refused
+        // to store an unchecked one, and failing closed here would turn every
+        // redirect into a 404 while a collaborator is down.
+        if (!is_array($result) || ($result['status'] ?? '') !== 'cycle') {
+            return $finalDestination;
+        }
+
+        $path = isset($result['path']) && is_array($result['path']) ? $result['path'] : array();
+        if (count($path) === 2) {
+            // The self-loop guard owns this case because dropping an appended
+            // request query can still reach the configured target.
+            return $finalDestination;
+        }
+        $display = array();
+        foreach ($path as $part) {
+            if (is_scalar($part)) {
+                $display[] = (string)$part;
+            }
+        }
+        $message = 'A redirect loop was stopped: ' . implode(' -> ', $display);
+        $this->logger->warn($message);
+        if (class_exists('ABJ_404_Solution_WPNotices')) {
+            ABJ_404_Solution_WPNotices::queueRedirectCycle($display);
+        }
+        return false;
+    }
+
+    /**
+     * Keep immediate self targets at the existing query-recovery boundary.
+     *
+     * @param array{requestUri: string, authority: string, targets: string[]} $request
+     * @return bool
+     */
+    private function targetsCurrentRequest(array $request): bool {
+        $authority = $this->normalizeAuthority($request['authority']);
+        $requestKey = $this->urlIdentityKey(array(
+            'url' => $request['requestUri'], 'requestAuthority' => $authority,
+        ));
+        foreach ($request['targets'] as $target) {
+            if ($target !== '' && $this->urlIdentityKey(array(
+                'url' => $target, 'requestAuthority' => $authority,
+            )) === $requestKey) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

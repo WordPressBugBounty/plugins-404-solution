@@ -42,6 +42,24 @@ final class ABJ_404_Solution_ClientTransportReport {
      */
     const MAX_REPORT_BYTES = 4096;
 
+    /** Browser transport measurements and the existing concurrent-control receipt. */
+    const REPORT_FIELDS = array(
+        'v', 'id', 'rid', 'sid', 'parent', 'part', 'subpage', 'attempt', 'build', 'buildModules',
+        'assets', 'timeoutMs', 'sentAt', 't0', 'inflightAtSend', 'inflightIdsAtSend',
+        'tabsAtSend', 'foreignInflightAtSend', 'storage_health', 'transports', 'events',
+        'eventsDropped', 'rs', 'status', 'bytes', 'firstHeadersMs', 'headers', 'outcome', 'jq',
+        'durationMs', 'rt', 'rtState', 'transport', 'env', 'bodyShape', 'bodyExcerpt',
+        'bodyExcerptStatus', 'headersStatus', 'fieldsDropped', 'kind', 'controlForRequestId', 'controlRequestId',
+        'tableStartedAt', 'tableEndedAt', 'controlStartedAt', 'controlEndedAt', 'tableOutcome',
+        'deliverable', 'deliveryRevision',
+        'receipt', 'overlap', 'decoded', 'truncated_on_arrival', 'json_error', 'raw_length',
+        'raw_head_status',
+    );
+
+    /** Same response-header allowlist as the browser transport recorder. */
+    const RESPONSE_HEADERS = array('cf-ray', 'x-abj404-request-id', 'content-encoding',
+        'content-length', 'x-litespeed-cache', 'x-turbo-charged-by', 'server');
+
     /**
      * The endpoint a response part belongs to, for the one question that has
      * to be answered from the part alone: a report-only beacon always travels
@@ -122,11 +140,34 @@ final class ABJ_404_Solution_ClientTransportReport {
             }
             ABJ_404_Solution_AjaxCheckpointLogger::record(
                 $requestId, 'client_prior_attempt',
-                array('report' => self::redactReportBodyExcerpt($report)));
+                array('report' => $report));
         } catch (Throwable $e) {
             ABJ_404_Solution_AjaxCheckpointLogger::record($requestId, 'client_report_error', array(
                 'message' => substr($e->getMessage(), 0, 200),
             ));
+        }
+    }
+
+    /**
+     * Retain only a safe failure receipt after authorization, even with full
+     * tracing unarmed. Healthy requests write nothing through this path.
+     * @param array<string, mixed> $context
+     */
+    public static function retainFailure(array $context): void {
+        try {
+            $reader = self::requestReader();
+            $raw = $reader->getPostOrGetSanitize('clientReport', '');
+            if (!is_string($raw) || $raw === '' || strlen($raw) > self::MAX_REPORT_BYTES) { return; }
+            $report = json_decode($raw, true, 12);
+            if (!is_array($report)) { return; }
+            ABJ_404_Solution_AjaxFailureReporter::recordClientFailure(array(
+                'report' => self::normalizeRecord($report),
+                'reported_attempt_id' => $reader->getPostOrGetSanitize('reportedAttemptId', ''),
+                'subpage' => $context['subpage'] ?? '', 'retry_count' => $context['retry_count'] ?? 0,
+            ));
+        } catch (Throwable $e) {
+            abj404_logPhpFallback('client-failure-receipt', 'retention failed (code '
+                . $e->getCode() . '): ' . $e->getMessage());
         }
     }
 
@@ -153,35 +194,121 @@ final class ABJ_404_Solution_ClientTransportReport {
     }
 
     /**
-     * Redact the bounded body excerpt inside one client record, if it has
-     * one. The excerpt is the only field of a client report that carries
-     * freeform response TEXT rather than measurements, and every route a
-     * client record leaves this class through (the checkpoint journal here,
-     * the drained support-payload buffer via
-     * ABJ_404_Solution_DrainedTelemetryBuffer) lands in debug_log_excerpt,
-     * which the payload redaction sweep skips by design. Anything that is not
-     * the {head, tail} string pair the shipped client sends is carried
-     * as-is, never mangled.
-     *
-     * @param array<mixed, mixed> $record Keys are untrusted decoded-JSON keys;
-     *   only the bodyExcerpt entry is read or written.
-     * @return array<mixed, mixed>
+     * Normalize untrusted browser records before storage or support delivery.
+     * Rich timing/control measurements survive; request material cannot become
+     * a new diagnostic field merely because a client supplied its name.
+     * @param array<array-key, mixed> $record
+     * @return array<string, mixed>
+     */
+    public static function normalizeRecord(array $record): array {
+        $allowed = array();
+        foreach (self::withoutCredentials($record) as $field => $value) {
+            if (is_string($field) && in_array($field, self::REPORT_FIELDS, true)) {
+                $allowed[$field] = $value;
+            }
+        }
+        if (array_key_exists('raw_head', $record)) {
+            $allowed['raw_head_status'] = 'omitted_unparseable';
+        }
+        return self::redactReportBodyExcerpt($allowed);
+    }
+
+    /**
+     * Sanitize historical JSONL too: automatic evidence can predate the writer.
+     * Unrelated records and section text retain their exact bytes.
+     */
+    public static function sanitizeJournalExcerpt(string $excerpt): string {
+        return implode("\n", array_map(array(self::class, 'sanitizeJournalLine'), explode("\n", $excerpt)));
+    }
+
+    /**
+     * The event identifies historical client data even when its JSON is damaged.
+     * Unreadable client data becomes an unavailable finding, never raw text.
+     */
+    public static function sanitizeJournalLine(string $line): string {
+        if (strpos($line, 'client_prior_attempt') === false
+                && strpos($line, 'concurrent_control_client_receipt') === false) { return $line; }
+        $record = json_decode($line, true);
+        if (!is_array($record)) {
+            if (preg_match('/"event"\s*:\s*"(client_prior_attempt|concurrent_control_client_receipt)"/',
+                    $line, $matches) !== 1) { return $line; }
+            $record = array('event' => $matches[1]);
+        }
+        if (!in_array($record['event'] ?? '',
+                array('client_prior_attempt', 'concurrent_control_client_receipt'), true)) { return $line; }
+        if (is_array($record['report'] ?? null)) {
+            $normalized = self::normalizeRecord($record['report']);
+            if ($normalized === $record['report']) { return $line; }
+            $record['report'] = $normalized;
+        } else {
+            $record['client_evidence_status'] = 'unavailable';
+            $record['report'] = array('decoded' => false, 'json_error' => 'client record unavailable');
+        }
+        return ABJ_404_Solution_Utf8SafeRecord::encode($record,
+            'sanitized historical client receipt', JSON_UNESCAPED_SLASHES);
+    }
+
+    /**
+     * @param array<array-key, mixed> $record
+     * @return array<array-key, mixed>
+     */
+    private static function withoutCredentials(array $record, int $depth = 0): array {
+        if ($depth >= 12) { return array('status' => 'truncated'); }
+        $safe = array();
+        $privateFields = '/^(?:' . ABJ_404_Solution_RequestCredentialRedactor::SENSITIVE_FIELD_NAMES
+            . '|.*(?:cookie|token|nonce|password|secret)|authorization|raw_?sql|sql|failure_frame|frame)$/i';
+        foreach ($record as $key => $value) {
+            if (preg_match($privateFields, (string)$key) === 1) { continue; }
+            if (strtolower((string)$key) === 'headers' && !is_array($value)) {
+                $safe[$key] = array();
+                $safe['headersStatus'] = 'omitted_invalid_shape';
+                continue;
+            }
+            if (is_array($value)) {
+                $value = self::withoutCredentials($value, $depth + 1);
+                if (strtolower((string)$key) === 'headers') {
+                    $value = array_intersect_key($value, array_fill_keys(self::RESPONSE_HEADERS, true));
+                }
+            }
+            $safe[$key] = $value;
+        }
+        return $safe;
+    }
+
+    /**
+     * Retain text only for the existing non-JSON parsererror feature (report521).
+     * @param array<string, mixed> $record
+     * @return array<string, mixed>
      */
     public static function redactReportBodyExcerpt(array $record): array {
-        $excerpt = $record['bodyExcerpt'] ?? null;
-        if (!is_array($excerpt)) {
+        if (!isset($record['bodyExcerpt'])) {
+            return $record;
+        }
+        $excerpt = $record['bodyExcerpt'];
+        unset($record['bodyExcerpt']);
+        if (!is_array($excerpt) || !is_string($excerpt['head'] ?? null)
+                || !is_string($excerpt['tail'] ?? null)) {
+            $record['bodyExcerptStatus'] = 'omitted_invalid_shape';
+            return $record;
+        }
+        $shape = is_array($record['bodyShape'] ?? null) ? $record['bodyShape'] : array();
+        if ((($record['jq'] ?? '') !== 'parsererror' && ($record['outcome'] ?? '') !== 'parsererror')
+                || ($shape['classification'] ?? '') !== 'invalid-json') {
+            $record['bodyExcerptStatus'] = 'omitted_not_parser_failure';
             return $record;
         }
         $redactor = self::piiRedactor();
         if ($redactor === null) {
+            $record['bodyExcerptStatus'] = 'omitted_redactor_unavailable';
             return $record;
         }
-        foreach (array('head', 'tail') as $side) {
-            if (isset($excerpt[$side]) && is_string($excerpt[$side])) {
-                $excerpt[$side] = $redactor->redact($excerpt[$side]);
-            }
+        $bounded = array('truncated' => ($excerpt['truncated'] ?? false) === true);
+        foreach (array('head' => $excerpt['head'], 'tail' => $excerpt['tail']) as $side => $text) {
+            $redacted = $redactor->redact($text);
+            $bounded[$side] = ABJ_404_Solution_Utf8SafeRecord::clip($redacted, $side === 'head' ? 200 : 80);
+            $bounded['truncated'] = $bounded['truncated'] || $bounded[$side] !== $redacted;
         }
-        $record['bodyExcerpt'] = $excerpt;
+        $record['bodyExcerpt'] = $bounded;
         return $record;
     }
 
@@ -280,7 +407,7 @@ final class ABJ_404_Solution_ClientTransportReport {
                 'decoded' => false,
                 'json_error' => json_last_error_msg(),
                 'raw_length' => strlen($raw),
-                'raw_head' => substr($raw, 0, 200),
+                'raw_head_status' => 'omitted_unparseable',
             );
         }
         // Rebuilt key by key rather than passed through: the decoded value is
@@ -292,6 +419,6 @@ final class ABJ_404_Solution_ClientTransportReport {
         }
         $report['decoded'] = true;
         $report['truncated_on_arrival'] = $truncated;
-        return $report;
+        return self::normalizeRecord($report);
     }
 }

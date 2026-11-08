@@ -42,7 +42,7 @@ class ABJ_404_Solution_FeedbackDatabaseIdentity {
         if (is_object($wpdb) && method_exists($wpdb, 'get_var')) {
             try {
                 // DAO-bypass-approved: SELECT VERSION() is a parameterless server-introspection probe with no plugin tables involved; routing through queryAndGetResults() would force a missing-table-repair detour for a query that cannot fail with that error class
-                $probed = $wpdb->get_var('SELECT VERSION()');
+                $probed = ABJ_404_Solution_DatabaseDriverCall::getVar($wpdb, 'SELECT VERSION()');
                 if (is_scalar($probed) && trim((string)$probed) !== '') {
                     $fullVersion = (string)$probed;
                 }

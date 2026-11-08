@@ -98,6 +98,8 @@ class ABJ_404_Solution_PluginLogicDefaults {
             'captured_order_by' => 'logshits',
             'captured_order' => 'DESC',
             'excludePages[]' => '',
+            // Safe backfill for existing sites; fresh installs initialize the
+            // suggestion destination through SettingsRedirectPolicy instead.
             'dest404_behavior' => 'theme_default',
             'auto_trash_junk_urls' => '1',
             'auto_trash_junk_patterns' => implode("\n", array(

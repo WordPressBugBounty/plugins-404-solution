@@ -1,19 +1,29 @@
 /**
  * Progressive pagination-response DOM application.
  *
- * Each ajaxUpdatePaginationLinks response updates only its own section:
- * table HTML, filter counts, or pagination controls. The legacy all-in-one
- * entry point remains available for older callers.
+ * Normal ajaxUpdatePaginationLinks responses update their own section.
+ * A degraded response is a complete envelope: bounded table HTML, cached
+ * filter counts, and matching pagination controls must be applied together.
+ * The legacy all-in-one entry point remains available for older callers.
  *
  * Globals defined: abj404ApplyPaginationSuccessResponse,
- * abj404ApplyPaginationPartResponse.
+ * abj404ApplyPaginationPartResponse, abj404PaginationResponseIsDegraded.
  */
 
 /** @param {object} result @returns {void} */
 function abj404ApplyPaginationSuccessResponse(result) {
-    abj404ApplyPaginationPartResponse('pagination', result);
-    abj404ApplyPaginationPartResponse('table', result);
-    abj404ApplyPaginationPartResponse('counts', result);
+    result = result || {};
+    // Validate/apply the table before changing its counters and controls. A
+    // malformed complete envelope must retain the previous visible view.
+    abj404ApplyPaginationTablePart(result);
+    abj404ApplyPaginationLinksPart(result);
+    abj404ApplyPaginationCountsPart(result);
+}
+
+/** @param {object} result @returns {boolean} */
+function abj404PaginationResponseIsDegraded(result) {
+    return !!(result && result.meta && result.meta.table_read &&
+        result.meta.table_read.state === 'degraded');
 }
 
 /**
@@ -24,6 +34,15 @@ function abj404ApplyPaginationSuccessResponse(result) {
  * @returns {void}
  */
 function abj404ApplyPaginationPartResponse(part, result) {
+    if (abj404PaginationResponseIsDegraded(result)) {
+        ['table', 'paginationLinksTop', 'paginationLinksBottom'].forEach(function(field) {
+            if (typeof result[field] !== 'string' || result[field].trim() === '') {
+                throw new TypeError('Degraded table response did not include non-empty ' + field + ' HTML.');
+            }
+        });
+        abj404ApplyPaginationSuccessResponse(result);
+        return;
+    }
     var appliers = {
         table: abj404ApplyPaginationTablePart,
         counts: abj404ApplyPaginationCountsPart,

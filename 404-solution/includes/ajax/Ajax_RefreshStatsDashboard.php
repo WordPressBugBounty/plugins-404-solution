@@ -58,14 +58,24 @@ class ABJ_404_Solution_Ajax_RefreshStatsDashboard {
 
             $snapshot = $statsRepository->refreshStatsDashboardSnapshot(false);
             $newHash = $snapshot['hash'];
-            $hasUpdate = ($newHash !== '' && ($currentHash === '' || $newHash !== $currentHash));
+            $state = $snapshot['state'] ?? 'ready';
+            $pending = $state !== 'ready';
+            $hasUpdate = (!$pending && $newHash !== '' && ($currentHash === '' || $newHash !== $currentHash));
+
+            if ($state === 'pending') {
+                abj_service('stats_rollup')->armAuthenticatedAjaxContinuation();
+            }
 
             $response = array(
                 'hasUpdate' => $hasUpdate,
                 'hash' => $newHash,
                 'refreshedAt' => intval($snapshot['refreshed_at']),
+                'state' => $state,
+                'generation' => $snapshot['generation'] ?? '',
+                'publishedGeneration' => $snapshot['published_generation'] ?? '',
             );
 
+            if ($state === 'unavailable' && isset($snapshot['error'])) { $response['error'] = $snapshot['error']; }
             ABJ_404_Solution_AjaxAdminEndpointSupport::markAjaxResponseSent();
             ABJ_404_Solution_AjaxAdminEndpointSupport::getAndClearAjaxBufferedOutput();
             ABJ_404_Solution_AjaxResponseEmitter::sendJsonResponseAndExit($response, 200);

@@ -49,7 +49,7 @@ class ABJ_404_Solution_LogsWriteRecoveryPolicy {
         global $wpdb;
         $trimSql = "DELETE FROM `{$tableName}` ORDER BY timestamp ASC LIMIT 1000";
         // DAO-bypass-approved: recovery trim must run on the active wpdb handle so last_error reflects the immediate retry context.
-        $wpdb->query($trimSql);
+        ABJ_404_Solution_DatabaseDriverCall::query($wpdb, $trimSql);
         $ttl = defined('HOUR_IN_SECONDS') ? (int) HOUR_IN_SECONDS : 3600;
         // @cache-write-audit: opt-out - log-trim cooldown marker, not query result data.
         if (function_exists('set_transient')) {
@@ -64,12 +64,47 @@ class ABJ_404_Solution_LogsWriteRecoveryPolicy {
     }
 
     public function setLogsv2FullNotice(string $errorMessage): void {
-        $this->noticeState->setPluginDbNotice(
-            'log_table_full',
-            function_exists('__') ? __('The 404 Solution log table is full and cannot accept new entries. This is usually caused by a full disk. Please contact your host or manually prune the logs table.', '404-solution') : 'The 404 Solution log table is full and cannot accept new entries. This is usually caused by a full disk. Please contact your host or manually prune the logs table.',
-            function_exists('__') ? __('The 404 Solution log table is full. The plugin automatically trimmed the oldest 1,000 log entries to free space, but logging may still be limited. Please contact your hosting provider about disk space.', '404-solution') : 'The 404 Solution log table is full. The plugin automatically trimmed the oldest 1,000 log entries to free space, but logging may still be limited. Please contact your hosting provider about disk space.',
-            $errorMessage
-        );
+        ABJ_404_Solution_DeferredTranslation::whenReady(function () use ($errorMessage): void {
+            $this->noticeState->setPluginDbNotice(
+                'log_table_full',
+                __('The 404 Solution log table is full and cannot accept new entries. This is usually caused by a full disk. Please contact your host or manually prune the logs table.', '404-solution'),
+                __('The 404 Solution log table is full. The plugin automatically trimmed the oldest 1,000 log entries to free space, but logging may still be limited. Please contact your hosting provider about disk space.', '404-solution'),
+                $errorMessage
+            );
+        });
+    }
+
+    /**
+     * Clear the log-full notice only after wpdb evidence confirms an accepted
+     * logsv2 INSERT and no driver error remains. A positive raw result is
+     * sufficient; rows_affected is optional metadata and, when supplied, must
+     * also be a positive integer.
+     *
+     * @param array<string, mixed> $writeEvidence
+     * @return void
+     */
+    public function clearLogsv2FullNoticeAfterWrite(array $writeEvidence): void {
+        if (!array_key_exists('result', $writeEvidence) || !array_key_exists('last_error', $writeEvidence)) {
+            return;
+        }
+        if (!is_string($writeEvidence['last_error']) || $writeEvidence['last_error'] !== '') {
+            return;
+        }
+
+        $result = $writeEvidence['result'];
+        $rowsAffected = $writeEvidence['rows_affected'] ?? null;
+        if ($rowsAffected !== null && !is_int($rowsAffected)) {
+            return;
+        }
+        $acceptedResult = is_int($result) && $result > 0;
+        if (!$acceptedResult) {
+            return;
+        }
+        if (is_int($rowsAffected) && $rowsAffected <= 0) {
+            return;
+        }
+
+        $this->noticeState->clearPluginDbNoticeIfType('log_table_full');
     }
 
     public function getWpdbRecentQueryContextForLogs(): string {

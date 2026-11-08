@@ -5,6 +5,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once dirname(__DIR__) . '/root-boot/EarlySettingsAccess.php';
+
 // allow-no-test-found: covered by tests/LoggingTest.php public Logging entry-point tests for debug writes and log rotation.
 
 /**
@@ -14,8 +16,13 @@ if (!defined('ABSPATH')) {
  * size accounting, and the dedupe-pointer reset that must happen whenever
  * line numbers become invalid. It intentionally does not decide when to log
  * or send feedback reports; ABJ_404_Solution_Logging remains that facade.
+ * Concurrent requests may overshoot the bound by their appends between size checks.
+ * Simultaneous rotations may lose the older _old.txt archive.
  */
 class ABJ_404_Solution_DebugLogFileStore {
+
+    /** Hard bound for the active file; cron rotation remains as a repair path. */
+    const MAX_DEBUG_FILE_BYTES = 10 * 1024 * 1000;
 
     /** @var callable */
     private $sanitizeLogLine;
@@ -45,6 +52,12 @@ class ABJ_404_Solution_DebugLogFileStore {
     /** @var int|null Blog id $cachedDebugFilename was resolved for. */
     private $cachedDebugFilenameBlogId = null;
 
+    /** @var string|null Path whose size is memoized for this request. */
+    private $knownFilePath = null;
+
+    /** @var int|null Size of $knownFilePath including this request's appends. */
+    private $knownFileBytes = null;
+
     /**
      * @param callable $sanitizeLogLine Receives a raw line and returns the sanitized line to write.
      * @param ABJ_404_Solution_LoggingStateStore $stateStore Recursion-safe accessor for the
@@ -64,17 +77,80 @@ class ABJ_404_Solution_DebugLogFileStore {
      */
     public function writeLine(string $line, string $debugFilePath): bool {
         $sanitizedLine = (string)call_user_func($this->sanitizeLogLine, $line);
-        $result = @file_put_contents($debugFilePath, $sanitizedLine . "\n", FILE_APPEND);
-
-        if ($result === false) {
-            abj404_logPhpFallback(
-                'logger-internal',
-                'Unable to write to debug log (possibly disk full): ' . $debugFilePath
-            );
+        $serializedLine = $sanitizedLine . "\n";
+        $serializedBytes = strlen($serializedLine);
+        if ($serializedBytes > self::MAX_DEBUG_FILE_BYTES) {
+            $serializedLine = substr($serializedLine, 0, self::MAX_DEBUG_FILE_BYTES);
+            $serializedBytes = strlen($serializedLine);
+        }
+        if ($this->knownFilePath !== $debugFilePath || $this->knownFileBytes === null) {
+            $this->knownFilePath = $debugFilePath;
+            $this->knownFileBytes = $this->readFileSize($debugFilePath);
+        }
+        $flags = FILE_APPEND;
+        $sentFilePath = null;
+        if ($this->knownFileBytes + $serializedBytes > self::MAX_DEBUG_FILE_BYTES) {
+            // Another request may already have rotated the file since our first write.
+            $this->knownFileBytes = $this->readFileSize($debugFilePath);
+            if ($this->knownFileBytes + $serializedBytes > self::MAX_DEBUG_FILE_BYTES) {
+                $sentFilePath = $this->getDebugFilePathSentFile();
+                $rotated = $this->rotateFiles(
+                    $sentFilePath,
+                    $debugFilePath . '_old.txt',
+                    $debugFilePath
+                );
+                if (!$rotated) {
+                    clearstatcache(true, $debugFilePath);
+                    if (file_exists($debugFilePath)) {
+                        // Keep the newest line when the archive cannot be replaced.
+                        $flags = 0;
+                    }
+                }
+                $this->knownFileBytes = 0;
+            }
+        }
+        $write = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($debugFilePath, $serializedLine, $flags) {
+                return file_put_contents($debugFilePath, $serializedLine, $flags);
+            }
+        );
+        if ($flags === 0 && $sentFilePath !== null && is_int($write['result'])) {
+            $this->resetSentLineCursors($sentFilePath);
+        }
+        if (!is_int($write['result']) || $write['result'] !== $serializedBytes) {
+            $this->knownFileBytes = null;
+            $this->reportWriteFailure($debugFilePath, $write['warning']);
             return false;
         }
-
+        $this->knownFileBytes += $write['result'];
         return true;
+    }
+
+    /** Read once per path, then only when a write would exceed the bound. */
+    private function readFileSize(string $debugFilePath): int {
+        clearstatcache(true, $debugFilePath);
+        $exists = ABJ_404_Solution_HostFilesystemCall::fileExists($debugFilePath);
+        if ($exists['warning'] !== null) {
+            abj404_logPhpFallback('logger-internal', 'Unable to inspect debug log: '
+                . $debugFilePath . ' (' . $exists['warning'] . ')');
+        }
+        if ($exists['result'] !== true) {
+            return 0;
+        }
+        $size = ABJ_404_Solution_HostFilesystemCall::filesize($debugFilePath);
+        if ($size['warning'] !== null) {
+            abj404_logPhpFallback('logger-internal', 'Unable to read debug log size: '
+                . $debugFilePath . ' (' . $size['warning'] . ')');
+        }
+        return is_int($size['result']) ? max(0, $size['result']) : 0;
+    }
+
+    private function reportWriteFailure(string $debugFilePath, ?string $warning): void {
+        abj404_logPhpFallback(
+            'logger-internal',
+            'Unable to write to debug log (possibly disk full): ' . $debugFilePath
+            . ($warning !== null ? ' (' . $warning . ')' : '')
+        );
     }
 
     /** @return string */
@@ -151,25 +227,79 @@ class ABJ_404_Solution_DebugLogFileStore {
      */
     public function getFilePathAndMoveOldFile($directory, $filename): string {
         if (!ABJ_404_Solution_FileSystemService::createDirectoryWithErrorMessages($directory)) {
-            return ABJ404_PATH . $filename;
+            return abj404_getWritablePluginFallbackDir() . $filename;
         }
 
-        if (file_exists(ABJ404_PATH . $filename)) {
-            rename(ABJ404_PATH . $filename, $directory . $filename);
+        $legacyPath = abj404_getWritablePluginFallbackDir() . $filename;
+        $destinationPath = $directory . $filename;
+        $legacyExists = ABJ_404_Solution_HostFilesystemCall::fileExists($legacyPath);
+        if (!$legacyExists['result']) {
+            if ($legacyExists['warning'] !== null) {
+                abj404_logPhpFallback(
+                    'logger-internal',
+                    'Unable to inspect legacy debug log: ' . $legacyPath . ' (' . $legacyExists['warning'] . ')'
+                );
+            }
+            return $destinationPath;
         }
 
-        return $directory . $filename;
+        $moved = ABJ_404_Solution_HostFilesystemCall::rename($legacyPath, $destinationPath);
+        if (!$moved['result']) {
+            abj404_logPhpFallback(
+                'logger-internal',
+                'Unable to move legacy debug log: ' . $legacyPath
+                . ($moved['warning'] !== null ? ' (' . $moved['warning'] . ')' : ' (unknown rename failure)')
+            );
+            $remaining = ABJ_404_Solution_HostFilesystemCall::fileExists($legacyPath);
+            if ($remaining['warning'] !== null) {
+                abj404_logPhpFallback(
+                    'logger-internal',
+                    'Unable to verify legacy debug log after move failure: ' . $legacyPath
+                    . ' (' . $remaining['warning'] . ')'
+                );
+            }
+            // A denied re-probe cannot prove that the source disappeared. Keep
+            // returning the legacy path so callers do not switch to an
+            // unusable destination after a failed migration.
+            return $remaining['result'] || $remaining['warning'] !== null
+                ? $legacyPath
+                : $destinationPath;
+        }
+
+        return $destinationPath;
     }
 
     /** @return void */
     public function limitDebugFileSize(string $sentFilePath, string $oldDebugFilePath, string $debugFilePath): void {
-        if (file_exists($sentFilePath)) {
-            ABJ_404_Solution_FileSystemService::safeUnlink($sentFilePath);
+        $this->rotateFiles($sentFilePath, $oldDebugFilePath, $debugFilePath);
+    }
+
+    private function rotateFiles(string $sentFilePath, string $oldDebugFilePath, string $debugFilePath): bool {
+        $moved = ABJ_404_Solution_HostFilesystemCall::rename($debugFilePath, $oldDebugFilePath);
+        if (!$moved['result']) {
+            abj404_logPhpFallback(
+                'logger-internal',
+                'Unable to rotate debug log: ' . $debugFilePath
+                . ($moved['warning'] !== null ? ' (' . $moved['warning'] . ')' : ' (unknown rename failure)')
+            );
+            return false;
         }
 
+        $this->resetSentLineCursors($sentFilePath);
+        return true;
+    }
+
+    private function resetSentLineCursors(string $sentFilePath): void {
+        $sentExists = ABJ_404_Solution_HostFilesystemCall::fileExists($sentFilePath);
+        if ($sentExists['result']) {
+            ABJ_404_Solution_FileSystemService::safeUnlink($sentFilePath);
+        } elseif ($sentExists['warning'] !== null) {
+            abj404_logPhpFallback(
+                'logger-internal',
+                'Unable to inspect sent debug-log cursor: ' . $sentFilePath . ' (' . $sentExists['warning'] . ')'
+            );
+        }
         $this->removeLastSentErrorLineFromDatabase();
-        ABJ_404_Solution_FileSystemService::safeUnlink($oldDebugFilePath);
-        rename($debugFilePath, $oldDebugFilePath);
     }
 
     /** @return void */
@@ -184,19 +314,41 @@ class ABJ_404_Solution_DebugLogFileStore {
     public function deleteDebugFile(): bool {
         $allIsWell = true;
 
-        if (file_exists($this->getDebugFilePathSentFile())) {
-            ABJ_404_Solution_FileSystemService::safeUnlink($this->getDebugFilePathSentFile());
-        }
-        $this->removeLastSentErrorLineFromDatabase();
+        $sentFilePath = $this->getDebugFilePathSentFile();
+        $this->resetSentLineCursors($sentFilePath);
 
         $uploadDir = abj404_getUploadsDir();
-        if (is_dir($uploadDir)) {
-            $files = glob($uploadDir . '/abj404_debug_*.txt');
+        $uploadDirectory = ABJ_404_Solution_HostFilesystemCall::isDir($uploadDir);
+        if ($uploadDirectory['warning'] !== null) {
+            abj404_logPhpFallback(
+                'logger-internal',
+                'Unable to inspect debug-log directory: ' . $uploadDir . ' (' . $uploadDirectory['warning'] . ')'
+            );
+            $allIsWell = false;
+        }
+        if ($uploadDirectory['result']) {
+            $globbed = ABJ_404_Solution_HostFilesystemCall::glob($uploadDir . '/abj404_debug_*.txt');
+            if ($globbed['warning'] !== null) {
+                abj404_logPhpFallback(
+                    'logger-internal',
+                    'Unable to enumerate debug logs: ' . $uploadDir . ' (' . $globbed['warning'] . ')'
+                );
+                $allIsWell = false;
+            }
+            $files = $globbed['result'];
             if (!is_array($files)) {
                 $files = array();
             }
             foreach ($files as $file) {
-                if (is_file($file) && !ABJ_404_Solution_FileSystemService::safeUnlink($file)) {
+                $isFile = ABJ_404_Solution_HostFilesystemCall::isFile($file);
+                if ($isFile['warning'] !== null) {
+                    abj404_logPhpFallback(
+                        'logger-internal',
+                        'Unable to inspect debug log candidate: ' . $file . ' (' . $isFile['warning'] . ')'
+                    );
+                    $allIsWell = false;
+                }
+                if ($isFile['result'] && !ABJ_404_Solution_FileSystemService::safeUnlink($file)) {
                     $allIsWell = false;
                 }
             }
@@ -219,11 +371,32 @@ class ABJ_404_Solution_DebugLogFileStore {
     public function getDebugFileSize(string $debugFilePath, string $oldDebugFilePath): int {
         $file1Size = 0;
         $file2Size = 0;
-        if (file_exists($debugFilePath)) {
-            $file1Size = (int)filesize($debugFilePath);
+        // allow-silent-error: the debug file can be rotated or deleted between file_exists and filesize; a missing file counts as 0 bytes.
+        $debugExists = ABJ_404_Solution_HostFilesystemCall::fileExists($debugFilePath);
+        if ($debugExists['warning'] !== null) {
+            abj404_logPhpFallback('logger-internal', 'Unable to inspect debug log: '
+                . $debugFilePath . ' (' . $debugExists['warning'] . ')');
         }
-        if (file_exists($oldDebugFilePath)) {
-            $file2Size = (int)filesize($oldDebugFilePath);
+        if ($debugExists['result']) {
+            $size = ABJ_404_Solution_HostFilesystemCall::filesize($debugFilePath);
+            $file1Size = is_int($size['result']) ? $size['result'] : 0;
+            if ($size['warning'] !== null) {
+                abj404_logPhpFallback('logger-internal', 'Unable to read debug log size: '
+                    . $debugFilePath . ' (' . $size['warning'] . ')');
+            }
+        }
+        $oldExists = ABJ_404_Solution_HostFilesystemCall::fileExists($oldDebugFilePath);
+        if ($oldExists['warning'] !== null) {
+            abj404_logPhpFallback('logger-internal', 'Unable to inspect rotated debug log: '
+                . $oldDebugFilePath . ' (' . $oldExists['warning'] . ')');
+        }
+        if ($oldExists['result']) {
+            $size = ABJ_404_Solution_HostFilesystemCall::filesize($oldDebugFilePath);
+            $file2Size = is_int($size['result']) ? $size['result'] : 0;
+            if ($size['warning'] !== null) {
+                abj404_logPhpFallback('logger-internal', 'Unable to read debug log size: '
+                    . $oldDebugFilePath . ' (' . $size['warning'] . ')');
+            }
         }
 
         return $file1Size + $file2Size;

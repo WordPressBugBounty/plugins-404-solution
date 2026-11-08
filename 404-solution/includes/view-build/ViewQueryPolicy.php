@@ -199,9 +199,9 @@ class ABJ_404_Solution_ViewQueryPolicy {
     }
 
     /**
-     * Strip the characters the search never matches on and escape the LIKE
-     * wildcards. The result is a LIKE operand, NOT SQL text: it is not quote-escaped,
-     * because it is bound as a query parameter (quoting is the binder's job, and a
+     * Preserve literal URL search text while escaping SQL LIKE controls. The
+     * result is a LIKE operand, NOT SQL text: it is not quote-escaped, because
+     * it is bound as a query parameter (quoting is the binder's job, and a
      * second quote-escape here would be applied on top of it).
      *
      * @param string $rawFilterText
@@ -209,7 +209,7 @@ class ABJ_404_Solution_ViewQueryPolicy {
      */
     public function sanitizeFilterText(string $rawFilterText): string {
         global $wpdb;
-        $sanitized = str_replace(array('*', '/', '$'), '', $rawFilterText);
+        $sanitized = $rawFilterText;
         if (isset($wpdb) && is_object($wpdb) && method_exists($wpdb, 'esc_like')) {
             /** @var wpdb $wpdb */
             $sanitized = $wpdb->esc_like($sanitized);

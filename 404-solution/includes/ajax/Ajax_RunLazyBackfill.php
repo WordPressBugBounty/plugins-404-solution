@@ -12,16 +12,16 @@ class ABJ_404_Solution_Ajax_RunLazyBackfill {
     public const NONCE_ACTION = 'abj404_runLazyBackfill';
 
     /**
-     * Per-pass wall-clock budget (seconds) for EACH browser-driven drain in a
-     * single AJAX poll. Deliberately small: the handler runs two drains (logsv2
-     * canonical + the denorm/sort-key pass), so the whole request stays at most
-     * ~2x this, comfortably under the JS poller's 30s client timeout. That keeps
-     * each poll light (smooth percent updates, no gateway/client timeout on large
-     * sites). The daily cron path keeps the large 15s/20s budgets for fast
-     * unattended convergence -- only the browser path shrinks. The cursor/latch
-     * are resumable, so successive polls (and the next admin visit) accumulate.
+     * Log canonical work receives at most two seconds inside one shared
+     * five-second work budget. The remaining time goes to the redirect pass,
+     * which publishes canonical URLs with the other derived fields.
+     * Short cooperative slices keep maintenance from monopolizing the shared
+     * database while the user opens another admin page. Persisted cursors let
+     * the next browser poll resume; a chunk already admitted may finish after
+     * its deadline. Daily cron retains its normal per-component budgets.
      */
-    private const BROWSER_PASS_BUDGET_SEC = 3.0;
+    private const BROWSER_PASS_BUDGET_SEC = 2.0;
+    private const BROWSER_REQUEST_BUDGET_SEC = 5.0;
 
     /** @return void */
     public function handle(): void {
@@ -87,6 +87,10 @@ class ABJ_404_Solution_Ajax_RunLazyBackfill {
                     'dest' => $this->sortStatus('dest'),
                 ),
             );
+            // Sort controls can become usable before the larger log backlog
+            // finishes. Keep those states separate so the browser continues
+            // maintenance without keeping an already-ready sort unavailable.
+            $response['maintenance'] = array('complete' => $this->maintenanceComplete($response['sorts']));
 
             ABJ_404_Solution_AjaxAdminEndpointSupport::markAjaxResponseSent();
             ABJ_404_Solution_AjaxAdminEndpointSupport::getAndClearAjaxBufferedOutput();
@@ -139,20 +143,39 @@ class ABJ_404_Solution_Ajax_RunLazyBackfill {
         }
 
         $components = $upgrades->components();
+        $deadline = abj_clock()->nowFloat() + self::BROWSER_REQUEST_BUDGET_SEC;
         if (is_object($components) && method_exists($components, 'canonicalUrlBackfillUpgrade')) {
             $canonical = $components->canonicalUrlBackfillUpgrade();
             if (is_object($canonical) && method_exists($canonical, 'backfillLogsv2CanonicalUrl')) {
-                $canonical->backfillLogsv2CanonicalUrl(self::BROWSER_PASS_BUDGET_SEC);
+                $canonicalBudget = min(self::BROWSER_PASS_BUDGET_SEC, max(0.0, $deadline - abj_clock()->nowFloat()));
+                $canonical->backfillLogsv2CanonicalUrl($canonicalBudget);
             }
         }
         if (is_object($components) && method_exists($components, 'redirectsDenormBackfillUpgrade')) {
             $denorm = $components->redirectsDenormBackfillUpgrade();
             if (is_object($denorm) && method_exists($denorm, 'runDeferredDenormBackfillPass')) {
-                $denorm->runDeferredDenormBackfillPass(self::BROWSER_PASS_BUDGET_SEC);
+                $remainingBudget = max(0.0, $deadline - abj_clock()->nowFloat());
+                $denorm->runDeferredDenormBackfillPass($remainingBudget);
             }
         }
 
         return true;
+    }
+
+    /** @param array<string, array{ready:bool,percent:int,status:string,message:string}> $sorts */
+    private function maintenanceComplete(array $sorts): bool {
+        if (!$sorts['url']['ready'] || !$sorts['dest']['ready']) {
+            return false;
+        }
+        $dbCore = function_exists('abj_service_optional') ? abj_service_optional('db_core') : null;
+        if (!$dbCore instanceof ABJ_404_Solution_DatabaseCore) {
+            return false;
+        }
+        // A fresh reader avoids reusing a pre-drain request cache. Its shared
+        // completion contract checks both the latch and actual NULL rows.
+        $canonical = new ABJ_404_Solution_LogsHitsCanonicalUrlJoinHelper($dbCore);
+        return $canonical->isRedirectsCanonicalUrlBackfillComplete()
+            && $canonical->isLogsv2CanonicalUrlBackfillComplete();
     }
 
     /**

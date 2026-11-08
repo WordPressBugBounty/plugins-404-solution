@@ -155,7 +155,17 @@ class ABJ_404_Solution_ReviewFeedback {
 
         self::applyQualificationResponse($response);
 
-        wp_safe_redirect(remove_query_arg(array('abj404_review_response', '_wpnonce')));
+        $destination = remove_query_arg(array('abj404_review_response', '_wpnonce'));
+        if (is_callable(array('ABJ_404_Solution_RedirectLoopGuard', 'permitsDestination'))
+            && !ABJ_404_Solution_RedirectLoopGuard::permitsDestination($destination)) {
+            if (is_callable(array('ABJ_404_Solution_WPNotices', 'respondToRedirectRefusal'))) {
+                ABJ_404_Solution_WPNotices::respondToRedirectRefusal($destination);
+            }
+            // The admin page itself remains the response. The guard has queued
+            // the existing loop notice for the plugin screen.
+            return;
+        }
+        wp_safe_redirect($destination);
         exit;
     }
 
@@ -203,8 +213,16 @@ class ABJ_404_Solution_ReviewFeedback {
         }
 
         self::stateRepository()->dismissPermanently();
+        $destination = remove_query_arg(array('abj404_leaving_review', '_wpnonce'));
+        if (is_callable(array('ABJ_404_Solution_RedirectLoopGuard', 'permitsDestination'))
+            && !ABJ_404_Solution_RedirectLoopGuard::permitsDestination($destination)) {
+            if (is_callable(array('ABJ_404_Solution_WPNotices', 'respondToRedirectRefusal'))) {
+                ABJ_404_Solution_WPNotices::respondToRedirectRefusal($destination);
+            }
+            return false;
+        }
         self::echoReviewRedirectScript();
-        wp_safe_redirect(remove_query_arg(array('abj404_leaving_review', '_wpnonce')));
+        wp_safe_redirect($destination);
         exit;
     }
 
@@ -314,8 +332,8 @@ class ABJ_404_Solution_ReviewFeedback {
      * @return void
      */
     private static function emailFeedback($feedback_data) {
-        $to = '404solution@ajexperience.com';
-        $subject = '404 Solution Feedback from ' . get_bloginfo('name');
+        $to = defined('ABJ404_AUTHOR_EMAIL') ? ABJ404_AUTHOR_EMAIL : 'support@forethought-studio.com';
+        $subject = '[404 Solution] Feedback from ' . get_bloginfo('name');
 
         $message = "New feedback received from 404 Solution plugin\n\n";
         $message .= "Site: " . $feedback_data['site_url'] . "\n";

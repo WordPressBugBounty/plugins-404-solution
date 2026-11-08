@@ -66,7 +66,6 @@ class ABJ_404_Solution_DatabaseQueryServices {
         $this->queryRecoveryPolicy = new ABJ_404_Solution_DatabaseQueryRecoveryPolicy(
             $core,
             $logger,
-            $this->resultHarvester,
             $this->queryDiagnostics
         );
         $this->queryExecutor = new ABJ_404_Solution_DatabaseQueryExecutor(

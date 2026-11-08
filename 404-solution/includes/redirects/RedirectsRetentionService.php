@@ -15,14 +15,9 @@ require_once __DIR__ . '/RedirectsCleanupRepository.php';
  * by RedirectsRetentionServiceInterface, but that
  * interface had a single implementer and no narrowing consumer, so it was
  * inlined to remove the unrealized abstraction.
+ * @phpstan-import-type MaintenancePass from ABJ_404_Solution_MaintenanceDrain
  */
 class ABJ_404_Solution_RedirectsRetentionService {
-
-    /** @var ABJ_404_Solution_DatabaseCore */
-    private $dbCore;
-
-    /** @var ABJ_404_Solution_DatabaseConnectionManager */
-    private $connectionManager;
 
     /** @var ABJ_404_Solution_Functions */
     private $f;
@@ -41,7 +36,6 @@ class ABJ_404_Solution_RedirectsRetentionService {
      * @param ABJ_404_Solution_RedirectsRepositoryInterface $redirectsRepo
      * @param ABJ_404_Solution_Functions|null $functions
      * @param ABJ_404_Solution_Logging|null $logging
-     * @param ABJ_404_Solution_DatabaseConnectionManager|null $connectionManager
      * @param ABJ_404_Solution_RedirectsRetentionPolicy|null $retentionPolicy
      * @param ABJ_404_Solution_RedirectsCleanupRepository|null $cleanupRepository
      */
@@ -50,14 +44,11 @@ class ABJ_404_Solution_RedirectsRetentionService {
         ABJ_404_Solution_RedirectsRepositoryInterface $redirectsRepo,
         $functions = null,
         $logging = null,
-        $connectionManager = null,
         ?ABJ_404_Solution_RedirectsRetentionPolicy $retentionPolicy = null,
         ?ABJ_404_Solution_RedirectsCleanupRepository $cleanupRepository = null
     ) {
-        $this->dbCore = $dbCore;
         $this->f = $functions !== null ? $functions : abj_service('functions');
         $this->logger = $logging !== null ? $logging : abj_service('logging');
-        $this->connectionManager = $connectionManager !== null ? $connectionManager : $dbCore->connectionManager();
         $this->retentionPolicy = $retentionPolicy !== null
             ? $retentionPolicy
             : new ABJ_404_Solution_RedirectsRetentionPolicy();
@@ -98,67 +89,140 @@ class ABJ_404_Solution_RedirectsRetentionService {
         return $this->cleanupRepository->deleteOldLogsByAge($daysToKeep, $now);
     }
 
-    /** @return string Human-readable summary of the cron run. */
-    function deleteOldRedirectsCron() {
+    /**
+     * @param mixed $passId
+     * @return string Human-readable progress from one bounded cron slice.
+     */
+    function deleteOldRedirectsCron($passId = null): string {
+        $pass = abj_service('maintenance_drain')->tick($passId, ['manual' => $this->isManualMaintenanceRun()]);
+        if ($pass === null) { return ''; }
         $viewRead = abj_service('view_read_service');
-        $abj404logic = abj_service('plugin_logic');
-
-        $options = abj_service('options_repository')->getOptions(true);
-        $now = abj_clock()->now();
-        $manually_fired = $this->isManualMaintenanceRun();
-
-        $upgradesEtc = abj_service('database_upgrades');
-        $upgradesEtc->components()->bootstrapUpgrade()->createDatabaseTables(false);
-
-        $this->connectionManager->ensureConnection();
-
-        $this->deleteTempExportFile($abj404logic);
-
-        $duplicateRowsDeleted = $this->removeDuplicatesCron();
-        $deletions = $this->deleteConfiguredOldRedirects($options, $now);
-        $orphanedCount = $this->cleanupOrphanedAutoRedirects();
-        $junkTrashedCount = $this->autoTrashJunkCapturedUrls($options);
-        $oldLogRowsDeletedBySize = $this->deleteOldLogsBySize($viewRead, $options);
-
+        $manually_fired = $pass['manual'];
+        $removed = $pass['removed'];
         $logsSizeBytes = $viewRead->getLogDiskUsage();
-        $logSizeMB = round($logsSizeBytes / (1024 * 1000), 2);
-
-        $renamed = $this->limitDebugFileSize();
-        $renamed = $renamed ? "true" : "false";
-
-        $oldLogRowsDeleted = $deletions['logRowsDeletedByAge'] + $oldLogRowsDeletedBySize;
-
+        // -1 means the size query failed or timed out: an unknown size.
+        $logSizeText = $logsSizeBytes >= 0 ? round($logsSizeBytes / (1024 * 1000), 2) . 'MB' : 'unknown';
+        $age = $removed['logs_age'] ?? 0;
+        $size = $removed['logs_size'] ?? 0;
         $message = "deleteOldRedirectsCron. Old captured URLs removed: " .
-                $deletions['capturedURLs'] . ", Old automatic redirects removed: " . $deletions['autoRedirects'] .
-                ", Old manual redirects removed: " . $deletions['manualRedirects'] .
-                ", Orphaned auto redirects removed: " . $orphanedCount .
-                ", Junk URLs auto-trashed: " . $junkTrashedCount .
-                ", Old log lines removed: " . $oldLogRowsDeleted .
-                " (age: " . $deletions['logRowsDeletedByAge'] . ", size: " . $oldLogRowsDeletedBySize . ")" .
-                ", New log size: " . $logSizeMB . "MB" .
-                ", Duplicate rows deleted: " . $duplicateRowsDeleted . ", Debug file size limited: " .
-                $renamed;
-
-        $message = $this->appendAdminNotificationMessage($message, $options, $manually_fired, $abj404logic);
-        $message = $this->appendDeveloperLogMessage($message, $options);
-
-        $abj404permalinkCache = abj_service('permalink_cache');
-        $rowsUpdated = $abj404permalinkCache->updatePermalinkCache(15);
-        $message .= ", Permlink cache rows updated: " . $rowsUpdated;
-
+                ($removed['captured'] ?? 0) . ", Old automatic redirects removed: " . ($removed['automatic'] ?? 0) .
+                ", Old manual redirects removed: " . ($removed['manual'] ?? 0) .
+                ", Orphaned auto redirects removed: " . ($removed['orphaned'] ?? 0) .
+                ", Junk URLs auto-trashed: " . ($removed['junk'] ?? 0) .
+                ", Old log lines removed: " . ($age + $size) .
+                " (age: " . $age . ", size: " . $size . ")" .
+                ", New log size: " . $logSizeText .
+                ", Duplicate rows deleted: " . ($removed['duplicates'] ?? 0);
         $manually_fired_String = ($manually_fired) ? 'true' : 'false';
         $message .= ", User initiated: " . $manually_fired_String;
-
         $this->logger->infoMessage($message);
-
-        $upgradesEtc = abj_service('database_upgrades');
-        $upgradesEtc->components()->bootstrapUpgrade()->createDatabaseTables();
-
-        $this->dbCore->queryAndGetResults("optimize table {wp_abj404_redirects}");
-
-        $upgradesEtc->components()->pluginUpdateUpgrade()->updatePluginCheck();
-
         return $message;
+    }
+
+    /** @return array<string,callable> Independent, bounded retention phases. */
+    public function maintenanceStages(): array {
+        $limits = ['batch_size' => 1000, 'max_batches' => 1, 'timeout' => 5];
+        $counted = function (int $count, int $batch = 1000): array {
+            return ['removed' => $count, 'complete' => $count < $batch,
+                'failure' => $this->cleanupRepository->lastCleanupFailure()];
+        };
+        return [
+            'tables' => static function (): array {
+                abj_service('database_upgrades')->components()->bootstrapUpgrade()->repairMissingTables();
+                return ['complete' => true];
+            },
+            'logs_age' => function () use ($limits, $counted): array {
+                $days = $this->retentionPolicy->daysFromOptions($this->currentMaintenanceOptions(), 'capture_deletion');
+                return $counted($this->cleanupRepository->deleteOldLogsByAge($days, abj_clock()->now(), $limits));
+            },
+            'logs_size' => function (array $pass) use ($limits): array {
+                $plan = $pass['log_plan'];
+                if ($plan === null) { return ['complete' => true]; }
+                $current = $this->currentMaintenanceOptions();
+                if (($current['maximum_log_disk_usage'] ?? null) !== $plan['cap_raw']) {
+                    return ['complete' => false];
+                }
+                $outcome = $this->cleanupRepository->trimOldestLogsToCount($plan['target_keep'], $limits);
+                $outcome['failure'] = $this->cleanupRepository->lastCleanupFailure();
+                return $outcome;
+            },
+            'captured' => fn() => $this->redirectRetentionSlice(['key' => 'capture_deletion',
+                'statuses' => ABJ404_STATUS_CAPTURED . ', ' . ABJ404_STATUS_IGNORED . ', ' . ABJ404_STATUS_LATER,
+                'label' => 'Captured 404', 'limits' => $limits]),
+            'automatic' => fn() => $this->redirectRetentionSlice(['key' => 'auto_deletion',
+                'statuses' => (string)ABJ404_STATUS_AUTO, 'label' => 'Automatic redirect', 'limits' => $limits]),
+            'manual' => fn() => $this->redirectRetentionSlice(['key' => 'manual_deletion',
+                'statuses' => ABJ404_STATUS_MANUAL . ', ' . ABJ404_STATUS_REGEX, 'label' => 'Manual redirect', 'limits' => $limits]),
+            'orphaned' => fn() => $counted($this->cleanupRepository->cleanupOrphanedAutoRedirects($limits)),
+            'junk' => fn() => $counted($this->cleanupRepository->autoTrashJunkCapturedUrls($this->currentMaintenanceOptions(), $limits)),
+            'duplicates' => fn(array $pass) => $this->cleanupRepository->removeDuplicatesSlice([
+                'scan' => $pass['duplicate_scan'] ?? null,
+                'limits' => ['batch_size' => 20, 'max_batches' => 1, 'timeout' => 5],
+            ]),
+            'auto_expiration' => function () use ($counted): array {
+                $days = $this->retentionPolicy->daysFromOptions($this->currentMaintenanceOptions(), 'auto_302_expiration_days');
+                return $counted($this->cleanupRepository->expireOldAutoRedirects($days, abj_clock()->now(),
+                    ['batch_size' => 100, 'max_batches' => 1, 'timeout' => 5]), 100);
+            },
+            'files' => function (): array {
+                $this->deleteTempExportFile(abj_service('plugin_logic'));
+                $this->limitDebugFileSize();
+                return ['complete' => true];
+            },
+            'notifications' => function (array $pass): array {
+                $options = $this->currentMaintenanceOptions();
+                $message = $this->appendAdminNotificationMessage('', $options, $pass['manual'], abj_service('plugin_logic'));
+                $this->logger->infoMessage($this->appendDeveloperLogMessage($message, $options));
+                return ['complete' => true];
+            },
+            'permalinks' => static function (): array {
+                $cron = abj_cron_scheduler();
+                $hook = ABJ_404_Solution_CronScheduler::HOOK_UPDATE_PERMALINK_CACHE;
+                $ok = $cron->hasAnyScheduledEvent($hook) || $cron->scheduleSingleIfMissing($hook, 10, [1, 1]);
+                return ['complete' => $ok, 'failure' => $ok ? '' : $cron->lastFailureDetail()];
+            },
+            'updates' => static function (): array {
+                abj_service('database_upgrades')->components()->pluginUpdateUpgrade()->updatePluginCheck();
+                return ['complete' => true];
+            },
+        ];
+    }
+
+    /**
+     * Persist a stable size target before the first destructive size slice.
+     * @param MaintenancePass $pass
+     * @return MaintenancePass
+     */
+    public function prepareMaintenanceStage(string $phase, array $pass): array {
+        if ($phase !== 'logs_size') { return $pass; }
+        $options = $this->currentMaintenanceOptions();
+        $view = abj_service('view_read_service');
+        $pass['log_plan'] = $this->retentionPolicy->sizeRetentionPlan($options, $pass['log_plan'],
+            $view->getLogDiskUsage(), static function () use ($view): int { return $view->getLogsCount(0); });
+        return $pass;
+    }
+
+    /** @return array<string,mixed> Re-read settings before every destructive slice. */
+    private function currentMaintenanceOptions(): array {
+        $repository = abj_service('options_repository');
+        $repository->clearCache();
+        $options = $repository->getOptions(true);
+        foreach (['capture_deletion', 'auto_deletion', 'manual_deletion', 'maximum_log_disk_usage',
+            'auto_302_expiration_days', 'auto_trash_junk_urls', 'auto_trash_junk_patterns'] as $key) {
+            $options[$key] = $repository->getRawSettingValue($key, $options[$key] ?? null);
+        }
+        return $options;
+    }
+
+    /**
+     * @param array{key:string,statuses:string,label:string,limits:array<string,int>} $request
+     * @return array{removed:int,complete:bool,failure:string}
+     */
+    private function redirectRetentionSlice(array $request): array {
+        $count = $this->cleanupRepository->deleteOldRedirectsByType($this->currentMaintenanceOptions(), abj_clock()->now(),
+            $request['key'], $request['statuses'], $request['label'], $request['limits']);
+        return ['removed' => $count, 'complete' => $count < $request['limits']['batch_size'],
+            'failure' => $this->cleanupRepository->lastCleanupFailure()];
     }
 
     private function isManualMaintenanceRun(): bool {
@@ -181,85 +245,6 @@ class ABJ_404_Solution_RedirectsRetentionService {
         if (is_string($tempFile) && $tempFile !== '' && file_exists($tempFile)) {
             ABJ_404_Solution_FileSystemService::safeUnlink($tempFile);
         }
-    }
-
-    /**
-     * @param array<string, mixed> $options
-     * @param int $now
-     * @return array{capturedURLs: int, autoRedirects: int, manualRedirects: int, logRowsDeletedByAge: int}
-     */
-    private function deleteConfiguredOldRedirects(array $options, int $now): array {
-        $deleted = array(
-            'capturedURLs' => 0,
-            'autoRedirects' => 0,
-            'manualRedirects' => 0,
-            'logRowsDeletedByAge' => 0,
-        );
-
-        if ($this->retentionPolicy->daysFromOptions($options, 'capture_deletion') > 0) {
-            $statusList = ABJ404_STATUS_CAPTURED . ", " . ABJ404_STATUS_IGNORED . ", " . ABJ404_STATUS_LATER;
-            $deleted['capturedURLs'] = $this->deleteOldRedirectsByType($options, $now, 'capture_deletion', $statusList, 'Captured 404');
-            $deleted['logRowsDeletedByAge'] = $this->deleteOldLogsByAge(
-                $this->retentionPolicy->daysFromOptions($options, 'capture_deletion'),
-                $now
-            );
-        }
-
-        if ($this->retentionPolicy->daysFromOptions($options, 'auto_deletion') > 0) {
-            $deleted['autoRedirects'] = $this->deleteOldRedirectsByType(
-                $options,
-                $now,
-                'auto_deletion',
-                (string)ABJ404_STATUS_AUTO,
-                'Automatic redirect'
-            );
-        }
-
-        if ($this->retentionPolicy->daysFromOptions($options, 'manual_deletion') > 0) {
-            $statusList = ABJ404_STATUS_MANUAL . ", " . ABJ404_STATUS_REGEX;
-            $deleted['manualRedirects'] = $this->deleteOldRedirectsByType(
-                $options,
-                $now,
-                'manual_deletion',
-                $statusList,
-                'Manual redirect'
-            );
-        }
-
-        return $deleted;
-    }
-
-    /**
-     * @param ABJ_404_Solution_ViewReadServiceInterface $viewRead
-     * @param array<string, mixed> $options
-     * @return int
-     */
-    private function deleteOldLogsBySize($viewRead, array $options): int {
-        $logsSizeBytes = $viewRead->getLogDiskUsage();
-        $maxLogSizeRaw = array_key_exists('maximum_log_disk_usage', $options) ? $options['maximum_log_disk_usage'] : 100;
-        $maxLogSizeBytes = (is_int($maxLogSizeRaw) || is_float($maxLogSizeRaw) || is_string($maxLogSizeRaw))
-            ? (int)$maxLogSizeRaw * 1024 * 1000
-            : 100 * 1024 * 1000;
-
-        if ($logsSizeBytes <= $maxLogSizeBytes) {
-            return 0;
-        }
-
-        $totalLogLines = $viewRead->getLogsCount(0);
-        $averageSizePerLine = max($logsSizeBytes, 1) / max($totalLogLines, 1);
-        $logLinesToKeep = ceil($maxLogSizeBytes / $averageSizePerLine);
-        $logLinesToDelete = max($totalLogLines - $logLinesToKeep, 0);
-        if ($logLinesToDelete <= 0) {
-            return 0;
-        }
-
-        $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/deleteOldLogs.sql");
-        $query = $this->f->str_replace('{lines_to_delete}', (string)$logLinesToDelete, $query);
-        $results = $this->dbCore->queryAndGetResults($query);
-        $oldLogRowsDeletedBySizeRaw = $results['rows_affected'] ?? 0;
-        return (is_int($oldLogRowsDeletedBySizeRaw) || is_float($oldLogRowsDeletedBySizeRaw) || is_string($oldLogRowsDeletedBySizeRaw))
-            ? (int)$oldLogRowsDeletedBySizeRaw
-            : 0;
     }
 
     /**

@@ -159,6 +159,9 @@ final class ABJ_404_Solution_DiagnosticCollectionManifest {
             isset($channel['writer_arming']) && is_array($channel['writer_arming'])
                 ? array('writer_arming' => $channel['writer_arming'])
                 : array(),
+            isset($channel['unavailable_reason']) && is_string($channel['unavailable_reason'])
+                ? array('unavailable_reason' => $channel['unavailable_reason'])
+                : array(),
             self::describeDirectory($directory),
             array(
                 'candidates_checked' => count($files),
@@ -193,18 +196,103 @@ final class ABJ_404_Solution_DiagnosticCollectionManifest {
                 'plugin_files_present' => null,
             );
         }
-        $exists = @is_dir($directory);
-        $stat = $exists ? @stat($directory) : false;
-        $real = $exists ? @realpath($directory) : false;
-        $matches = $exists ? @glob(rtrim($directory, '/\\') . DIRECTORY_SEPARATOR . 'abj404_*') : false;
-        return array(
+        $access = self::directoryAccessFacts($directory);
+        $ioWarnings = $access['io_warnings'];
+        $exists = $access['exists'];
+        $stat = $access['stat'];
+        $real = $access['real'];
+        $matches = $access['matches'];
+        $reading = array(
             'directory_exists' => $exists,
-            'directory_readable' => $exists && @is_readable($directory),
-            'directory_writable' => $exists && @is_writable($directory),
+            'directory_readable' => $exists && $access['readable'],
+            'directory_writable' => $exists && $access['writable'],
             'directory_real' => is_string($real) ? $real : null,
             'directory_device' => is_array($stat) && isset($stat['dev']) ? (int)$stat['dev'] : null,
             'directory_inode' => is_array($stat) && isset($stat['ino']) ? (int)$stat['ino'] : null,
             'plugin_files_present' => is_array($matches) ? count($matches) : null,
+        );
+        if ($ioWarnings !== array()) {
+            $warning = implode('; ', $ioWarnings);
+            self::reportFailure('Diagnostic collection directory probe warning: ' . $warning);
+            $reading['io_warning'] = substr($warning, 0, 512);
+            $reading['io_warning_operations'] = array_values(array_unique(array_map(
+                static function (string $item): string { return (string)strtok($item, ':'); },
+                $ioWarnings
+            )));
+            $reading['io_warning_truncated'] = strlen($warning) > 512;
+        }
+        return $reading;
+    }
+
+    /**
+     * Gather all native directory facts as one cohesive probe stage. Keeping
+     * this stage separate leaves describeDirectory responsible only for the
+     * public manifest shape and warning serialization.
+     *
+     * @return array{exists: bool, readable: bool, writable: bool,
+     *   stat: array<int|string, int>|false, real: string|false,
+     *   matches: array<int, string>|false, io_warnings: list<string>}
+     */
+    private static function directoryAccessFacts(string $directory): array {
+        $ioWarnings = array();
+        $existsResult = ABJ_404_Solution_HostFilesystemCall::isDir($directory);
+        if ($existsResult['warning'] !== null) {
+            $ioWarnings[] = 'is_dir: ' . $existsResult['warning'];
+        }
+        $exists = $existsResult['warning'] === null && (bool)$existsResult['result'];
+        $stat = false;
+        $real = false;
+        $matches = false;
+        $readable = false;
+        $writable = false;
+        if ($exists) {
+            $statResult = ABJ_404_Solution_HostFilesystemCall::stat($directory);
+            if ($statResult['warning'] !== null) {
+                $ioWarnings[] = 'stat: ' . $statResult['warning'];
+            } else {
+                $stat = $statResult['result'];
+            }
+            $realResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($directory) { return realpath($directory); }
+            );
+            if ($realResult['warning'] !== null) {
+                $ioWarnings[] = 'realpath: ' . $realResult['warning'];
+            } else {
+                $real = $realResult['result'];
+            }
+            $globResult = ABJ_404_Solution_HostFilesystemCall::glob(
+                rtrim($directory, '/\\') . DIRECTORY_SEPARATOR . 'abj404_*'
+            );
+            if ($globResult['warning'] !== null) {
+                $ioWarnings[] = 'glob: ' . $globResult['warning'];
+            } else {
+                $matches = $globResult['result'];
+            }
+            $readableResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($directory) { return is_readable($directory); }
+            );
+            if ($readableResult['warning'] !== null) {
+                $ioWarnings[] = 'is_readable: ' . $readableResult['warning'];
+            } else {
+                $readable = (bool)$readableResult['result'];
+            }
+            $writableResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($directory) { return is_writable($directory); }
+            );
+            if ($writableResult['warning'] !== null) {
+                $ioWarnings[] = 'is_writable: ' . $writableResult['warning'];
+            } else {
+                $writable = (bool)$writableResult['result'];
+            }
+        }
+        return array(
+            'exists' => $exists,
+            'readable' => $readable,
+            'writable' => $writable,
+            'stat' => $stat,
+            'real' => $real,
+            'matches' => $matches,
+            'io_warnings' => $ioWarnings,
         );
     }
 
@@ -213,19 +301,58 @@ final class ABJ_404_Solution_DiagnosticCollectionManifest {
      * the directory is already stated once per channel, and repeating it per
      * file would spend the manifest's budget on the same string four times.
      *
-     * @return array{name: string, exists: bool, size: int|null, mtime: int|null, readable: bool}
+     * @return array{name: string, exists: bool, size: int|null, mtime: int|null, readable: bool, io_warning?: string, io_warning_operations?: array<int, string>, io_warning_truncated?: bool}
      */
     private static function describeFile(string $path): array {
-        $exists = @is_file($path);
-        $size = $exists ? @filesize($path) : false;
-        $modified = $exists ? @filemtime($path) : false;
-        return array(
+        $ioWarnings = array();
+        $existsResult = ABJ_404_Solution_HostFilesystemCall::isFile($path);
+        if ($existsResult['warning'] !== null) {
+            $ioWarnings[] = 'is_file: ' . $existsResult['warning'];
+        }
+        $exists = $existsResult['warning'] === null && (bool)$existsResult['result'];
+        $size = false;
+        $modified = false;
+        $readable = false;
+        if ($exists) {
+            $sizeResult = ABJ_404_Solution_HostFilesystemCall::filesize($path);
+            if ($sizeResult['warning'] !== null) {
+                $ioWarnings[] = 'filesize: ' . $sizeResult['warning'];
+            } else {
+                $size = $sizeResult['result'];
+            }
+            $modifiedResult = ABJ_404_Solution_HostFilesystemCall::filemtime($path);
+            if ($modifiedResult['warning'] !== null) {
+                $ioWarnings[] = 'filemtime: ' . $modifiedResult['warning'];
+            } else {
+                $modified = $modifiedResult['result'];
+            }
+            $readableResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($path) { return is_readable($path); }
+            );
+            if ($readableResult['warning'] !== null) {
+                $ioWarnings[] = 'is_readable: ' . $readableResult['warning'];
+            } else {
+                $readable = (bool)$readableResult['result'];
+            }
+        }
+        $reading = array(
             'name' => basename($path),
             'exists' => $exists,
             'size' => is_int($size) ? $size : null,
             'mtime' => is_int($modified) ? $modified : null,
-            'readable' => $exists && @is_readable($path),
+            'readable' => $exists && $readable,
         );
+        if ($ioWarnings !== array()) {
+            $warning = implode('; ', $ioWarnings);
+            self::reportFailure('Diagnostic collection file probe warning: ' . $warning);
+            $reading['io_warning'] = substr($warning, 0, 512);
+            $reading['io_warning_operations'] = array_values(array_unique(array_map(
+                static function (string $item): string { return (string)strtok($item, ':'); },
+                $ioWarnings
+            )));
+            $reading['io_warning_truncated'] = strlen($warning) > 512;
+        }
+        return $reading;
     }
 
     /**

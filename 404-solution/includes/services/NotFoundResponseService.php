@@ -86,13 +86,13 @@ class ABJ_404_Solution_NotFoundResponseService {
                 $this->logger->infoMessage($msg);
 
             } else {
-                $redirect = $this->redirectsRepo->getExistingRedirectForURL($requestedURL);
+                $redirect = $this->redirectsRepo->getExistingRedirectForURL(abj_service('query_string_helper')->routingKey($requestedURL));
                 $pType = is_scalar($permalink['type']) ? (string)$permalink['type'] : '';
                 $pId = is_scalar($permalink['id']) ? (string)$permalink['id'] : '';
                 $pLink = is_scalar($permalink['link']) ? (string)$permalink['link'] : '';
                 $defRedir = is_scalar($options['default_redirect']) ? (string)$options['default_redirect'] : '301';
                 if (!isset($redirect['id']) || $redirect['id'] == 0) {
-                    $this->redirectsRepo->setupRedirect(
+                    $this->redirectsRepo->setupRedirectIfSourceAbsent(
                         $this->capturedRedirectSpec(array(
                             'requestedURL' => $requestedURL,
                             'type' => $pType,
@@ -106,15 +106,15 @@ class ABJ_404_Solution_NotFoundResponseService {
                 setcookie(ABJ404_PP . '_STATUS_404', 'true', abj_clock()->now() + 20, "/");
 
                 $this->forceRedirect(esc_url($pLink), (int)$defRedir);
-                exit;
+                return;
             }
         }
 
         if (@$options['capture_404'] == '1') {
-            $redirect = $this->redirectsRepo->getExistingRedirectForURL($requestedURL);
+            $redirect = $this->redirectsRepo->getExistingRedirectForURL(abj_service('query_string_helper')->routingKey($requestedURL));
             $defRedir2 = is_scalar($options['default_redirect']) ? (string)$options['default_redirect'] : '301';
             if (!isset($redirect['id']) || $redirect['id'] == 0) {
-                $this->redirectsRepo->setupRedirect($this->capturedRedirectSpec(
+                $this->redirectsRepo->setupRedirectIfSourceAbsent($this->capturedRedirectSpec(
                     array(
                         'requestedURL' => $requestedURL,
                         'type' => (string)ABJ404_TYPE_404_DISPLAYED,
@@ -199,7 +199,7 @@ class ABJ_404_Solution_NotFoundResponseService {
      * @param bool $isCustom404
      * @return bool true if the user is sent to the default 404 page.
      */
-    function forceRedirect(string $location, int $status = 302, $type = -1, string $requestedURL = '', bool $isCustom404 = false): bool {
+    function forceRedirect(string $location, int $status = 302, $type = -1, string $requestedURL = '', bool $isCustom404 = false, ?string $queryMode = null): bool {
         if ($status === 410) {
             $this->sendGoneStatusResponse(
                 410,
@@ -218,16 +218,15 @@ class ABJ_404_Solution_NotFoundResponseService {
             );
         }
 
-        if ($status === 0 && $location !== '') {
-            $this->sendMetaRefreshResponse($location);
-        }
-
         $pluginLogic = abj_service('plugin_logic');
-        if (is_object($pluginLogic) && method_exists($pluginLogic, 'pageOrdering')) {
+        if ($status === 0) {
+            $finalDestination = $location;
+        } else if (is_object($pluginLogic) && method_exists($pluginLogic, 'pageOrdering')) {
             $finalDestination = $pluginLogic->pageOrdering()
-                ->buildFinalRedirectDestination($location, $requestedURL, $isCustom404);
+                ->buildFinalRedirectDestination($location, $requestedURL, $isCustom404, $queryMode);
         } else {
-            $finalDestination = (string)$location . $this->getCommentPartAndQueryPartOfRequest();
+            $suffix = $this->getCommentPartAndQueryPartOfRequest();
+            $finalDestination = (string)$location . ($queryMode === 'ignore' ? explode('?', $suffix, 2)[0] : $suffix);
         }
 
         $terminatingDestination = $this->loopGuard->terminatingDestination(array(
@@ -238,6 +237,10 @@ class ABJ_404_Solution_NotFoundResponseService {
             return false;
         }
         $finalDestination = $terminatingDestination;
+
+        if ($status === 0 && $finalDestination !== '') {
+            $this->sendMetaRefreshResponse($finalDestination);
+        }
 
         if ($type == ABJ404_TYPE_404_DISPLAYED) {
             $this->sendTo404Page($requestedURL, '', false);

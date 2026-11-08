@@ -90,7 +90,7 @@ class ABJ_404_Solution_View_OptionsPresenter extends ABJ_404_Solution_ViewCompon
 			}
 		}
 
-		$defaults = is_array($defaults) && !empty($defaults)
+		$defaults = !empty($defaults)
 			? array_merge($this->getFallbackOptionDefaults(), $defaults)
 			: $this->getFallbackOptionDefaults();
 

@@ -12,7 +12,7 @@ require_once __DIR__ . '/GscConfig.php';
 class ABJ_404_Solution_GscOAuthTokenStore {
     /** @return array{client_id: string, client_secret: string, site_url: string} */
     public function getSettings(): array {
-        $raw = get_option(ABJ_404_Solution_GscConfig::OPTION_KEY, array());
+        $raw = ABJ_404_Solution_OptionShapeRead::arrayValue(ABJ_404_Solution_GscConfig::OPTION_KEY, array());
         if (!is_array($raw)) {
             $raw = array();
         }
@@ -229,7 +229,7 @@ class ABJ_404_Solution_GscOAuthTokenStore {
     }
 
     public function getLastOAuthError(): string {
-        $v = get_option(ABJ_404_Solution_GscConfig::ERROR_OPTION_KEY, '');
+        $v = ABJ_404_Solution_OptionShapeRead::scalar(ABJ_404_Solution_GscConfig::ERROR_OPTION_KEY, '');
         return is_string($v) ? $v : '';
     }
 
@@ -252,7 +252,7 @@ class ABJ_404_Solution_GscOAuthTokenStore {
 
     /** @return array<string, mixed>|false */
     private function getStoredToken() {
-        $token = get_option(ABJ_404_Solution_GscConfig::TOKEN_OPTION_KEY, false);
+        $token = ABJ_404_Solution_OptionShapeRead::arrayValue(ABJ_404_Solution_GscConfig::TOKEN_OPTION_KEY, false);
         if (!is_array($token)) {
             return false;
         }

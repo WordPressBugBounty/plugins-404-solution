@@ -14,9 +14,9 @@ if (!defined('ABSPATH')) {
  *   - The abj404_plugin_db_notice admin-notice payload lifecycle (set, clear,
  *     clear-if-type).
  *   - Write-block / skip-non-essential-write cooldown detection.
- *   - The per-request server-side-issue tracking booleans
- *     (serverSideIssueNoted / serverSideIssueChecked) that drive notice
- *     auto-clear once the server recovers.
+ *   - Legacy per-request issue flags retained for existing callers. These
+ *     flags are not recovery evidence; cause-specific recovery belongs to
+ *     DatabaseNoticeRecoveryPolicy and the individual notice producers.
  *
  * This class holds no SQL query pipeline and builds no queries. It depends on
  * a clock (for cooldown comparisons and notice timestamps) and on a
@@ -36,7 +36,7 @@ class ABJ_404_Solution_DatabaseNoticeStateHolder {
     /** @var callable(): bool */
     private $quotaCooldownChecker;
 
-    /** @var bool Whether a server-side DB issue was noted this request (for auto-clear). */
+    /** @var bool Whether a server-side DB issue was noted this request. */
     private $serverSideIssueNoted = false;
 
     /** @var bool Whether we already checked for a stale notice transient this request. */
@@ -83,8 +83,9 @@ class ABJ_404_Solution_DatabaseNoticeStateHolder {
     }
 
     /**
-     * Persist a runtime flag as a transient (option fallback when transients
-     * are unavailable).
+     * Persist a runtime flag as a transient. The transient API is defined in
+     * the same core file as the options API, so there is no options-only
+     * state to fall back to.
      *
      * @param string $key Flag name.
      * @param mixed $value Value to store (admin-notice payload, cooldown
@@ -96,10 +97,6 @@ class ABJ_404_Solution_DatabaseNoticeStateHolder {
         if (function_exists('set_transient')) {
             // allow-cache-empty: passthrough helper. Callers store admin-notice payloads, cooldown timestamps, and lock-state markers, not query results.
             set_transient($key, $value, $ttlSeconds);
-            return;
-        }
-        if (function_exists('update_option')) {
-            update_option($key, $value, false);
         }
     }
 
@@ -128,14 +125,15 @@ class ABJ_404_Solution_DatabaseNoticeStateHolder {
     }
 
     /**
-     * Read a durable flag written by {@see setDurableFlag()}.
+     * Read a durable flag written by {@see setDurableFlag()}. Durable flags are
+     * scalars (a start instant), read past a wrong-shaped object-cache answer.
      *
      * @param string $key Flag name.
      * @return mixed The stored value, or false when unset/unavailable.
      */
     public function getDurableFlag(string $key) {
         if (function_exists('get_option')) {
-            return get_option($key, false);
+            return ABJ_404_Solution_OptionShapeRead::scalar($key, false);
         }
         return false;
     }
@@ -153,7 +151,7 @@ class ABJ_404_Solution_DatabaseNoticeStateHolder {
     }
 
     /**
-     * Read a runtime flag (transient, with option fallback).
+     * Read a runtime flag written by {@see setRuntimeFlag()}.
      *
      * @param string $key Flag name.
      * @return mixed The stored value, or false when unset/unavailable.
@@ -161,9 +159,6 @@ class ABJ_404_Solution_DatabaseNoticeStateHolder {
     public function getRuntimeFlag(string $key) {
         if (function_exists('get_transient')) {
             return get_transient($key);
-        }
-        if (function_exists('get_option')) {
-            return get_option($key, false);
         }
         return false;
     }
@@ -254,8 +249,8 @@ class ABJ_404_Solution_DatabaseNoticeStateHolder {
     }
 
     /**
-     * Mark that a server-side DB issue was noted this request, so the notice
-     * can be auto-cleared once a later query succeeds.
+     * Record that a server-side DB issue was noted this request. This flag
+     * does not authorize clearing a notice after an unrelated query succeeds.
      *
      * @return void
      */

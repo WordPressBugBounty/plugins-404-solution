@@ -119,14 +119,14 @@ class ABJ_404_Solution_LockOwnerStore {
 
 				// test saving.
 				update_option($keyForTesting, $uniqueID);
-				$result = get_option($keyForTesting);
+				$result = ABJ_404_Solution_OptionShapeRead::scalar($keyForTesting);
 				if ($result != $uniqueID) {
 					$pass = false;
 				}
 
 				// test deleting.
 				delete_option($keyForTesting);
-				$result = get_option($keyForTesting);
+				$result = ABJ_404_Solution_OptionShapeRead::scalar($keyForTesting);
 				if ($result != null && $result != '') {
 					$pass = false;
 				}
@@ -330,7 +330,7 @@ class ABJ_404_Solution_LockOwnerStore {
 		if (!$this->shouldUseNetworkStorage($key)) {
 			return true;
 		}
-		$readyAt = get_site_option(self::NETWORK_ATOMIC_READY_OPTION, false);
+		$readyAt = ABJ_404_Solution_OptionShapeRead::networkScalar(self::NETWORK_ATOMIC_READY_OPTION, false);
 		if ($readyAt === false || !is_numeric($readyAt)) {
 			if ($initialize) {
 				$stored = update_site_option(self::NETWORK_ATOMIC_READY_OPTION,
@@ -349,7 +349,7 @@ class ABJ_404_Solution_LockOwnerStore {
 		}
 		// An old request still owns the legacy site option. Stay paused until
 		// that owner releases it instead of opening a cross-store overlap.
-		return get_site_option($key, false) === false;
+		return ABJ_404_Solution_OptionShapeRead::networkScalar($key, false) === false;
     }
 
     /** Record a storage failure that cost the caller a lock.

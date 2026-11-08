@@ -111,6 +111,12 @@ class ABJ_404_Solution_ErrorEmailBodyFormatter {
         $lines[] = "Active plugins: <pre>" .
             json_encode($activePlugins, JSON_PRETTY_PRINT) . "</pre>";
 
+        $excerpt = $this->scalarString($payload, 'debug_log_excerpt', '');
+        if ($excerpt !== '') {
+            $lines[] = 'AJAX failure evidence: <pre>'
+                . htmlspecialchars($excerpt, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</pre>';
+        }
+
         return implode("<BR/>\n", $lines);
     }
 

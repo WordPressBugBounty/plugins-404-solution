@@ -6,7 +6,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Constants
-if (!defined('ABJ404_AUTHOR_EMAIL')) { define( 'ABJ404_AUTHOR_EMAIL', '404solution@ajexperience.com' ); }
+if (!defined('ABJ404_AUTHOR_EMAIL')) { define( 'ABJ404_AUTHOR_EMAIL', 'support@forethought-studio.com' ); }
 // Default endpoint for the FeedbackTransport HTTP reports POST. Site owners
 // and tests can override via the 'abj404_report_endpoint' filter.
 if (!defined('ABJ404_REPORT_ENDPOINT')) { define( 'ABJ404_REPORT_ENDPOINT', 'https://404solution.ajexperience.com/api/v1/reports' ); }
@@ -85,6 +85,10 @@ ABJ_404_Solution_ErrorHandler::init();
 // Moving it outside is_admin() ensures auto-redirects are created in all contexts.
 ABJ_404_Solution_SlugChangeHandler::init();
 
+// Snapshot term and hierarchical-page permalinks before WordPress mutates
+// them, then persist ID-based redirects after the corresponding save.
+ABJ_404_Solution_AutoRedirectSnapshotHooks::init();
+
 // Keep the redirects denorm display columns (dest_for_view / published_status)
 // fresh when a targeted post or term changes. Registered in all contexts
 // (admin, WP-CLI, REST) because content changes outside wp-admin too. (Step 3c.)
@@ -93,9 +97,14 @@ ABJ_404_Solution_RedirectsDenormContentHooks::init();
 // System page hooks must fire on both admin and frontend
 ABJ_404_Solution_SystemPage::registerHooks();
 
+// Content and permalink-option changes also originate in REST, CLI and cron.
+// These registrations resolve their services only when a relevant hook fires.
+// init() predates 4.3.2; a registrar already linked from that release has no
+// registerPermalinkCacheHooks() member and cannot be replaced mid-request.
+ABJ_404_Solution_PermalinkCache::init();
+ABJ_404_Solution_SpellChecker::init();
+
 if (is_admin()) {
-	ABJ_404_Solution_PermalinkCache::init();
-	ABJ_404_Solution_SpellChecker::init();
 	ABJ_404_Solution_PostEditorIntegration::init();
 
     // Get services from the container instead of using getInstance()

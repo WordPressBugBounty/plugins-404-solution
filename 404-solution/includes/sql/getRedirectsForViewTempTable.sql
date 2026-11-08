@@ -33,10 +33,12 @@ SELECT  COALESCE({wp_abj404_logsv2}.canonical_url,
 
 FROM    {wp_abj404_logsv2}
 
-        INNER JOIN {wp_abj404_redirects}
-        ON COALESCE({wp_abj404_logsv2}.canonical_url,
+WHERE   {wp_abj404_logsv2}.id >= {snapshot_min_log_id}
+        AND {wp_abj404_logsv2}.id <= {snapshot_max_log_id}
+        AND EXISTS (SELECT 1 FROM {wp_abj404_redirects}
+        WHERE COALESCE({wp_abj404_logsv2}.canonical_url,
                     CONCAT('/', TRIM(BOTH '/' FROM {wp_abj404_logsv2}.requested_url))) =
-           {redirects_canonical_url_join_rhs}
+           {redirects_canonical_url_join_rhs})
 
 GROUP BY COALESCE({wp_abj404_logsv2}.canonical_url,
                   CONCAT('/', TRIM(BOTH '/' FROM {wp_abj404_logsv2}.requested_url)))

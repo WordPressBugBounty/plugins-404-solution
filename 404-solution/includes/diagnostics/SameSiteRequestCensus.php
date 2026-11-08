@@ -134,6 +134,9 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
      */
     private static $ownAuthorized = false;
 
+    /** @var bool Evidence persistence must never observe or recurse into itself. */
+    private static $persisting = false;
+
     /**
      * Register this request in the census and arrange for it to leave at
      * shutdown. Safe to call more than once; only the first call registers.
@@ -162,6 +165,7 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
             $action = self::actionForThisRequest();
             $pid = ABJ_404_Solution_PhpRuntimeCapabilityAdapter::processId();
             if ($action === self::TABLE_ENDPOINT_ACTION) {
+                ABJ_404_Solution_RequestFailureFrame::start($_REQUEST);
                 // Described BEFORE registration so the very first row already
                 // carries the request's identity: a request killed before its
                 // first phase transition still has its timeline attributed.
@@ -170,6 +174,7 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
                     'retryCount' => $_REQUEST['retryCount'] ?? '',
                     'retryParentId' => $_REQUEST['retryParentId'] ?? '',
                     'part' => $_REQUEST['part'] ?? '',
+                    'subpage' => $_REQUEST['subpage'] ?? '',
                     'clientSentAt' => $_REQUEST['clientSentAt'] ?? '',
                 ));
                 // Deliberately no request id: the census is not debug-gated, and a
@@ -197,6 +202,7 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
                 ABJ_404_Solution_PhpRuntimeCapabilityAdapter::processToken()
             );
             if ($optionName === '') {
+                if ($action === self::TABLE_ENDPOINT_ACTION) { ABJ_404_Solution_RequestFailureFrame::storageFailed(); }
                 return '';
             }
             self::$ownEntry = $optionName;
@@ -210,6 +216,7 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
             register_shutdown_function(array(__CLASS__, 'leave'));
             return $optionName;
         } catch (Throwable $e) {
+            if (class_exists('ABJ_404_Solution_RequestFailureFrame', false)) { ABJ_404_Solution_RequestFailureFrame::storageFailed(); }
             self::reportFailure('same-site census join failed: ' . $e->getMessage());
             return '';
         }
@@ -244,19 +251,11 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
                 // is paid on the path being measured.
                 return true;
             }
-            $identity = self::$ownIdentity;
             ABJ_404_Solution_RequestPhaseTimeline::stamp($phase);
-            $recorded = ABJ_404_Solution_SameSiteRequestRegistry::advance(
-                self::$ownEntry,
-                array(
-                    'started_at_ms' => $identity['started_at_ms'],
-                    'channel' => $identity['channel'],
-                    'action' => $identity['action'],
-                    'pid' => $identity['pid'],
-                    'phase' => $phase,
-                    'timeline' => ABJ_404_Solution_RequestPhaseTimeline::encode(),
-                )
-            );
+            if (self::$ownIdentity['action'] === self::TABLE_ENDPOINT_ACTION) {
+                ABJ_404_Solution_RequestFailureFrame::stage($phase);
+            }
+            $recorded = self::writeTimeline($phase);
             if ($recorded) {
                 self::$ownPhase = $phase;
             }
@@ -278,9 +277,38 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
      * @return void
      */
     public static function markAuthorized(): void {
+        $context = $GLOBALS['abj404_ajax_context'] ?? array();
+        ABJ_404_Solution_RequestFailureFrame::authorize(is_array($context) ? $context : array());
         if (self::$ownEntry !== '') {
             self::$ownAuthorized = true;
+            self::checkpoint();
         }
+    }
+
+    /** Persist a bounded authorized stage/query checkpoint through this request's existing row. */
+    public static function checkpoint(): bool {
+        if (!self::$ownAuthorized || self::$ownIdentity === null
+                || self::$ownIdentity['action'] !== self::TABLE_ENDPOINT_ACTION) { return false; }
+        return self::writeTimeline(self::$ownPhase);
+    }
+
+    public static function isPersisting(): bool { return self::$persisting; }
+
+    /** Single guarded persistence boundary shared by phases and bounded failure-frame checkpoints. */
+    private static function writeTimeline(string $phase): bool {
+        if (self::$persisting || self::$ownEntry === '' || self::$ownIdentity === null) { return false; }
+        self::$persisting = true;
+        try {
+            $recorded = ABJ_404_Solution_SameSiteRequestRegistry::advance(self::$ownEntry,
+                array_merge(self::$ownIdentity, array('phase' => $phase,
+                    'timeline' => ABJ_404_Solution_RequestPhaseTimeline::encode())));
+            if (!$recorded) { ABJ_404_Solution_RequestFailureFrame::storageFailed(); }
+            return $recorded;
+        } catch (Throwable $e) {
+            ABJ_404_Solution_RequestFailureFrame::storageFailed();
+            self::reportFailure('same-site checkpoint failed: ' . $e->getMessage());
+            return false;
+        } finally { self::$persisting = false; }
     }
 
     /**
@@ -311,6 +339,7 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
                     && $identity['action'] === self::TABLE_ENDPOINT_ACTION
                     && $rid !== ''
                     && $rid !== ABJ_404_Solution_AjaxRequestLedger::UNKNOWN_ID) {
+                self::preserveInterruptedAccount($identity, $phase, $described);
                 ABJ_404_Solution_SameSiteRequestRegistry::retire($optionName, array(
                     'started_at_ms' => $identity['started_at_ms'],
                     'channel' => $identity['channel'],
@@ -340,6 +369,28 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
     }
 
     /**
+     * Keep an authorized table request that shutdown reached before a response.
+     * LSAPI aborts can run PHP cleanup; retirement must not erase their account.
+     *
+     * @param array{started_at_ms: int, channel: string, action: string, pid: int|null} $identity
+     * @param array<string, mixed> $timeline
+     */
+    private static function preserveInterruptedAccount(array $identity, string $phase, array $timeline): void {
+        $stamps = isset($timeline['t']) && is_array($timeline['t']) ? $timeline['t'] : array();
+        if (!isset($stamps['shutdown']) || isset($stamps['echoed'])) {
+            return;
+        }
+        $now = self::nowMs();
+        ABJ_404_Solution_StrandedRequestLedger::record(array(array(
+            'started_at_ms' => $identity['started_at_ms'],
+            'channel' => $identity['channel'], 'action' => $identity['action'],
+            'pid' => $identity['pid'], 'phase' => $phase,
+            'age_ms' => $now === null ? 0 : max(0, $now - $identity['started_at_ms']),
+            'timeline' => ABJ_404_Solution_RequestPhaseTimeline::encode(),
+        )));
+    }
+
+    /**
      * Return this class to the state a freshly started PHP process is in:
      * no census identity, no memoized reading.
      *
@@ -355,6 +406,7 @@ final class ABJ_404_Solution_SameSiteRequestCensus {
         self::$ownIdentity = null;
         self::$ownPhase = '';
         self::$ownAuthorized = false;
+        self::$persisting = false;
     }
 
     /**

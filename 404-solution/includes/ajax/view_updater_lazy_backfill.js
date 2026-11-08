@@ -18,6 +18,9 @@
     var POLL_INTERVAL_MS = 5000;
     var ERROR_BACKOFF_MS = 15000;
     var MAX_ATTEMPTS = 36;
+    var pollState = 'idle';
+    var chainRefreshDone = false;
+    var maintenanceStatus = 'unknown';
 
     function configHost() {
         return $('.abj404-filter-bar[data-lazy-backfill-ajax-url], .abj404-pagination-right[data-lazy-backfill-ajax-url]').first();
@@ -28,10 +31,22 @@
     }
 
     function responseData(result) {
-        if (result && result.success === true && result.data && typeof result.data === 'object') {
+        if (result && result.success === true && result.data && typeof result.data === 'object' && !Array.isArray(result.data)) {
             return result.data;
         }
         return null;
+    }
+
+    function maintenanceState(data) {
+        if (!data || !Object.prototype.hasOwnProperty.call(data, 'maintenance')) {
+            return { present: false, valid: true, complete: false };
+        }
+        var maintenance = data.maintenance;
+        if (!maintenance || typeof maintenance !== 'object' || Array.isArray(maintenance)
+            || typeof maintenance.complete !== 'boolean') {
+            return { present: true, valid: false, complete: false };
+        }
+        return { present: true, valid: true, complete: maintenance.complete };
     }
 
     function updatePendingTooltip(sortKey, sortData) {
@@ -69,17 +84,30 @@
     }
 
     function scheduleNextPoll(attempt, delayMs) {
-        if (attempt >= MAX_ATTEMPTS) {
+        if (attempt >= MAX_ATTEMPTS || pollState !== 'idle') {
             return;
         }
+        pollState = 'scheduled';
         global.setTimeout(function () {
+            pollState = 'idle';
             runLazyBackfillPoll(attempt + 1);
         }, delayMs);
     }
 
     function runLazyBackfillPoll(attempt) {
         var $host = configHost();
-        if (!$host.length || !pendingTooltips().length || attempt > MAX_ATTEMPTS) {
+        if (!$host.length || attempt > MAX_ATTEMPTS) {
+            return;
+        }
+
+        if (attempt === 1 && pollState === 'idle') {
+            chainRefreshDone = false;
+            maintenanceStatus = 'unknown';
+        }
+        if (pollState !== 'idle') {
+            return;
+        }
+        if (!pendingTooltips().length && maintenanceStatus !== 'pending') {
             return;
         }
 
@@ -93,6 +121,7 @@
         var ajaxRunner = (typeof global.abj404AjaxWithNonceRetry === 'function')
             ? global.abj404AjaxWithNonceRetry : $.ajax; // ajax-direct-approved: fallback matches view_updater_pagination.js when nonce retry has not loaded
 
+        pollState = 'requesting';
         ajaxRunner({
             url: ajaxUrl,
             type: 'POST',
@@ -104,19 +133,48 @@
                 subpage: subpage
             },
             success: function (result) {
+                pollState = 'idle';
                 var data = responseData(result);
                 var sorts = data && data.sorts ? data.sorts : null;
-                if (sorts) {
+                var sortsValid = !!sorts && typeof sorts === 'object' && !Array.isArray(sorts);
+                var maintenance = maintenanceState(data);
+                if (maintenance.present) {
+                    maintenanceStatus = maintenance.valid && maintenance.complete === true
+                        ? 'complete' : 'pending';
+                }
+                if (!data || (!sortsValid && !maintenance.present)) {
+                    maintenanceStatus = 'pending';
+                    scheduleNextPoll(attempt, POLL_INTERVAL_MS);
+                    return;
+                }
+                if (sortsValid) {
                     updatePendingTooltip('url', sorts.url);
                     updatePendingTooltip('dest', sorts.dest);
                 }
-                if (sorts && allVisiblePendingSortsReady(sorts)) {
-                    refreshTableWithoutPageReload($host);
+                var sortsReady = sortsValid && allVisiblePendingSortsReady(sorts);
+                if (sortsReady && !chainRefreshDone) {
+                    chainRefreshDone = true;
+                    pollState = 'refreshing';
+                    try {
+                        refreshTableWithoutPageReload($host);
+                    } finally {
+                        pollState = 'idle';
+                    }
+                }
+                if (maintenanceStatus === 'complete') {
+                    return;
+                }
+                if (maintenanceStatus === 'pending') {
+                    scheduleNextPoll(attempt, POLL_INTERVAL_MS);
+                    return;
+                }
+                if (sortsReady) {
                     return;
                 }
                 scheduleNextPoll(attempt, POLL_INTERVAL_MS);
             },
             error: function (jqXHR, textStatus, errorThrown) {
+                pollState = 'idle';
                 if (global.console && typeof global.console.error === 'function') {
                     global.console.error('ABJ404 lazy backfill AJAX failed', {
                         status: jqXHR ? jqXHR.status : 0,

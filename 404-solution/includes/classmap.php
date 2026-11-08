@@ -7,9 +7,10 @@ if (!defined('ABSPATH')) {
 // Deterministic classmap, so the autoloader never has to glob() at runtime.
 //
 // Stored as "which classes live in which includes/ subdirectory" rather than
-// as one path per class, because that is what the data actually is: 481 of the
-// 488 entries are the same sentence repeated -- class ABJ_404_Solution_Foo
-// lives in includes/<dir>/Foo.php. Writing that convention once, and listing
+// as one path per class, because that is what the data actually is: all but a
+// handful of the entries are the same sentence repeated -- class
+// ABJ_404_Solution_Foo lives in includes/<dir>/Foo.php. (No counts here on
+// purpose: every new class would make them stale.) Writing that convention once, and listing
 // only the handful of classes that break it, is what keeps this file
 // navigable (and under the project's file-size limit) as the plugin grows.
 //
@@ -17,7 +18,9 @@ if (!defined('ABSPATH')) {
 // for the directory that holds it. A class whose FILE is not named after it --
 // several classes sharing one file, or a file renamed without its class --
 // goes in $abj404ClassFileExceptions instead.
-// A standalone class omitted from this map must be require_once'd by every production file that loads or statically references it.
+// Every class declared under includes/ is in this map, mapped to the file that
+// declares it (ClassLoadingReachabilityTest enforces it), so no caller ever has
+// to remember a require_once for a collaborator to be loadable.
 //
 // Grepping: search the short name (`grep -rn "SpellChecker" includes/classmap.php`).
 // The fully prefixed class name appears here only for the exceptions.
@@ -39,6 +42,8 @@ $abj404ClassesByDirectory = array(
         'RedirectDestinationLinkResolver', 'RedirectRowActionsPresenter', 'RedirectRowPresenter',
         'RedirectAddModalPresenter', 'RedirectsTablePagePresenter', 'AdminActionsDependencies',
         'AdminThemeManager', 'AdminRuntimeErrorNotice', 'AdminPageUrlBuilder',
+        'AdminLogsPageShell', 'AdminLogsTable', 'AdminPaginationLinks', 'AdminStatusFilterTabs',
+        'AdminTableColumnHeaders', 'AdminTraceLabels',
     ),
     'admin/actions' => array(
         'AdminActionHandlerInterface', 'AdminActionRegistry', 'UpdateOptionsHandler',
@@ -57,9 +62,9 @@ $abj404ClassesByDirectory = array(
         'Ajax_LoadGscSection', 'Ajax_ViewLogs', 'Ajax_RedirectDestinationAutocomplete',
         'Ajax_TrendData', 'Ajax_SettingsModeToggle', 'Ajax_RestoreDefaults', 'Ajax_PrivacyExport',
         'Ajax_PrivacyDelete', 'Ajax_SupportRequest', 'Ajax_SupportRequestPreview',
-        'Ajax_SuggestionPolling', 'Ajax_TrashLink',
+        'Ajax_SuggestionPolling', 'Ajax_SuggestionCompute', 'Ajax_TrashLink',
         'Ajax_EngineProfiles', 'Ajax_UninstallPrefs', 'AjaxAdminEndpointRegistrar',
-        'AjaxClientReportBeaconResponder',
+        'AjaxClientReportBeaconResponder', 'PluginAjaxActions',
         'AjaxAdminEndpointSupport', 'AjaxResponseEmitter', 'Ajax_GetPaginationLinks',
         'AdminTableResponseParts', 'MeasuredTableResponseSize',
         'JsonResponseEncoder', 'EncodedJsonResponse', 'JsonResponseHead', 'AjaxErrorEnvelope', 'AjaxRequestIdScopes',
@@ -75,30 +80,46 @@ $abj404ClassesByDirectory = array(
     'core' => array(
         'PluginLogicAdminActions', 'PluginLogicImportExport', 'PluginLogicLifecycle',
         'PluginLogicPageOrdering', 'PluginLogicSettingsUpdate', 'PluginLogicUrlNormalization',
-        'PluginLogicDefaults', 'InternalLinkScanner', 'LockOwnerStore', 'ExclusiveOptionRow', 'OptionRowCompareAndSwap',
-        'LeakedLockReclaimer', 'DatabaseMetadataLockWaitGuard',
+        'PluginLogicDefaults', 'InternalLinkScanner', 'LockOwnerStore', 'ExclusiveOptionRow',
+        'LeakedLockReclaimer', 'DatabaseMetadataLockWaitGuard', 'DatabaseDriverCall',
         'PluginLogicVersionUpgrader', 'PluginLogicOptionsResolver', 'ErrorHandler',
         'FileSystemService', 'Functions', 'RegexHelper', 'RegexHelperMb', 'RegexHelperPreg',
         'PermalinkResolver', 'UrlEncoder', 'Sanitizer', 'QueryStringHelper', 'PostRef', 'UserRef',
         'SiteRef', 'PluginLogic', 'PluginLogicInterface', 'Privacy', 'ServiceContainer', 'Clock',
         'ExactInteger', 'TransientStore', 'ResponseDetach', 'RequestKind',
-        'PhpRuntimeCapabilityAdapter', 'PcntlSignalAdapter', 'OpcacheAdapter',
+        'PhpRuntimeCapabilityAdapter', 'PcntlSignalAdapter', 'OpcacheAdapter', 'PageCacheAdapter',
         'SiteTimezone', 'SiteLocalTimestamp', 'PluginReleaseChannel', 'SetupWizard', 'SynchronizationUtils', 'Timer',
         'WordPressHookRegistrar', 'WordPress_Connector', 'WordPressConnectorDependencies',
-        'ReviewFeedback', 'RebuildHealthState',
+        'ReviewFeedback', 'RebuildHealthState', 'DeferredTranslation',
+        'HostFilesystemCall', 'StoredSettingsReconciler',
     ),
     'database' => array(
+        'DatabaseColumnIntersection',
         'DatabaseMetadataReader', 'DatabaseRuntimeState', 'DatabaseCoreInterface', 'DatabaseCore',
-        'DatabaseConnectionManager', 'DatabaseErrorClassifier', 'DatabaseRepairPolicy',
+        'DatabaseTableNameResolver', 'DatabaseTableCharacterSetChange',
+        'DatabaseConnectionManager', 'DatabaseErrorClassifier', 'DatabaseInfrastructureErrorTaxonomy',
+        'DatabaseCollationHelper', 'DatabaseRepairPolicy',
         'DatabaseQueryRecoveryPolicy', 'DatabaseQueryTimeoutManager', 'DatabaseSqlErrorReporter',
+        'DatabaseNoticeRecoveryPolicy',
         'DatabaseQueryInterface', 'DatabaseTableMetadataInterface',
         'DatabaseQueryBuilderInterface', 'DatabaseErrorRecoveryInterface', 'SqlFragmentTemplate',
         'DatabaseRuntimeStateInterface', 'DatabaseNoticeStateHolder', 'DataAccessDependencies', 'DataAccess',
-        'TrackingDatabaseCore', 'TableIndexDefinitions', 'TableIndexWriter', 'TableReadinessGate', 'ShowIndexRowReader',
+        'TableIndexDefinitions', 'TableIndexWriter', 'TableReadinessGate', 'ShowIndexRowReader',
         'CreateTableIndexParser', 'CreateTableColumnParser', 'CreateTableOptionsParser',
-        'IndexDefinitionComparator', 'RetiredColumns', 'SchemaHighWaterMark',
+        'IndexDefinitionComparator', 'RetiredColumns', 'SchemaHighWaterMark', 'OptionRowCompareAndSwap',
+        'DatabaseMutationFailedException', 'StatementPreparationException', 'CleanupQuerySession',
+        'DatabaseConnectivityErrorTaxonomy', 'DatabaseErrorTableInspector',
+        'DatabaseHostStateErrorTaxonomy', 'DatabasePrefixDiagnostics', 'DatabaseQueryDiagnostics',
+        'DatabaseQueryExecutor', 'DatabaseQueryServices', 'DatabaseRecoveryServices',
+        'DatabaseMaintenanceBatchSizer',
+        'DatabaseSchemaErrorTaxonomy', 'DatabaseTableRepairer', 'DatabaseTransactionExecutor',
+        'DatabaseTransactionConnection', 'DatabaseStatementGroupTransaction',
+        'DatabaseWpdbResultHarvester', 'DatabaseReadResultValidator',
     ),
     'database/upgrades' => array(
+        'LegacyLogsTableMigration',
+        'ColumnCollationDriftDetector',
+        'MinLogIdBackfillStateStore',
         'DatabaseUpgradeCoordinator', 'DatabaseUpgradeComponent',
         'DatabaseUpgradeComponentRegistry', 'DatabaseUpgradeRuntimeState',
         'DatabaseUpgradeIndexes', 'DatabaseUpgradeEngineNormalization',
@@ -111,17 +132,20 @@ $abj404ClassesByDirectory = array(
         'DatabaseUpgradeTableRepair', 'DatabaseUpgradeDropStagedViewTables',
         'DatabaseUpgradeOrphanAdoption', 'DatabaseUpgradeMultiSite', 'DatabaseUpgradeSchemaDiff',
         'DatabaseUpgradeBootstrap', 'DatabaseTableLowercaseRenamer', 'DatabaseTableDdlExecutor',
-        'DatabaseUpgradesDependencies', 'DatabaseUpgradesEtc',
+        'DatabaseUpgradesDependencies', 'DatabaseUpgradesEtc', 'QueuedCollationRepair',
+        'LogsTableMetadataRefresh',
     ),
     'diagnostics' => array(
+        'HeartbeatFailureCounts', 'HeartbeatWindowAggregate',
+        'AjaxFailureReporter', 'RequestFailureFrame',
         'CrashBeacon', 'CrashBeaconStore', 'CrashBeaconReporter', 'AjaxRequestTrace',
         'AjaxTeardownRecorder', 'CanonicalRedirectHookCensus', 'CanonicalHookCensusStore', 'HookCallbackRoster',
         'AjaxCheckpointLogger', 'AjaxCheckpointBoundaryWriter', 'AjaxFrequentCheckpointWriter',
         'CheckpointRecordFactory', 'CheckpointIntentStore', 'CheckpointIntentCorrelation',
         'DurableOperationRecorder',
-        'ActiveOperationBreadcrumbs', 'ActiveOperationBoundaryManifest',
+        'ActiveOperationBreadcrumbs', 'ActiveOperationBreadcrumbReader', 'ActiveOperationBreadcrumbState', 'ActiveOperationBoundaryManifest',
         'CheckpointJournalWriter',
-        'CheckpointJournalReader', 'EncodedTableResponseSize', 'RequiredCheckpointEvidence', 'RequiredCheckpointIdentityEvidence',
+        'CheckpointJournalReader', 'EncodedTableResponseSize', 'RequiredCheckpointEvidence', 'RequiredCheckpointEvidenceBudget', 'RequiredCheckpointIdentityEvidence',
         'CanaryLadderVerdicts', 'CanaryLadderStep', 'CanaryLadderInterpretation',
         'MalformedCheckpointEvidence',
         'DecisiveRecordManifest',
@@ -137,7 +161,7 @@ $abj404ClassesByDirectory = array(
         'AuthorizationLogTracer', 'PostAuthorizationFailureTracer',
         'TableRenderTranslationTracer', 'DiagnosticInternalHookObserver',
         'HookInstrumentationRegistration', 'HookInstrumentationRegistry',
-        'DiagnosticAppendStream',
+        'DiagnosticAppendStream', 'DiagnosticSinkIdentity',
         'HookRegistryInspectionLedger', 'DiagnosticDirectoryResolver',
         'RenderOptionIoTracer',
         'RenderOptionIoOperationJournal',
@@ -154,16 +178,16 @@ $abj404ClassesByDirectory = array(
         'ResponseControlFilterTracer',
         'ShutdownCallbackTracer',
         'InstrumentedObjectCache',
-        'AjaxTraceJournal', 'AjaxStageDiagnostics',
+        'AjaxTraceJournal', 'AjaxTraceJournalReader', 'AjaxStageDiagnostics',
         'ShutdownEnvironmentInventory', 'ShutdownTeardownBracket', 'DiagnosticJournalExcerpt',
         'DiagnosticJournalFileSelector',
         'DiagnosticClientVerdict', 'DiagnosticCollectionManifest', 'DiagnosticCollectionManifestRenderer', 'DiagnosticDirectoryProbe',
         'DiagnosticEvidencePriority', 'DiagnosticEvidenceBudget', 'DiagnosticEvidenceGrant','DetachAbEvidence', 'CanaryReceiptEvidence',
         'FailingSessionEvidence',
         'DiagnosticRequestGroup', 'DiagnosticFailureClassification',
-        'HostFilesystemPressureProbe', 'HostPressureSampler', 'HostServerCounterProbe',
-        'SameSiteRequestCensus', 'SameSiteCensusReading', 'SameSiteRequestRegistry', 'SameSiteRequestRowCodec', 'RequestTimelinePromoter',
-        'StrandedRequestLedger', 'Utf8SafeRecord', 'CpuUsage',
+        'HostFilesystemPressureProbe', 'HostPressureSampler', 'HostProcfsPressureProbe', 'HostServerCounterProbe',
+        'SameSiteRequestCensus', 'SameSiteCensusReading', 'SameSiteCensusReaper', 'SameSiteCensusHandoff', 'SameSiteRequestRegistry', 'SameSiteRequestRowCodec', 'RequestTimelinePromoter',
+        'StrandedRequestLedger', 'StrandedRequestLedgerEntries', 'Utf8SafeRecord', 'CpuUsage',
         'RequestPhaseTimeline', 'LifecycleHookStamps', 'RequestTimeRecorder', 'HookTickLayout', 'CodeOwnerResolver', 'TimeLimitBreakdown', 'TimeLimitRecord', 'TimeLimitEvidence', 'TimeLimitReportRenderer', 'TimeLimitFatalStore', 'TimeLimitFatalReporter', 'TimeLimitRecoveryEmail', 'TimeLimitFatalRecorder', 'TimeLimitReportView', 'TimeLimitAdminReport',
         'RequestEnvironmentFingerprint', 'ClientBuildFingerprint', 'DiagnosticModuleManifest',
         'OpcacheGenerationProbe', 'BootWaypointRecorder',
@@ -172,7 +196,10 @@ $abj404ClassesByDirectory = array(
         'DetachAbAttempt', 'DetachAbVerdict', 'ResponseBodyRewriteVerdict', 'ResponseBodyDeliveryEvidence',
         'DeliveredTableResponseSize', 'MeasuredBodyBytes', 'BodyDeliveryObservations',
         'AjaxCanaryReceiptParser', 'DebugLogFileStore', 'DebugLogReader',
+        'DebugLogEntryFormat', 'DebugLogSupportExcerpt',
         'DebugLogArchiveBuilder', 'DeveloperLogMailer', 'ToolsDiagnostics',
+        'DecisiveRecordContractEvaluator', 'DecisiveRecordDiscriminatorContract',
+        'QueryBudgetInstrumentation',
     ),
     'engine' => array(
         'ArchiveFallbackEngine', 'CategoryTagMatchingEngine', 'ContentMatchingEngine',
@@ -186,8 +213,8 @@ $abj404ClassesByDirectory = array(
         'FeedbackEnvironmentExtras_HostProbes',
         'FeedbackEnvironmentExtras_PlatformFingerprint',
         'FeedbackEnvironmentExtras_CacheFingerprint',
-        'FeedbackEnvironmentExtras_DebugLogSignatures', 'FeedbackSiteTokenStore',
-        'SupportLogExcerpt', 'SupportEvidenceExcerpt', 'CanaryReceiptSupportSection',
+        'FeedbackEnvironmentExtras_DebugLogSignatures', 'FeedbackSiteSummary', 'FeedbackSiteTokenStore',
+        'SupportLogExcerpt', 'SupportEvidenceExcerpt', 'DiagnosticChannelEvidence', 'CanaryReceiptSupportSection',
         'FailingSessionSupportSection', 'StrandedRequestSupportSection',
         'DetachAbVerdictSupportSection', 'CanonicalSuppressionSupportSection',
         'FeedbackDsrClient', 'FeedbackReportUuid',
@@ -195,13 +222,17 @@ $abj404ClassesByDirectory = array(
         'FeedbackTransport', 'PayloadSchema', 'ReportPayloadJsonSchemaValidator',
         'ErrorEmailDedupeState', 'ErrorEmailBodyFormatter', 'PiiRedactor', 'OpaqueTokenClassifier',
         'RequestCredentialRedactor', 'SensitiveValueMask',
+        'DebugLogEvidenceBudget', 'FeedbackEmailFallback', 'FeedbackHttpClient',
+        'FeedbackPayloadBuilder', 'FeedbackPayloadSchemaGuard', 'FeedbackTransportLog',
     ),
     'frontend' => array(
         'FrontendRequestPipeline', 'FrontendPipelineDependencies', 'FrontendLegacyAdapters',
         'FrontendRuntimeOptions', 'FrontendHitRecorder', 'SuggestionComputeJob',
         'FrontendPipelineTrace', 'FrontendDbVersionRecovery', 'FrontendPipelineTelemetry',
         'RequestContext', 'PostEditorIntegration', 'PublishedPostsProvider', 'ShortCode',
-        'SlugChangeHandler', 'RemovedPostParentResolver', 'SuggestionPublisher', 'SystemPage',
+        'SlugChangeHandler', 'AutoRedirectSnapshotService', 'AutoRedirectSnapshotHooks', 'ContentDescendantWalker',
+        'RemovedPostParentResolver', 'SuggestionPublisher', 'FrontendAsyncSuggestionTrigger', 'SystemPage',
+        'SystemPageNotices',
     ),
     'gsc' => array(
         'GscConfig', 'GscFetchLease', 'GscFetchLock', 'GscFetchLockStore', 'GscOAuthTokenStore', 'GscSearchAnalyticsClient', 'GscAdminSectionRenderer',
@@ -209,18 +240,21 @@ $abj404ClassesByDirectory = array(
     ),
     'import' => array(
         'CrossPluginImporter', 'ForeignRedirectSourceReader', 'ForeignSourceQueryGateway',
-        'ExportService', 'ImportService', 'RedirectExportDestination', 'NativeRedirectCsvWriter',
+        'ExportService', 'ImportService', 'ImportIssueSummary', 'ImportRunState', 'ImportSourceReadException', 'RedirectExportDestination', 'NativeRedirectCsvWriter', 'RedirectExportWorkspace',
     ),
     'logs' => array(
+        'LogRetentionRepository',
         'LoggingCapabilityDiagnostics', 'LoggingFeedbackDispatcher', 'LoggingStateStore',
         'LoggingMessageWriter', 'RoutineLoggingBridge', 'LogTimestampFormatter', 'LogDebugModeResolver',
         'LogsMetricsReader', 'LogReadQueryInterface', 'LogPrivacyInterface', 'LogWriteInterface',
         'LogHitsRebuildInterface', 'LogHitsLifecycleInterface', 'LogsHitsRollupServiceInterface',
         'LogsHitsRollupService', 'LogsHitsRollupStallWatchdog', 'LogsHitsTableRebuilder',
-        'LogsHitsRebuildLock', 'LogsLookupRepository',
-        'LogsPrivacyService', 'LogsReadQueries', 'LogsHitsDataPopulator',
+        'LogsHitsRebuildBudget', 'LogsHitsRebuildProgress', 'LogsHitsTableMetadata',
+        'LogsHitsRebuildLock', 'LogsHitsCanonicalUrlJoinHelper', 'LogsLookupRepository',
+        'LogsPrivacyService', 'LogsReadResult', 'LogsReadQueries', 'LogsUrlSortRepository', 'LogsHitsDataPopulator',
         'LogsWriteRecoveryPolicy', 'LogsWriter', 'RedirectHitLogEntry', 'LogsRepositoryInterface',
-        'LogsRepository', 'EmailDigest', 'EmailDigestExtensionPoints', 'Logging', 'TrackingLogsRepository',
+        'LogsRepository', 'EmailDigest', 'EmailDigestExtensionPoints', 'Logging',
+        'LogsEntrySanitizer', 'LogsQueueFlusher', 'LogsRequestedUrlColumnMetadata',
     ),
     'matching' => array(
         'EngineProfileSaveRequest', 'MatchingEngineOrchestrator', 'RedirectCandidateEvaluator',
@@ -232,14 +266,15 @@ $abj404ClassesByDirectory = array(
     ),
     'ngram' => array(
         'NGramNetworkOptionStore', 'NGramCacheRebuildScheduler', 'NGramCacheRebuildBatchRunner',
-        'NGramRebuildProgressState', 'NGramRescheduleFailureReport', 'NGramRebuildDrain',
-        'NGramRebuildRetryPolicy', 'NGramRebuildRuntime',
+        'NGramRebuildProgressState', 'NGramRescheduleFailureReport', 'NGramRebuildDrain', 'NGramRebuildChainRearmer',
+        'NGramRebuildRetryPolicy', 'NGramRebuildRuntime', 'NGramCronFallback',
         'NGramCacheSyncRebuilder',
         'NGramCacheReconciler', 'NGramTermCacheReconciler', 'NGramLastUpdatedEpochMigration',
         'NGramFilter',
         'NGramFilterCollaboratorResolver', 'TermNGramCoveragePolicy', 'TermCandidateSource',
-        'NGramExtractor', 'NGramSimilarity', 'NGramCacheRepository', 'NGramCountRangeQuery', 'NGramCoveragePolicy',
+        'NGramExtractor', 'NGramSimilarity', 'NGramCacheRepository', 'NGramCacheRowDecoder', 'NGramCountRangeQuery', 'NGramCoveragePolicy',
         'NGramRebuilder', 'NGramRebuilderDependencies', 'NGramUsageTelemetry',
+        'NGramCronFallbackCoordinator',
     ),
     'php' => array(
         'FileSync', 'MbStringAdapter', 'MbStringAdapterMb', 'MbStringAdapterPreg',
@@ -256,62 +291,73 @@ $abj404ClassesByDirectory = array(
         'AdminStatusFallbackResolver',
         'SettingsNotificationPolicy', 'SetupWizardAnswerPolicy', 'SettingsRedirectPolicy',
         'SettingsRegexPatternPolicy', 'SettingsRetentionPolicy', 'SettingsSuggestionPolicy',
-        'SettingsWordPressPolicy', 'PluginAdminAccessPolicy', 'ErrorTypeClassifier',
+        'SettingsWordPressPolicy', 'PluginAdminAccessPolicy', 'PluginAdminAuthorization', 'ErrorTypeClassifier',
     ),
     'redirects' => array(
         'RedirectsBulkReader', 'RedirectLookupService', 'RedirectSpec',
-        'RedirectsDenormChunkResolver', 'RedirectsSortKeyChunkStore', 'RedirectsDenormColumnSql',
+        'RedirectsDenormChunkResolver', 'RedirectsSchemaProbe', 'RedirectsSortKeyChunkStore', 'RedirectsDenormColumnSql',
         'RedirectsDenormMaintenanceService', 'RedirectsDenormContentHooks',
-        'RedirectsRetentionPolicy', 'RedirectsCleanupRepository', 'RedirectDeadDestinationChecker',
+        'RedirectsRetentionPolicy', 'RedirectsCleanupRepository', 'RedirectDuplicatesRepository', 'RedirectDeadDestinationChecker',
         'RedirectsRetentionService', 'RedirectRow', 'RedirectUpdate', 'RedirectCanonicalUrl',
         'RedirectScheduleTimezone', 'ExistingRedirectLookup', 'AutoRedirectHandler',
         'CanonicalPaginationRedirect', 'CanonicalPaginationUrlResolver',
-        'RedirectLoopGuard',
+        'RedirectLoopGuard', 'RedirectChainWalker', 'RedirectChainTraversal', 'RedirectCycleException',
         'RedirectExclusionPolicy', 'RedirectDispatcher', 'RedirectConditionEvaluator',
         'RegexAutoPromote', 'RegexDestinationSubstitutor', 'RegexDestinationTemplateValidator',
-        'RegexSourcePatternValidator', 'RedirectWriteAdmissionPolicy',
+        'RegexSourcePatternValidator', 'RedirectWriteAdmissionPolicy', 'RedirectPageCachePurge',
     ),
     'repositories' => array(
+        'AdminTableFlightRepository',
+        'LegacySuggestionPageRecovery', 'LegacyPageRecoveryMutation', 'SettingsOptionWriter', 'SettingsBookkeepingWriter',
+        'SettingsWriteTarget', 'NativeOptionSql', 'Dest404PageFence',
         'ContentRepositoryInterface', 'PublishedContentLookupInterface', 'OldSlugLookupInterface',
         'TermUrlEnricher', 'InternalSourceEvidenceRepository', 'PublishedContentRepository',
         'PublishedTermsProvider', 'PermalinkCacheRepository', 'OldPermalinkStructureStore',
         'SpellingCacheRepository', 'OldSlugRepository', 'ContentRepository',
         'RedirectsRepositoryInterface', 'RedirectConditionsRepository', 'RedirectExportReader',
-        'RedirectInsertStatement',
+        'RedirectInsertStatement', 'RedirectUpdateStatement',
         'RedirectLookupRepository', 'RedirectRegexCacheStore', 'RedirectsLiveColumnSet',
-        'RedirectWriteService',
+        'RedirectWriteService', 'RedirectEditWriter', 'RedirectGraphLock', 'RedirectLifecycleService', 'RedirectIntentRepository',
         'RedirectsRepository', 'ContentKeywordsRepository', 'PluginUpdateMetadataRepository',
         'PermalinkCache', 'PermalinkCacheScheduleLock', 'ReviewStateRepository',
-        'NetworkSitesRepository', 'NextNetworkSite',
+        'NetworkSitesRepository', 'NextNetworkSite', 'MaintenancePassRepository', 'RedirectBatchDeletion',
+        'SiteResourceLock',
     ),
     'rest' => array(
         'RestApiResponsePresenter', 'RestApiRedirectMutationService', 'RestApiReadService',
         'RestApiController',
     ),
     'services' => array(
-        'PerPageOptionUpdater', 'CronScheduler', 'ScheduledEventInspector',
+        'AdminTableFlight',
+        'RedirectMutationCompletion', 'PostChangeRedirectDelivery',
+        'PerPageOptionUpdater', 'CronScheduler', 'ScheduledEventInspector', 'MaintenanceDrain',
+        'MinLogIdBackfillContinuation', 'CronDispatchStallEvidence', 'QueuedCronEventAdminContinuation',
+        'OptionShapeRead',
+        'WordPressPostMutationNotifications',
         'CronWriteOutcome',
         'CronRecurrenceMigration', 'RequestInputNormalizer', 'RedirectEditRequest',
-        'RequestedRedirectIds',
+        'RequestedRedirectIds', 'SubmittedRedirectConditions',
         'RedirectDestinationSuggestionService', 'RedirectEngineLabeler', 'StatsRepositoryResolver',
         'RestApiRequestParser', 'FrontendSuggestionLocaleScope', 'ShortcodeRequestedUrlResolver',
         'ShortcodeUrlBarUpdater', 'SettingsModePreference', 'SettingsModeDeepLink',
-        'NotFoundResponseService',
+        'NotFoundResponseService', 'OptionCacheInvalidator',
         'NotFoundResponseDependencies', 'PreviousRequestCookieTracker', 'RequestIgnoreNormalizer',
         'RequestIgnoreNormalizerDependencies', 'ErrorDiagnosticsReporter',
         'AdminFatalErrorResponder', 'AjaxFatalErrorResponder', 'FatalErrorProcessor',
         'ImportCsvParser', 'ImportProgressStore', 'ImportRedirectRowProcessor',
         'ImportUploadValidator', 'OutputBufferDrain',
+        'CronExactEventConsumer', 'PostResponseWorkerBudget',
     ),
     'settings' => array(
         'SettingsFieldValidator', 'StorageOptionContracts', 'SuggestionTransient', 'SuggestionWorkerStateStore',
-        'SuggestionDisplayOptions', 'SetupWizardOptionStore',
+        'SuggestionDisplayOptions', 'SetupWizardOptionStore', 'SettingsVersionStamp',
     ),
     // Includes the standalone classes SpellChecker delegates to (converted
     // from traits).
     'spelling' => array(
         'SpellURLMatcher', 'SpellPostListeners', 'SpellNGramPrefilter',
         'SpellCandidatePermalinkLookup', 'SpellSuggestionExclusionPolicy', 'SpellSuggestionScorer',
+        'SpellSuggestionShortcodeDetector',
         'SpellLevenshteinEngine', 'SpellLevenshteinEngineDependencies',
         'SpellCandidateDistanceRanker', 'SpellCandidateFilter',
         'StopWords', 'SpellChecker', 'SpellCheckerDependencies',
@@ -319,8 +365,8 @@ $abj404ClassesByDirectory = array(
     'stats' => array(
         'StatusCountBuckets', 'StatusCountsMutationSync', 'StatusCountsRepository', 'RedirectHitCountHistogramRepository',
         'RedirectRowCountRepository', 'UnavailableStatsRepository', 'StatsRepositoryInterface',
-        'StatsRefreshLock', 'StatsReadRepository', 'StatsDashboardSnapshotCache',
-        'StatsDigestDataProvider', 'StatsRepository',
+        'StatsRefreshLock', 'StatsReadRepository', 'PeriodicStatsRepository', 'StatsDashboardSnapshotCache',
+        'StatsDigestDataProvider', 'StatsRepository', 'StatsRollupRepository', 'StatsRollupService',
     ),
     'uninstall' => array(
         'UninstallModal', 'UninstallCollationSnapshotPresenter', 'UninstallDatabaseDefaultsReader',
@@ -344,10 +390,10 @@ $abj404ClassesByDirectory = array(
     ),
     'view-build' => array(
         'ViewReadServiceInterface', 'ViewReadService', 'StatusCountsRefreshCoordinator',
-        'ViewReadRuntimeState', 'ViewQueryPolicy', 'ViewQueryBuilder', 'RedirectsViewLiveResolver',
+        'ViewReadRuntimeState', 'ViewQueryPolicy', 'ViewQueryBuilder', 'ViewSortResolver', 'RedirectsViewLiveResolver',
         'RedirectsDenormSchemaReadiness', 'RedirectsHitsRollupReader', 'ScoreThresholds',
         'ViewDiagnostics', 'ViewQueryExplainDiagnostics', 'ViewCacheInvalidator',
-        'AdminViewReadCoordinator', 'ViewReadOutcome', 'HitsTableRebuildPolicy',
+        'AdminViewReadCoordinator', 'AdminTableReadRepository', 'ViewReadOutcome', 'HitsTableRebuildPolicy',
         'ViewQueryFailureException',
     ),
     'wpcli' => array(
@@ -368,13 +414,29 @@ $abj404ClassFileExceptions = array(
     'ABJ_404_Solution_Ajax_SearchFeedback' => 'includes/ajax/AjaxSearchFeedback.php',
     'ABJ_404_Solution_SystemClock' => 'includes/core/Clock.php',
     'ABJ_404_Solution_FrozenClock' => 'includes/core/Clock.php',
+    'ABJ_404_Solution_LogsHitsRebuildYield' => 'includes/logs/LogsHitsRebuildBudget.php',
     'ABJ_404_Solution_AjaxCanaryStreamFlushPlan' =>
         'includes/diagnostics/AjaxCanaryStreamFlush.php',
     'ABJ_404_Solution_RedirectHitCountHistogramQueryException' =>
         'includes/stats/RedirectHitCountHistogramRepository.php',
-    'ABJ_404_Solution_TrackingLogsHitsRollupService' => 'includes/logs/TrackingLogsRepository.php',
     'ABJ_404_Solution_WPDBExtension_PHP5' => 'includes/php/wordpress/WPDBExtension.php',
     'ABJ_404_Solution_WPDBExtension_PHP7' => 'includes/php/wordpress/WPDBExtension.php',
+    'ABJ_404_Solution_AjaxContractViolationException' =>
+        'includes/ajax/AjaxRequestContractValidator.php',
+    'ABJ_404_Solution_UnlistedAjaxActionException' =>
+        'includes/ajax/PluginAjaxActions.php',
+    'ABJ_404_Solution_DatabaseSessionStatementConnection' =>
+        'includes/core/DatabaseMetadataLockWaitGuard.php',
+    'ABJ_404_Solution_ServiceNotRegisteredException' =>
+        'includes/core/ServiceContainer.php',
+    'ABJ_404_Solution_ServiceResolutionCycleException' =>
+        'includes/core/ServiceContainer.php',
+    'ABJ_404_Solution_SettingsPersistenceException' =>
+        'includes/core/PluginLogicSettingsUpdate.php',
+    'ABJ_404_Solution_SetupWizardAssetException' =>
+        'includes/core/SetupWizard.php',
+    'ABJ_404_Solution_TrendDataQueryException' =>
+        'includes/logs/LogsReadQueries.php',
 );
 
 $abj404Classmap = array();

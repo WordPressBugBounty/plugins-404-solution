@@ -13,7 +13,7 @@ final class ABJ_404_Solution_GscFetchLockStore {
 
     /** @return mixed */
     public function atomicReadyAt() {
-        return get_option(ABJ_404_Solution_GscConfig::ATOMIC_LOCK_READY_OPTION, false);
+        return ABJ_404_Solution_OptionShapeRead::scalar(ABJ_404_Solution_GscConfig::ATOMIC_LOCK_READY_OPTION, false);
     }
 
     /**

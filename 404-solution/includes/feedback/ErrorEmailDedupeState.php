@@ -64,9 +64,16 @@ class ABJ_404_Solution_ErrorEmailDedupeState {
      */
     public function readSentLine(string $sentinelFilePath): int {
         $sentLine = -1;
-        if (file_exists($sentinelFilePath)) {
-            $sentLine = absint(
-                ABJ_404_Solution_FileSystemService::readFileContents($sentinelFilePath, false));
+        $exists = ABJ_404_Solution_HostFilesystemCall::fileExists($sentinelFilePath);
+        $this->reportFilesystemWarning('error-email sentinel existence check', $sentinelFilePath, $exists['warning']);
+        if ($exists['warning'] === null && $exists['result']) {
+            $read = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+                static function () use ($sentinelFilePath) { return file_get_contents($sentinelFilePath); }
+            );
+            $this->reportFilesystemWarning('error-email sentinel read', $sentinelFilePath, $read['warning']);
+            if ($read['warning'] === null && is_string($read['result'])) {
+                $sentLine = absint($read['result']);
+            }
         }
         if ($sentLine < 1) {
             $sentLine = $this->loggingStateStore->getLastSentLine();
@@ -132,9 +139,29 @@ class ABJ_404_Solution_ErrorEmailDedupeState {
 
         $this->loggingStateStore->setLastSentLine($latestNum);
 
-        @file_put_contents($sentinelFilePath, (string)$latestNum);
-        $fileContents = @file_get_contents($sentinelFilePath);
-        return ($fileContents === (string)$latestNum);
+        $write = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($sentinelFilePath, $latestNum) {
+                return file_put_contents($sentinelFilePath, (string)$latestNum);
+            }
+        );
+        $this->reportFilesystemWarning('error-email sentinel write', $sentinelFilePath, $write['warning']);
+        if ($write['warning'] !== null || $write['result'] === false) {
+            return false;
+        }
+        $read = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($sentinelFilePath) { return file_get_contents($sentinelFilePath); }
+        );
+        $this->reportFilesystemWarning('error-email sentinel verification read', $sentinelFilePath, $read['warning']);
+        if ($read['warning'] !== null || !is_string($read['result'])) {
+            return false;
+        }
+        return ($read['result'] === (string)$latestNum);
+    }
+
+    private function reportFilesystemWarning(string $operation, string $path, ?string $warning): void {
+        if ($warning !== null && $warning !== '') {
+            abj404_logPhpFallback('logger-internal', $operation . ' failed for ' . $path . ': ' . $warning);
+        }
     }
 
     /**

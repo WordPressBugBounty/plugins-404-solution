@@ -6,6 +6,9 @@ if (!defined('ABSPATH')) {
 
 require_once __DIR__ . '/../DatabaseCollationHelper.php';
 
+/**
+ * Adopts verified old-prefix plugin data while preserving tenant isolation.
+ */
 class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_DatabaseUpgradeComponent {
 
 	/**
@@ -38,7 +41,7 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 			array('query_params' => array($dbNameRaw, '%abj404\\_%'))
 		);
 
-		if (!is_array($results['rows']) || empty($results['rows'])) {
+		if (!$this->queryResultSucceeded($results) || !is_array($results['rows']) || empty($results['rows'])) {
 			return;
 		}
 
@@ -48,7 +51,7 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 		$tablesByPrefix = $this->groupAbj404TablesByPrefix($results['rows']);
 
 		// Skip prefixes we've already adopted.
-		$adoptedPrefixes = get_option('abj404_adopted_prefixes', array());
+		$adoptedPrefixes = ABJ_404_Solution_OptionShapeRead::arrayValue('abj404_adopted_prefixes', array());
 		if (!is_array($adoptedPrefixes)) {
 			$adoptedPrefixes = array();
 		}
@@ -59,6 +62,7 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 		// slug-match heuristic below is only a tie-breaker among genuine
 		// migration leftovers, never the authorization boundary.
 		$activeBlogPrefixes = $this->getActiveBlogPrefixesLowercase();
+		$foreignOptionsPrefixes = $this->getForeignWordPressOptionsPrefixes(array_keys($tablesByPrefix));
 
 		// Process each OLD prefix (not the current one).
 		foreach ($tablesByPrefix as $oldPrefix => $tables) {
@@ -77,6 +81,13 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 				);
 				continue;
 			}
+			if (in_array($oldPrefix, $foreignOptionsPrefixes, true)) {
+				$this->logger->infoMessage(
+					"Orphaned tables under prefix '{$oldPrefix}' have a separate "
+					. 'WordPress core options table; skipping adoption to preserve tenant isolation.'
+				);
+				continue;
+			}
 
 			$this->logger->infoMessage(
 				"Found orphaned plugin tables under prefix '{$oldPrefix}' "
@@ -84,7 +95,15 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 			);
 
 			// Check if old tables have any data at all.
-			$totalRows = $this->countOldPrefixRows($oldPrefix, $tables);
+			$rowCount = $this->countOldPrefixRows($oldPrefix, $tables);
+			if ($rowCount['uncertain']) {
+				$this->logger->warn(
+					"Could not complete the row-count probe for orphan prefix '{$oldPrefix}'; "
+					. 'deferring adoption until it can be retried.'
+				);
+				continue;
+			}
+			$totalRows = $rowCount['total'];
 			if ($totalRows === 0) {
 				$this->logger->infoMessage(
 					"Orphaned tables under prefix '{$oldPrefix}' are all empty. Skipping adoption."
@@ -113,7 +132,7 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 			}
 
 			// Ownership positively verified. Adopt the data.
-			$this->adoptDataFromPrefix($oldPrefix, $currentPrefix, $tables);
+			$this->adoptDataFromPrefix(array('source' => $oldPrefix, 'destination' => $currentPrefix), $tables);
 		}
 	}
 
@@ -163,10 +182,11 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 	 *
 	 * @param string $oldPrefix
 	 * @param array<int, string> $knownTables  Table names actually found in information_schema.
-	 * @return int
+	 * @return array{total: int, uncertain: bool}
 	 */
-	private function countOldPrefixRows(string $oldPrefix, array $knownTables): int {
+	private function countOldPrefixRows(string $oldPrefix, array $knownTables): array {
 		$total = 0;
+		$uncertain = false;
 		foreach ($this->getPluginTableSuffixes() as $suffix) {
 			$tableName = $oldPrefix . $suffix;
 			if (!in_array($tableName, $knownTables, true)) {
@@ -176,14 +196,31 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 				"SELECT COUNT(*) AS cnt FROM `{$tableName}`",
 				['ignore_errors' => ["doesn't exist", "not found"]]
 			);
-			if (is_array($result['rows']) && !empty($result['rows'])) {
+			if (!$this->queryResultSucceeded($result)) {
+				if (!$this->queryResultIsExpectedMissingTable($result)) {
+					$uncertain = true;
+				}
+				continue;
+			}
+			if (!array_key_exists('rows', $result) || !is_array($result['rows']) || empty($result['rows'])
+					|| !is_array($result['rows'][0] ?? null)) {
+				$uncertain = true;
+				continue;
+			}
+			if (array_key_exists('cnt', $result['rows'][0]) || array_key_exists('CNT', $result['rows'][0])) {
 				$row = $result['rows'][0];
-				$countValue = is_array($row) ? ($row['cnt'] ?? $row['CNT'] ?? 0) : 0;
-				$cnt = ABJ_404_Solution_ExactInteger::readOr($countValue, 0, 0);
+                $countValue = $row['cnt'] ?? $row['CNT'] ?? 0;
+				$cnt = ABJ_404_Solution_ExactInteger::read($countValue, 0);
+				if ($cnt === null) {
+					$uncertain = true;
+					continue;
+				}
 				$total += $cnt;
+			} else {
+				$uncertain = true;
 			}
 		}
-		return $total;
+		return array('total' => $total, 'uncertain' => $uncertain);
 	}
 
 	/**
@@ -238,7 +275,7 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 		$result = $this->dbCore->queryAndGetResults($query,
 			['ignore_errors' => ["doesn't exist", "not found"]]);
 
-		if (!is_array($result['rows']) || empty($result['rows'])) {
+		if (!$this->queryResultSucceeded($result) || !is_array($result['rows']) || empty($result['rows'])) {
 			return null;
 		}
 
@@ -296,7 +333,7 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 		$result = $this->dbCore->queryAndGetResults($query,
 			['ignore_errors' => ["doesn't exist", "not found"]]);
 
-		if (!is_array($result['rows']) || empty($result['rows'])) {
+		if (!$this->queryResultSucceeded($result) || !is_array($result['rows']) || empty($result['rows'])) {
 			return null;
 		}
 
@@ -326,17 +363,18 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 	 * Adopt data from orphaned tables under an old prefix into current-prefix tables.
 	 * Uses INSERT IGNORE to avoid duplicate key conflicts.
 	 *
-	 * @param string $oldPrefix
-	 * @param string $currentPrefix
+	 * @param array{source:string,destination:string} $prefixes
 	 * @param array<string> $knownTables
 	 * @return void
 	 */
-	private function adoptDataFromPrefix(string $oldPrefix, string $currentPrefix, array $knownTables): void {
+	private function adoptDataFromPrefix(array $prefixes, array $knownTables): void {
+		['source' => $oldPrefix, 'destination' => $currentPrefix] = $prefixes;
 		$this->logger->infoMessage(
 			"Beginning adoption of data from prefix '{$oldPrefix}' to '{$currentPrefix}'"
 		);
 
 		$totalAdopted = 0;
+		$adoptionFailed = false;
 
 		foreach ($this->getPluginTableSuffixes() as $suffix) {
 			$oldTable = $oldPrefix . $suffix;
@@ -344,62 +382,17 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 				continue;
 			}
 			$newTable = $currentPrefix . $suffix;
+			$tableResult = $this->adoptOneTable(array('source' => $oldTable, 'destination' => $newTable), $suffix);
+			$totalAdopted += $tableResult['affected'];
+			$adoptionFailed = $adoptionFailed || $tableResult['failed'];
+		}
 
-			// Check if old table exists and has rows.
-			$countResult = $this->dbCore->queryAndGetResults(
-				"SELECT COUNT(*) AS cnt FROM `{$oldTable}`",
-				['ignore_errors' => ["doesn't exist", "not found"]]
+		if ($adoptionFailed) {
+			$this->logger->infoMessage(
+				"Adoption deferred: {$totalAdopted} rows were confirmed for prefix '{$oldPrefix}', "
+				. 'but one or more reads or writes were uncertain; retaining the prefix for retry.'
 			);
-			if (!is_array($countResult['rows']) || empty($countResult['rows'])) {
-				continue;
-			}
-			$row = $countResult['rows'][0];
-			$countValue = is_array($row) ? ($row['cnt'] ?? $row['CNT'] ?? 0) : 0;
-			$oldCount = ABJ_404_Solution_ExactInteger::readOr($countValue, 0, 0);
-			if ($oldCount === 0) {
-				continue;
-			}
-
-			// Check if new table exists (it should — auto-repair creates them).
-			$newExists = $this->dbCore->queryAndGetResults(
-				"SELECT 1 FROM `{$newTable}` LIMIT 1",
-				['ignore_errors' => ["doesn't exist", "not found"]]
-			);
-			if (!empty($newExists['last_error'])) {
-				$this->logger->infoMessage(
-					"Target table '{$newTable}' does not exist yet. Skipping adoption for '{$suffix}'."
-				);
-				continue;
-			}
-
-			// Build a column-matched INSERT to handle schema drift between old and new tables.
-			// Old tables from older plugin versions may have fewer or different columns.
-			$commonColumns = $this->getCommonColumns($oldTable, $newTable);
-			if (empty($commonColumns)) {
-				$this->logger->infoMessage(
-					"No common columns found between '{$oldTable}' and '{$newTable}'. Skipping."
-				);
-				continue;
-			}
-
-			$columnList = implode('`, `', $commonColumns);
-			$insertQuery = "INSERT IGNORE INTO `{$newTable}` (`{$columnList}`) "
-				. "SELECT `{$columnList}` FROM `{$oldTable}`";
-			$insertResult = $this->dbCore->queryAndGetResults($insertQuery,
-				['ignore_errors' => ["doesn't exist", "not found", "Duplicate"]]);
-
-			$affectedRows = 0;
-			if (is_array($insertResult) && isset($insertResult['rows_affected'])) {
-				$rawAffected = $insertResult['rows_affected'];
-				$affectedRows = ABJ_404_Solution_ExactInteger::readOr($rawAffected, 0, 0);
-			}
-
-			if ($affectedRows > 0) {
-				$totalAdopted += $affectedRows;
-				$this->logger->infoMessage(
-					"Adopted {$affectedRows} rows from '{$oldTable}' into '{$newTable}'"
-				);
-			}
+			return;
 		}
 
 		$this->logger->infoMessage(
@@ -407,7 +400,7 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 		);
 
 		// Record this prefix as adopted so we don't re-detect it on every page load.
-		$adoptedPrefixes = get_option('abj404_adopted_prefixes', array());
+		$adoptedPrefixes = ABJ_404_Solution_OptionShapeRead::arrayValue('abj404_adopted_prefixes', array());
 		if (!is_array($adoptedPrefixes)) {
 			$adoptedPrefixes = array();
 		}
@@ -417,62 +410,89 @@ class ABJ_404_Solution_DatabaseUpgradeOrphanAdoption extends ABJ_404_Solution_Da
 		}
 	}
 
-	/**
-	 * Get the list of column names that exist in both tables.
-	 * Used by adoptDataFromPrefix() to build column-matched INSERTs
-	 * that survive schema drift between plugin versions.
-	 *
-	 * @param string $tableA
-	 * @param string $tableB
-	 * @return array<int, string>  Column names present in both tables (lowercase).
-	 */
-	private function getCommonColumns(string $tableA, string $tableB): array {
-		$colsA = $this->getTableColumns($tableA);
-		$colsB = $this->getTableColumns($tableB);
-
-		if (empty($colsA) || empty($colsB)) {
-			return [];
+	/** @param array{source:string,destination:string} $tables
+	 * @return array{affected:int,failed:bool} */
+	private function adoptOneTable(array $tables, string $suffix): array {
+		['source' => $oldTable, 'destination' => $newTable] = $tables;
+        // Check if the old table exists and has rows.
+        $oldCount = $this->oldTableRowCount($oldTable);
+        if ($oldCount === null) { return array('affected' => 0, 'failed' => true); }
+        if ($oldCount === 0) { return array('affected' => 0, 'failed' => false); }
+		// Auto-repair should have created the new table; verify it before adoption.
+		$newExists = $this->dbCore->queryAndGetResults("SELECT 1 FROM `{$newTable}` LIMIT 1",
+			array('ignore_errors' => array("doesn't exist", 'not found')));
+		if (!$this->queryResultSucceeded($newExists) || !is_array($newExists['rows'] ?? null)) {
+			$this->logger->infoMessage("Target table '{$newTable}' could not be verified. Skipping adoption for '{$suffix}' and retaining the prefix for retry.");
+			return array('affected' => 0, 'failed' => true);
 		}
-
-		return array_values(array_intersect($colsA, $colsB));
+		// Match columns to tolerate schema drift in tables from older versions.
+		$common = (new ABJ_404_Solution_DatabaseColumnIntersection($this->dbCore))->between($oldTable, $newTable);
+		if ($common['uncertain'] || empty($common['columns'])) {
+			$this->logger->infoMessage("Common columns between '{$oldTable}' and '{$newTable}' could not be safely established. Skipping and retaining the prefix for retry.");
+			return array('affected' => 0, 'failed' => true);
+		}
+        $affected = $this->insertAdoptedRows($tables, $suffix, $common['columns']);
+        if ($affected === null) { return array('affected' => 0, 'failed' => true); }
+		if ($affected > 0) {
+			$this->logger->infoMessage("Adopted {$affected} rows from '{$oldTable}' into '{$newTable}'");
+			if ($suffix === 'abj404_redirects' || $suffix === 'abj404_redirect_conditions') { ABJ_404_Solution_RedirectPageCachePurge::queueSiteWide(); }
+		}
+		return array('affected' => $affected, 'failed' => false);
 	}
 
-	/**
-	 * Get column names for a table via SHOW COLUMNS.
-	 *
-	 * @param string $tableName
-	 * @return array<int, string>  Column names (lowercase).
-	 */
-	private function getTableColumns(string $tableName): array {
-		$result = $this->dbCore->queryAndGetResults(
-			"SHOW COLUMNS FROM `{$tableName}`",
-			['ignore_errors' => ["doesn't exist", "not found"]]
-		);
+    /** @return int|null Null means the read was uncertain. */
+    private function oldTableRowCount(string $oldTable): ?int {
+        $result = $this->dbCore->queryAndGetResults("SELECT COUNT(*) AS cnt FROM `{$oldTable}`",
+            array('ignore_errors' => array("doesn't exist", 'not found')));
+        if (!$this->queryResultSucceeded($result)) {
+            return $this->queryResultIsExpectedMissingTable($result) ? 0 : null;
+        }
+        $rows = $result['rows'] ?? array();
+        if (!is_array($rows) || empty($rows) || !is_array($rows[0] ?? null)) { return null; }
+        $row = $rows[0];
+        if (!array_key_exists('cnt', $row) && !array_key_exists('CNT', $row)) { return null; }
+        return ABJ_404_Solution_ExactInteger::read($row['cnt'] ?? $row['CNT'] ?? 0, 0);
+    }
 
-		if (!is_array($result['rows']) || empty($result['rows'])) {
-			return [];
+    /** @param array{source:string,destination:string} $tables
+     * @param array<int,string> $columns
+     * @return int|null */
+    private function insertAdoptedRows(array $tables, string $suffix, array $columns): ?int {
+        ['source' => $oldTable, 'destination' => $newTable] = $tables;
+        $columnList = implode('`, `', $columns);
+        $result = $this->dbCore->queryAndGetResults("INSERT IGNORE INTO `{$newTable}` (`{$columnList}`) SELECT `{$columnList}` FROM `{$oldTable}`",
+            array('ignore_errors' => array("doesn't exist", 'not found', 'Duplicate')));
+        if (!$this->queryResultSucceeded($result)) {
+            if ($suffix === 'abj404_redirects' || $suffix === 'abj404_redirect_conditions') { ABJ_404_Solution_RedirectPageCachePurge::queueSiteWide(); }
+            $this->logger->warn("Adoption write for '{$newTable}' did not succeed; retaining the old-prefix work for retry.");
+            return null;
+        }
+        return ABJ_404_Solution_ExactInteger::readOr($result['rows_affected'] ?? null, 0, 0);
+    }
+
+	/** @param array<string,mixed> $result */
+	private function queryResultIsExpectedMissingTable(array $result): bool {
+		if (($result['query_succeeded'] ?? null) === true
+				|| ($result['timed_out'] ?? false) === true) {
+			return false;
 		}
-
-		$columns = [];
-		$rows = is_array($result['rows'] ?? null) ? $result['rows'] : [];
-		foreach ($rows as $row) {
-			if (!is_array($row)) {
-				continue;
-			}
-			// SHOW COLUMNS returns 'Field' key — case-insensitive lookup.
-			$colName = null;
-			foreach ($row as $key => $value) {
-				if (strtolower((string)$key) === 'field' && is_scalar($value)) {
-					$colName = strtolower((string)$value);
-					break;
-				}
-			}
-			if ($colName !== null) {
-				$columns[] = $colName;
-			}
+		$error = $result['last_error'] ?? null;
+		if (!is_string($error) || $error === '') {
+			return false;
 		}
+		$error = strtolower($error);
+		return strpos($error, "doesn't exist") !== false
+			|| strpos($error, 'does not exist') !== false
+			|| strpos($error, 'unknown table') !== false
+			|| strpos($error, 'not found') !== false;
+	}
 
-		return $columns;
+	/** @param array<string,mixed> $result */
+	private function queryResultSucceeded(array $result): bool {
+		return ($result['query_succeeded'] ?? null) === true
+			&& is_string($result['last_error'] ?? null)
+			&& $result['last_error'] === ''
+			&& (!array_key_exists('timed_out', $result) || $result['timed_out'] === false);
 	}
 
 }

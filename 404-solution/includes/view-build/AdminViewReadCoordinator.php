@@ -99,8 +99,13 @@ class ABJ_404_Solution_AdminViewReadCoordinator {
         // timeout / suppress-writeback flags.
         $tableOptions['_abj404_dest_sort_key_present'] = $readiness->sortKeyReadyForColumn('dest_sort_key');
         $tableOptions['_abj404_url_sort_key_present'] = $readiness->sortKeyReadyForColumn('url_sort_key');
+        if (!empty($tableOptions['_abj404_allow_degraded_read'])) {
+            $tableOptions['_abj404_bounded_status_index'] = $readiness->boundedStatusIndex();
+        }
         $rows = $this->queryBuilder->readRedirectsSingleTable($sub, $tableOptions, $derivedPresent);
-        $persist = $derivedPresent && empty($tableOptions['_abj404_suppress_denorm_writeback']);
+        $degraded = !empty($tableOptions['_abj404_allow_degraded_read'])
+            && abj_service('admin_table_reader')->isDegraded();
+        $persist = $derivedPresent && !$degraded && empty($tableOptions['_abj404_suppress_denorm_writeback']);
         return $this->liveResolver->resolveAndPersistVisibleRows($rows, $persist);
     }
 
@@ -126,10 +131,20 @@ class ABJ_404_Solution_AdminViewReadCoordinator {
         $throwOnQueryError = !empty($tableOptionsArray['_abj404_throw_on_view_query_error']);
 
         try {
+            // Establish count availability before a full render can persist
+            // resolved values. A degraded response is entirely read-only.
+            if (!empty($tableOptionsArray['_abj404_prepare_count'])) {
+                $this->getRedirectsForViewCount((string)$sub, $tableOptionsArray);
+            }
             $rows = $this->readRedirectsSingleTable((string)$sub, $tableOptionsArray);
         } catch (Throwable $e) {
             $this->lastReadOutcome->markErrored();
             if ($throwOnQueryError) {
+                // A bounded reader already captured the original SQL/result.
+                // Rewrapping it as a comment would erase timeout/index evidence.
+                if ($e instanceof ABJ_404_Solution_ViewQueryFailureException && $e->getDiagnostics() !== array()) {
+                    throw $e;
+                }
                 $failureMarker = '/* single-table: ' . $e->getMessage() . ' */';
                 $diagnostics = $this->diagnostics->captureViewQueryFailureDiagnostics(
                     (string)$sub,
@@ -154,6 +169,10 @@ class ABJ_404_Solution_AdminViewReadCoordinator {
             (string)$sub
         ));
         $this->finalizeReadStatusForRows($rows, (string)$sub, $tableOptionsArray);
+        if ($rows === array() && !empty($tableOptionsArray['_abj404_allow_degraded_read'])
+            && abj_service('admin_table_reader')->isDegraded()) {
+            $this->lastReadOutcome->markPending();
+        }
 
         return $rows;
     }
@@ -194,6 +213,10 @@ class ABJ_404_Solution_AdminViewReadCoordinator {
      * @return int Negative when the count query was incomplete or unavailable.
      */
     public function getRedirectsForViewCount(string $sub, array $tableOptions): int {
+        if (!empty($tableOptions['_abj404_allow_degraded_read'])
+            && abj_service('admin_table_reader')->isDegraded()) {
+            return abj_service('admin_table_reader')->cachedCount($sub, $tableOptions);
+        }
         $queryTimeout = ABJ_404_Solution_ExactInteger::readOr(
             $tableOptions['_abj404_query_timeout'] ?? null,
             1,
@@ -252,6 +275,9 @@ class ABJ_404_Solution_AdminViewReadCoordinator {
         Throwable $e
     ): int {
         if ($throwOnQueryError) {
+            if ($e instanceof ABJ_404_Solution_ViewQueryFailureException && $e->getDiagnostics() !== array()) {
+                throw $e;
+            }
             $failureMarker = '/* single-table-count: ' . $e->getMessage() . ' */';
             $diagnostics = $this->diagnostics->captureViewQueryFailureDiagnostics(
                 (string)$sub,
@@ -285,6 +311,14 @@ class ABJ_404_Solution_AdminViewReadCoordinator {
         string $requestCountCacheKey
     ): int {
         $query = $this->queryBuilder->getOptimizedRedirectsForViewCountQuery($sub, $tableOptions);
+        if (!empty($tableOptions['_abj404_allow_degraded_read'])) {
+            $count = abj_service('admin_table_reader')->count(array(
+                'statement' => array('sql' => $query, 'params' => array()),
+                'subpage' => $sub, 'tableOptions' => $tableOptions, 'operation' => 'getRedirectsForViewCount',
+            ));
+            $this->redirectsForViewCountRequestCache[$requestCountCacheKey] = $count;
+            return $count;
+        }
         $this->cacheInvalidator->setSqlBigSelects();
         $queryOptions = $queryTimeout > 0 ? array('timeout' => $queryTimeout) : array();
         $results = $this->dbCore->queryAndGetResults($query, $queryOptions);

@@ -19,15 +19,15 @@ if (!defined('ABSPATH')) {
 // allow-no-test-found: boot-time WP-Cron action callbacks wired via add_action in 404-solution.php; no same-named unit file. The cron listener dispatch and wiring are exercised in FeedbackTransportCronListenerTest and CronListenerServiceWiringTest.
 
 if (!function_exists('abj404_dailyMaintenanceCronJobListener')) {
-/** @return void */
-function abj404_dailyMaintenanceCronJobListener() {
+/**
+ * @param mixed $passId
+ * @return void
+ */
+function abj404_dailyMaintenanceCronJobListener($passId = null) {
     try {
         require_once(plugin_dir_path( ABJ404_FILE ) . "includes/Loader.php");
         $retentionService = abj_service('redirects_retention_service');
-        $retentionService->deleteOldRedirectsCron();
-
-        $dbUpgrades = ABJ_404_Solution_DatabaseUpgradesEtc::getInstance();
-        $dbUpgrades->components()->dailyMaintenanceUpgrade()->runDatabaseMaintenanceTasks();
+        $retentionService->deleteOldRedirectsCron($passId);
     } catch (\Throwable $e) {
         abj404_logRuntimeWarning('Cron maintenance failed', $e);
     }
@@ -41,6 +41,7 @@ function abj404_updateLogsHitsTableListener() {
         require_once(plugin_dir_path( ABJ404_FILE ) . "includes/Loader.php");
         $logsRepo = abj_service('logs_repository');
         $logsRepo->createRedirectsForViewHitsTable();
+        abj_service('stats_rollup')->continueRefresh();
     } catch (\Throwable $e) {
         abj404_logRuntimeWarning('Cron logs/hits refresh failed', $e);
     }
@@ -48,13 +49,38 @@ function abj404_updateLogsHitsTableListener() {
 }
 
 if (!function_exists('abj404_repairCollationsListener')) {
-/** Run schema-wide plugin-table collation correction outside foreground requests. @return void */
+/** Run schema-wide plugin-table collation correction outside foreground requests, under the repair lock. @return void */
 function abj404_repairCollationsListener(): void {
     try {
         require_once(plugin_dir_path( ABJ404_FILE ) . "includes/Loader.php");
-        abj_service('database_upgrades')->correctCollations();
+        (new ABJ_404_Solution_QueuedCollationRepair(
+            abj_service('database_upgrades')->components()->collationDriftUpgrade()))->runScheduled();
     } catch (\Throwable $e) {
         abj404_logRuntimeWarning('Cron collation repair failed', $e);
+    }
+}
+}
+
+if (!function_exists('abj404_adminTableRepairListener')) {
+/** Run the deferred admin-table index and denorm repair. @return void */
+function abj404_adminTableRepairListener(): void {
+    try {
+        require_once(plugin_dir_path(ABJ404_FILE) . 'includes/Loader.php');
+        abj_service('database_upgrades')->components()->selfHealUpgrade()->repairAdminTables();
+    } catch (\Throwable $e) {
+        abj404_logRuntimeWarning('Cron admin table repair failed', $e);
+    }
+}
+}
+
+if (!function_exists('abj404_legacySuggestionPageRecoveryListener')) {
+/** Continue a bounded legacy-page batch using the site's current saved destination. @return void */
+function abj404_legacySuggestionPageRecoveryListener(): void {
+    try {
+        require_once(plugin_dir_path(ABJ404_FILE) . 'includes/Loader.php');
+        (new ABJ_404_Solution_LegacySuggestionPageRecovery())->continuePendingBatch();
+    } catch (\Throwable $e) {
+        abj404_logRuntimeWarning('Cron legacy suggestion page recovery failed', $e);
     }
 }
 }
@@ -98,24 +124,63 @@ function abj404_sendQueuedReportListener($uuid) {
 }
 
 if (!function_exists('abj404_logsv2CanonicalUrlBackfillListener')) {
-/** @return void */
-function abj404_logsv2CanonicalUrlBackfillListener() {
+/** Continue both canonical-url backlogs under one shared fifteen-second budget. @return void */
+function abj404_logsv2CanonicalUrlBackfillListener(): void {
     try {
         require_once(plugin_dir_path( ABJ404_FILE ) . "includes/Loader.php");
         $dbUpgrades = ABJ_404_Solution_DatabaseUpgradesEtc::getInstance();
-        $dbUpgrades->components()->canonicalUrlBackfillUpgrade()->backfillLogsv2CanonicalUrl();
+        $backfill = $dbUpgrades->components()->canonicalUrlBackfillUpgrade();
+        // An in-flight plugin update can retain the previous component API.
+        if (method_exists($backfill, 'continueCanonicalUrlBackfills')) {
+            $backfill->continueCanonicalUrlBackfills();
+        } else {
+            $backfill->backfillLogsv2CanonicalUrl();
+        }
     } catch (\Throwable $e) {
-        abj404_logRuntimeWarning('Cron log canonical URL backfill failed', $e);
+        abj404_logRuntimeWarning('Cron canonical URL backfill continuation failed', $e);
+    }
+}
+}
+if (!function_exists('abj404_logsv2MinLogIdBackfillListener')) {
+/** Continue the bounded min_log_id backfill after the foreground upgrade slice. @return void */
+function abj404_logsv2MinLogIdBackfillListener(): void {
+    try {
+        require_once(plugin_dir_path(ABJ404_FILE) . 'includes/Loader.php');
+        ABJ_404_Solution_DatabaseUpgradesEtc::getInstance()->components()
+            ->addedColumnBackfillUpgrade()->runScheduledMinLogIdBackfill();
+    } catch (\Throwable $e) {
+        abj404_logRuntimeWarning('Cron min_log_id backfill failed', $e);
+    }
+}
+}
+if (!function_exists('abj404_redirectsDenormReconcileResumeListener')) {
+/**
+ * Continue an existing nightly sweep under its normal per-invocation budget.
+ * @param mixed $passId
+ */
+function abj404_redirectsDenormReconcileResumeListener($passId): void {
+    if (!is_string($passId) || $passId === '') {
+        return;
+    }
+    try {
+        require_once(plugin_dir_path(ABJ404_FILE) . 'includes/Loader.php');
+        ABJ_404_Solution_DatabaseUpgradesEtc::getInstance()->components()
+            ->dailyMaintenanceUpgrade()->resumeNightlyReconcilePass($passId);
+    } catch (\Throwable $e) {
+        abj404_logRuntimeWarning('Cron nightly reconcile continuation failed', $e);
     }
 }
 }
 if (!function_exists('abj404_redirectsDenormBackfillListener')) {
 /**
- * On-demand drain of the main redirects denorm backlog (dest_for_view,
- * published_status, logshits, last_used), armed by an admin redirect-table
- * render when legacy NULL dest_for_view rows exist. The sort-key drains run
- * immediately after so Destination/URL sort gates can open in the same deferred
- * pass once the main source columns are populated.
+ * Drain of the main redirects denorm backlog (dest_for_view,
+ * published_status, logshits, last_used) for an event on the legacy denorm
+ * hook. Nothing in this release schedules that hook: the admin redirect-table
+ * read queues abj404_admin_table_repair instead, whose listener runs this same
+ * pass and whose queued event ordinary admin views also consume when WP-Cron
+ * is stalled. Kept so an event queued by an earlier release still drains. The
+ * sort-key drains run immediately after so Destination/URL sort gates can open
+ * in the same deferred pass once the main source columns are populated.
  *
  * @return void
  */

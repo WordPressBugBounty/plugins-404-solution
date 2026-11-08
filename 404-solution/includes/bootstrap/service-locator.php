@@ -47,13 +47,17 @@ require_once __DIR__ . '/../core/ServiceContainer.php';
  *     $name is 'db_core' ? ABJ_404_Solution_DatabaseCore : (
  *     $name is 'content_repository' ? ABJ_404_Solution_ContentRepository : (
  *     $name is 'redirects_repository' ? ABJ_404_Solution_RedirectsRepository : (
+ *     $name is 'redirect_chain_walker' ? ABJ_404_Solution_RedirectChainWalker : (
  *     $name is 'redirects_retention_service' ? ABJ_404_Solution_RedirectsRetentionService : (
+ *     $name is 'maintenance_drain' ? ABJ_404_Solution_MaintenanceDrain : (
  *     $name is 'redirect_dead_destination_checker' ? ABJ_404_Solution_RedirectDeadDestinationChecker : (
  *     $name is 'logs_repository' ? ABJ_404_Solution_LogsRepository : (
+ *     $name is 'stats_rollup' ? ABJ_404_Solution_StatsRollupService : (
  *     $name is 'stats_repository' ? ABJ_404_Solution_StatsRepository : (
  *     $name is 'internal_source_evidence_repository' ? ABJ_404_Solution_InternalSourceEvidenceRepository : (
  *     $name is 'plugin_update_metadata_repository' ? ABJ_404_Solution_PluginUpdateMetadataRepository : (
  *     $name is 'view_read_service' ? ABJ_404_Solution_ViewReadService : (
+ *     $name is 'admin_table_reader' ? ABJ_404_Solution_AdminTableReadRepository : (
  *     $name is 'data_access' ? ABJ_404_Solution_DataAccess : (
  *     $name is 'database_upgrades' ? ABJ_404_Solution_DatabaseUpgradesEtc : (
  *     $name is 'permalink_cache' ? ABJ_404_Solution_PermalinkCache : (
@@ -78,6 +82,7 @@ require_once __DIR__ . '/../core/ServiceContainer.php';
  *     $name is 'near_miss_recorder' ? ABJ_404_Solution_NearMissRecorder : (
  *     $name is 'wordpress_connector' ? ABJ_404_Solution_WordPress_Connector : (
  *     $name is 'slug_change_handler' ? ABJ_404_Solution_SlugChangeHandler : (
+ *     $name is 'auto_redirect_snapshot_service' ? ABJ_404_Solution_AutoRedirectSnapshotService : (
  *     $name is 'sync_utils' ? ABJ_404_Solution_SynchronizationUtils : (
  *     $name is 'request_context' ? ABJ_404_Solution_RequestContext : (
  *     $name is 'previous_request_cookie_tracker' ? ABJ_404_Solution_PreviousRequestCookieTracker : (
@@ -90,9 +95,10 @@ require_once __DIR__ . '/../core/ServiceContainer.php';
  *     $name is 'options_repository' ? ABJ_404_Solution_PluginLogicOptionsResolver : (
  *     $name is 'admin_access_policy' ? ABJ_404_Solution_PluginAdminAccessPolicy : (
  *     $name is 'settings_mode_preference' ? ABJ_404_Solution_SettingsModePreference : (
+ *     $name is 'redirectioner_row_importer' ? Closure : (
  *     $name is 'not_found_response' ? ABJ_404_Solution_NotFoundResponseService :
  *     mixed
- * ))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+ * ))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
  */
 function abj_service($name) {
     if ($name === 'logging' && class_exists('ABJ_404_Solution_Logging', false)) {

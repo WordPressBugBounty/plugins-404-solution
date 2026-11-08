@@ -13,6 +13,7 @@ require_once __DIR__ . '/../repositories/ContentKeywordsRepository.php';
 
 /**
  * Stable facade for stats aggregation, dashboard snapshots, digest data, and keyword updates.
+ * @phpstan-import-type Snapshot from ABJ_404_Solution_StatsDashboardSnapshotCache
  */
 class ABJ_404_Solution_StatsRepository implements ABJ_404_Solution_StatsRepositoryInterface {
 
@@ -62,9 +63,12 @@ class ABJ_404_Solution_StatsRepository implements ABJ_404_Solution_StatsReposito
             $refreshLock
         );
         $this->dashboardSnapshotCache = new ABJ_404_Solution_StatsDashboardSnapshotCache(
-            $this->statsReadRepository,
-            $refreshLock,
-            $logger
+            $logger,
+            static function (): void {
+                // Scheduling is required for a pending acknowledgement. Let the
+                // cache report an unavailable read if the producer cannot be armed.
+                abj_service('stats_rollup')->schedule();
+            }
         );
         $this->digestDataProvider = new ABJ_404_Solution_StatsDigestDataProvider(
             $dbCore,
@@ -86,13 +90,21 @@ class ABJ_404_Solution_StatsRepository implements ABJ_404_Solution_StatsReposito
     }
 
     /** @inheritDoc */
-    function getPeriodicStatsSummary($sinceTimestamp, $notFoundDest = '404') {
-        return $this->statsReadRepository->getPeriodicStatsSummary($sinceTimestamp, $notFoundDest);
+    function getPeriodicStatsSummary($sinceTimestamp) {
+        $snapshot = $this->snapshotForDerivedRead();
+        foreach ($snapshot['thresholds'] ?? array() as $period => $threshold) {
+            if ((int)$sinceTimestamp === $threshold) { return $this->publishedPeriod($snapshot['data']['periods'] ?? null, $period); }
+        }
+        $this->dashboardSnapshotCache->requestThreshold(abs((int)$sinceTimestamp));
+        throw new RuntimeException('Statistics generation is pending for threshold ' . (string)$sinceTimestamp . '.', 503);
     }
 
     /** @inheritDoc */
-    function getPeriodicStatsSummariesCached($notFoundDest = '404') {
-        return $this->statsReadRepository->getPeriodicStatsSummariesCached($notFoundDest);
+    function getPeriodicStatsSummariesCached() {
+        $snapshot = $this->snapshotForDerivedRead();
+        $periods = $snapshot['data']['periods'] ?? array();
+        return array('today' => $this->publishedPeriod($periods, 'today'), 'month' => $this->publishedPeriod($periods, 'month'),
+            'year' => $this->publishedPeriod($periods, 'year'), 'all' => $this->publishedPeriod($periods, 'all'));
     }
 
     /** @inheritDoc */
@@ -112,7 +124,47 @@ class ABJ_404_Solution_StatsRepository implements ABJ_404_Solution_StatsReposito
 
     /** @inheritDoc */
     function getConfidenceBandCounts() {
-        return $this->statsReadRepository->getConfidenceBandCounts();
+        $snapshot = $this->snapshotForDerivedRead();
+        $bands = $snapshot['data']['confidence'] ?? null;
+        if (!is_array($bands)) { return null; }
+        return array('high' => ABJ_404_Solution_ExactInteger::readOr($bands['high'] ?? 0, 0, 0),
+            'medium' => ABJ_404_Solution_ExactInteger::readOr($bands['medium'] ?? 0, 0, 0),
+            'low' => ABJ_404_Solution_ExactInteger::readOr($bands['low'] ?? 0, 0, 0),
+            'manual' => ABJ_404_Solution_ExactInteger::readOr($bands['manual'] ?? 0, 0, 0),
+            'total' => ABJ_404_Solution_ExactInteger::readOr($bands['total'] ?? 0, 0, 0),
+            'avg' => is_numeric($bands['avg'] ?? null) ? (float)$bands['avg'] : null);
+    }
+
+    /**
+     * Derived readers retain pending/unknown contracts while preserving producer failures.
+     * A prior publication remains usable even when a refresh reports an error.
+     * @return Snapshot
+     */
+    private function snapshotForDerivedRead(): array {
+        $snapshot = $this->dashboardSnapshotCache->getStatsDashboardSnapshot();
+        if ($snapshot['data'] === array() && isset($snapshot['error'])) {
+            $error = $snapshot['error'];
+            throw new RuntimeException($error['message'] . ' (' . $error['code'] . ')',
+                is_int($error['code']) ? $error['code'] : 503);
+        }
+        return $snapshot;
+    }
+
+    /**
+     * Normalize a published period; never execute a legacy aggregate to fill a gap.
+     * @param mixed $periods
+     * @return array{disp404:int,distinct404:int,visitors404:int,refer404:int,redirected:int,distinctredirected:int,distinctvisitors:int,distinctrefer:int}
+     */
+    private function publishedPeriod($periods, string $period): array {
+        $zero = array('disp404' => 0, 'distinct404' => 0, 'visitors404' => 0, 'refer404' => 0,
+            'redirected' => 0, 'distinctredirected' => 0, 'distinctvisitors' => 0, 'distinctrefer' => 0);
+        $stats = is_array($periods) && is_array($periods[$period] ?? null) ? $periods[$period] : array();
+        foreach ($zero as $key => $unused) {
+            $count = ABJ_404_Solution_ExactInteger::read($stats[$key] ?? null, 0);
+            if ($count === null) { throw new RuntimeException('Statistics generation is pending for period ' . $period . '.', 503); }
+            $zero[$key] = $count;
+        }
+        return $zero;
     }
 
     /** @inheritDoc */

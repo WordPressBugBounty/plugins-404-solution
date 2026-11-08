@@ -28,8 +28,8 @@ if (!defined('ABSPATH')) {
  * This class holds no DatabaseCore back-reference. It receives:
  *   - a query-runner callable bound over DatabaseCore::queryAndGetResults
  *     (signature: function(string, array<string,mixed>): array<string,mixed>);
- *   - a result-harvester callable bound over DatabaseWpdbResultHarvester
- *     (signature: function(array<string,mixed>): void, by-reference);
+ *   - the legacy result-harvester constructor argument, retained so requests
+ *     spanning a plugin update can keep their already-loaded composition root;
  *   - a result-type getter bound over DatabaseCore::getCurrentResultType
  *     (signature: function(): string);
  *   - a notice setter bound over DatabaseNoticeStateHolder::setPluginDbNotice
@@ -54,9 +54,6 @@ class ABJ_404_Solution_DatabaseTableRepairer {
     /** @var callable(string, array<string,mixed>): array<string,mixed> */
     private $queryRunner;
 
-    /** @var callable(array<string,mixed>): void */
-    private $resultHarvester;
-
     /** @var callable(): string */
     private $resultTypeGetter;
 
@@ -76,9 +73,9 @@ class ABJ_404_Solution_DatabaseTableRepairer {
      * @param callable(string, array<string,mixed>): array<string,mixed> $queryRunner
      *   Runs a SQL query through the centralized error-handling pipeline and
      *   returns its result array. Bound by DatabaseCore over queryAndGetResults().
-     * @param callable(array<string,mixed>): void $resultHarvester
-     *   Copies wpdb->last_error / rows_affected / insert_id into the result array,
-     *   by reference. Bound by DatabaseCore over DatabaseWpdbResultHarvester.
+     * @param callable(array<string,mixed>&): void $resultHarvester
+     *   Reserved for compatibility with already-loaded composition roots.
+     *   Retries now use queryRunner so execution and metadata capture stay paired.
      * @param callable(): string $resultTypeGetter
      *   Returns the current wpdb result type (ARRAY_A or OBJECT) for retries.
      * @param callable(string, string, string, string): void $noticeSetter
@@ -97,8 +94,10 @@ class ABJ_404_Solution_DatabaseTableRepairer {
         $functions,
         $logger
     ) {
+        // Intentionally discard the retired callback while preserving its
+        // positional slot for composition roots loaded before an update.
+        unset($resultHarvester);
         $this->queryRunner = $queryRunner;
-        $this->resultHarvester = $resultHarvester;
         $this->resultTypeGetter = $resultTypeGetter;
         $this->noticeSetter = $noticeSetter;
         $this->connectionResetter = $connectionResetter;
@@ -152,8 +151,8 @@ class ABJ_404_Solution_DatabaseTableRepairer {
     /**
      * Run REPAIR TABLE for a table named in a wpdb error string.
      *
-     * Recognizes both the "is marked as crashed" message and the "Incorrect
-     * key file for table" message. If the table name cannot be sanitized
+     * Recognizes the "is marked as crashed", "Incorrect key file for table" and
+     * "Index for table ... is corrupt" messages. If the table name cannot be sanitized
      * (typically because it is a temporary table outside our prefix, e.g.
      * "#sql_xxx_0.MYI" on a corrupted-disk host), falls back to a 24-hour
      * deduplicated admin notice telling the site owner to contact their host.
@@ -162,21 +161,9 @@ class ABJ_404_Solution_DatabaseTableRepairer {
      * @return void
      */
     public function repairTable(string $errorMessage): void {
-        $re1 = "Table '(.*\/)?(.+)' is marked as crashed and ";
-        $re2 = "Incorrect key file for table '(?:.*\/)?([^'.]+?)(?:\\.MYI)?'";
+        $rawTableName = $this->tableNameFromRepairableError($errorMessage);
 
-        $matches = array();
-        $this->f->regexMatch($re1, $errorMessage, $matches);
-
-        if (empty($matches) || count($matches) <= 2 || $this->f->strlen($matches[2]) === 0) {
-            $this->f->regexMatch($re2, $errorMessage, $matches);
-            if (!empty($matches) && isset($matches[1]) && $this->f->strlen($matches[1]) > 0) {
-                $matches[2] = $matches[1];
-            }
-        }
-
-        if (!empty($matches) && count($matches) > 2 && $this->f->strlen($matches[2]) > 0) {
-            $rawTableName = $matches[2];
+        if ($rawTableName !== '') {
             $tableToRepair = $this->sanitizeTableName($rawTableName);
             if ($tableToRepair !== null) {
                 $query = "REPAIR TABLE `{$tableToRepair}`";
@@ -190,12 +177,14 @@ class ABJ_404_Solution_DatabaseTableRepairer {
                 $cooldownKey = 'abj404_corrupted_temp_table_notice_until';
                 $alreadyNotified = function_exists('get_transient') ? get_transient($cooldownKey) : false;
                 if (!$alreadyNotified) {
-                    ($this->noticeSetter)(
-                        'corrupted_temp_table',
-                        function_exists('__') ? __('A database temporary table is corrupted - this is usually caused by a full or failing disk. Please contact your host. (MySQL error 1034)', '404-solution') : 'A database temporary table is corrupted - this is usually caused by a full or failing disk. Please contact your host. (MySQL error 1034)',
-                        function_exists('__') ? __('A temporary MySQL table was corrupted, usually caused by disk or hardware issues. The plugin cannot repair it. Please contact your hosting provider.', '404-solution') : 'A temporary MySQL table was corrupted, usually caused by disk or hardware issues. The plugin cannot repair it. Please contact your hosting provider.',
-                        $errorMessage
-                    );
+                    ABJ_404_Solution_DeferredTranslation::whenReady(function () use ($errorMessage): void {
+                        ($this->noticeSetter)(
+                            'corrupted_temp_table',
+                            __('A database temporary table is corrupted - this is usually caused by a full or failing disk. Please contact your host. (MySQL error 1034)', '404-solution'),
+                            __('A temporary MySQL table was corrupted, usually caused by disk or hardware issues. The plugin cannot repair it. Please contact your hosting provider.', '404-solution'),
+                            $errorMessage
+                        );
+                    });
                     if (function_exists('set_transient')) {
                         // @cache-write-audit: opt-out - admin-notice dedup cooldown
                         // (one notice per 24h per failure type), not a query result.
@@ -252,6 +241,34 @@ class ABJ_404_Solution_DatabaseTableRepairer {
     }
 
     /**
+     * The table name a MyISAM corruption error names, or '' when the text is none of
+     * the recognized shapes.
+     *
+     * Each shape is a pattern plus the index of its table-name capture group:
+     * "Table '...' is marked as crashed and should be repaired",
+     * "Incorrect key file for table '...MYI'; try to repair it" (MySQL), and
+     * "Index for table '...MYI' is corrupt; try to repair it" (MariaDB).
+     *
+     * @param string $errorMessage The wpdb->last_error string.
+     * @return string
+     */
+    private function tableNameFromRepairableError(string $errorMessage): string {
+        $shapes = array(
+            array("Table '(.*\/)?(.+)' is marked as crashed and ", 2),
+            array("Incorrect key file for table '(?:.*\/)?([^'.]+?)(?:\\.MYI)?'", 1),
+            array("Index for table '(?:.*\/)?([^'.]+?)(?:\\.MYI)?' is corrupt", 1),
+        );
+        foreach ($shapes as $shape) {
+            $matches = array();
+            $this->f->regexMatch($shape[0], $errorMessage, $matches);
+            if (isset($matches[$shape[1]]) && $this->f->strlen($matches[$shape[1]]) > 0) {
+                return $matches[$shape[1]];
+            }
+        }
+        return '';
+    }
+
+    /**
      * Attempt REPAIR TABLE after MySQL errno 1034 ("Incorrect key file"), then
      * retry the original query once.
      *
@@ -272,7 +289,6 @@ class ABJ_404_Solution_DatabaseTableRepairer {
         $errorMessage = is_string($result['last_error']) ? $result['last_error'] : '';
         $this->repairTable($errorMessage);
         if (stripos($errorMessage, 'abj404') !== false) {
-            global $wpdb;
             if ($tracer === null) {
                 if (!(($this->connectionResetter)($errorMessage))) {
                     return;
@@ -288,17 +304,12 @@ class ABJ_404_Solution_DatabaseTableRepairer {
                 }
             }
             $resultType = ($this->resultTypeGetter)();
-            // DAO-bypass-approved: retry-after-repair is part of the DAO's
-            // self-healing pipeline; calling queryAndGetResults() here would
-            // re-enter the error-handler that just invoked us.
-            $retry = function () use ($wpdb, $query, $resultType): array {
-                $retried = array('rows' => $wpdb->get_results($query, $resultType));
-                $retried['last_error'] = (string)($wpdb->last_error ?? '');
-                $retried['last_result'] = $wpdb->last_result ?? array();
-                $retried['rows_affected'] = $wpdb->rows_affected ?? 0;
-                $retried['insert_id'] = $wpdb->insert_id ?? 0;
-                return $retried;
-            };
+            // Use the version-stable query boundary. These options suppress
+            // final repair hooks and missing-table repair on the nested attempt;
+            // invalid-data retries also have their own request-local guard.
+            $retry = fn(): array => ($this->queryRunner)($query, array(
+                'log_errors' => false, 'skip_repair' => true, 'result_type' => $resultType,
+            ));
             $retried = $tracer === null
                 ? $retry()
                 : $tracer->traceAttempt(
@@ -353,7 +364,6 @@ class ABJ_404_Solution_DatabaseTableRepairer {
             if (!is_string($retryQuery) || trim($retryQuery) === '' || $retryQuery === $query) {
                 return;
             }
-            global $wpdb;
             $retryError = isset($result['last_error']) && is_scalar($result['last_error'])
                 ? (string)$result['last_error']
                 : '';
@@ -372,14 +382,11 @@ class ABJ_404_Solution_DatabaseTableRepairer {
                 }
             }
             $resultType = ($this->resultTypeGetter)();
-            // DAO-bypass-approved: retry-after-strip is part of the DAO's
-            // self-healing pipeline; calling queryAndGetResults() here would
-            // re-enter the error-handler that just invoked us.
-            $retry = function () use ($wpdb, $retryQuery, $resultType): array {
-                $retried = array('rows' => $wpdb->get_results($retryQuery, $resultType));
-                ($this->resultHarvester)($retried);
-                return $retried;
-            };
+            // The guarded shared pipeline captures the retry's driver result
+            // before any diagnostic or recovery query can overwrite it.
+            $retry = fn(): array => ($this->queryRunner)($retryQuery, array(
+                'log_errors' => false, 'skip_repair' => true, 'result_type' => $resultType,
+            ));
             $retried = $tracer === null
                 ? $retry()
                 : $tracer->traceAttempt('invalid_data', 'invalid_data', $retry);

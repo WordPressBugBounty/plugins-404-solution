@@ -246,16 +246,44 @@ final class ABJ_404_Solution_DiagnosticJournalExcerpt {
     private static function failureVerdictLines(array $paths): array {
         $lines = array();
         foreach ($paths as $path) {
-            if (!@is_file($path)) {
+            $fileResult = ABJ_404_Solution_HostFilesystemCall::isFile($path);
+            if ($fileResult['warning'] !== null) {
+                self::reportFailure('Diagnostic failure index file check warning: ' . $path . ' (' . $fileResult['warning'] . ')');
                 continue;
             }
-            $handle = @fopen($path, 'rb');
+            if (!$fileResult['result']) {
+                continue;
+            }
+            $openResult = ABJ_404_Solution_HostFilesystemCall::fopen($path, 'rb');
+            if ($openResult['warning'] !== null) {
+                self::reportFailure('Diagnostic failure index open warning: ' . $path . ' (' . $openResult['warning'] . ')');
+                if (is_resource($openResult['result'])) {
+                    $closeResult = ABJ_404_Solution_HostFilesystemCall::fclose($openResult['result']);
+                    if ($closeResult['warning'] !== null) {
+                        self::reportFailure('Diagnostic failure index close warning: ' . $path . ' (' . $closeResult['warning'] . ')');
+                    }
+                }
+                continue;
+            }
+            $handle = $openResult['result'];
             if ($handle === false) {
                 self::reportFailure('Diagnostic failure index could not scan: ' . $path);
                 continue;
             }
+            $pathLines = array();
+            $pathHealthy = true;
             try {
-                while (($line = @fgets($handle)) !== false) {
+                while (true) {
+                    $lineResult = ABJ_404_Solution_HostFilesystemCall::fgets($handle);
+                    if ($lineResult['warning'] !== null) {
+                        self::reportFailure('Diagnostic failure index read warning: ' . $path . ' (' . $lineResult['warning'] . ')');
+                        $pathHealthy = false;
+                        break;
+                    }
+                    $line = $lineResult['result'];
+                    if ($line === false) {
+                        break;
+                    }
                     if (strpos($line, ABJ_404_Solution_DiagnosticClientVerdict::PRIOR_ATTEMPT_EVENT) === false
                             && strpos($line,
                                 ABJ_404_Solution_DiagnosticClientVerdict::BEACON_BRANCH_EVENT) === false) {
@@ -263,11 +291,18 @@ final class ABJ_404_Solution_DiagnosticJournalExcerpt {
                     }
                     $line = trim($line);
                     if ($line !== '') {
-                        $lines[] = $line;
+                        $pathLines[] = $line;
                     }
                 }
             } finally {
-                @fclose($handle);
+                $closeResult = ABJ_404_Solution_HostFilesystemCall::fclose($handle);
+                if ($closeResult['warning'] !== null) {
+                    self::reportFailure('Diagnostic failure index close warning: ' . $path . ' (' . $closeResult['warning'] . ')');
+                    $pathHealthy = false;
+                }
+            }
+            if ($pathHealthy) {
+                $lines = array_merge($lines, $pathLines);
             }
         }
         return $lines;
@@ -300,7 +335,11 @@ final class ABJ_404_Solution_DiagnosticJournalExcerpt {
         $filesSkipped = 0;
         $bytesUnread = 0;
         foreach (array_reverse($files) as $path) {
-            $size = @filesize($path);
+            $sizeResult = ABJ_404_Solution_HostFilesystemCall::filesize($path);
+            if ($sizeResult['warning'] !== null) {
+                self::reportFailure('Diagnostic journal size warning: ' . $path . ' (' . $sizeResult['warning'] . ')');
+            }
+            $size = $sizeResult['warning'] === null ? $sizeResult['result'] : false;
             if (!is_int($size)) {
                 self::reportFailure('Diagnostic journal size could not be read: ' . $path);
                 $filesSkipped++;
@@ -345,16 +384,36 @@ final class ABJ_404_Solution_DiagnosticJournalExcerpt {
      * reader never gets half a JSON record.
      */
     private static function readFileTail(string $path, int $limit): string {
-        if ($limit <= 0 || !@is_file($path)) {
+        if ($limit <= 0) {
             return '';
         }
-        $size = @filesize($path);
+        $fileResult = ABJ_404_Solution_HostFilesystemCall::isFile($path);
+        if ($fileResult['warning'] !== null) {
+            self::reportFailure('Diagnostic journal file check warning: ' . $path . ' (' . $fileResult['warning'] . ')');
+            return '';
+        }
+        if (!$fileResult['result']) {
+            return '';
+        }
+        $sizeResult = ABJ_404_Solution_HostFilesystemCall::filesize($path);
+        if ($sizeResult['warning'] !== null) {
+            self::reportFailure('Diagnostic journal size warning: ' . $path . ' (' . $sizeResult['warning'] . ')');
+        }
+        $size = $sizeResult['warning'] === null ? $sizeResult['result'] : false;
         if (!is_int($size)) {
             self::reportFailure('Diagnostic journal size could not be read: ' . $path);
             return '';
         }
         $offset = max(0, $size - $limit);
-        $contents = @file_get_contents($path, false, null, $offset, $limit);
+        $readResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($path, $offset, $limit) {
+                return file_get_contents($path, false, null, $offset, $limit);
+            }
+        );
+        if ($readResult['warning'] !== null) {
+            self::reportFailure('Diagnostic journal read warning: ' . $path . ' (' . $readResult['warning'] . ')');
+        }
+        $contents = $readResult['warning'] === null ? $readResult['result'] : false;
         if (!is_string($contents)) {
             self::reportFailure('Diagnostic journal could not be read: ' . $path);
             return '';

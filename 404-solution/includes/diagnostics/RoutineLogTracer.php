@@ -25,6 +25,7 @@ final class ABJ_404_Solution_RoutineLogTracer {
      */
     public static function trace(string $operation, array $fields, callable $work) {
         if (self::$recording
+                || ABJ_404_Solution_AjaxCheckpointLogger::isRecording()
                 || ABJ_404_Solution_AuthorizationLogTracer::isActive()
                 || ABJ_404_Solution_PostAuthorizationFailureTracer::isActive()) {
             return $work();

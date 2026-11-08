@@ -74,7 +74,11 @@
 
     // ── Load profiles ───────────────────────────────────────────────────────
 
-    function loadProfiles() {
+    /**
+     * @param {function(): void} [onSettled] Runs once the list rendered or
+     *     failed; the initial load passes the admin ready release.
+     */
+    function loadProfiles(onSettled) {
         $.ajax({
             url: ajaxUrl,
             type: 'POST',
@@ -87,31 +91,39 @@
                 nonce:  nonce
             },
             success: function (resp, textStatus, jqXHR) {
-                // Validate shape before reading fields; a malformed
-                // body (non-JSON, plugin-conflict mangled output) must
-                // not throw and leave the table on its empty-row state.
-                if (!resp || typeof resp !== 'object' || resp.success !== true || !resp.data) {
-                    recordFailure(jqXHR, {
-                        source: 'engine-profiles-list-malformed',
-                        textStatus: textStatus,
-                        errorThrown: ''
-                    });
-                    renderProfiles([]);
-                    return;
+                try {
+                    // Validate shape before reading fields; a malformed
+                    // body (non-JSON, plugin-conflict mangled output) must
+                    // not throw and leave the table on its empty-row state.
+                    if (!resp || typeof resp !== 'object' || resp.success !== true || !resp.data) {
+                        recordFailure(jqXHR, {
+                            source: 'engine-profiles-list-malformed',
+                            textStatus: textStatus,
+                            errorThrown: ''
+                        });
+                        renderProfiles([]);
+                        return;
+                    }
+                    renderProfiles(resp.data.profiles || []);
+                } finally {
+                    if (onSettled) { onSettled(); }
                 }
-                renderProfiles(resp.data.profiles || []);
             },
             error: function (jqXHR, textStatus, errorThrown) {
-                // Transport failure: render the empty state so the
-                // page does not appear stuck loading, and record why, so
-                // "no profiles exist" is distinguishable from "the list
-                // request failed".
-                recordFailure(jqXHR, {
-                    source: 'engine-profiles-list',
-                    textStatus: textStatus,
-                    errorThrown: errorThrown
-                });
-                renderProfiles([]);
+                try {
+                    // Transport failure: render the empty state so the
+                    // page does not appear stuck loading, and record why, so
+                    // "no profiles exist" is distinguishable from "the list
+                    // request failed".
+                    recordFailure(jqXHR, {
+                        source: 'engine-profiles-list',
+                        textStatus: textStatus,
+                        errorThrown: errorThrown
+                    });
+                    renderProfiles([]);
+                } finally {
+                    if (onSettled) { onSettled(); }
+                }
             }
         });
     }
@@ -381,7 +393,10 @@
 
     $(function () {
         if ($('#abj404-engine-profiles-section').length) {
-            loadProfiles();
+            // Holds the admin ready signal (includes/js/adminReady.js)
+            // until the first list render.
+            loadProfiles((window.ABJ404 && window.ABJ404.adminReady)
+                ? window.ABJ404.adminReady.hold('engine-profiles') : undefined);
         }
     });
 

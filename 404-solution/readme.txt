@@ -1,11 +1,11 @@
-=== 404 Solution ===
+=== 404 Solution: Redirection and Page Suggestions ===
 Contributors: aaron13100
 Website: https://www.ajexperience.com/404-solution/
-Tags: 404, redirect, 404 redirect, broken links, spell check
+Tags: 404, redirect, 404 redirect, 301 redirect, spell check
 Requires at least: 5.0
 Requires PHP: 7.4
 Tested up to: 7.1
-Stable tag: 4.3.6
+Stable tag: 4.4.0
 License: GPL-3.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -21,11 +21,11 @@ Stop losing visitors and search rankings to broken links. **404 Solution automat
 
 Most redirect plugins fall into two categories: tools that require you to manually write every rule, or tools that blindly send every 404 to your homepage. 404 Solution does neither.
 
-* **A spell-checking algorithm that actually matches typos.** Using Levenshtein distance and N-gram scoring, 404 Solution catches `/prodcut/`, `/categroy/`, and `/wooocmmerce/` and finds the real destination — something no other free plugin does.
+* **A spell-checking algorithm that actually matches typos.** Using Levenshtein distance and N-gram scoring, 404 Solution catches `/prodcut/`, `/categroy/`, and `/wooocmmerce/` and finds the real destination.
 * **7 matching engines, in sequence.** Slug match → URL fix → Title keywords → Category/tag paths → Content search → Spelling similarity → Archive fallback. The first engine with a confident match wins.
 * **Automatic, from day one.** Install and activate. 404 Solution starts capturing and redirecting immediately. You can tune it; you don't have to.
 * **Redirect management when you need it.** Full manual redirect editor, regex support, bulk actions, and CSV/JSON import compatible with Redirection's export format.
-* **Debug mode that shows its work.** Enable debug logging and see exactly which engine chose a redirect and why — a level of transparency no competing plugin offers.
+* **Debug mode that shows its work.** Enable debug logging and see exactly which engine chose a redirect and why.
 * **Built for real-world hosting.** Self-healing database tables, auto-recovery from corruption, automatic log trimming, and zero wp-admin-wide banners.
 * **Ships with extras most plugins sell separately.** HTTP 410 Gone, 307/308/451 status codes, Google Search Console integration, REST API, WP-CLI support, email digest reports, and security probe detection — all free.
 
@@ -62,6 +62,8 @@ The whole process adds no perceptible latency for visitors on non-404 pages. The
 
 * Manual redirect editor with bulk actions
 * Full regular expression support
+* Conditional redirects: match on login status, user role, referrer, user agent, IP range or HTTP header, combined with AND/OR
+* Scheduled redirects with optional start and end dates
 * CSV and JSON import/export (compatible with Redirection plugin format)
 * .htaccess and Nginx server-level export
 * Per-post and per-term exclusion via meta box
@@ -122,7 +124,7 @@ The two plugins are complementary. Many sites run both: Redirection for planned 
 
 = How is this different from 404 to 301? =
 
-404 to 301 redirects ALL 404 errors to one fixed destination (usually the homepage). 404 Solution finds the actual page the visitor was looking for. Sending visitors to your homepage is poor UX and can create soft 404 problems in Google Search Console.
+404 to 301 sends every 404 that has no custom rule to one fallback destination (usually the homepage). 404 Solution finds the actual page the visitor was looking for. Sending visitors to your homepage is poor UX and can create soft 404 problems in Google Search Console.
 
 = How is this different from WP 404 Auto Redirect to Similar Post? =
 
@@ -181,6 +183,12 @@ Yes. Go to **Settings → 404 Solution → Redirect all unhandled 404s to** and 
 
 Log cleanup is automatic. Configure maximum log size under **Options → General Settings → Maximum log disk usage**. You can also manually clear logs from the Logs page.
 
+= What happens when I uninstall 404 Solution? =
+
+By default, uninstall keeps your redirects and 404 logs so a later reinstall can reuse them. Rebuildable cache tables are removed. Plugin options are removed; `abj404_schema_high_water` is kept when any plugin tables remain so a downgrade does not discard columns created by a newer build. The schema marker is removed when all plugin tables are deleted.
+
+The `uploads/temp_abj404_solution` directory is intentionally retained because it may contain existing diagnostic logs and CSV exports. Save any files you need, then remove that directory manually if you want a complete filesystem cleanup.
+
 = Can I exclude certain URLs from being processed? =
 
 Yes. Use **Options → Advanced Settings → Files and Folders Ignore Strings** to add paths to ignore. Per-post and per-term exclusion is also available via the edit screen checkbox.
@@ -203,6 +211,28 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 6. **Email Digest** — Weekly HTML email summarizing captured 404s, resolution rate, and a ranked table of top 404 URLs with color-coded hit badges.
 
 == Changelog ==
+
+= Version 4.4.0 (November 5, 2026) =
+
+**New Features**
+
+* Added redirect options for matching query strings and passing or discarding query parameters. These options are included in CSV imports and exports.
+* Added a 404 Suggestions block for the WordPress editor and first-run setup for displaying similar pages, with improved keyboard and screen-reader support.
+
+**Bug Fixes**
+
+* Stopped tracking parameters, such as UTM tags, from creating duplicate automatic redirects.
+* Preserved redirects after page and category URL changes, including changes affecting child pages, and improved redirect-loop prevention.
+* Fixed cached 404 pages hiding new redirects by clearing affected entries in W3 Total Cache, WP Super Cache and LiteSpeed Cache.
+* Fixed the blank Match Confidence chart and corrected email digest dates to use the site's timezone.
+* Fixed errors during plugin updates when older requests were still running.
+* Kept the redirect tables available when the database temporarily refuses writes.
+* Corrected multisite uninstall cleanup to respect each site's saved data-retention choices.
+
+**Improvements**
+
+* Improved table loading and pagination on large sites, corrected URL searches containing punctuation, and moved statistics refresh work into the background.
+* Improved recovery of unfinished upgrades and background rebuilds when WordPress scheduled tasks are stalled.
 
 = Version 4.3.6 (September 29, 2026) =
 
@@ -331,39 +361,4 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 * FIX: Fixed an out-of-memory error (thanks to johnegg and kalshyre for reporting this).
 * FIX: Fixed other things that looked like possible out-of-memory errors during maintenance.
 * Improvement: Made automatic error reporting more robust to cover OOM as best as possible as well as other failure types.
-
-= Version 4.3.0 (June 12, 2026) =
-
-**Bug Fixes**
-
-* Fixed locale-stale labels in the Page Redirects view cache by storing status and type as integer codes only, translating labels at render time, and dropping the legacy translated-label columns during upgrade.
-* Fixed the Page Redirects and Captured 404s admin tabs still occasionally failing to load on high-traffic sites running 4.2.0. The 4.2.0 release notes claimed this was fixed, but only the cache-warmup race was addressed. A separate internal "mutation watermark" gate could still abort the cache rebuild mid-stage when 404 traffic arrived during the rebuild, and surface the same "Could not finish refreshing data" message at the 45-second budget. That gate and its supporting machinery (watermark counter table, admin-mutation gate, view-build watermark stamping) have now been removed in full. On Bruno-class data (about 30,000 active redirects, about 384,000 hit rows, sustained 1 request per second or higher 404 traffic), the admin tabs hydrate within budget across consecutive refreshes.
-* Fixed a stale "No ID(s) found" notice appearing after a redirect was edited and saved successfully. The notice from the prior screen is now cleared so the success message stands alone.
-* Fixed a stuck "Refreshing data... (stage 4)" badge that could remain on the Page Redirects pagination strip after a background refresh failed. The strip now collapses placeholder-only rows on a failed table load, and the error notice no longer competes with the 5-star review prompt for attention.
-* Fixed generic "Something went wrong" messages on admin AJAX errors. The underlying cause is now appended in parentheses so the error is self-diagnosable, and the multi-stage diagnostic detail is tucked behind a collapsed Details panel.
-* Fixed `wp abj404 list` not returning redirects that were just created via `wp abj404 create` in the same session, and corrected the `--status=manual` filter so manually-created redirects are returned.
-* Fixed CSV-imported redirects not appearing in the Page Redirects table immediately after import. The cached view is now rebuilt synchronously when the import completes, so the table reflects the new rows on the next page load.
-* Fixed a "table doesn't exist" error path that could fire during a partial install or upgrade. The data layer now tolerates an unprepared `$wpdb` and surfaces a clean degraded state instead of a fatal.
-* Fixed the plugin's settings defaults not being available on the uninstall path, which could leave a stray option behind on some sites.
-* Fixed a duplicate-accessible-name accessibility warning on the redirects list. The "Add Redirect" submit button inside the modal is now labeled "Add", which removes the collision with the page-level "Add Redirect" action button.
-* Fixed a fatal that could occur on the Plugins admin screen when `wp-admin/includes/plugin-install.php` was unavailable on hardened hosts (the include is now guarded with `is_readable`).
-* Fixed a fail-open default in the REST captured-404s status filter that could return rows from an unintended status when an unknown filter value was supplied.
-* Fixed the URL and Destination column-sort "being prepared" progress indicator that could stay stuck at 0% on large sites where a security plugin blocks the WordPress cron loopback. The one-time sort-key preparation is now driven by the admin's own page view in the background, with a longer and gentler retry window, so column sorting becomes available without depending on WP-cron, and a transient timeout no longer halts the progress.
-
-**Improvements**
-
-* Several admin surfaces were restyled to match native WordPress chrome and feel quieter on the eye: the top sub-navigation now uses standard `.nav-tab` styling; the Edit Redirect form follows the native `form-table` shape; list-table filter rows use subsubsub pipe-separated links; status badges and pills use the bordered-label shape; checkbox columns and column-header padding match core WP list tables; AJAX error notices use the native `.notice-error` shape; and the self-healing dashboard notice routes through the standard notice template.
-* Several internal queries that scanned the full `information_schema`, post-type table, or content-keywords index on large sites are now bounded, removing a needless cost during background cache rebuilds. No behavior change for typical sites; smoother performance on sites with thousands of post types or very large content tables.
-* Changed the internal admin-notice payload schema to store translated message and guidance text directly, removing the message catalog indirection. No user-facing behavior change is expected.
-* When a background refresh fails, a Support button is now mounted directly on the failure notice so the report path is one click instead of a hunt through Settings.
-
-= Version 4.2.0 (May 23, 2026) =
-
-**Bug Fixes**
-
-* Fixed the "Page Redirects" and "Captured 404s" admin tabs occasionally failing to load on busy sites. The cache-warmup pipeline could race against ongoing 404 traffic and report that the data snapshot was missing even when the underlying query had succeeded. Admin tables on high-volume sites now load reliably.
-
-**Improvements**
-
-* Substantial internal refactor of the data-access, view-build, and admin-mutation layers for long-term maintainability. No visible behavior change is expected; the version bump from 4.1.x to 4.2.0 reflects the size of the change.
 

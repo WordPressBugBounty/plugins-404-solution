@@ -100,6 +100,47 @@ if (!function_exists('abj404_shortCodeListener')) {
 	}
 }
 
+if (!function_exists('abj404_register_page_suggestions_block')) {
+	/**
+	 * Register the dynamic page-suggestions block on the WordPress 5.0 floor.
+	 *
+	 * The block deliberately reuses the shortcode callback so its frontend
+	 * output, request handling, and cache behavior stay on one rendering path.
+	 * Block metadata registration is unavailable until WordPress 5.5, so the
+	 * registration uses the PHP args form supported by the plugin's floor.
+	 *
+	 * @return void
+	 */
+	function abj404_register_page_suggestions_block() {
+		if (!function_exists('register_block_type') || !function_exists('wp_register_script')) {
+			return;
+		}
+		if (!defined('ABJ404_URL') || !defined('ABJ404_VERSION')) {
+			return;
+		}
+
+		wp_register_script(
+			'abj404-page-suggestions-block',
+			ABJ404_URL . 'includes/js/pageSuggestionsBlock.js',
+			array('wp-blocks', 'wp-element', 'wp-components', 'wp-i18n'),
+			ABJ404_VERSION,
+			true
+		);
+
+		if (class_exists('ABJ_404_Solution_WPUtils')) {
+			ABJ_404_Solution_WPUtils::registerScriptTranslations();
+		}
+
+		register_block_type('abj404/page-suggestions', array(
+			'title' => __('404 Suggestions', '404-solution'),
+			'description' => __('Shows visitors a list of pages matching the URL they were looking for', '404-solution'),
+			'category' => 'widgets',
+			'editor_script' => 'abj404-page-suggestions-block',
+			'render_callback' => 'abj404_shortCodeListener',
+		));
+	}
+}
+
 if (!function_exists('abj404_verify_runtime_integrity')) {
 	/**
 	 * Validate that required plugin files are present.

@@ -29,7 +29,7 @@ class ABJ_404_Solution_FeedbackSiteTokenStore {
         if (!function_exists('get_option')) {
             return '';
         }
-        $raw = get_option(self::TOKEN_OPTION, '');
+        $raw = ABJ_404_Solution_OptionShapeRead::scalar(self::TOKEN_OPTION, '');
         if ($raw === '' || $raw === false || $raw === null) {
             return '';
         }
@@ -44,7 +44,7 @@ class ABJ_404_Solution_FeedbackSiteTokenStore {
     }
 
     public static function freshStoredToken(): string {
-        self::clearOptionCaches();
+        ABJ_404_Solution_OptionCacheInvalidator::site(self::TOKEN_OPTION);
         return self::storedToken();
     }
 
@@ -74,26 +74,20 @@ class ABJ_404_Solution_FeedbackSiteTokenStore {
         if (is_array($existing) && (($existing['type'] ?? null) === self::NOTICE_TYPE)) {
             return;
         }
-        // allow-cache-empty: locally generated admin-notice payload, not a cached fetch result.
-        set_transient(self::NOTICE_TRANSIENT, array(
-            'type' => self::NOTICE_TYPE,
-            'message' => __(
-                "This site's diagnostic identity had to be re-established after the reports server rejected its stored credential.",
-                '404-solution'
-            ),
-            'guidance' => __(
-                'Reporting has recovered. Older self-service privacy history may require the manual privacy request path.',
-                '404-solution'
-            ),
-        ), self::NOTICE_TTL);
+        ABJ_404_Solution_DeferredTranslation::whenReady(static function (): void {
+            // allow-cache-empty: locally generated admin-notice payload, not a cached fetch result.
+            set_transient(self::NOTICE_TRANSIENT, array(
+                'type' => self::NOTICE_TYPE,
+                'message' => __(
+                    "This site's diagnostic identity had to be re-established after the reports server rejected its stored credential.",
+                    '404-solution'
+                ),
+                'guidance' => __(
+                    'Reporting has recovered. Older self-service privacy history may require the manual privacy request path.',
+                    '404-solution'
+                ),
+            ), self::NOTICE_TTL);
+        });
     }
 
-    private static function clearOptionCaches(): void {
-        if (!function_exists('wp_cache_delete')) {
-            return;
-        }
-        wp_cache_delete(self::TOKEN_OPTION, 'options');
-        wp_cache_delete('notoptions', 'options');
-        wp_cache_delete('alloptions', 'options');
-    }
 }

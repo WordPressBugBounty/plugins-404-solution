@@ -9,6 +9,11 @@
  * plugin and enqueued as a hard dependency, so window.Chart is normally
  * already defined). As a fallback it also waits for the `abj404ChartJsLoaded`
  * event that statsTrends.js dispatches, in case of script-order differences.
+ *
+ * The script is enqueued in the document head, so it runs before the canvas
+ * is parsed: rendering waits for the DOM to be ready, and a render guard
+ * keeps the DOM-ready path and the event fallback from both building a
+ * chart on the same canvas.
  */
 (function () {
     'use strict';
@@ -49,11 +54,17 @@
         }
     }
 
+    var rendered = false;
+
     function renderConfidenceChart() {
+        if (rendered) {
+            return;
+        }
         var canvas = document.getElementById('abj404-chart-confidence');
         if (!canvas || !window.Chart) {
             return;
         }
+        rendered = true;
         var cfg = readConfig(canvas);
         if (!cfg) {
             return;
@@ -75,9 +86,10 @@
         });
     }
 
-    if (window.Chart) {
-        renderConfidenceChart();
+    document.addEventListener('abj404ChartJsLoaded', renderConfidenceChart);
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', renderConfidenceChart);
     } else {
-        document.addEventListener('abj404ChartJsLoaded', renderConfidenceChart);
+        renderConfidenceChart();
     }
 })();

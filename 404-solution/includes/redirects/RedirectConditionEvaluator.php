@@ -49,40 +49,74 @@ class ABJ_404_Solution_RedirectConditionEvaluator {
      * @return bool true if redirect should proceed, false if conditions block it
      */
     public function shouldApplyRedirect(int $redirectId): bool {
-        $conditions = $this->getConditionsForRedirect($redirectId);
         $this->lastTrace = [];
+
+        $read = $this->readConditionsForEvaluation($redirectId);
+        if (!is_array($read)
+                || ($read['query_succeeded'] ?? null) !== true
+                || ($read['timed_out'] ?? null) !== false
+                || ($read['table_available'] ?? null) !== true
+                || !array_key_exists('last_error', $read)
+                || !is_string($read['last_error']) || $read['last_error'] !== ''
+                || !isset($read['rows']) || !is_array($read['rows'])) {
+            return false;
+        }
+        $conditions = $this->validatedConditions($read['rows']);
+        if ($conditions === null) {
+            return false;
+        }
 
         // No conditions = always redirect.
         if (empty($conditions)) {
             return true;
         }
 
-        $result = null;
+        return $this->combineConditions($conditions);
+    }
 
+    /**
+     * @param mixed $rows
+     * @return array<int,array<string,mixed>>|null
+     */
+    private function validatedConditions($rows): ?array {
+        if (!is_array($rows)) {
+            return null;
+        }
+        $conditions = [];
+        foreach ($rows as $condition) {
+            if (!is_array($condition)) {
+                return null;
+            }
+            // Project the fields evaluation reads instead of passing arbitrary
+            // driver keys into the string-keyed condition contract.
+            $conditions[] = [
+                'condition_type' => $condition['condition_type'] ?? null,
+                'operator' => $condition['operator'] ?? null,
+                'value' => $condition['value'] ?? null,
+                'logic' => $condition['logic'] ?? null,
+            ];
+        }
+        return $conditions;
+    }
+
+    /** @param array<int,array<string,mixed>> $conditions */
+    private function combineConditions(array $conditions): bool {
+        $result = null;
         foreach ($conditions as $condition) {
             $outcome = $this->evaluateCondition($condition);
-
             $condType = isset($condition['condition_type']) && is_string($condition['condition_type'])
                 ? $condition['condition_type'] : 'unknown';
             $this->lastTrace[] = ['type' => $condType, 'result' => $outcome];
-
             if ($result === null) {
                 // First condition initialises the running result.
                 $result = $outcome;
-            } else {
-                $logic = isset($condition['logic']) && is_string($condition['logic'])
-                    ? strtoupper(trim($condition['logic']))
-                    : 'AND';
-
-                if ($logic === 'OR') {
-                    $result = $result || $outcome;
-                } else {
-                    // Default to AND.
-                    $result = $result && $outcome;
-                }
+                continue;
             }
+            $logic = isset($condition['logic']) && is_string($condition['logic'])
+                ? strtoupper(trim($condition['logic'])) : 'AND';
+            // Default to AND.
+            $result = $logic === 'OR' ? ($result || $outcome) : ($result && $outcome);
         }
-
         return (bool)$result;
     }
 
@@ -94,6 +128,28 @@ class ABJ_404_Solution_RedirectConditionEvaluator {
      */
     public function getConditionsForRedirect(int $redirectId): array {
         return $this->dao->getRedirectConditions($redirectId);
+    }
+
+    /**
+     * Unsupported collaborators cannot prove that an empty condition set was
+     * read successfully, so they fail closed instead of receiving a synthetic
+     * success acknowledgement.
+     *
+     * @param int $redirectId
+     * @return mixed
+     */
+    private function readConditionsForEvaluation(int $redirectId) {
+        if (is_callable(array($this->dao, 'readRedirectConditions'))) {
+            return $this->dao->readRedirectConditions($redirectId);
+        }
+
+        return array(
+            'rows' => array(),
+            'last_error' => 'The redirect conditions read capability is unavailable.',
+            'query_succeeded' => false,
+            'timed_out' => false,
+            'table_available' => false,
+        );
     }
 
     /**

@@ -92,6 +92,8 @@ final class ABJ_404_Solution_ClientBuildFingerprint {
             'file' => 'ajax/view_updater_pagination_request.js',
             'functions' => array('abj404BuildPaginationRequest'),
         ),
+        'table_flight' => array(
+            'file' => 'ajax/view_updater_table_flight.js', 'functions' => null),
         'pagination_transport' => array(
             'file' => 'ajax/view_updater_pagination_transport.js',
             'functions' => array(
@@ -161,7 +163,23 @@ final class ABJ_404_Solution_ClientBuildFingerprint {
         }
         $path = dirname(__DIR__) . DIRECTORY_SEPARATOR
             . str_replace('/', DIRECTORY_SEPARATOR, (string)$module['file']);
-        $contents = @file_get_contents($path);
+        $readResult = ABJ_404_Solution_FileSystemService::captureFilesystemWarnings(
+            static function () use ($path) {
+                if (!is_file($path)) {
+                    return false;
+                }
+                return file_get_contents($path);
+            }
+        );
+        if ($readResult['warning'] !== null) {
+            abj404_logPhpFallback(
+                'client-build',
+                'Expected client module source could not be read: ' . $path . ' ('
+                . (string)$readResult['warning'] . ')'
+            );
+            return '';
+        }
+        $contents = $readResult['result'];
         if (!is_string($contents) || $contents === '') {
             return '';
         }

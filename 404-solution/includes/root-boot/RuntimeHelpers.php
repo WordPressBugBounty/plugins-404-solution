@@ -13,23 +13,8 @@ if (!defined('ABSPATH')) {
  */
 // allow-no-test-found: boot-time global helper functions (logging/clock/admin-policy gate) required directly by 404-solution.php before the service container exists; no isolated unit-file seam. abj404_logRuntimeWarning is exercised in CatchExceptionCoverageAuditTest and OpcacheStaleAfterUpgradeTest; the clock helpers back the Clock-injection tests.
 
-if (!function_exists('abj404_record_missing_file')) {
-/**
- * Append a missing/corrupt plugin file path to the boot-state missing-files
- * list. Centralizes the typed write to $GLOBALS['abj404_missing_files'] so
- * callers (the autoloader, the boot sequence) don't each have to re-assert the
- * global's array shape.
- *
- * @param string $path
- * @return void
- */
-function abj404_record_missing_file(string $path): void {
-	if (!isset($GLOBALS['abj404_missing_files']) || !is_array($GLOBALS['abj404_missing_files'])) {
-		$GLOBALS['abj404_missing_files'] = array();
-	}
-	$GLOBALS['abj404_missing_files'][] = $path;
-}
-}
+// abj404_record_missing_file() is defined in Autoloader.php, which the autoloader's
+// missing-file branch needs before this file is loaded.
 
 if (!function_exists('abj404_logRuntimeWarning')) {
 /**

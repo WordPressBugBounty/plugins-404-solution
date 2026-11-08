@@ -29,6 +29,7 @@ if (!defined('ABSPATH')) {
  */
 // allow-no-test-found: static data file (returns the handle-to-source map, no logic); the map is verified against the real on-disk JS sources in ScriptTranslationsTest.
 return array(
+	'abj404-page-suggestions-block' => 'includes/js/pageSuggestionsBlock.js',
 	'abj404-stats-confidence-chart' => 'includes/js/statsConfidenceChart.js',
 	'abj404-support-request-modal-view' => 'includes/js/support-request-modal-view.js',
 	'abj404-tools-migrate-plugin' => 'includes/js/toolsMigratePlugin.js',

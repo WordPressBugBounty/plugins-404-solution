@@ -45,6 +45,7 @@
     var cfg = null;
     var nonce = '';
     var chartInstances = {};
+    var loadState = 'idle';
 
     // Trend data is a lighter read (three small aggregate series) than the
     // one-shot admin actions elsewhere in this bundle, so a shorter bound is
@@ -53,7 +54,11 @@
     // open forever (M501).
     var TREND_DATA_TIMEOUT_MS = 20000;
 
-    function loadChartJs(cb) {
+    /**
+     * @param {function(): void} cb Runs when Chart.js is available.
+     * @param {function(): void} [onUnavailable] Runs instead when it is not.
+     */
+    function loadChartJs(cb, onUnavailable) {
         // Chart.js is bundled with the plugin and enqueued as a hard dependency
         // (see AdminAssetEnqueuer::addScripts), so window.Chart is already
         // defined by the time this runs. We dispatch abj404ChartJsLoaded so
@@ -69,6 +74,7 @@
         if (loadEl) { loadEl.style.display = 'none'; }
         var errEl = document.getElementById('abj404-trends-error');
         if (errEl) { errEl.style.display = ''; }
+        if (onUnavailable) { onUnavailable(); }
     }
 
     function buildChart(canvasId, label, color, labels, values) {
@@ -160,7 +166,14 @@
         }
     }
 
-    function fetchAndRender() {
+    /**
+     * @param {function(): void} [onSettled] Runs once the charts or the
+     *     error panel are showing; the first render passes the admin ready
+     *     release.
+     */
+    function fetchAndRender(onSettled) {
+        loadState = 'loading';
+        var settle = function () { if (onSettled) { onSettled(); } };
         var days = getSelectedDays();
         var loadEl   = document.querySelector('.abj404-trends-loading');
         var errEl    = document.getElementById('abj404-trends-error');
@@ -173,6 +186,7 @@
             .then(function (resp) {
                 if (loadEl) { loadEl.style.display = 'none'; }
                 if (!resp || !resp.success || !Array.isArray(resp.data)) {
+                    loadState = 'error';
                     recordTrendFailure({
                         serverMessage: (resp && resp.data && typeof resp.data.message === 'string')
                             ? resp.data.message : 'unexpected response shape: ' + typeof resp
@@ -191,23 +205,51 @@
                 chartInstances['abj404-chart-404s']      = buildChart('abj404-chart-404s',      cfg.label404,      'rgb(0,115,170)',  labels, vals404);
                 chartInstances['abj404-chart-redirects'] = buildChart('abj404-chart-redirects', cfg.labelRedirect, 'rgb(70,170,100)', labels, valsRedir);
                 chartInstances['abj404-chart-captures']  = buildChart('abj404-chart-captures',  cfg.labelCapture,  'rgb(220,100,50)', labels, valsCapt);
+                loadState = 'ready';
             })
             .catch(function (reason) {
+                loadState = 'error';
                 recordTrendFailure({ error: reason });
                 if (loadEl) { loadEl.style.display = 'none'; }
                 if (errEl)  { errEl.style.display  = ''; }
+            })
+            .then(settle, function (renderError) {
+                loadState = 'error';
+                settle();
+                throw renderError;
             });
     }
 
     function onPeriodChange() { fetchAndRender(); }
 
     document.addEventListener('DOMContentLoaded', function () {
+        if (cfg) { return; }
         cfg = readConfig();
         if (!cfg) {
             return;
         }
         nonce = cfg.nonce || '';
-        loadChartJs(fetchAndRender);
+        var card = document.getElementById('abj404-trends-config').closest('.abj404-card');
+        // The accordion owns pointer, keyboard, Expand All and restored state.
+        // Observe its disclosure instead of loading an invisible chart and
+        // blocking the already-rendered Statistics cards on another request.
+        var loadDisclosedTrends = function () {
+            if (card && !card.classList.contains('expanded')) { return; }
+            if (loadState !== 'idle' && loadState !== 'error') { return; }
+            loadState = 'loading';
+            // Initially visible charts still participate in first-render
+            // readiness. A later disclosure cannot revoke a fired signal.
+            var releaseReady = (window.ABJ404 && window.ABJ404.adminReady)
+                ? window.ABJ404.adminReady.hold('stats-trends') : function () {};
+            loadChartJs(function () { fetchAndRender(releaseReady); }, function () {
+                loadState = 'error';
+                releaseReady();
+            });
+        };
+        if (card) {
+            new MutationObserver(loadDisclosedTrends).observe(card, { attributes: true, attributeFilter: ['class'] });
+        }
+        loadDisclosedTrends();
         document.querySelectorAll('input[name=abj404_trend_period]').forEach(function (r) {
             r.addEventListener('change', onPeriodChange);
         });

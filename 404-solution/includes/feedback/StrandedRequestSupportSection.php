@@ -61,19 +61,203 @@ final class ABJ_404_Solution_StrandedRequestSupportSection {
      * a support request is the last thing that may be blocked by its own
      * diagnostics, so a missing class or an unreadable option degrades to a
      * stated reason rather than a fatal in the request the admin is waiting on.
+     * @param array<int, string> $requestIds Authorized, normalized failures to pin.
      */
-    public static function compose(): string {
+    public static function compose(array $requestIds = array()): string {
         if (!class_exists('ABJ_404_Solution_SameSiteCensusReading')
                 || !class_exists('ABJ_404_Solution_StrandedRequestLedger')) {
             return 'Stranded-request diagnostics unavailable: the census classes could not be'
                 . ' loaded on this install, so in-flight worker state was not read here.';
         }
         try {
-            return self::render(self::record());
+            $original = json_decode($requestIds === array() ? self::retainedOriginals()
+                : self::forRequests($requestIds, true), true);
+            return self::render(self::record(), is_array($original) ? $original : array());
         } catch (Throwable $e) {
             return 'Stranded-request diagnostics could not be computed: '
                 . substr($e->getMessage(), 0, 200);
         }
+    }
+
+    /**
+     * Render named, ALREADY retained accounts without sampling/reaping census
+     * state. Safe inside AjaxFailureReporter and independently authorized
+     * support retrieval. A missing frame never borrows collector identity.
+     *
+     * @param array<int, string> $requestIds
+     */
+    public static function forRequests(array $requestIds, bool $includePendingFatal = false): string {
+        $entries = array_merge(ABJ_404_Solution_StrandedRequestLedger::read(),
+            ABJ_404_Solution_StrandedRequestLedger::readTimelines());
+        if ($includePendingFatal && class_exists('ABJ_404_Solution_CrashBeaconStore')) {
+            $pending = self::pendingFatalEntry();
+            if ($pending !== null) {
+                $requestIds[] = $pending['request_id'];
+                $entries[] = $pending['entry'];
+            }
+        }
+        if ($requestIds === array()) { return ''; }
+        $records = array();
+        $ids = self::uniqueRequestIds($requestIds);
+        foreach ($ids as $rawId) {
+            $id = ABJ_404_Solution_AjaxRequestLedger::normalizeId($rawId, '');
+            if ($id === '') { continue; }
+            $records[] = self::recordForRequest($id, $entries);
+        }
+        $total = count($records);
+        // Keep the named first request and the newest context. Automatic
+        // reporting supplies exactly its named request, so it cannot be evicted.
+        $records = count($records) > 2 ? array($records[0], $records[count($records) - 1]) : $records;
+        do {
+            $record = array('records' => $records, 'truncated' => count($records) < $total,
+                'omitted_requests' => $total - count($records),
+                'collector_runtime' => ABJ_404_Solution_RequestFailureFrame::runtimeIdentity());
+            $json = ABJ_404_Solution_Utf8SafeRecord::encode(array('abj404_original_requests' => $record), 'original request evidence');
+            // This block spends at most half of the existing section budget;
+            // it does not allocate another report section or enlarge the sum.
+            if (strlen($json) <= intdiv(self::MAX_STRANDED_DIAG_BYTES, 2)) { return $json; }
+            array_pop($records);
+        } while ($records !== array());
+        return '{"abj404_original_requests":{"records":[],"truncated":true,"status":"unavailable"}}';
+    }
+
+    /**
+     * @return array{request_id: string, entry: array<string, mixed>}|null
+     */
+    private static function pendingFatalEntry(): ?array {
+        $pending = ABJ_404_Solution_CrashBeaconStore::forCurrentSite()->read();
+        $beacon = $pending['beacon'];
+        $fatalFrame = $beacon === null ? null : $beacon->failureFrame();
+        $fatalRequestId = is_array($fatalFrame) ? ($fatalFrame['request_id'] ?? null) : null;
+        if (!is_string($fatalRequestId) || $fatalRequestId === '') {
+            return null;
+        }
+        return array(
+            'request_id' => $fatalRequestId,
+            'entry' => array('timeline' => array('rid' => $fatalRequestId, 'failure_frame' => $fatalFrame)),
+        );
+    }
+
+    /**
+     * @param array<int, mixed> $requestIds
+     * @return array<int, string>
+     */
+    private static function uniqueRequestIds(array $requestIds): array {
+        $unique = array();
+        foreach ($requestIds as $requestId) {
+            if (is_string($requestId)) {
+                $unique[$requestId] = true;
+            }
+        }
+        return array_keys($unique);
+    }
+
+    /**
+     * @param array<int, mixed> $entries
+     * @return array<string, mixed>
+     */
+    private static function timelineForRequest(array $entries, string $id): array {
+        $timeline = array();
+        foreach ($entries as $entry) {
+            if (!is_array($entry) || !is_array($entry['timeline'] ?? null)) { continue; }
+            $entryTimeline = $entry['timeline'];
+            if (($entryTimeline['rid'] ?? null) !== $id) { continue; }
+            // A later receipt can outlive the retired census row. Its missing
+            // frame must not hide an original still retained for another reason.
+            $frame = ABJ_404_Solution_RequestFailureFrame::normalize($entryTimeline['failure_frame'] ?? null);
+            if ($frame !== null) { $timeline['failure_frame'] = $frame; }
+            $rawClient = $entryTimeline['client_observation'] ?? null;
+            $client = is_array($rawClient)
+                ? ABJ_404_Solution_RequestFailureFrame::clientObservation($rawClient) : null;
+            if ($client !== null) { $timeline['client_observation'] = $client; }
+        }
+        if (self::validFrameForRequest($timeline['failure_frame'] ?? null, $id)) {
+            return $timeline;
+        }
+
+        // A bounded ledger can evict the original frame, and the registry may
+        // retire the row before a later client receipt promotes its timeline.
+        // Read only this requested id as a fallback; never broaden the lookup
+        // into a census.
+        $retired = self::retiredTimelineForRequest($id);
+        if (is_array($retired['failure_frame'] ?? null)) {
+            $timeline['failure_frame'] = $retired['failure_frame'];
+        }
+        // A client observation already retained in the bounded ledger remains
+        // authoritative. Only carry one from the retired row when the ledger
+        // had none, so the fallback cannot replace later client evidence.
+        if (!isset($timeline['client_observation'])
+                && is_array($retired['client_observation'] ?? null)) {
+            $timeline['client_observation'] = $retired['client_observation'];
+        }
+        return $timeline;
+    }
+
+    /**
+     * Read one exact request row from the existing bounded registry API.
+     *
+     * @return array<string, mixed>
+     */
+    private static function retiredTimelineForRequest(string $id): array {
+        if ($id === '' || !class_exists('ABJ_404_Solution_SameSiteRequestRegistry')) {
+            return array();
+        }
+        try {
+            $found = ABJ_404_Solution_SameSiteRequestRegistry::findTimeline($id);
+            if (!in_array($found['state'] ?? null, array('retired', 'in_flight'), true)
+                    || !is_string($found['value'] ?? null) || $found['value'] === '') {
+                return array();
+            }
+            $encoded = ABJ_404_Solution_SameSiteRequestRowCodec::timelineOfValue($found['value']);
+            $decoded = ABJ_404_Solution_RequestPhaseTimeline::decode($encoded);
+            if (!is_array($decoded) || ($decoded['rid'] ?? null) !== $id) {
+                return array();
+            }
+            $frame = ABJ_404_Solution_RequestFailureFrame::normalize($decoded['failure_frame'] ?? null);
+            if (!self::validFrameForRequest($frame, $id)) {
+                return array();
+            }
+            $result = array('failure_frame' => $frame);
+            $client = is_array($decoded['client_observation'] ?? null)
+                ? ABJ_404_Solution_RequestFailureFrame::clientObservation($decoded['client_observation']) : null;
+            if ($client !== null) {
+                $result['client_observation'] = $client;
+            }
+            return $result;
+        } catch (Throwable $e) {
+            abj404_logPhpFallback('stranded-request-support',
+                'retired request frame fallback failed for ' . $id . ': '
+                . substr($e->getMessage(), 0, 200));
+            return array();
+        }
+    }
+
+    /** @param mixed $frame */
+    private static function validFrameForRequest($frame, string $id): bool {
+        return is_array($frame) && ($frame['request_id'] ?? null) === $id;
+    }
+
+    /**
+     * @param array<int, mixed> $entries
+     * @return array<string, mixed>
+     */
+    private static function recordForRequest(string $id, array $entries): array {
+        $timeline = self::timelineForRequest($entries, $id);
+        $frame = ABJ_404_Solution_RequestFailureFrame::normalize($timeline['failure_frame'] ?? null);
+        $client = $timeline['client_observation'] ?? null;
+        return array(
+            'request_id' => $id,
+            'status' => $frame === null ? 'unavailable' : 'available',
+            'reason' => $frame === null ? 'never_reached_or_write_failed_or_expired' : '',
+            'frame' => $frame,
+            'client_observation' => is_array($client)
+                ? ABJ_404_Solution_RequestFailureFrame::clientObservation($client) : null,
+        );
+    }
+
+    /** Local read-only evidence for the existing independently authorized support/preview routes. */
+    public static function retainedOriginals(): string {
+        return self::forRequests(array_keys(ABJ_404_Solution_StrandedRequestLedger::condemnedRequestIds()), true);
     }
 
     /**
@@ -164,8 +348,9 @@ final class ABJ_404_Solution_StrandedRequestSupportSection {
      * misleading to a human.
      *
      * @param array<string, mixed> $record
+     * @param array<string, mixed> $original Already bounded original-request block.
      */
-    private static function render(array $record): string {
+    private static function render(array $record, array $original = array()): string {
         $header = 'Stranded-request diagnostics -- ' . self::summary($record) . " (JSON):\n";
 
         $withoutHistory = $record;
@@ -184,7 +369,7 @@ final class ABJ_404_Solution_StrandedRequestSupportSection {
         );
 
         foreach (array($record, $withoutHistory, $trimmedTimelines, $minimal) as $candidate) {
-            $line = json_encode(array(self::STRANDED_DIAG_KEY => $candidate));
+            $line = json_encode(array_merge($original, array(self::STRANDED_DIAG_KEY => $candidate)));
             if (is_string($line)
                     && strlen($header) + strlen($line) <= self::MAX_STRANDED_DIAG_BYTES) {
                 return $header . $line;
@@ -247,7 +432,8 @@ final class ABJ_404_Solution_StrandedRequestSupportSection {
         $entries = array();
         foreach ($value as $entry) {
             if (is_array($entry)) {
-                $entries[] = $entry;
+                // Records are JSON objects; a numeric key is not a record field.
+                $entries[] = array_filter($entry, 'is_string', ARRAY_FILTER_USE_KEY);
             }
         }
         return $entries;

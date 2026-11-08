@@ -1,11 +1,10 @@
 <?php
 
-// allow-no-test-found: covered by tests/SetupWizardTest.php through setup wizard form submission entry points.
+// allow-no-test-found: covered by tests/SetupWizardFormSubmissionTest.php through setup wizard form submission entry points.
 
 if (!defined('ABSPATH')) {
     exit;
 }
-
 /**
  * Reads and persists setup wizard state.
  */
@@ -19,7 +18,7 @@ class ABJ_404_Solution_SetupWizardOptionStore {
      * @return bool
      */
     public static function isComplete(): bool {
-        $completed = get_option(self::OPTION_NAME, '');
+        $completed = ABJ_404_Solution_OptionShapeRead::scalar(self::OPTION_NAME, '');
         return !empty($completed);
     }
 
@@ -51,12 +50,4 @@ class ABJ_404_Solution_SetupWizardOptionStore {
         return is_string($adminEmail) ? $adminEmail : '';
     }
 
-    /**
-     * Persist plugin options already derived by the setup policy.
-     *
-     * @param array<string,mixed> $options
-     */
-    public static function savePluginOptions(array $options): void {
-        abj_service('options_repository')->updateOptions($options);
-    }
 }

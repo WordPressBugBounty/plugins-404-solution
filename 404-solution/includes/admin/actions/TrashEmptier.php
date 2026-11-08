@@ -73,14 +73,36 @@ class ABJ_404_Solution_TrashEmptier {
                 "where " . $trashedRows;
 
         $result = $this->dbCore->queryAndGetResults($query);
+        $mutationError = isset($result['last_error']) && is_scalar($result['last_error'])
+            ? trim((string)$result['last_error']) : '';
+        if ($mutationError === ''
+                && (!array_key_exists('query_succeeded', $result) || $result['query_succeeded'] !== true
+                    || (array_key_exists('timed_out', $result) && $result['timed_out'] !== false))) {
+            $mutationError = 'Trash deletion did not confirm success.';
+        }
+        if ($mutationError !== '') {
+            // The delete may have committed before a false native return. Keep
+            // the count cache conservative, but do not apply the snapshot as a
+            // confirmed deletion or run the follow-up optimize.
+            $this->viewRead->invalidateStatusCountsCache();
+            $this->logger->warn($mutationError);
+            return;
+        }
         $rowsAffected = is_array($result) && isset($result['rows_affected']) && is_scalar($result['rows_affected'])
             ? (string)$result['rows_affected']
             : '0';
         $this->logger->debugMessage("doEmptyTrash deleted " . $rowsAffected . " rows total. (" . $sub . ")");
 
-        $this->viewRead->invalidateStatusCountsCache();
-        $countsSync->syncRemoved($emptied);
-
-        $this->dbCore->queryAndGetResults("optimize table {wp_abj404_redirects}");
+        ABJ_404_Solution_RedirectMutationCompletion::complete(array(
+            'status-count-invalidation' => function (): void {
+                $this->viewRead->invalidateStatusCountsCache();
+            },
+            'count-sync' => function () use ($countsSync, $emptied): void {
+                $countsSync->syncRemoved($emptied);
+            },
+            'optimize' => function (): void {
+                $this->dbCore->queryAndGetResults("optimize table {wp_abj404_redirects}");
+            },
+        ));
     }
 }

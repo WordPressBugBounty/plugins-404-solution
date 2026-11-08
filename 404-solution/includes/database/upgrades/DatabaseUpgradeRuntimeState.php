@@ -10,7 +10,8 @@ if (!defined('ABSPATH')) {
 final class ABJ_404_Solution_DatabaseUpgradeRuntimeState {
 
     /**
-     * Number of rows updated per chunk by backfillRedirectsCanonicalUrl().
+     * Conservative initial batch size for backfillRedirectsCanonicalUrl(); a
+     * pass-local sizer grows successful batches within its bounded maximum.
      * @var int
      */
     public const CANONICAL_URL_BACKFILL_CHUNK_SIZE = 5000;
@@ -42,9 +43,11 @@ final class ABJ_404_Solution_DatabaseUpgradeRuntimeState {
     public const REDIRECTS_CANONICAL_URL_BACKFILL_COMPLETE_OPTION = 'abj404_redirects_canonical_url_backfill_complete';
 
     /**
-     * Rows resolved per chunk by backfillRedirectsDenormColumns(). Smaller than
-     * the canonical-url chunk (5000) because each chunk also runs a logsv2
-     * GROUP BY rollup join, so a tighter chunk keeps each statement bounded.
+     * Conservative initial batch size for backfillRedirectsDenormColumns(); a
+     * pass-local sizer grows dense batches within a bounded maximum, while
+     * sparse explicit-ID writes retain a smaller bound. Each chunk performs
+     * derived projection and rollup work, so the initial size keeps statements
+     * bounded while the pass measures successful work.
      * @var int
      */
     public const REDIRECTS_DENORM_BACKFILL_CHUNK_SIZE = 1000;
@@ -56,18 +59,18 @@ final class ABJ_404_Solution_DatabaseUpgradeRuntimeState {
     public const REDIRECTS_DENORM_BACKFILL_TIME_BUDGET_SEC = 20;
 
     /**
-     * Rows recomputed per chunk by reconcileRedirectsDenormColumns() (Denorm
-     * Step 3d). Same 1000-row chunk as the backfill: each chunk also runs a
-     * logsv2 GROUP BY rollup join, so a tighter chunk keeps each statement
-     * bounded on a large table.
+     * Conservative initial batch size for reconcileRedirectsDenormColumns()
+     * (Denorm Step 3d). Its pass-local sizer grows dense batches within a
+     * bounded maximum and keeps sparse explicit-ID writes smaller; each chunk
+     * also performs a logs_hits rollup join.
      * @var int
      */
     public const REDIRECTS_DENORM_RECONCILE_CHUNK_SIZE = 1000;
 
     /**
      * Per-invocation wall-clock budget for the nightly redirects denorm
-     * reconcile. A pass that exhausts it persists its id cursor and resumes on
-     * the next nightly tick, so a huge table converges across successive nights.
+     * reconcile. A pass that exhausts it persists its id cursor and resumes
+     * through bounded single-shot continuations of that same nightly sweep.
      * @var int
      */
     public const REDIRECTS_DENORM_RECONCILE_TIME_BUDGET_SEC = 20;
@@ -100,6 +103,8 @@ final class ABJ_404_Solution_DatabaseUpgradeRuntimeState {
         'abj404_lookup',
         'abj404_ngram_cache',
         'abj404_logs_hits',
+        'abj404_stats_dimensions',
+        'abj404_stats_buckets',
         'abj404_redirect_conditions',
         'abj404_engine_profiles',
         'abj404_view_cache',

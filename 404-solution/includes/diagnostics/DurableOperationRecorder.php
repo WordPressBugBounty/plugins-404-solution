@@ -4,6 +4,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// allow-no-test-found: exercised through the real AJAX table handler in tests/AjaxRowProgressAttributionTest.php and tests/TableRendererPreludeTracerTest.php
 /**
  * Coordinates two-sink lifecycle evidence around foreign operations.
  *
@@ -16,15 +17,22 @@ if (!defined('ABSPATH')) {
  * CheckpointRecordFactory, and ActiveOperationBreadcrumbs remain the persistence
  * implementations.
  *
- * allow-no-test-found: exercised through the real AJAX table handler in tests/AjaxRowProgressAttributionTest.php and tests/TableRendererPreludeTracerTest.php
  */
 final class ABJ_404_Solution_DurableOperationRecorder {
 
     /** @var bool Prevent directory filters from recursively recording themselves. */
     private static $recordingActiveOperation = false;
 
+    /** @var int Observer-owned path resolution and journal writes can log warnings. */
+    private static $recordingJournalDepth = 0;
+
     /** @var int */
     private static $checkpointSequence = 0;
+
+    /** Observer work must not become another cache or routine-log operation. */
+    public static function isRecording(): bool {
+        return self::$recordingActiveOperation || self::$recordingJournalDepth > 0;
+    }
 
     /**
      * Privacy-safe scalar fields allowed in the system-temp operation state.
@@ -75,11 +83,13 @@ final class ABJ_404_Solution_DurableOperationRecorder {
         $checkpointId = self::newCheckpointId();
         $safeFields = self::selectSafeFields($fields);
         $intent = self::appendFixedState(
-            $requestId,
-            $event,
-            $checkpointId,
-            'intent',
-            $safeFields
+            array(
+                'request_id' => $requestId,
+                'operation_event' => $event,
+                'checkpoint_id' => $checkpointId,
+                'operation_state' => 'intent',
+                'fields' => $safeFields,
+            )
         );
         $journal = self::appendJournalRecord(
             $requestId,
@@ -92,15 +102,17 @@ final class ABJ_404_Solution_DurableOperationRecorder {
             ))
         );
         self::appendFixedState(
-            $requestId,
-            $event,
-            $checkpointId,
-            'armed',
-            array_merge($safeFields, array(
-                'armed' => true,
-                'first_sink_status' => self::writeStatus($intent),
-                'second_sink_status' => self::writeStatus($journal),
-            ))
+            array(
+                'request_id' => $requestId,
+                'operation_event' => $event,
+                'checkpoint_id' => $checkpointId,
+                'operation_state' => 'armed',
+                'fields' => array_merge($safeFields, array(
+                    'armed' => true,
+                    'first_sink_status' => self::writeStatus($intent),
+                    'second_sink_status' => self::writeStatus($journal),
+                )),
+            )
         );
         return $checkpointId;
     }
@@ -120,11 +132,13 @@ final class ABJ_404_Solution_DurableOperationRecorder {
             return;
         }
         $completion = self::appendFixedState(
-            $requestId,
-            $event,
-            $checkpointId,
-            'complete',
-            self::selectSafeFields($fields)
+            array(
+                'request_id' => $requestId,
+                'operation_event' => $event,
+                'checkpoint_id' => $checkpointId,
+                'operation_state' => 'complete',
+                'fields' => self::selectSafeFields($fields),
+            )
         );
         self::appendJournalRecord(
             $requestId,
@@ -173,12 +187,23 @@ final class ABJ_404_Solution_DurableOperationRecorder {
                 array('boundary' => $boundary, 'state' => $state),
                 $safeFields
             );
+            // The system-temp sink stays narrower than the manifest, but it
+            // must keep the discriminators the reservation demands from this
+            // very record: without them the one copy that outlives the active
+            // file's fold is never selected as support evidence.
+            $fixedSinkFields = array_merge(
+                self::SAFE_FIELDS,
+                ABJ_404_Solution_ActiveOperationBoundaryManifest::requiredEvidenceFields($boundary)
+            );
             $intent = self::appendFixedState(
-                $requestId,
-                'active_operation_breadcrumb',
-                $checkpointId,
-                'intent',
-                $identity
+                array(
+                    'request_id' => $requestId,
+                    'operation_event' => 'active_operation_breadcrumb',
+                    'checkpoint_id' => $checkpointId,
+                    'operation_state' => 'intent',
+                    'fields' => $identity,
+                    'allowed_fields' => $fixedSinkFields,
+                )
             );
             $result = self::replaceActiveState(
                 $requestId,
@@ -188,15 +213,18 @@ final class ABJ_404_Solution_DurableOperationRecorder {
                 self::writeStatus($intent)
             );
             self::appendFixedState(
-                $requestId,
-                'active_operation_breadcrumb',
-                $checkpointId,
-                $state === 'active' ? 'armed' : 'complete',
-                array_merge($identity, array(
-                    'armed' => $state === 'active',
-                    'first_sink_status' => self::writeStatus($intent),
-                    'second_sink_status' => self::writeStatus($result),
-                ))
+                array(
+                    'request_id' => $requestId,
+                    'operation_event' => 'active_operation_breadcrumb',
+                    'checkpoint_id' => $checkpointId,
+                    'operation_state' => $state === 'active' ? 'armed' : 'complete',
+                    'fields' => array_merge($identity, array(
+                        'armed' => $state === 'active',
+                        'first_sink_status' => self::writeStatus($intent),
+                        'second_sink_status' => self::writeStatus($result),
+                    )),
+                    'allowed_fields' => $fixedSinkFields,
+                )
             );
         } catch (Throwable $e) {
             self::reportFailure('active-operation record failed: ' . $e->getMessage());
@@ -240,8 +268,8 @@ final class ABJ_404_Solution_DurableOperationRecorder {
                 ARRAY_FILTER_USE_BOTH
             ));
         }
-        return class_exists('ABJ_404_Solution_ActiveOperationBreadcrumbs')
-            ? ABJ_404_Solution_ActiveOperationBreadcrumbs::compactSupportLines($compacted)
+        return class_exists('ABJ_404_Solution_ActiveOperationBreadcrumbState')
+            ? ABJ_404_Solution_ActiveOperationBreadcrumbState::compactSupportLines($compacted)
             : $compacted;
     }
 
@@ -262,6 +290,7 @@ final class ABJ_404_Solution_DurableOperationRecorder {
         string $checkpointId,
         array $fields
     ): array {
+        self::$recordingJournalDepth++;
         try {
             $directory = ABJ_404_Solution_AjaxCheckpointLogger::resolveDirectoryPath();
             if ($directory === '') {
@@ -281,6 +310,8 @@ final class ABJ_404_Solution_DurableOperationRecorder {
         } catch (Throwable $e) {
             self::reportFailure('journal record failed: ' . $e->getMessage());
             return self::failure('unexpected_failure');
+        } finally {
+            self::$recordingJournalDepth = max(0, self::$recordingJournalDepth - 1);
         }
     }
 
@@ -323,24 +354,32 @@ final class ABJ_404_Solution_DurableOperationRecorder {
     }
 
     /**
-     * @param array<string, mixed> $fields
+     * @param array{
+     *     request_id: string,
+     *     operation_event: string,
+     *     checkpoint_id: string,
+     *     operation_state: string,
+     *     fields: array<string, mixed>,
+     *     allowed_fields?: array<int, string>
+     * } $record
      * @return array<string, mixed>
      */
-    private static function appendFixedState(
-        string $requestId,
-        string $operationEvent,
-        string $checkpointId,
-        string $operationState,
-        array $fields
-    ): array {
+    private static function appendFixedState(array $record): array {
         return ABJ_404_Solution_CheckpointIntentStore::append(array_merge(
-            self::frequentRecord($requestId, 'durable_operation_state', $checkpointId),
-            array(
-                'operation_event' => $operationEvent,
-                'operation_state' => $operationState,
-                'operation_checkpoint_id' => $checkpointId,
+            self::frequentRecord(
+                $record['request_id'],
+                'durable_operation_state',
+                $record['checkpoint_id']
             ),
-            self::selectSafeFields($fields)
+            array(
+                'operation_event' => $record['operation_event'],
+                'operation_state' => $record['operation_state'],
+                'operation_checkpoint_id' => $record['checkpoint_id'],
+            ),
+            self::selectSafeFields(
+                $record['fields'],
+                $record['allowed_fields'] ?? self::SAFE_FIELDS
+            )
         ));
     }
 
@@ -362,11 +401,12 @@ final class ABJ_404_Solution_DurableOperationRecorder {
 
     /**
      * @param array<string, mixed> $fields
+     * @param array<int, string> $allowedFields
      * @return array<string, mixed>
      */
-    private static function selectSafeFields(array $fields): array {
+    private static function selectSafeFields(array $fields, array $allowedFields = self::SAFE_FIELDS): array {
         $safe = array();
-        foreach (self::SAFE_FIELDS as $field) {
+        foreach ($allowedFields as $field) {
             if (array_key_exists($field, $fields)
                     && (is_scalar($fields[$field]) || $fields[$field] === null)) {
                 $safe[$field] = $fields[$field];

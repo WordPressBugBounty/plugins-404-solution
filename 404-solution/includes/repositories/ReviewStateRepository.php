@@ -98,7 +98,7 @@ class ABJ_404_Solution_ReviewStateRepository {
      * @return void
      */
     public function appendFeedbackEntry(array $entry): void {
-        $existingRaw = get_option(self::OPTION_FEEDBACK, array());
+        $existingRaw = ABJ_404_Solution_OptionShapeRead::arrayValue(self::OPTION_FEEDBACK, array());
         $existing = is_array($existingRaw) ? $existingRaw : array();
         $existing[] = $entry;
         update_option(self::OPTION_FEEDBACK, $existing);
@@ -132,7 +132,7 @@ class ABJ_404_Solution_ReviewStateRepository {
      * @return int first-seen unix timestamp, or 0 if unset / invalid
      */
     public function getInstalledTime(): int {
-        $installedTimeRaw = get_option(self::OPTION_INSTALLED_TIME);
+        $installedTimeRaw = ABJ_404_Solution_OptionShapeRead::scalar(self::OPTION_INSTALLED_TIME);
         return ABJ_404_Solution_ExactInteger::readOr($installedTimeRaw, 0, 0);
     }
 

@@ -26,6 +26,9 @@ class ABJ_404_Solution_FatalErrorProcessor {
     /** @var callable */
     private $resourceUsageProvider;
 
+    /** @var ABJ_404_Solution_SystemClock Preallocated while the request is healthy. */
+    private $beaconClock;
+
     /**
      * @param ABJ_404_Solution_ErrorTypeClassifier|null $classifier
      * @param ABJ_404_Solution_ErrorDiagnosticsReporter|null $diagnostics
@@ -34,6 +37,7 @@ class ABJ_404_Solution_FatalErrorProcessor {
      * @param callable|null $resourceUsageProvider returns getrusage()-shaped array or null; injectable for tests
      */
     public function __construct($classifier = null, $diagnostics = null, $adminResponder = null, $ajaxResponder = null, $resourceUsageProvider = null) {
+        $this->beaconClock = new ABJ_404_Solution_SystemClock();
         $this->classifier = $classifier !== null ? $classifier : new ABJ_404_Solution_ErrorTypeClassifier();
         $this->diagnostics = $diagnostics !== null ? $diagnostics : new ABJ_404_Solution_ErrorDiagnosticsReporter();
         $this->adminResponder = $adminResponder !== null ? $adminResponder : new ABJ_404_Solution_AdminFatalErrorResponder();
@@ -343,7 +347,7 @@ class ABJ_404_Solution_FatalErrorProcessor {
     /**
      * Write a crash beacon for a plugin-scope fatal using ONLY the path
      * precomputed at healthy boot (ABJ_404_Solution_ErrorHandler::precomputeCrashBeaconPath)
-     * plus primitives. No wp_upload_dir()/options/container/clock calls here:
+     * plus a preallocated primitive clock. No wp_upload_dir()/options/container resolution here:
      * this runs in the fatal handler where memory may be exhausted, so it must
      * not re-enter the failure class it is reporting. Best effort; never throws.
      *
@@ -377,13 +381,29 @@ class ABJ_404_Solution_FatalErrorProcessor {
             }
             $version = defined('ABJ404_VERSION') ? (string)ABJ404_VERSION : '';
             $pluginRoot = defined('ABJ404_PATH') ? (string)ABJ404_PATH : '';
-            // Clock service for the informational capture timestamp. Safe during
-            // shutdown: the clock has no settings/logging/uploads dependencies
-            // (the re-entry classes this capture avoids) and is near-certainly
-            // already resolved this request; the surrounding try/catch makes the
-            // whole capture best-effort if it is somehow unavailable.
-            $now = abj_clock()->now();
-            $beacon = ABJ_404_Solution_CrashBeacon::fromLastError($lasterror, $version, $pluginRoot, $now);
+            // This primitive-backed clock was allocated at healthy boot.
+            // Do not resolve services or allocate a clock after an OOM.
+            $now = $this->beaconClock->now();
+            $frame = $GLOBALS['abj404_request_failure_frame'] ?? null;
+            $frame = is_array($frame) ? $frame : null;
+            if ($frame !== null) { $frame['terminal_state'] = 'error'; }
+            $requestKind = isset($GLOBALS['abj404_crash_beacon_request_kind'])
+                && is_string($GLOBALS['abj404_crash_beacon_request_kind'])
+                ? $GLOBALS['abj404_crash_beacon_request_kind'] : null;
+            $requestAction = isset($GLOBALS['abj404_crash_beacon_request_action'])
+                && is_string($GLOBALS['abj404_crash_beacon_request_action'])
+                ? $GLOBALS['abj404_crash_beacon_request_action'] : null;
+            $beacon = ABJ_404_Solution_CrashBeacon::fromLastError(
+                $lasterror,
+                $version,
+                $pluginRoot,
+                $now,
+                array(
+                    'failure_frame' => $frame,
+                    'request_kind' => $requestKind,
+                    'request_action' => $requestAction,
+                )
+            );
             $store = new ABJ_404_Solution_CrashBeaconStore($path);
             $store->recordIfAbsent($beacon);
         } catch (\Throwable $e) {

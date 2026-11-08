@@ -32,9 +32,28 @@ class ABJ_404_Solution_SpellPostListeners {
 	private ?ABJ_404_Solution_PublishedPostsProvider $publishedPostsProvider = null;
 
 	/**
-	 * @var array<int, bool>
+	 * Saves already handled in this request, keyed by
+	 * ABJ_404_Solution_PostRef::saveKey().
+	 *
+	 * @var array<string, bool>
 	 */
 	private static $processedSavePostIds = [];
+
+	/** @var array<int, array<int, \WP_Post|null>> Post context retained until core completes deletion. */
+	private static array $postsBeingDeleted = array();
+
+	/**
+	 * Reset the per-request save dedup and the deletion context. Test seam:
+	 * both live for one request in production (the SAPI discards them), so a
+	 * process replaying several requests must not let one request's handled
+	 * post IDs suppress the next request's save_post.
+	 *
+	 * @return void
+	 */
+	public static function resetForTests(): void {
+		self::$processedSavePostIds = array();
+		self::$postsBeingDeleted = array();
+	}
 
 	/**
 	 * @param ABJ_404_Solution_Functions $functions
@@ -62,20 +81,46 @@ class ABJ_404_Solution_SpellPostListeners {
 	 * @param bool|null $update
 	 */
 	function save_postListener($post_id, $post = null, $update = null): void {
-		if (isset(self::$processedSavePostIds[$post_id])) {
-			return;
-		}
-		self::$processedSavePostIds[$post_id] = true;
-
 		if ($post == null) {
 			$post = get_post($post_id);
 		}
+		// Skip only WordPress's repeated fires of one save; a later save in
+		// this request (an importer publishing the draft it just inserted, a
+		// slug rewrite) is handled.
+		$saveKey = ABJ_404_Solution_PostRef::saveKey($post_id, $post);
+		if (isset(self::$processedSavePostIds[$saveKey])) {
+			return;
+		}
+		self::$processedSavePostIds[$saveKey] = true;
 		if ($update == null) {
 			$update = true;
 		}
 
 		$this->savePostHandler($post_id, $post, $update, 'save');
     }
+
+	/**
+	 * Capture context without rebuilding while the published row still exists.
+	 * WordPress before 5.5 passes only the ID to both deletion hooks.
+	 * @param int $post_id
+	 * @param \WP_Post|null $post
+	 */
+	public static function captureDeletingPost($post_id, $post = null): void {
+		self::$postsBeingDeleted[get_current_blog_id()][$post_id] = $post ?? get_post($post_id);
+	}
+
+	/**
+	 * Consume context even when settings initialization defers invalidation.
+	 * @param int $post_id
+	 * @param \WP_Post|null $post
+	 * @return \WP_Post|null
+	 */
+	public static function consumeDeletedPostContext($post_id, $post = null) {
+		$blogId = get_current_blog_id();
+		$post = $post ?? (self::$postsBeingDeleted[$blogId][$post_id] ?? null);
+		unset(self::$postsBeingDeleted[$blogId][$post_id]);
+		return $post;
+	}
 
 	/**
 	 * @param int $post_id

@@ -1,7 +1,7 @@
 <script>
     (function() {
         var overlay = document.getElementById('abj404-setup-wizard');
-        var closeBtn = document.getElementById('abj404-setup-close');
+        var dialog = overlay ? overlay.querySelector('.abj404-setup-modal') : null;
         var skipBtn = document.getElementById('abj404-setup-skip');
         var saveBtn = document.querySelector('.abj404-setup-primary');
         var form = document.querySelector('#abj404-setup-wizard form');
@@ -14,6 +14,9 @@
         var isDismissing = false;
         var isSubmitting = false;
 
+        // Return focus to whatever had it before the dialog opened.
+        var previouslyFocused = document.activeElement;
+
         function dismissWizard() {
             // Bug #26 fix: Prevent multiple rapid dismissals
             if (isDismissing) {
@@ -22,12 +25,16 @@
             isDismissing = true;
 
             // Disable buttons to prevent further clicks
-            if (closeBtn) closeBtn.disabled = true;
             if (skipBtn) skipBtn.disabled = true;
 
             // Remove modal immediately
+            document.removeEventListener('keydown', onKeydown);
+            document.removeEventListener('focusin', onFocusIn);
             if (overlay) {
                 overlay.remove();
+            }
+            if (previouslyFocused && document.body.contains(previouslyFocused) && previouslyFocused.focus) {
+                previouslyFocused.focus();
             }
 
             // Bug #9 fix: Don't send AJAX if no nonce
@@ -87,15 +94,15 @@
             toast.className = 'abj404-toast';
             toast.setAttribute('role', 'alert');
 
-            var closeBtn = document.createElement('button');
-            closeBtn.className = 'abj404-toast-close';
-            closeBtn.setAttribute('aria-label', {close_label});
-            closeBtn.textContent = '\u00D7';
-            closeBtn.onclick = function() { toast.remove(); };
+            var toastCloseBtn = document.createElement('button');
+            toastCloseBtn.className = 'abj404-toast-close';
+            toastCloseBtn.setAttribute('aria-label', {close_label});
+            toastCloseBtn.textContent = '\u00D7';
+            toastCloseBtn.onclick = function() { toast.remove(); };
 
             var textNode = document.createTextNode(message);
 
-            toast.appendChild(closeBtn);
+            toast.appendChild(toastCloseBtn);
             toast.appendChild(textNode);
             document.body.appendChild(toast);
 
@@ -117,7 +124,6 @@
             // Disable buttons
             if (saveBtn) saveBtn.disabled = true;
             if (skipBtn) skipBtn.disabled = true;
-            if (closeBtn) closeBtn.disabled = true;
 
             // Bug #19 fix: Use DOM methods instead of innerHTML
             var loadingOverlay = document.createElement('div');
@@ -131,15 +137,111 @@
             loadingText.textContent = {saving_label};
             loadingOverlay.appendChild(loadingText);
 
-            var modal = overlay ? overlay.querySelector('.abj404-setup-modal') : null;
-            if (modal) {
-                modal.appendChild(loadingOverlay);
+            if (dialog) {
+                dialog.appendChild(loadingOverlay);
             }
         }
 
-        if (closeBtn) {
-            closeBtn.addEventListener('click', dismissWizard);
+        // Keyboard behavior of a modal dialog: Escape dismisses, Tab stays inside.
+        function focusableElements() {
+            if (!dialog) {
+                return [];
+            }
+            var nodes = dialog.querySelectorAll('a[href], button, input, select, textarea, [tabindex]');
+            return Array.prototype.filter.call(nodes, function(el) {
+                return !el.disabled && el.tabIndex >= 0 && el.offsetParent !== null;
+            });
         }
+
+        function onKeydown(event) {
+            if (event.key === 'Escape' || event.key === 'Esc') {
+                if (!isSubmitting) {
+                    event.preventDefault();
+                    dismissWizard();
+                }
+                return;
+            }
+            if (event.key !== 'Tab') {
+                return;
+            }
+            var items = focusableElements();
+            if (items.length === 0) {
+                event.preventDefault();
+                return;
+            }
+            var first = items[0];
+            var last = items[items.length - 1];
+            var active = document.activeElement;
+            if (!dialog.contains(active) || active === dialog) {
+                event.preventDefault();
+                (event.shiftKey ? last : first).focus();
+            } else if (event.shiftKey && active === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && active === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        }
+
+        // Page scripts (the redirects table focuses its filter box once it loads) can move
+        // focus behind the modal after it opens; a modal dialog keeps focus inside itself.
+        function onFocusIn(event) {
+            if (dialog && !dialog.contains(event.target)) {
+                dialog.focus();
+            }
+        }
+
+        // Email alerts (q3) are about captured 404s, so they follow the logging answer (q2).
+        var q3Group = document.getElementById('abj404-setup-q3-group');
+        var q3Note = document.getElementById('abj404-setup-q3-unavailable');
+        var q3Radios = form ? form.querySelectorAll('input[name="abj404_setup_q3"]') : [];
+        var q2Radios = form ? form.querySelectorAll('input[name="abj404_setup_q2"]') : [];
+        var q3Remembered = '';
+
+        function selectedValue(radios) {
+            for (var i = 0; i < radios.length; i++) {
+                if (radios[i].checked) {
+                    return radios[i].value;
+                }
+            }
+            return '';
+        }
+
+        function setQ3Value(value) {
+            for (var i = 0; i < q3Radios.length; i++) {
+                q3Radios[i].checked = (q3Radios[i].value === value);
+            }
+        }
+
+        function syncAlertQuestion() {
+            if (!q3Group) {
+                return;
+            }
+            var logging = selectedValue(q2Radios) !== 'no';
+            if (!logging && !q3Group.disabled) {
+                q3Remembered = selectedValue(q3Radios);
+                setQ3Value('no');
+            } else if (logging && q3Group.disabled && q3Remembered !== '') {
+                setQ3Value(q3Remembered);
+            }
+            q3Group.disabled = !logging;
+            if (q3Note) {
+                q3Note.hidden = logging;
+            }
+        }
+
+        for (var i = 0; i < q2Radios.length; i++) {
+            q2Radios[i].addEventListener('change', syncAlertQuestion);
+        }
+        syncAlertQuestion();
+
+        document.addEventListener('keydown', onKeydown);
+        document.addEventListener('focusin', onFocusIn);
+        if (dialog) {
+            dialog.focus();
+        }
+
         if (skipBtn) {
             skipBtn.addEventListener('click', dismissWizard);
         }

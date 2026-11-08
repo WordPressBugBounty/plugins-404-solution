@@ -4,6 +4,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/CronExactEventConsumer.php';
+
 /**
  * Owns WordPress cron primitive access for plugin scheduling code.
  *
@@ -28,11 +30,15 @@ class ABJ_404_Solution_CronScheduler {
     const HOOK_SEND_DIGEST = 'abj404_send_digest';
     const HOOK_REBUILD_NGRAM_CACHE = 'abj404_rebuild_ngram_cache_hook';
     const HOOK_LOGSV2_CANONICAL_BACKFILL = 'abj404_logsv2_canonical_backfill';
+    const HOOK_LOGSV2_MIN_LOG_ID_BACKFILL = 'abj404_logsv2_min_log_id_backfill';
     const HOOK_REDIRECTS_DENORM_BACKFILL = 'abj404_redirects_denorm_backfill';
+    const HOOK_REDIRECTS_DENORM_RECONCILE_RESUME = 'abj404_redirects_denorm_reconcile_resume';
     const HOOK_REDIRECTS_SORT_KEY_BACKFILL = 'abj404_redirects_sort_key_backfill';
     const HOOK_SEND_QUEUED_REPORT = 'abj404_send_queued_report';
     const HOOK_REFRESH_STATUS_COUNTS = 'abj404_refresh_status_counts';
     const HOOK_REPAIR_COLLATIONS = 'abj404_repair_collations';
+    const HOOK_REPAIR_ADMIN_TABLES = 'abj404_admin_table_repair';
+    const HOOK_LEGACY_PAGE_RECOVERY = 'abj404_legacy_page_recovery';
     const HOOK_NETWORK_ACTIVATION = 'abj404_network_activation_hook';
     const HOOK_NETWORK_ACTIVATION_BACKGROUND = 'abj404_network_activation_background';
     const HOOK_NETWORK_UPGRADE_BACKGROUND = 'abj404_network_upgrade_background';
@@ -101,7 +107,7 @@ class ABJ_404_Solution_CronScheduler {
                 }
                 return empty($args)
                     ? wp_next_scheduled($hook)
-                    : wp_next_scheduled($hook, $this->listArgs($args));
+                    : wp_next_scheduled($hook, array_values($args));
             }
         );
     }
@@ -174,7 +180,7 @@ class ABJ_404_Solution_CronScheduler {
             fn() => wp_schedule_single_event(
                 $timestamp,
                 $hook,
-                $this->listArgs($args),
+                array_values($args),
                 true
             )
         );
@@ -249,9 +255,7 @@ class ABJ_404_Solution_CronScheduler {
             ));
             return false;
         }
-        $result = empty($args)
-            ? wp_unschedule_event($timestamp, $hook, array(), true)
-            : wp_unschedule_event($timestamp, $hook, $this->listArgs($args), true);
+		$result = wp_unschedule_event($timestamp, $hook, array_values($args), true);
         if ($this->outcome->reportsFailure($result)) {
             return $this->outcome->resolveRemoval(array(
                 'writeResult' => $result,
@@ -264,6 +268,11 @@ class ABJ_404_Solution_CronScheduler {
             return $this->outcome->reportRemovalNotVerified($hook, $timestamp);
         }
         return true;
+    }
+
+    /** @param array{timestamp:int,hook:string,args:array<int,mixed>} $request */
+    public function consumeExactEvent(array $request): bool {
+        return (new ABJ_404_Solution_CronExactEventConsumer($this->inspector, $this->outcome))->consume($request);
     }
 
     /**
@@ -332,7 +341,7 @@ class ABJ_404_Solution_CronScheduler {
             ));
             return;
         }
-        empty($args) ? wp_clear_scheduled_hook($hook) : wp_clear_scheduled_hook($hook, $this->listArgs($args));
+        empty($args) ? wp_clear_scheduled_hook($hook) : wp_clear_scheduled_hook($hook, array_values($args));
     }
 
     /**
@@ -350,9 +359,7 @@ class ABJ_404_Solution_CronScheduler {
         }
         $timestamp = $this->nextScheduled($hook, $args);
         while ($timestamp !== false) {
-            $result = empty($args)
-                ? wp_unschedule_event($timestamp, $hook, array(), true)
-                : wp_unschedule_event($timestamp, $hook, $this->listArgs($args), true);
+		$result = wp_unschedule_event($timestamp, $hook, array_values($args), true);
 
             // A refused removal leaves the occurrence exactly where it was, so
             // the next read returns the same timestamp and asking again can
@@ -392,9 +399,15 @@ class ABJ_404_Solution_CronScheduler {
      */
     public function clearRegisteredHooks(?array $hooks = null): void {
         foreach ($hooks ?? self::registeredHooks() as $hook) {
-            $this->unscheduleAllOccurrences($hook);
-            $this->unscheduleAllOccurrences($hook, array(''));
-            $this->clearHook($hook);
+            if (!function_exists('wp_unschedule_hook')) {
+                $this->outcome->reportUnavailablePrimitive([
+                    'verb' => 'clear', 'hook' => $hook, 'primitive' => 'wp_unschedule_hook',
+                ]);
+                continue;
+            }
+            $this->outcome->resolveHookRemoval([
+                'writeResult' => wp_unschedule_hook($hook, true), 'hook' => $hook,
+            ]);
         }
     }
 
@@ -411,11 +424,15 @@ class ABJ_404_Solution_CronScheduler {
             self::HOOK_SEND_DIGEST,
             self::HOOK_REBUILD_NGRAM_CACHE,
             self::HOOK_LOGSV2_CANONICAL_BACKFILL,
+            self::HOOK_LOGSV2_MIN_LOG_ID_BACKFILL,
             self::HOOK_REDIRECTS_DENORM_BACKFILL,
+            self::HOOK_REDIRECTS_DENORM_RECONCILE_RESUME,
             self::HOOK_REDIRECTS_SORT_KEY_BACKFILL,
             self::HOOK_SEND_QUEUED_REPORT,
             self::HOOK_REFRESH_STATUS_COUNTS,
             self::HOOK_REPAIR_COLLATIONS,
+            self::HOOK_REPAIR_ADMIN_TABLES,
+            self::HOOK_LEGACY_PAGE_RECOVERY,
             self::HOOK_NETWORK_ACTIVATION,
             self::HOOK_NETWORK_ACTIVATION_BACKGROUND,
             self::HOOK_NETWORK_UPGRADE_BACKGROUND,
@@ -448,7 +465,7 @@ class ABJ_404_Solution_CronScheduler {
             ));
             return false;
         }
-        $scheduled = wp_schedule_event($timestamp, $recurrence, $hook, $this->listArgs($args), true);
+        $scheduled = wp_schedule_event($timestamp, $recurrence, $hook, array_values($args), true);
         if ($this->outcome->reportsFailure($scheduled)) {
             return $this->outcome->resolveRecurringWrite(array(
                 'writeResult' => $scheduled,
@@ -479,11 +496,4 @@ class ABJ_404_Solution_CronScheduler {
         return $this->clock->now() + max(0, $delaySeconds);
     }
 
-    /**
-     * @param array<int, mixed> $args
-     * @return list<mixed>
-     */
-    private function listArgs(array $args): array {
-        return array_values($args);
-    }
 }

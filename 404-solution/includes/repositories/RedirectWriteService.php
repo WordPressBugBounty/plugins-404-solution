@@ -5,11 +5,16 @@ if (!defined('ABSPATH')) {
 }
 
 require_once __DIR__ . '/../redirects/RedirectCanonicalUrl.php';
+require_once __DIR__ . '/../redirects/RedirectChainTraversal.php';
 require_once __DIR__ . '/RedirectsLiveColumnSet.php';
 require_once __DIR__ . '/RedirectInsertStatement.php';
+require_once __DIR__ . '/RedirectUpdateStatement.php';
+require_once __DIR__ . '/RedirectGraphLock.php';
+require_once __DIR__ . '/RedirectLifecycleService.php';
+require_once __DIR__ . '/RedirectEditWriter.php';
 
 /**
- * Application service for redirect row mutations and purge decisions.
+ * Application service for redirect row mutations.
  *
  * This keeps write validation, status-count invalidation, and regex-cache
  * invalidation out of the frontend redirect lookup repository.
@@ -28,11 +33,26 @@ class ABJ_404_Solution_RedirectWriteService {
     /** @var ABJ_404_Solution_RedirectRegexCacheStore */
     private $regexCacheStore;
 
+    /** @var ABJ_404_Solution_RedirectChainTraversal|null */
+    private $chainWalker;
+
+    /** @var string Request-local error for the int-returning insert API. */
+    private $lastWriteError = '';
+
+    /** @var ''|'source-owned' Structured admission refusal, separate from database errors. */
+    private $lastWriteRefusalReason = '';
+
+    /** @var ABJ_404_Solution_RedirectGraphLock|null Held across admission and persistence. */
+    private $graphLock = null;
+
     /** @var ABJ_404_Solution_PluginLogicUrlNormalization|null */
     private $urlNormalization;
 
-    /** @var ABJ_404_Solution_RedirectsDenormMaintenanceService|null Memoized Step 3c maintenance service. */
-    private $denormMaintenance = null;
+    /** @var ABJ_404_Solution_RedirectLifecycleService|null Memoized lifecycle service. */
+    private $lifecycle = null;
+
+    /** @var ABJ_404_Solution_RedirectEditWriter|null Memoized admitted-edit persister. */
+    private $editWriter = null;
 
     /** @var ABJ_404_Solution_StatusCountsMutationSync|null Memoized cached-count delta writer. */
     private $countsSync = null;
@@ -51,22 +71,18 @@ class ABJ_404_Solution_RedirectWriteService {
 
     /**
      * @param ABJ_404_Solution_DatabaseCore $dbCore
-     * @param ABJ_404_Solution_Functions|null $functions
-     * @param ABJ_404_Solution_Logging|null $logging
-     * @param ABJ_404_Solution_RedirectRegexCacheStore|null $regexCacheStore
+     * @param array{functions?: ABJ_404_Solution_Functions, logging?: ABJ_404_Solution_Logging,
+     *   regexCacheStore?: ABJ_404_Solution_RedirectRegexCacheStore,
+     *   urlNormalization?: ABJ_404_Solution_PluginLogicUrlNormalization|null,
+     *   chainWalker?: ABJ_404_Solution_RedirectChainTraversal|null} $dependencies Omitted or null keys resolve lazily.
      */
-    public function __construct(
-        ABJ_404_Solution_DatabaseCore $dbCore,
-        $functions = null,
-        $logging = null,
-        $regexCacheStore = null,
-        ?ABJ_404_Solution_PluginLogicUrlNormalization $urlNormalization = null
-    ) {
+    public function __construct(ABJ_404_Solution_DatabaseCore $dbCore, array $dependencies = array()) {
         $this->dbCore = $dbCore;
-        $this->f = $functions !== null ? $functions : abj_service('functions');
-        $this->logger = $logging !== null ? $logging : abj_service('logging');
-        $this->regexCacheStore = $regexCacheStore !== null ? $regexCacheStore : new ABJ_404_Solution_RedirectRegexCacheStore();
-        $this->urlNormalization = $urlNormalization;
+        $this->f = $dependencies['functions'] ?? abj_service('functions');
+        $this->logger = $dependencies['logging'] ?? abj_service('logging');
+        $this->regexCacheStore = $dependencies['regexCacheStore'] ?? new ABJ_404_Solution_RedirectRegexCacheStore();
+        $this->urlNormalization = $dependencies['urlNormalization'] ?? null;
+        $this->chainWalker = $dependencies['chainWalker'] ?? null;
     }
 
     /** @return ABJ_404_Solution_PluginLogicUrlNormalization */
@@ -79,103 +95,91 @@ class ABJ_404_Solution_RedirectWriteService {
 
     /** @param int|string $id */
     public function deleteRedirect($id): void {
-        $cleanedID = absint(sanitize_text_field((string)$id));
-
-        if (is_numeric($id)) {
-            $before = $this->countsSync()->snapshot('id = %d', array($cleanedID));
-            $query = "delete from {wp_abj404_redirects} where id = %d";
-            $this->dbCore->queryAndGetResults($query, array('query_params' => array($cleanedID)));
-            $this->invalidateRedirectMutationCaches();
-            $this->countsSync()->syncSince($before, 'id = %d', array($cleanedID));
-        }
+        $this->lifecycleService()->deleteRedirect($id);
     }
 
     public function setupRedirect(ABJ_404_Solution_RedirectSpec $spec): int {
-        return $this->setupRedirectWithPolicy($spec, array('require_absent_source' => false));
+        $this->lastWriteError = '';
+        $this->lastWriteRefusalReason = '';
+        $status = ABJ_404_Solution_ExactInteger::readOr($spec->getStatus(), PHP_INT_MIN, -1);
+        return $this->setupRedirectWithPolicy($spec, array(
+            'source_conflict_scope' => $status === ABJ404_STATUS_AUTO ? 'manual' : 'none',
+        ));
     }
 
     public function setupRedirectIfSourceAbsent(ABJ_404_Solution_RedirectSpec $spec): int {
-        return $this->setupRedirectWithPolicy($spec, array('require_absent_source' => true));
+        $this->lastWriteError = '';
+        $this->lastWriteRefusalReason = '';
+        return $this->setupRedirectWithPolicy($spec, array('source_conflict_scope' => 'any'));
+    }
+
+    public function getLastWriteError(): string {
+        return $this->lastWriteError;
+    }
+
+    /** @return ''|'source-owned' Lets durable delivery distinguish supersession from storage failure. */
+    public function getLastWriteRefusalReason(): string {
+        return $this->lastWriteRefusalReason;
     }
 
     /**
      * @param ABJ_404_Solution_RedirectSpec $spec
-     * @param array{require_absent_source: bool} $policy
+     * @param array{source_conflict_scope: 'any'|'manual'|'none'} $policy
      * @return int
      */
     private function setupRedirectWithPolicy(ABJ_404_Solution_RedirectSpec $spec, array $policy): int {
+        // All writers share source admission, including capture and automatic
+        // redirects. Otherwise a capture can race a manual promotion.
+        return $this->serializeGraphMutation(function () use ($spec, $policy): int {
+            return $this->insertAdmittedRedirect($spec, $policy);
+        }, static function (string $error): int { return 0; });
+    }
+
+    /** @param array{source_conflict_scope: 'any'|'manual'|'none'} $policy */
+    private function insertAdmittedRedirect(ABJ_404_Solution_RedirectSpec $spec, array $policy): int {
         $fromURL = $spec->getFromURL();
         $status = $spec->getStatus();
-        $type = $spec->getType();
-        $finalDest = $spec->getFinalDest();
-        $code = $spec->getCode();
         $disabled = $spec->getDisabled();
-        $engine = $spec->getEngine();
-        $score = $spec->getScore();
-
-        if (!is_numeric($type)) {
-            $this->logger->errorMessage("Wrong data type for redirect. TYPE is non-numeric. From: " .
-                    esc_url($fromURL) . " to: " . esc_url($finalDest) . ", Type: " . esc_html((string)$type) . ", Status: " . $status);
-        } else if (!is_numeric($status)) {
-            $this->logger->errorMessage("Wrong data type for redirect. STATUS is non-numeric. From: " .
-                    esc_url($fromURL) . " to: " . esc_url($finalDest) . ", Type: " . esc_html((string)$type) . ", Status: " . $status);
-        }
-
-        // (int), not absint(): status and type are stored with %d, which casts
-        // rather than takes an absolute value. absint() here would gate a
-        // status of -2 as ABJ404_STATUS_AUTO and then write -2, so the row that
-        // passed the admission rules is not the row that lands in the table.
-        // -1 keeps its existing meaning of "no rule applies to this value".
-        $statusAsInt = ABJ_404_Solution_ExactInteger::readOr($status, PHP_INT_MIN, -1);
-        $typeAsInt = ABJ_404_Solution_ExactInteger::readOr($type, PHP_INT_MIN, -1);
-
-        if ($statusAsInt === ABJ404_STATUS_REGEX && !$this->admissionPolicy()->regexSourceIsValid($fromURL)) {
+        $statusAsInt = ABJ_404_Solution_ExactInteger::read($status, PHP_INT_MIN);
+        // Regex sources are programs, so preserve the raw-input grammar
+        // check before URL normalization can erase control bytes. Admission
+        // below validates the same pattern again after canonicalization for
+        // the pattern that will actually be persisted and matched.
+        if (!$this->admissionPolicy()->regexSourceIsAdmissibleForStatus($statusAsInt, $fromURL)) {
             return 0;
         }
-
-        if ($statusAsInt === ABJ404_STATUS_AUTO &&
-                !$this->admissionPolicy()->isValidAutomaticRedirectDestination($typeAsInt, $finalDest)) {
-            $this->logger->debugMessage("Skipping automatic redirect with invalid destination. " .
-                    "From: " . esc_url($fromURL) . ", Dest: " . esc_html((string)$finalDest) .
-                    ", Type: " . esc_html((string)$type) . ", Status: " . esc_html((string)$status));
+        // One write boundary owns generated source identity, including the
+        // INSERT...SELECT absence check used by evidence capture. Admission,
+        // source ownership, and SQL persistence all share this one key.
+        if ($statusAsInt !== null) {
+            $fromURL = $this->urlNormalization()->normalizeRedirectSourceForStatus($fromURL, $statusAsInt);
+            if ($statusAsInt !== ABJ404_STATUS_REGEX) {
+                $fromURL = abj_service('query_string_helper')->redirectSourceKey($fromURL, $spec->getQueryMode(),
+                    in_array($statusAsInt, array(ABJ404_STATUS_AUTO, ABJ404_STATUS_CAPTURED), true));
+            }
+            $spec = $spec->withFromURL($fromURL);
+        }
+        if (!$this->admissionPolicy()->insertIsAllowed($spec, function (): bool {
+            return $this->liveColumns()->has('query_mode');
+        })) {
             return 0;
         }
-
+        if ($statusAsInt === null) {
+            return 0;
+        }
         $insertId = 0;
 
         if (!abj_service('request_context')->ignore_doprocess) {
-            $now = abj_clock()->now();
+            $now = $spec->getTimestamp() ?? abj_clock()->now();
             $redirectsTable = $this->dbCore->doTableNameReplacements("{wp_abj404_redirects}");
-            $fromURL = $this->urlNormalization()->normalizeRedirectSourceForStatus($fromURL, $statusAsInt);
             $canonicalUrl = ABJ_404_Solution_RedirectCanonicalUrl::compute($fromURL);
-            $insert = ABJ_404_Solution_RedirectInsertStatement::fromRequest(array(
-                'table' => $redirectsTable,
-                'sourceUrl' => $fromURL,
-                'status' => $status,
-                'type' => $type,
-                'finalDest' => $finalDest,
-                'code' => $code,
-                'disabled' => $disabled,
-                'timestamp' => $now,
-                'canonicalUrl' => $canonicalUrl,
-                'engine' => $engine === null ? null : (string)$engine,
-                'score' => $score === null ? null : (float)$score,
-                'liveColumns' => $this->liveColumns(),
-                'requireAbsentSource' => $policy['require_absent_source'],
+            $write = $this->persistAdmittedSource($spec, $policy, array(
+                'table' => $redirectsTable, 'sourceUrl' => $fromURL, 'timestamp' => $now, 'canonicalUrl' => $canonicalUrl,
             ));
-            if ($policy['require_absent_source']) {
-                $insertResult = $this->dbCore->transactionExecutor()->executeSerializableMutation(array(
-                    'sql' => $insert->sql(),
-                    'params' => $insert->params(),
-                    'description' => 'atomically recording captured-404 evidence',
-                ));
-            } else {
-                $insertResult = $this->dbCore->queryAndGetResults($insert->sql(), array(
-                    'query_params' => $insert->params(),
-                ));
-            }
-            $insertIdRaw = $insertResult['insert_id'] ?? 0;
-            $insertId = is_scalar($insertIdRaw) ? (int)$insertIdRaw : 0;
+            if ($write['error'] !== '') { $this->lastWriteError = $write['error']; return 0; }
+            $insertId = $write['id'];
+            $existingId = $write['existingId'];
+            $before = $write['before'];
 
             // A captured-404 insert is the high-frequency frontend path: on a
             // busy site it fires continuously and only changes the captured +
@@ -186,27 +190,86 @@ class ABJ_404_Solution_RedirectWriteService {
             // e.g. Add Redirect or a slug-change auto-redirect) are low-frequency
             // and keep the immediate full invalidation so the admin sees the
             // count change at once.
-            if ($statusAsInt === ABJ404_STATUS_CAPTURED) {
-                ABJ_404_Solution_ViewCacheInvalidator::invalidateCapturedStatusCountsCacheDebounced();
-            } else {
-                abj_service('view_read_service')->invalidateStatusCountsCache();
-            }
+            $completion = array('status-count-invalidation' => $statusAsInt === ABJ404_STATUS_CAPTURED
+                ? static function (): void { ABJ_404_Solution_ViewCacheInvalidator::invalidateCapturedStatusCountsCacheDebounced(); }
+                : static function (): void { abj_service('view_read_service')->invalidateStatusCountsCache(); });
             if ($insertId > 0) {
-                $this->countsSync()->syncInserted($statusAsInt, absint($disabled));
+                $completion['count-sync'] = $existingId > 0
+                    ? function () use ($before, $existingId): void { $this->countsSync()->syncSince($before, 'id = %d', array($existingId)); }
+                    : function () use ($statusAsInt, $disabled): void { $this->countsSync()->syncInserted($statusAsInt, absint($disabled)); };
+                $completion['page-purge'] = static function () use ($fromURL, $statusAsInt): void { ABJ_404_Solution_RedirectPageCachePurge::queueRows(array(array('url' => $fromURL, 'status' => $statusAsInt))); };
             }
-            if ($status == ABJ404_STATUS_REGEX) {
-                $this->regexCacheStore->clear();
+            if ($status == ABJ404_STATUS_REGEX || strpbrk($fromURL, '*[]|^\\{}') !== false) {
+                $completion['regex-cache'] = function (): void { $this->regexCacheStore->clear(); };
             }
 
             // Step 3c: keep the new row's denorm display columns (dest_for_view
             // / published_status) current so an off-page sort/filter sees fresh
             // values immediately, not only after the nightly reconcile.
-            if ($insertId > 0) {
-                $this->recomputeDenormColumns(array($insertId));
-            }
+            if ($insertId > 0) { $completion['denorm-recompute'] = function () use ($insertId): void { $this->lifecycleService()->recomputeDenormColumns(array($insertId)); }; }
+            $this->dbCore->transactionExecutor()->afterCommit(static function () use ($completion): void {
+                ABJ_404_Solution_RedirectMutationCompletion::complete($completion);
+            });
         }
 
         return $insertId;
+    }
+
+    /**
+     * Store the spec as a new row or as the promotion of its source's live
+     * owner, reporting the id the statement wrote, never the id admission
+     * read. Trash takes no graph lock, so the owner can leave the live set
+     * before the promotion runs; admission is then read once more, which
+     * stores the redirect as if the trash had landed first.
+     *
+     * @param array{source_conflict_scope: 'any'|'manual'|'none'} $policy
+     * @param array{table: string, sourceUrl: string, timestamp: int, canonicalUrl: string} $target
+     * @return array{id: int, existingId: int, before: array<int, array{status:int,disabled:int,count:int}>|null, error: string}
+     */
+    private function persistAdmittedSource(ABJ_404_Solution_RedirectSpec $spec, array $policy, array $target): array {
+        $refused = array('id' => 0, 'existingId' => 0, 'before' => null);
+        for ($attempt = 1; ; $attempt++) {
+            $owner = $spec->getDisabled() !== 0 ? array('id' => 0, 'error' => '')
+                : $this->sourceOwnerForInsert($spec, $target['sourceUrl'], $policy['source_conflict_scope'] === 'any');
+            if ($owner['error'] !== '') { return $refused + array('error' => $owner['error']); }
+            $before = $owner['id'] > 0 ? $this->countsSync()->snapshot('id = %d', array($owner['id'])) : null;
+            $statement = ABJ_404_Solution_RedirectInsertStatement::fromSpec($spec, $target + array(
+                'liveColumns' => $this->liveColumns(), 'sourceConflictScope' => $policy['source_conflict_scope'],
+                'ownershipPredicate' => $this->graphOwnershipPredicate(), 'existingId' => $owner['id'],
+            ));
+            try {
+                $result = $statement->execute($this->dbCore);
+            } catch (ABJ_404_Solution_DatabaseMutationFailedException $e) {
+                // The row is evidence or a convenience, never the answer to the
+                // visitor's request: a refused write (a read-only server, a full
+                // disk) is reported as "not stored" so the caller can still
+                // redirect. The executor has already classified and logged it.
+                return $refused + array('error' => $e->getMessage());
+            }
+            if (isset($result['last_error']) && is_string($result['last_error']) && $result['last_error'] !== '') {
+                return $refused + array('error' => $result['last_error']);
+            }
+            $id = $statement->storedId($result);
+            if ($id > 0 || $owner['id'] === 0) {
+                return array('id' => $id, 'existingId' => $owner['id'], 'before' => $before, 'error' => '');
+            }
+            if ($attempt >= 2) {
+                return $refused + array('error' => 'The row owning this source URL changed during promotion; nothing was saved: '
+                    . $target['sourceUrl']);
+            }
+        }
+    }
+
+    /** Resolve an existing source under the graph lock, preserving read errors.
+     * @return array{id: int, error: string, reason?: 'source-owned'} Zero id means a new source.
+     */
+    private function sourceOwnerForInsert(ABJ_404_Solution_RedirectSpec $spec, string $source, bool $sourceMustBeAbsent): array {
+        $lookup = new ABJ_404_Solution_RedirectLookupRepository($this->dbCore, $this->f);
+        $live = $lookup->getLiveRowsForNormalizedUrl($source);
+        if ($live['last_error'] !== '') { return array('id' => 0, 'error' => $live['last_error']); }
+        $owner = $this->admissionPolicy()->sourceOwner($spec, $live['rows'], array('source' => $source, 'mustBeAbsent' => $sourceMustBeAbsent));
+        $this->lastWriteRefusalReason = $owner['reason'] ?? '';
+        return $owner;
     }
 
     /**
@@ -214,62 +277,11 @@ class ABJ_404_Solution_RedirectWriteService {
      * @return array{status: string, rows_affected: int, redirect_types: array<int, int>}
      */
     public function deleteSpecifiedRedirects(array $types, string $purgeType): array {
-        $result = array(
-            'status' => 'noop',
-            'rows_affected' => 0,
-            'redirect_types' => array(),
-        );
-
-        if ($purgeType != 'abj404_logs' && $purgeType != 'abj404_redirects') {
-            $this->logger->debugMessage("Error: An invalid purge type was selected. Type: " .
-                    wp_kses_post((string)json_encode($purgeType)));
-            $result['status'] = 'invalid_purge_type';
-            return $result;
-        }
-
-        $redirectTypes = array();
-        foreach ($types as $aType) {
-            if (('' . $aType != ABJ404_TYPE_HOME) && ('' . $aType != ABJ404_TYPE_404_DISPLAYED)) {
-                array_push($redirectTypes, absint($aType));
-            }
-        }
-
-        if (empty($redirectTypes)) {
-            $this->logger->debugMessage("Error: No valid redirect types were selected. Types: " .
-                    wp_kses_post((string)json_encode($redirectTypes)));
-            $result['status'] = 'no_valid_types';
-            return $result;
-        }
-
-        array_push($redirectTypes, 0);
-
-        $redirectTypes = array_map('absint', $redirectTypes);
-        $result['redirect_types'] = $redirectTypes;
-
-        if ($purgeType == 'abj404_logs') {
-            $result['status'] = 'logs_only';
-            return $result;
-        }
-
-        $typesForSQL = implode(',', $redirectTypes);
-
-        $affectedRows = "status in (" . $typesForSQL . ")";
-        $before = $this->countsSync()->snapshot($affectedRows);
-
-        $query = "update {wp_abj404_redirects} set disabled = 1 where status in (" . $typesForSQL . ")";
-        $purgeResult = $this->dbCore->queryAndGetResults($query);
-        $rowsAffectedRaw = $purgeResult['rows_affected'] ?? 0;
-        $redirectCount = is_scalar($rowsAffectedRaw) ? (int)$rowsAffectedRaw : 0;
-
-        $this->invalidateRedirectMutationCaches();
-        $this->countsSync()->syncSince($before, $affectedRows);
-
-        $result['status'] = 'redirects_purged';
-        $result['rows_affected'] = $redirectCount;
-        return $result;
+        return $this->lifecycleService()->trashStatuses(array('types' => $types, 'purgeType' => $purgeType));
     }
 
     public function updateRedirect(ABJ_404_Solution_RedirectUpdate $update): string {
+        $this->lastWriteError = '';
         $type = $update->getType();
         $idForUpdate = $update->getId();
         if (($type < 0) || ($idForUpdate <= 0)) {
@@ -278,112 +290,31 @@ class ABJ_404_Solution_RedirectWriteService {
                 ", ID(s): " . esc_html((string)$idForUpdate));
             return 'bad_update_request';
         }
-
-        $statusType = $update->getStatusType();
-        if ((int)$statusType === ABJ404_STATUS_REGEX && !$this->admissionPolicy()->regexSourceIsValid($update->getFromUrl())) {
-            return 'invalid_regex_source';
-        }
-
-        $startTs = $update->getStartTs();
-        $endTs = $update->getEndTs();
-        $fromUrl = $this->urlNormalization()->normalizeRedirectSourceForStatus(
-            $update->getFromUrl(),
-            $statusType
-        );
-
-        $redirectsTable = $this->dbCore->doTableNameReplacements("{wp_abj404_redirects}");
-        $before = $this->countsSync()->snapshot('id = %d', array(absint($idForUpdate)));
-
-        $updateData = array(
-            'url' => $fromUrl,
-            'status' => $statusType,
-            'type' => absint($type),
-            'final_dest' => $update->getDestination(),
-            'code' => esc_attr($update->getCode()),
-        );
-        $updateFormats = array('%s', '%d', '%d', '%s', '%d');
-
-        if ($startTs !== null) {
-            $updateData['start_ts'] = (int)$startTs;
-            $updateFormats[] = '%d';
-        }
-        if ($endTs !== null) {
-            $updateData['end_ts'] = (int)$endTs;
-            $updateFormats[] = '%d';
-        }
-
-        $setFragments = array();
-        $idx = 0;
-        foreach ($updateData as $col => $unusedValue) {
-            $format = isset($updateFormats[$idx]) ? $updateFormats[$idx] : '%s';
-            $setFragments[] = '`' . $col . '` = ' . $format;
-            $idx++;
-        }
-
-        // Explicit NULL clearing folded into the same SET clause as the rest
-        // of the row (single merged UPDATE, not a second independent
-        // statement): these carry no bound placeholder (NULL is a SQL
-        // literal here, never passed through %d, which would coerce it to
-        // 0), so appending them after the placeholder fragments does not
-        // shift $updateParams' positional alignment. One statement means
-        // there is nothing for a mid-request DB failure to leave half
-        // applied.
-        if ($startTs === null) {
-            $setFragments[] = '`start_ts` = NULL';
-        }
-        if ($endTs === null) {
-            $setFragments[] = '`end_ts` = NULL';
-        }
-
-        $updateSql = "UPDATE `" . $redirectsTable . "` SET " . implode(', ', $setFragments) .
-            " WHERE `id` = %d";
-        $updateParams = array_values($updateData);
-        $updateParams[] = absint($idForUpdate);
-        $updateResult = $this->dbCore->queryAndGetResults($updateSql, array('query_params' => $updateParams));
-        $updateError = isset($updateResult['last_error']) && is_string($updateResult['last_error']) ? $updateResult['last_error'] : '';
-        if ($updateError !== '') {
-            // queryAndGetResults() already logged this (centralized DAO error
-            // handler) -- reject before any downstream cache invalidation /
-            // denorm recompute runs against a row that may not have changed.
-            return 'db_update_failed';
-        }
-
-        $this->invalidateRedirectMutationCaches();
-        $this->countsSync()->syncSince($before, 'id = %d', array(absint($idForUpdate)));
-
-        $this->moveRedirectsToTrash(absint($idForUpdate), 0);
-
-        // Step 3c: an edit can change the destination type/target, so recompute
-        // the row's denorm display columns from the new final_dest.
-        $this->recomputeDenormColumns(array(absint($idForUpdate)));
-
-        return '';
+        return $this->serializeGraphMutation(function () use ($update): string {
+            return $this->editWriter()->write($update);
+        }, static function (string $error): string { return $error; });
     }
 
     /**
-     * @param array<int, int|string> $ids
-     * @return array<int, array<string, mixed>>
+     * @param callable(array<string, mixed>): (ABJ_404_Solution_RedirectUpdate|non-empty-string) $buildUpdate Build the same-id update from the locked row.
      */
-    public function getRedirectsByIDs($ids): array {
-        if (!is_array($ids) || empty($ids)) {
-            return array();
-        }
-        $validids = array_map('absint', $ids);
-        $multipleIds = implode(',', $validids);
+    public function updateRedirectFromStoredRow(int $id, callable $buildUpdate): string {
+        if ($id <= 0) { return 'bad_update_request'; }
+        return $this->serializeGraphMutation(function () use ($id, $buildUpdate): string {
+            $read = (new ABJ_404_Solution_RedirectLookupRepository($this->dbCore, $this->f))->readRedirectsByIDs(array($id));
+            if ($read['last_error'] !== '') { return $read['last_error']; }
+            if (empty($read['rows'][0]) || !is_array($read['rows'][0])) { return ABJ_404_Solution_RedirectsRepositoryInterface::ROW_NOT_FOUND; }
+            $built = $buildUpdate($read['rows'][0]);
+            if (is_string($built)) { return $built !== '' ? $built : 'bad_update_request'; }
+            if (!($built instanceof ABJ_404_Solution_RedirectUpdate) || $built->getId() !== $id) { return 'bad_update_request'; }
+            return $this->updateRedirect($built);
+        }, static function (string $error): string { return $error; });
+    }
 
-        // allow-unbounded-select: caller-supplied id keyset (where id IN an absint-filtered list); bounded by the explicit id list
-        $query = "select id, url, type, status, final_dest, code, COALESCE(engine, '') as engine, start_ts, end_ts from {wp_abj404_redirects} " .
-                "where id in (" . $multipleIds . ")";
-        $result = $this->dbCore->queryAndGetResults($query);
-        $rawRows = isset($result['rows']) && is_array($result['rows']) ? $result['rows'] : array();
-
-        $rows = array();
-        foreach ($rawRows as $row) {
-            if (is_array($row)) {
-                $rows[] = $row;
-            }
-        }
-        return $rows;
+    private function recordWriteFailure(string $message): string {
+        $this->lastWriteError = $message;
+        $this->logger->warn($this->lastWriteError);
+        return $this->lastWriteError;
     }
 
     /**
@@ -391,17 +322,29 @@ class ABJ_404_Solution_RedirectWriteService {
      * @param string $newstatus
      */
     public function updateRedirectTypeStatus($id, $newstatus): string {
-        $before = $this->countsSync()->snapshot('id = %d', array(absint($id)));
+        return $this->serializeGraphMutation(function () use ($id, $newstatus): string {
+            return $this->lifecycleService()->updateStatus(array(
+                'id' => $id, 'status' => $newstatus, 'ownership' => $this->graphOwnershipPredicate(),
+            ));
+        }, static function (string $error): string { return $error; });
+    }
 
-        $query = "update {wp_abj404_redirects} set status = %s where id = %d";
-        $result = $this->dbCore->queryAndGetResults($query, array(
-            'query_params' => array($newstatus, absint($id))
-        ));
-
-        $this->invalidateRedirectMutationCaches();
-        $this->countsSync()->syncSince($before, 'id = %d', array(absint($id)));
-
-        return is_string($result['last_error']) ? $result['last_error'] : '';
+    /** Restore a row and optionally reset its captured status in one graph mutation.
+     * @param array{id: mixed, status?: int|null} $request Null status preserves the stored status.
+     * @return string Empty on success, otherwise the refusal cause. Both fields share one SQL statement.
+     */
+    public function restoreRedirect(array $request): string {
+        $id = ABJ_404_Solution_ExactInteger::read($request['id'] ?? null, 1);
+        if ($id === null) { return 'Invalid redirect ID for restore.'; }
+        $status = $request['status'] ?? null;
+        if ($status !== null && !in_array($status, array(ABJ404_STATUS_CAPTURED, ABJ404_STATUS_IGNORED, ABJ404_STATUS_LATER), true)) {
+            return 'Invalid captured status for restore.';
+        }
+        return $this->serializeGraphMutation(function () use ($id, $status): string {
+            return $this->lifecycleService()->changeTrashState(array(
+                'id' => $id, 'trash' => 0, 'status' => $status, 'ownership' => $this->graphOwnershipPredicate(),
+            ));
+        }, static function (string $error): string { return $error; });
     }
 
     /**
@@ -409,28 +352,78 @@ class ABJ_404_Solution_RedirectWriteService {
      * @param int|string $trash
      */
     public function moveRedirectsToTrash($id, $trash): string {
-        $message = "";
-        $hadError = false;
-        if ($this->f->regexMatch('[0-9]+', '' . $id)) {
-            $before = $this->countsSync()->snapshot('id = %d', array(absint($id)));
-
-            $redirectsTable = $this->dbCore->doTableNameReplacements("{wp_abj404_redirects}");
-            $updateResult = $this->dbCore->queryAndGetResults(
-                "UPDATE `" . $redirectsTable . "` SET disabled = %d WHERE id = %d",
-                array('query_params' => array(absint(esc_html((string)$trash)), absint($id)))
-            );
-            $updateError = isset($updateResult['last_error']) && is_string($updateResult['last_error']) ? $updateResult['last_error'] : '';
-            $hadError = $updateError !== '';
-
-            $this->invalidateRedirectMutationCaches();
-            $this->countsSync()->syncSince($before, 'id = %d', array(absint($id)));
-        } else {
-            $hadError = true;
+        if (absint($trash) === 0) {
+            return $this->serializeGraphMutation(function () use ($id, $trash): string {
+                return $this->lifecycleService()->changeTrashState(array(
+                    'id' => $id, 'trash' => $trash, 'ownership' => $this->graphOwnershipPredicate(),
+                ));
+            }, static function (string $error): string { return $error; });
         }
-        if ($hadError) {
-            $message = __('Error: Unknown Database Error!', '404-solution');
-        }
-        return $message;
+        $this->lastWriteError = '';
+        return $this->lifecycleService()->changeTrashState(array(
+            'id' => $id, 'trash' => $trash, 'ownership' => $this->graphOwnershipPredicate(),
+        ));
+    }
+
+    public function moveSourceRedirectsToTrash(int $id): string {
+        return $this->serializeGraphMutation(function () use ($id): string {
+            return $this->lifecycleService()->trashSource(array('id' => $id, 'ownership' => $this->graphOwnershipPredicate()));
+        }, static function (string $error): string { return $error; });
+    }
+
+    /**
+     * @template T of int|string
+     * @param callable(): T $operation
+     * @param callable(string): T $onFailure Inserts use 0, string-returning APIs carry the error.
+     * @return T
+     */
+    private function serializeGraphMutation(callable $operation, callable $onFailure) {
+        if ($this->graphLock !== null) { return $operation(); }
+        $this->lastWriteError = '';
+        $lock = new ABJ_404_Solution_RedirectGraphLock($this->dbCore->doTableNameReplacements('{wp_abj404_redirects}'));
+        return $lock->withOwnership(function () use ($lock, $operation, $onFailure) {
+            $this->graphLock = $lock;
+            try {
+                try { return $operation(); }
+                catch (ABJ_404_Solution_RedirectCycleException $e) { return $onFailure($this->recordWriteFailure($e->getMessage())); }
+            } finally {
+                $this->graphLock = null;
+            }
+        }, array(
+            'onFailure' => fn(string $error) => $onFailure($this->recordWriteFailure($error)),
+            'onReleaseFailure' => function (string $error): void { $this->logger->warn($error); },
+        ));
+    }
+
+    private function lifecycleService(): ABJ_404_Solution_RedirectLifecycleService {
+        return $this->lifecycle ??= new ABJ_404_Solution_RedirectLifecycleService(array(
+            'core' => $this->dbCore, 'functions' => $this->f,
+            'admission' => $this->admissionPolicy(), 'counts' => $this->countsSync(),
+            'regexCache' => $this->regexCacheStore, 'logger' => $this->logger,
+            'isOwned' => function (): bool { return $this->graphMutationStillOwned(); },
+        ));
+    }
+
+    private function editWriter(): ABJ_404_Solution_RedirectEditWriter {
+        return $this->editWriter ??= new ABJ_404_Solution_RedirectEditWriter(array(
+            'core' => $this->dbCore, 'functions' => $this->f,
+            'admission' => $this->admissionPolicy(), 'counts' => $this->countsSync(),
+            'lifecycle' => $this->lifecycleService(),
+            'urlNormalization' => function () { return $this->urlNormalization(); },
+            'hasQueryModeColumn' => function (): bool { return $this->liveColumns()->has('query_mode'); },
+            'ownershipPredicate' => function (): string { return $this->graphOwnershipPredicate(); },
+            'isOwned' => function (): bool { return $this->graphMutationStillOwned(); },
+            'recordFailure' => function (string $message): string { return $this->recordWriteFailure($message); },
+        ));
+    }
+
+    /** Verify held ownership; disabling mutations that require no lock remain valid. */
+    private function graphMutationStillOwned(): bool {
+        return $this->graphLock === null || $this->graphLock->isOwned();
+    }
+
+    private function graphOwnershipPredicate(): string {
+        return $this->graphLock !== null ? $this->graphLock->ownershipPredicate() : '1=1';
     }
 
     /** @return ABJ_404_Solution_RedirectsLiveColumnSet */
@@ -444,57 +437,19 @@ class ABJ_404_Solution_RedirectWriteService {
         return $this->liveColumns;
     }
 
-    /**
-     * Invalidate the caches a redirect mutation affects.
-     *
-     * Invalidation alone is not enough for the tab counts: foreground count
-     * reads are cache-only (the aggregate is deferred to cron), so an
-     * invalidated count keeps serving its last-known value. Every mutation
-     * therefore also brackets itself with ABJ_404_Solution_StatusCountsMutationSync,
-     * which applies the delta the mutation actually caused.
-     *
-     * @return void
-     */
-    private function invalidateRedirectMutationCaches(): void {
-        abj_service('view_read_service')->invalidateStatusCountsCache();
-        $this->regexCacheStore->clear();
-    }
-
     /** @return ABJ_404_Solution_StatusCountsMutationSync */
     private function countsSync() {
-        if ($this->countsSync === null) {
-            $this->countsSync = new ABJ_404_Solution_StatusCountsMutationSync($this->dbCore);
-        }
-        return $this->countsSync;
+        return $this->countsSync ??= new ABJ_404_Solution_StatusCountsMutationSync($this->dbCore);
     }
 
     /** @return ABJ_404_Solution_RedirectWriteAdmissionPolicy */
     private function admissionPolicy() {
         if ($this->admissionPolicy === null) {
             $this->admissionPolicy = new ABJ_404_Solution_RedirectWriteAdmissionPolicy(
-                $this->f, $this->logger
+                $this->f, $this->logger, $this->chainWalker
             );
         }
         return $this->admissionPolicy;
     }
 
-    /**
-     * Recompute the dest_for_view / published_status denorm columns for the
-     * given redirect ids via the Step 3c maintenance service, built from this
-     * service's own injected db_core + logger. The maintenance write degrades
-     * gracefully on a schema-drifted / read-only host, so no extra guard is
-     * needed here.
-     *
-     * @param array<int, int> $ids
-     * @return void
-     */
-    private function recomputeDenormColumns(array $ids): void {
-        if ($this->denormMaintenance === null) {
-            $this->denormMaintenance = new ABJ_404_Solution_RedirectsDenormMaintenanceService(
-                $this->dbCore,
-                $this->logger
-            );
-        }
-        $this->denormMaintenance->recomputeByRedirectIds($ids);
-    }
 }

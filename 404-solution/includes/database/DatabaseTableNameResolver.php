@@ -105,7 +105,7 @@ class ABJ_404_Solution_DatabaseTableNameResolver {
             'description' => 'probing whether database table ' . $tableName . ' exists',
             'operation' => function () use ($wpdb, $tableName) {
                 // DAO-bypass-approved: bounded metadata existence probe for a system-generated table name.
-                return $wpdb->get_var("SHOW TABLES LIKE '" . esc_sql($tableName) . "'");
+                return ABJ_404_Solution_DatabaseDriverCall::getVar($wpdb, "SHOW TABLES LIKE '" . esc_sql($tableName) . "'");
             },
         ));
         $table = $guarded['value'];
@@ -133,7 +133,7 @@ class ABJ_404_Solution_DatabaseTableNameResolver {
             'description' => 'reading database columns for ' . $tableName,
             'operation' => function () use ($wpdb, $tableName) {
                 // DAO-bypass-approved: bounded metadata column probe for a system-generated table name.
-                return $wpdb->get_results("SHOW COLUMNS FROM `" . esc_sql($tableName) . "`", ARRAY_A);
+                return ABJ_404_Solution_DatabaseDriverCall::getResults($wpdb, "SHOW COLUMNS FROM `" . esc_sql($tableName) . "`", ARRAY_A);
             },
         ));
         $rows = $guarded['value'];
@@ -208,11 +208,18 @@ class ABJ_404_Solution_DatabaseTableNameResolver {
 
     /**
      * @param string $tableName
+     * @param (callable(): array<string,mixed>)|null $queryOptionsFactory Fresh
+     *        options supplied immediately before this metadata query.
      * @return string
+     * @phpstan-impure Reads current database schema, which can change after DDL.
      */
-    public function getCreateTableDDL($tableName): string {
+    public function getCreateTableDDL($tableName, ?callable $queryOptionsFactory = null): string {
         $query = "show create table " . $tableName;
-        $result = ($this->queryRunner)($query, array('log_errors' => false, 'skip_repair' => true));
+        $queryOptions = array('log_errors' => false, 'skip_repair' => true);
+        if ($queryOptionsFactory !== null) {
+            $queryOptions = array_merge($queryOptions, $queryOptionsFactory());
+        }
+        $result = ($this->queryRunner)($query, $queryOptions);
         $rows = $result['rows'];
         if (!is_array($rows) || empty($rows) || !isset($rows[0]) || !is_array($rows[0])) {
             return '';

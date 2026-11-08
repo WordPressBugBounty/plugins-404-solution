@@ -47,6 +47,9 @@ class ABJ_404_Solution_LogDebugModeResolver {
         }
         try {
             $optionsProperty = new ReflectionProperty('ABJ_404_Solution_PluginLogic', 'options');
+            if (PHP_VERSION_ID < 80100) {
+                $optionsProperty->setAccessible(true);
+            }
             $options = $optionsProperty->getValue($pluginLogic);
             if (is_array($options) && array_key_exists('debug_mode', $options)) {
                 return $options['debug_mode'] == true;

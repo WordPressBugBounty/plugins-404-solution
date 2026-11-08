@@ -412,7 +412,8 @@ class ABJ_404_Solution_CreateTableColumnParser {
 
     /**
      * One entry on one line: leading and trailing space removed, and every
-     * internal run of whitespace reduced to a single space.
+     * unquoted run of whitespace reduced to a single space. Quoted identifiers,
+     * defaults and comments retain their exact content for callers emitting DDL.
      *
      * The two sides of a schema comparison are written by different authors --
      * a .sql file the plugin ships and whatever SHOW CREATE TABLE emits -- and
@@ -423,7 +424,25 @@ class ABJ_404_Solution_CreateTableColumnParser {
      * @return string
      */
     private static function collapseWhitespace($entry) {
-        $collapsed = preg_replace('/\s+/', ' ', (string)$entry);
-        return trim($collapsed === null ? (string)$entry : $collapsed);
+        $sql = (string)$entry;
+        $out = '';
+        $pendingSpace = false;
+        $length = strlen($sql);
+        for ($i = 0; $i < $length; $i++) {
+            $char = $sql[$i];
+            if (strpos(" \t\n\r\v\f", $char) !== false) {
+                $pendingSpace = $out !== '';
+                continue;
+            }
+            if ($pendingSpace) { $out .= ' '; $pendingSpace = false; }
+            if (self::opensQuotedRun($char)) {
+                $end = self::endOfQuotedRun($sql, $i);
+                $out .= substr($sql, $i, $end - $i + 1);
+                $i = $end;
+            } else {
+                $out .= $char;
+            }
+        }
+        return $out;
     }
 }

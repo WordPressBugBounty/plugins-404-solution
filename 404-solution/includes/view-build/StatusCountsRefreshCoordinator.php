@@ -199,28 +199,71 @@ class ABJ_404_Solution_StatusCountsRefreshCoordinator {
     }
 
     /**
-     * Run one scope's aggregate under the distributed refresh lock.
+     * Admit each scope's queued refresh event on an authorized admin page
+     * render of a site whose WP-Cron has proved stalled, through the shared
+     * queued-event consumer. The admitted slice runs the same locked aggregate
+     * the cron listener runs, at the deferred query budget, after the response
+     * is detached, and consumes that scope's exact event only once its cache no
+     * longer needs a refresh. Without the stall proof the event stays cron work.
      */
-    private function performRefresh(string $scope, int $timeoutSeconds): void {
+    public function armAdminContinuations(): void {
+        foreach (array(self::SCOPE_REDIRECTS, self::SCOPE_CAPTURED, self::SCOPE_HIGH_IMPACT) as $scope) {
+            $refresher = $this->refresherFor($scope);
+            if ($refresher === null) {
+                continue;
+            }
+            (new ABJ_404_Solution_QueuedCronEventAdminContinuation(array(
+                'hook' => ABJ_404_Solution_CronScheduler::HOOK_REFRESH_STATUS_COUNTS,
+                'args' => array($scope),
+                'lockKey' => 'status_counts_refresh_' . $scope,
+                'label' => 'status count refresh (' . $scope . ')',
+                'sync' => abj_service('sync_utils'),
+                'clock' => abj_clock(),
+                'cron' => abj_cron_scheduler(),
+                'logger' => abj_service('logging'),
+                'pending' => $refresher['needs_refresh'],
+                'slice' => function (float $deadline) use ($scope, $refresher): array {
+                    // One aggregate is one step, bounded by its own query budget.
+                    unset($deadline);
+                    $outcome = $this->performRefresh($scope, self::DEFERRED_REFRESH_QUERY_TIMEOUT_SECONDS);
+                    $complete = !($refresher['needs_refresh'])();
+                    // A held lock means another writer is computing this scope now.
+                    return array('complete' => $complete, 'progressed' => $complete || $outcome === 'busy');
+                },
+                'describe' => function () use ($scope): array {
+                    return array('scope' => $scope, 'lastRecomputeFailure' => $this->statusCounts->lastRecomputeFailure());
+                },
+            )))->arm();
+        }
+    }
+
+    /**
+     * Run one scope's aggregate under the distributed refresh lock.
+     *
+     * @return string 'refreshed', 'failed', 'busy' (another writer holds the lock) or 'unknown-scope'.
+     */
+    private function performRefresh(string $scope, int $timeoutSeconds): string {
         $refresh = $this->refresherFor($scope);
         if ($refresh === null) {
-            return;
+            return 'unknown-scope';
         }
         if (!$this->refreshLock->acquire($refresh['cache_key'])) {
-            return;
+            return 'busy';
         }
         try {
             $refreshed = ($refresh['recompute'])($timeoutSeconds);
-            if ($refreshed !== true) {
-                // The cause lives one layer down, flattened to `false` by the
-                // recompute's bool contract; the repository keeps it alongside.
-                $cause = $this->statusCounts->lastRecomputeFailure();
-                call_user_func($this->warn,
-                    'Status-count refresh failed for scope ' . $scope
-                    . ($cause !== '' ? ' (' . $cause . ')' : ' (no cause recorded)')
-                    . '; retaining the last-known cache.'
-                );
+            if ($refreshed === true) {
+                return 'refreshed';
             }
+            // The cause lives one layer down, flattened to `false` by the
+            // recompute's bool contract; the repository keeps it alongside.
+            $cause = $this->statusCounts->lastRecomputeFailure();
+            call_user_func($this->warn,
+                'Status-count refresh failed for scope ' . $scope
+                . ($cause !== '' ? ' (' . $cause . ')' : ' (no cause recorded)')
+                . '; retaining the last-known cache.'
+            );
+            return 'failed';
         } finally {
             $this->refreshLock->release($refresh['cache_key']);
         }

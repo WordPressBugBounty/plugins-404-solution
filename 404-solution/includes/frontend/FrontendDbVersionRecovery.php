@@ -115,7 +115,7 @@ class ABJ_404_Solution_FrontendDbVersionRecovery {
             return 1;
         }
 
-        $stored = get_option(self::CONSECUTIVE_FAILURE_OPTION, 0);
+        $stored = ABJ_404_Solution_OptionShapeRead::scalar(self::CONSECUTIVE_FAILURE_OPTION, 0);
         $failureCount = (is_scalar($stored) ? (int)$stored : 0) + 1;
 
         // @cache-write-audit: opt-out - stores a failure-streak counter, not a query result

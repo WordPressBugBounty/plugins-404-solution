@@ -27,7 +27,7 @@ class ABJ_404_Solution_UninstallModal {
         add_action('admin_enqueue_scripts', array(__CLASS__, 'enqueueAssets'));
 
         // Register AJAX handler for saving preferences
-        add_action('wp_ajax_abj404_save_uninstall_prefs', array(__CLASS__, 'handleAjaxSavePreferences'));
+        add_action(ABJ_404_Solution_PluginAjaxActions::hook('abj404_save_uninstall_prefs'), array(__CLASS__, 'handleAjaxSavePreferences'));
     }
 
     /**

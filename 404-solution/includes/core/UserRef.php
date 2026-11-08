@@ -12,8 +12,9 @@ if (!defined('ABSPATH')) {
  *
  * WordPress's user APIs return `WP_User|false`. The `WP_User` class has a
  * stable property surface (`ID`, `user_login`, `user_email`, `display_name`,
- * `roles`), but every public property is typed `string|int|array` in the
- * stubs (raw DB column types) and is also subject to:
+ * `roles`). Row-backed strings use __get()/__isset(), so declared-property
+ * reflection cannot determine whether they are readable. Properties are typed
+ * `string|int|array` in the stubs (raw DB column types) and are also subject to:
  *
  *   1. Anonymous-user objects with `ID = 0` (the documented sentinel for
  *      visitors not logged in: `WP_User::exists()` returns false).
@@ -170,7 +171,7 @@ final class ABJ_404_Solution_UserRef {
      * @param object $obj
      */
     private static function coerceObjectString($obj, string $key): string {
-        if (!property_exists($obj, $key)) {
+        if (!isset($obj->{$key})) {
             return '';
         }
         $v = $obj->{$key};
@@ -187,7 +188,7 @@ final class ABJ_404_Solution_UserRef {
      * @param object $obj
      */
     private static function coerceObjectInt($obj, string $key): int {
-        if (!property_exists($obj, $key)) {
+        if (!isset($obj->{$key})) {
             return 0;
         }
         return self::scalarToInt($obj->{$key});
@@ -205,7 +206,7 @@ final class ABJ_404_Solution_UserRef {
      * @return array<int, string>
      */
     private static function coerceObjectRoles($obj): array {
-        if (!property_exists($obj, 'roles')) {
+        if (!isset($obj->{'roles'})) {
             return array();
         }
         $v = $obj->{'roles'};

@@ -31,8 +31,8 @@ class ABJ_404_Solution_UninstallDiagnostics {
      * @return array{
      *     redirects: array{all:int,manual:int,auto:int,regex:int,trash:int},
      *     captured: array{all:int,captured:int,ignored:int,later:int,trash:int},
-     *     log_count: int,
-     *     log_table_size_mb: int|float,
+     *     log_count: int|null,
+     *     log_table_size_mb: int|float|null,
      *     debug_file_size_mb: int|float,
      *     _errors?: list<string>
      * }

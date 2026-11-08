@@ -221,7 +221,8 @@ class ABJ_404_Solution_FrontendRequestPipeline {
 
             if ($deferredAutoRedirect !== null) {
                 $this->dispatcher->processRedirect($requestedURL, $deferredAutoRedirect, 'existing', $this->trace);
-                exit;
+                // A successful redirect emitter exits.  A loop refusal
+                // returns false and falls through to the normal 404 path.
             }
 
             if ($autoRedirectsAreOn) {

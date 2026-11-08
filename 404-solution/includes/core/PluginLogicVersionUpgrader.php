@@ -4,6 +4,10 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/../repositories/LegacySuggestionPageRecovery.php';
+require_once __DIR__ . '/../repositories/SiteResourceLock.php';
+require_once __DIR__ . '/../repositories/SettingsOptionWriter.php';
+
 /**
  * Owns the plugin version upgrade orchestration: detect a version mismatch,
  * acquire the upgrade synchronizer lock, invalidate opcache for files whose
@@ -130,7 +134,22 @@ class ABJ_404_Solution_PluginLogicVersionUpgrader {
      * @return array<string, mixed>
      */
     public function runUpgradeAction(array $options) {
-        $options = array_merge(ABJ_404_Solution_PluginLogicDefaults::defaults(), $options);
+        $initializationLock = new ABJ_404_Solution_SiteResourceLock('initialization');
+        if (!$initializationLock->acquire()) {
+            $this->logger->warn('Database upgrade deferred because the initialization lock was unavailable.');
+            return $options;
+        }
+        try {
+            $options = array_merge(ABJ_404_Solution_PluginLogicDefaults::defaults(), $options);
+            $freshSnapshot = ABJ_404_Solution_SettingsOptionWriter::readSnapshot();
+            $freshOptions = $this->decodeFreshSettings($freshSnapshot);
+            if ($freshOptions === null) {
+                $this->logger->warn('Database upgrade deferred because the settings row was not readable after lock acquisition.');
+                return $options;
+            }
+            // The row read inside the lock is authoritative; migrations run on its
+            // normalized view, as on a healthy site (the checked writer throws on a raw invalid row).
+            $options = ABJ_404_Solution_StoredSettingsReconciler::servedForm($freshOptions);
 
         $currentDBVersion = self::currentDbVersionFromOptions($options);
         $this->logger->infoMessage($this->uniqID . ': Updating database version from ' .
@@ -142,7 +161,12 @@ class ABJ_404_Solution_PluginLogicVersionUpgrader {
 
         $pluginLogic = self::pluginLogic();
         $this->migrateIgnoredUserAgents($options, $currentDBVersion, $pluginLogic);
-        $this->migrateLegacyLogsTable($currentDBVersion);
+        if (version_compare($currentDBVersion, '1.8.0') < 0) {
+            // Refuse to run from cron. Migration is operator-driven (admin upgrade path).
+            if (!function_exists('wp_doing_cron') || !wp_doing_cron()) {
+                (new ABJ_404_Solution_LegacyLogsTableMigration($this->dbCore, $this->logger))->migrate();
+            }
+        }
         $this->migrateIgnoredFolders($options, $currentDBVersion, $pluginLogic);
         $this->normalizeDest404Page($options, $pluginLogic);
         $this->markSetupCompletedForExistingInstall($currentDBVersion);
@@ -153,7 +177,10 @@ class ABJ_404_Solution_PluginLogicVersionUpgrader {
         $this->logger->infoMessage($this->uniqID . ': Updating database version to ' .
             ABJ404_VERSION . ' (end).');
 
-        return $options;
+            return $options;
+        } finally {
+            $initializationLock->release();
+        }
     }
 
     /**
@@ -163,22 +190,81 @@ class ABJ_404_Solution_PluginLogicVersionUpgrader {
      * a freshly-activated site records the running version without going
      * through the full upgrade action.
      *
+     * The returned array is what the stamp could confirm, which is the stored
+     * row as it stands when the stamp write is refused or deferred. It is not
+     * resolved settings: PluginLogicOptionsResolver normalizes it before
+     * caching, and no other caller uses it.
+     *
      * @param array<string, mixed>|null $options
      * @return array<string, mixed>
      */
     public function stampDbVersion($options = null): array {
-        $pluginLogic = self::pluginLogic();
-        if ($options == null) {
-            $options = abj_service('options_repository')->getOptions(true);
+        $initializationLock = new ABJ_404_Solution_SiteResourceLock('initialization');
+        if (!$initializationLock->acquire()) {
+            $this->logger->warn('Database version stamp deferred because the initialization lock was unavailable.');
+            return is_array($options) ? $options : array();
         }
+        try {
+            $repository = abj_service('options_repository');
+            $snapshot = ABJ_404_Solution_SettingsOptionWriter::readSnapshot();
+            $fresh = $this->decodeFreshSettings($snapshot);
+            if ($fresh === null) {
+                $this->logger->warn('Database version stamp deferred because the settings row was not readable.');
+                return is_array($options) ? $options : array();
+            }
+            $currentOptions = $fresh;
 
-        $options['DB_VERSION'] = ABJ404_VERSION;
+            // Recovery reads the current saved destination itself after this
+            // lock. The caller's options array is never destination authority.
+            (new ABJ_404_Solution_LegacySuggestionPageRecovery())->recoverLegacyPages(0);
 
-        ABJ_404_Solution_SchemaHighWaterMark::raiseTo(ABJ404_VERSION);
+            $afterRecovery = ABJ_404_Solution_SettingsOptionWriter::readSnapshot();
+            $after = $this->decodeFreshSettings($afterRecovery);
+            if ($after === null) {
+                $this->logger->warn('Database version stamp deferred because recovery left settings unreadable.');
+                return $currentOptions;
+            }
+            $options = ABJ_404_Solution_SettingsVersionStamp::stamp(ABJ_404_Solution_StoredSettingsReconciler::servedForm($after));
 
-        abj_service('options_repository')->updateOptions($options);
+            if (!is_callable(array($repository, 'updateOptionsChecked'))
+                || !is_callable(array($repository, 'getRawSettingsSnapshot'))) {
+                $this->logger->warn('Database version stamp deferred because the checked storage writer is unavailable.');
+                return $currentOptions;
+            }
+            // Bind the data and its compare authority to the same exact raw
+            // read. A second snapshot here could belong to a re-entrant save
+            // and let this stale stamp overwrite that newer destination.
+            if ($repository->updateOptionsChecked($options, $afterRecovery, $initializationLock) !== true) {
+                $this->logger->warn('Database version stamp refused because settings changed during recovery.');
+                return $currentOptions;
+            }
+            ABJ_404_Solution_SchemaHighWaterMark::raiseTo(ABJ404_VERSION);
+            return $options;
+        } finally {
+            $initializationLock->release();
+        }
+    }
 
-        return $options;
+    /**
+     * @param array{status:string,value:string} $snapshot
+     * @return array<string,mixed>|null
+     */
+    private function decodeFreshSettings(array $snapshot): ?array {
+        if ($snapshot['status'] !== 'found') {
+            return null;
+        }
+        $decoded = @unserialize($snapshot['value'], array('allowed_classes' => false));
+        if (!is_array($decoded)) {
+            return null;
+        }
+        $stringKeyed = array();
+        foreach ($decoded as $key => $value) {
+            if (!is_string($key)) {
+                return null;
+            }
+            $stringKeyed[$key] = $value;
+        }
+        return $stringKeyed;
     }
 
     /** @param array<string, mixed> $options */
@@ -208,9 +294,16 @@ class ABJ_404_Solution_PluginLogicVersionUpgrader {
 
     /** @return void */
     private function refreshUpgradeCrons(): void {
-        abj_cron_scheduler()->clearHook(ABJ_404_Solution_CronScheduler::HOOK_DUPLICATE_LEGACY);
-
-        ABJ_404_Solution_PluginLogicLifecycle::doUnregisterCrons();
+        // Deactivation clears every hook. An upgrade must retain queued
+        // background work, including overdue events and cursor arguments.
+        abj_cron_scheduler()->clearRegisteredHooks(array(
+            ABJ_404_Solution_CronScheduler::HOOK_CLEANUP,
+            ABJ_404_Solution_CronScheduler::HOOK_GSC_FETCH,
+            ABJ_404_Solution_CronScheduler::HOOK_DUPLICATE_LEGACY,
+            ABJ_404_Solution_CronScheduler::HOOK_REMOVE_DUPLICATES_LEGACY,
+            ABJ_404_Solution_CronScheduler::HOOK_DELETE_OLD_REDIRECTS_LEGACY,
+            ABJ_404_Solution_CronScheduler::HOOK_REBUILD_VIEW_DONE_LEGACY,
+        ));
         ABJ_404_Solution_PluginLogicLifecycle::doRegisterCrons();
     }
 
@@ -262,50 +355,6 @@ class ABJ_404_Solution_PluginLogicVersionUpgrader {
 
         $options['ignore_doprocess'] = implode("\n", $userAgents);
         abj_service('options_repository')->updateOptions($options);
-    }
-
-    /** @return void */
-    private function migrateLegacyLogsTable(string $currentDBVersion): void {
-        if (version_compare($currentDBVersion, '1.8.0') >= 0) {
-            return;
-        }
-        // Refuse to run from cron. Migration is operator-driven (admin upgrade path).
-        if (function_exists('wp_doing_cron') && wp_doing_cron()) {
-            return;
-        }
-
-        $query = "SHOW TABLES LIKE '{wp_abj404_logs}'";
-        $dbCore = $this->dbCore;
-        if (!$dbCore instanceof ABJ_404_Solution_DatabaseQueryInterface
-            || !$dbCore instanceof ABJ_404_Solution_DatabaseCoreInterface) {
-            throw new \RuntimeException('PluginLogicVersionUpgrader requires database query and table-name resolver methods.');
-        }
-
-        $result = $dbCore->queryAndGetResults($query);
-        $rows = isset($result['rows']) ? $result['rows'] : array();
-
-        $filteredRows = is_array($rows) ? array_filter($rows) : array();
-        if (empty($filteredRows)) {
-            return;
-        }
-
-        $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . '/../sql/migrateToNewLogsTable.sql');
-        $query = $dbCore->doTableNameReplacements($query);
-        $result = $dbCore->queryAndGetResults($query);
-
-        $rowsAffected = ABJ_404_Solution_ExactInteger::readOr(
-            $result['rows_affected'] ?? null,
-            0,
-            0
-        );
-        // The early-return at the top of this function ensures
-        // $currentDBVersion < '1.8.0' here, so the version gate that previously
-        // wrapped this block has been removed (PHPStan smaller.alwaysTrue).
-        if ($rowsAffected > 0) {
-            $this->logger->infoMessage($rowsAffected .
-                ' log rows were migrated to the new table structre.');
-            $dbCore->queryAndGetResults('drop table ' . $dbCore->tableNameResolver()->getLowercasePrefix() . 'abj404_logs');
-        }
     }
 
     /**
@@ -394,24 +443,8 @@ class ABJ_404_Solution_PluginLogicVersionUpgrader {
         }
 
         $dest = is_string($options['dest404page']) ? $options['dest404page'] : '';
-        $options['dest404_behavior'] = self::dest404BehaviorFromDestination($dest);
+        $options['dest404_behavior'] = ABJ_404_Solution_SettingsRedirectPolicy::behaviorFromDestination($dest);
         abj_service('options_repository')->updateOptions($options);
-    }
-
-    private static function dest404BehaviorFromDestination(string $dest): string {
-        if ($dest === '0|' . ABJ404_TYPE_404_DISPLAYED || $dest === (string)ABJ404_TYPE_404_DISPLAYED || $dest === '') {
-            return 'theme_default';
-        }
-        if ($dest === '0|' . ABJ404_TYPE_HOME) {
-            return 'homepage';
-        }
-
-        $parts = explode('|', $dest);
-        $pageId = isset($parts[0]) ? (int)$parts[0] : 0;
-        if ($pageId > 0 && ABJ_404_Solution_SystemPage::isSystemPage($pageId)) {
-            return 'suggest';
-        }
-        return 'custom';
     }
 
     /** @return ABJ_404_Solution_Functions */

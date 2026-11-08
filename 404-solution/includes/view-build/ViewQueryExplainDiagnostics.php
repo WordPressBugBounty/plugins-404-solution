@@ -36,7 +36,7 @@ class ABJ_404_Solution_ViewQueryExplainDiagnostics {
                 return 'skipped: ' . $reason;
             }
 
-            $result = $this->dbCore->queryAndGetResults('EXPLAIN ' . $this->stripWrappersForExplain($failedQuery), array(
+            $result = $this->dbCore->queryAndGetResults('EXPLAIN FORMAT=TRADITIONAL ' . $this->stripWrappersForExplain($failedQuery), array(
                 'timeout' => 5,
                 'log_errors' => false,
                 'skip_repair' => true,

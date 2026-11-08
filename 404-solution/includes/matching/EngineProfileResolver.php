@@ -353,6 +353,25 @@ class ABJ_404_Solution_EngineProfileResolver {
     }
 
     /**
+     * Return the native error captured by the most recent profile write.
+     *
+     * The repository receives an immutable query-result envelope, while
+     * wpdb::$last_error is mutable and may be cleared by diagnostic logging
+     * before an AJAX handler formats its response.
+     */
+    public function getLastWriteError(): string {
+        $repository = $this->repository();
+        // PluginUpdateClassmapCompatibilityTest exercises the retained 4.3.6 class.
+        // @phpstan-ignore function.alreadyNarrowedType (4.3.6 repository lacks this getter.)
+        if (method_exists($repository, 'getLastWriteError')) {
+            return (string)$repository->getLastWriteError();
+        }
+        global $wpdb;
+        return isset($wpdb->last_error) && is_string($wpdb->last_error)
+            ? $wpdb->last_error : '';
+    }
+
+    /**
      * Every profile, active or not, for the admin edit screen.
      *
      * The rows and the ceiling belong to

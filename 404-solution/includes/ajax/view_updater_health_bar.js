@@ -263,6 +263,10 @@ function abj404BeginHealthBarRequest(plan) {
     }) : null;
     return {
         $bar: $bar,
+        // Holds the admin ready signal (includes/js/adminReady.js) until
+        // this request renders or retires the bar.
+        releaseReady: (window.ABJ404 && window.ABJ404.adminReady)
+            ? window.ABJ404.adminReady.hold('health-bar') : function() {},
         action: plan.config.action,
         nonce: plan.config.nonce,
         reportNonce: abj404HealthBarReportNonce(),
@@ -357,26 +361,34 @@ function abj404HealthBarAjaxOptions(context) {
             }
         },
         success: function(result, textStatus, jqXHR) {
-            if (context.telemetry) {
-                context.telemetry.finishAttempt(context.record, 'success', jqXHR, textStatus);
+            try {
+                if (context.telemetry) {
+                    context.telemetry.finishAttempt(context.record, 'success', jqXHR, textStatus);
+                }
+                abj404RenderHealthBarResult(context, result);
+            } finally {
+                context.releaseReady();
             }
-            abj404RenderHealthBarResult(context, result);
         },
         error: function(jqXHR, textStatus, errorThrown) {
-            if (context.telemetry) {
-                context.telemetry.finishAttempt(
-                    context.record, abj404HealthBarOutcome(textStatus), jqXHR, textStatus);
-                var delivery = window.abj404TransportTelemetryDelivery;
-                if (context.reportNonce && delivery && typeof delivery.sendBeacon === 'function') {
-                    delivery.sendBeacon(context.url, context.record, context.reportNonce);
+            try {
+                if (context.telemetry) {
+                    context.telemetry.finishAttempt(
+                        context.record, abj404HealthBarOutcome(textStatus), jqXHR, textStatus);
+                    var delivery = window.abj404TransportTelemetryDelivery;
+                    if (context.reportNonce && delivery && typeof delivery.sendBeacon === 'function') {
+                        delivery.sendBeacon(context.url, context.record, context.reportNonce);
+                    }
+                } else {
+                    abj404RecordHealthBarFailure(jqXHR, {
+                        textStatus: textStatus,
+                        errorThrown: errorThrown
+                    });
                 }
-            } else {
-                abj404RecordHealthBarFailure(jqXHR, {
-                    textStatus: textStatus,
-                    errorThrown: errorThrown
-                });
+                abj404RetireHealthBar(context.$bar);
+            } finally {
+                context.releaseReady();
             }
-            abj404RetireHealthBar(context.$bar);
         }
     };
     if (context.telemetry) {

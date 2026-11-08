@@ -19,12 +19,14 @@ CREATE TABLE IF NOT EXISTS {wp_abj404_logsv2} (
     `engine` varchar(64) DEFAULT NULL,
     `pipeline_trace` blob DEFAULT NULL,
     `canonical_url` varchar(2048) DEFAULT NULL COMMENT 'Cached CONCAT(/, TRIM(BOTH / FROM requested_url)) so the logs_hits rebuild JOIN against redirects.canonical_url is index-friendly. Plain (not VIRTUAL) for MySQL 5.6 / 5.7.0-5.7.5 compatibility. Populated at insert time by sanitizeLogEntry; legacy NULL rows backfilled by backfillLogsv2CanonicalUrl().',
+    `url_sort_key` varchar(191) DEFAULT NULL COMMENT 'Narrow URL prefix for indexed admin sorting, with id breaking ties in the selected direction.',
     PRIMARY KEY  (`id`),
     KEY `timestamp` (`timestamp`),
     KEY `requested_url` (`requested_url`(190)) USING BTREE,
     KEY `username` (`username`) USING BTREE,
     KEY `min_log_id` (`min_log_id`),
     KEY `idx_requested_url_timestamp` (`requested_url`(190), `timestamp`),
-    KEY `idx_canonical_url` (`canonical_url`(190)) USING BTREE
+    KEY `idx_canonical_url` (`canonical_url`(190)) USING BTREE,
+    KEY `idx_url_sort_id` (`url_sort_key`, `id`)
 ) COMMENT='404 Solution Plugin Logs Table.' AUTO_INCREMENT=1
 

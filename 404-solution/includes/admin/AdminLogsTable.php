@@ -32,11 +32,16 @@ class ABJ_404_Solution_AdminLogsTable {
 
     /** @param array<string, mixed> $tableOptions */
     public function render(string $sub, array $tableOptions): string {
-        $headerCells = $this->renderHeaderCells($tableOptions);
         $rows = $this->logsRepository->getLogRecords($tableOptions);
+        if ($this->logsRepository->lastLogRecordsReadWasIncomplete()) {
+            return ABJ_404_Solution_FileSystemService::readFileContents(
+                __DIR__ . '/../html/tableWarmupPlaceholder.html'
+            );
+        }
         /** @var array<int, array<string, mixed>> $typedLogRows */
         $typedLogRows = array_values(array_filter($rows, 'is_array'));
         $this->shared->rememberTableDataSignature($sub, $typedLogRows);
+        $headerCells = $this->renderHeaderCells($tableOptions);
 
         $body = $this->renderBodyRows($typedLogRows);
         return $this->f->str_replace(
@@ -63,6 +68,15 @@ class ABJ_404_Solution_AdminLogsTable {
             $orderbyCol = $col['orderby'];
             if ($orderbyCol === '') {
                 $headerCells .= $this->f->str_replace('{title}', esc_html($col['title']), $plainHeaderTpl);
+                continue;
+            }
+            $pending = $this->shared->pendingSortTooltipText($orderbyCol, null);
+            if ($pending !== '') {
+                $tooltip = $this->f->str_replace(array('{more_info_label}', '{tooltip_body}'),
+                    array(esc_attr__('More info', '404-solution'), esc_html($pending)),
+                    $this->tpl('viewRedirectsTableHeaderTooltip.html'));
+                $headerCells .= $this->f->str_replace(array('{class_attr}', '{title}', '{tooltip_html}'),
+                    array('', esc_html($col['title']), $tooltip), $this->tpl('viewRedirectsTableCapturedPendingHeader.html'));
                 continue;
             }
 
@@ -97,7 +111,9 @@ class ABJ_404_Solution_AdminLogsTable {
 
         $this->logger->debugMessage($displayed . ' log records displayed on the page.');
         if ($displayed === 0) {
-            $bodyRows .= $this->f->str_replace('{message}', __('No Results To Display', '404-solution'), $this->tpl('viewLogsEmptyRow.html'));
+            $pending = $this->shared->pendingSortTooltipText('url', null);
+            $bodyRows .= $this->f->str_replace('{message}', $pending !== '' ? esc_html($pending)
+                : __('No Results To Display', '404-solution'), $this->tpl('viewLogsEmptyRow.html'));
         }
 
         return $bodyRows;
