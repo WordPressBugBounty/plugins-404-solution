@@ -59,7 +59,7 @@ class ABJ_404_Solution_ErrorDiagnosticsReporter {
         if (is_object($logger) && method_exists($logger, 'sanitizeLogLine')) {
             $line = $logger->sanitizeLogLine($line);
         }
-        @file_put_contents(abj404_getWritablePluginFallbackDir() . 'abj404_debug_fallback.txt', $line . "\n", FILE_APPEND);
+        @file_put_contents(ABJ_404_Solution_FallbackStateDirectory::path() . 'abj404_debug_fallback.txt', $line . "\n", FILE_APPEND);
         return false;
     }
 }

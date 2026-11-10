@@ -51,11 +51,14 @@ class ABJ_404_Solution_PermalinkResolver {
             $permalink['status'] = 'trash';
         }
 
-        // Decode anything that might be encoded to support utf8 characters
+        // Decode anything that might be encoded to support utf8 characters.
+        // An external link is a stored destination, sent as the admin typed it:
+        // decoding would unwrap a nested URL or turn %2B into a plus.
         $sanitizer = abj_service('sanitizer');
         $linkVal = is_string($permalink['link']) ? $permalink['link']
             : (is_scalar($permalink['link']) ? (string)$permalink['link'] : '');
-        $permalink['link'] = $sanitizer->normalizeUrlString($linkVal);
+        $permalink['link'] = $sanitizer->normalizeUrlString(
+            $linkVal, array('decode' => $typeInt !== ABJ404_TYPE_EXTERNAL));
         $titleVal = (array_key_exists('title', $permalink) && is_string($permalink['title']))
             ? $permalink['title'] : '';
         $permalink['title'] = $sanitizer->normalizeUrlString($titleVal);

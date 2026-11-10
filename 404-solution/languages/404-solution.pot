@@ -1044,8 +1044,8 @@ msgstr ""
 msgid "Error: External URL must use http:// or https:// protocol only."
 msgstr ""
 
-#: includes/PluginLogicTrait_AdminActions.php:775
-msgid "Error: External redirect URL failed validation."
+#: includes/policies/ExternalDestinationPolicy.php:87
+msgid "Error: Another plugin or your theme rejected this external URL."
 msgstr ""
 
 #: includes/PluginLogicTrait_AdminActions.php:954

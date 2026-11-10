@@ -69,10 +69,10 @@ class ABJ_404_Solution_LogsHitsDataPopulator {
         $urlChunks = array_chunk($urls, $batchSize);
 
         foreach ($urlChunks as $urlChunk) {
-            $placeholders = implode(',', array_fill(0, count($urlChunk), '%s'));
             $sql = "SELECT requested_url, logsid, last_used, logshits "
                  . "FROM {$logsHitsTable} "
-                 . "WHERE BINARY requested_url IN ($placeholders)";
+                 . "WHERE " . ABJ_404_Solution_StoredValueMatch::isOneOf(
+                     'requested_url', array_fill(0, count($urlChunk), '%s'));
 
             $chunkResult = $this->dbCore->queryAndGetResults($sql, array(
                 'query_params' => $urlChunk,

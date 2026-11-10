@@ -67,7 +67,7 @@ class ABJ_404_Solution_AutoRedirectHandler {
 
         $resolvedLink = $this->resolveMatchLink($matchResult);
         $this->hitRecorder->record($requestedURL, $resolvedLink, $matchResult->getEngineName(), null, $trace->getSteps());
-        return $this->notFoundResponse->forceRedirect(esc_url($resolvedLink), (int)$defaultRedirect);
+        return $this->notFoundResponse->forceRedirect(esc_url_raw($resolvedLink), (int)$defaultRedirect);
     }
 
     /**

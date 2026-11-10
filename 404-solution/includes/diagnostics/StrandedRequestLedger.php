@@ -136,7 +136,7 @@ final class ABJ_404_Solution_StrandedRequestLedger {
         }
         $select = self::transactionSql($wpdb,
             "SELECT option_value FROM `" . $table . "` "
-                . "WHERE option_name = %s AND BINARY option_name = BINARY %s FOR UPDATE",
+                . "WHERE option_name = %s AND " . ABJ_404_Solution_StoredValueMatch::equals('option_name', '%s') . " FOR UPDATE",
             array(self::OPTION_NAME, self::OPTION_NAME));
         $result = $connection->execute($select);
         self::requireTransactionResult($result, 'The stranded-request ledger could not be locked.');
@@ -172,8 +172,8 @@ final class ABJ_404_Solution_StrandedRequestLedger {
         } else {
             $write = self::transactionSql($wpdb,
                 "UPDATE `" . $table . "` SET option_value = %s "
-                    . "WHERE option_name = %s AND BINARY option_name = BINARY %s "
-                    . "AND BINARY option_value = BINARY %s",
+                    . "WHERE option_name = %s AND " . ABJ_404_Solution_StoredValueMatch::equals('option_name', '%s') . " "
+                    . "AND " . ABJ_404_Solution_StoredValueMatch::equals('option_value', '%s'),
                 array($encoded, self::OPTION_NAME, self::OPTION_NAME, $existingRaw));
         }
         $written = $connection->execute($write);

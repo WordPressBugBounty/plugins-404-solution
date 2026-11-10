@@ -159,19 +159,14 @@ class ABJ_404_Solution_PluginLogicVersionUpgrader {
         $this->createDatabaseTables();
         $this->refreshUpgradeCrons();
 
-        $pluginLogic = self::pluginLogic();
-        $this->migrateIgnoredUserAgents($options, $currentDBVersion, $pluginLogic);
         if (version_compare($currentDBVersion, '1.8.0') < 0) {
             // Refuse to run from cron. Migration is operator-driven (admin upgrade path).
             if (!function_exists('wp_doing_cron') || !wp_doing_cron()) {
                 (new ABJ_404_Solution_LegacyLogsTableMigration($this->dbCore, $this->logger))->migrate();
             }
         }
-        $this->migrateIgnoredFolders($options, $currentDBVersion, $pluginLogic);
-        $this->normalizeDest404Page($options, $pluginLogic);
-        $this->markSetupCompletedForExistingInstall($currentDBVersion);
-        $this->migrateSuggestMinScoreEnabled($options, $pluginLogic);
-        $this->migrateDest404Behavior($options, $pluginLogic);
+        (new ABJ_404_Solution_SettingsVersionMigrations($this->f, $this->logger))->apply($options, $currentDBVersion);
+        $this->repairEscapedExternalDestinations($currentDBVersion);
 
         $options = $this->stampDbVersion($options);
         $this->logger->infoMessage($this->uniqID . ': Updating database version to ' .
@@ -235,7 +230,10 @@ class ABJ_404_Solution_PluginLogicVersionUpgrader {
             // read. A second snapshot here could belong to a re-entrant save
             // and let this stale stamp overwrite that newer destination.
             if ($repository->updateOptionsChecked($options, $afterRecovery, $initializationLock) !== true) {
-                $this->logger->warn('Database version stamp refused because settings changed during recovery.');
+                $reason = is_callable(array($repository, 'lastRefusalReason'))
+                    ? (string)call_user_func(array($repository, 'lastRefusalReason')) : '';
+                $this->logger->warn('Database version stamp refused by the checked settings writer ('
+                    . ($reason !== '' ? $reason : 'reason not reported') . ').');
                 return $currentOptions;
             }
             ABJ_404_Solution_SchemaHighWaterMark::raiseTo(ABJ404_VERSION);
@@ -316,135 +314,25 @@ class ABJ_404_Solution_PluginLogicVersionUpgrader {
     }
 
     /**
-     * @param array<string, mixed> $options
+     * Report 753: before 4.4.1 the Add/Edit Redirect forms stored an external
+     * destination HTML-escaped ("&" as "&#038;"), which broke every query
+     * parameter after the first. Decode the rows that older versions wrote. A
+     * fresh install has none, and the fixed save path no longer writes any, so
+     * the step runs on the upgrade that crosses 4.4.1, and again on a later
+     * upgrade only if a failing database stopped it before it finished. A
+     * destination typed on 4.4.1 or later is never rewritten otherwise.
+     *
      * @return void
      */
-    private function migrateIgnoredUserAgents(
-        array &$options,
-        string $currentDBVersion,
-        ABJ_404_Solution_PluginLogic $pluginLogic
-    ): void {
-        if (version_compare($currentDBVersion, '1.9.0') >= 0) {
+    private function repairEscapedExternalDestinations(string $currentDBVersion): void {
+        if ($currentDBVersion === '0.0.0') {
             return;
         }
-
-        $ignoreDoProcessStr = is_string($options['ignore_doprocess']) ? $options['ignore_doprocess'] : '';
-        $userAgents = $this->f->explodeNewline($ignoreDoProcessStr);
-
-        $uasForSearch = $this->f->explodeNewline($ignoreDoProcessStr);
-
-        foreach ($userAgents as &$str) {
-            if ($this->f->strtolower(trim($str)) == 'slurp') {
-                $str = 'Yahoo! Slurp';
-                $this->logger->infoMessage('Changed user agent "Slurp" to "Yahoo! Slurp" in the do not log list.');
-            }
-        }
-
-        if (!in_array('seznambot', $uasForSearch)) {
-            $userAgents[] = 'SeznamBot';
-            $this->logger->infoMessage('Added user agent "SeznamBot" to do not log list."');
-        }
-        if (!in_array('pinterestbot', $uasForSearch)) {
-            $userAgents[] = 'Pinterestbot';
-            $this->logger->infoMessage('Added user agent "Pinterestbot" to do not log list."');
-        }
-        if (!in_array('uptimerobot', $uasForSearch)) {
-            $userAgents[] = 'UptimeRobot';
-            $this->logger->infoMessage('Added user agent "UptimeRobot" to do not log list."');
-        }
-
-        $options['ignore_doprocess'] = implode("\n", $userAgents);
-        abj_service('options_repository')->updateOptions($options);
-    }
-
-    /**
-     * @param array<string, mixed> $options
-     * @return void
-     */
-    private function migrateIgnoredFolders(
-        array &$options,
-        string $currentDBVersion,
-        ABJ_404_Solution_PluginLogic $pluginLogic
-    ): void {
-        if (version_compare($currentDBVersion, '2.18.0') >= 0) {
+        if (version_compare($currentDBVersion, '4.4.1') >= 0
+                && !ABJ_404_Solution_DatabaseUpgradePluginUpdate::escapedExternalDestinationRepairPending()) {
             return;
         }
-
-        $foldersIgnoreStr = is_string($options['folders_files_ignore']) ? $options['folders_files_ignore'] : '';
-        $originalItems = $this->f->explodeNewline($foldersIgnoreStr);
-
-        $newItems = array('wp-content/plugins/*', 'wp-content/themes/*', '.well-known/acme-challenge/*');
-        foreach ($newItems as $newItem) {
-            if (array_search($newItem, $originalItems) === false) {
-                $originalItems[] = $newItem;
-                $this->logger->infoMessage('Added ' . $newItem . ' to the list of folders to ignore."');
-            }
-        }
-
-        $options['folders_files_ignore'] = implode("\n", $originalItems);
-        abj_service('options_repository')->updateOptions($options);
-    }
-
-    /**
-     * @param array<string, mixed> $options
-     * @return void
-     */
-    private function normalizeDest404Page(array &$options, ABJ_404_Solution_PluginLogic $pluginLogic): void {
-        $dest404page = is_string($options['dest404page']) ? $options['dest404page'] : '';
-        if ($this->f->strpos($dest404page, '|') !== false) {
-            return;
-        }
-
-        if ($dest404page == '0') {
-            $dest404page .= '|' . ABJ404_TYPE_404_DISPLAYED;
-        } else {
-            $dest404page .= '|' . ABJ404_TYPE_POST;
-        }
-        $options['dest404page'] = $dest404page;
-        abj_service('options_repository')->updateOptions($options);
-    }
-
-    /** @return void */
-    private function markSetupCompletedForExistingInstall(string $currentDBVersion): void {
-        if ($currentDBVersion === '0.0.0' || version_compare($currentDBVersion, '3.0.7') >= 0) {
-            return;
-        }
-
-        // @cache-write-audit: opt-out - stores a setup-completion date marker, not a query result
-        update_option('abj404_setup_completed', gmdate('Y-m-d', abj_clock()->now()));
-        $this->logger->infoMessage('Marked setup wizard as completed for existing user.');
-    }
-
-    /**
-     * @param array<string, mixed> $options
-     * @return void
-     */
-    private function migrateSuggestMinScoreEnabled(array &$options, ABJ_404_Solution_PluginLogic $pluginLogic): void {
-        if (isset($options['suggest_minscore_enabled'])) {
-            return;
-        }
-
-        if (isset($options['suggest_minscore']) && is_scalar($options['suggest_minscore']) && intval($options['suggest_minscore']) >= 25) {
-            $options['suggest_minscore_enabled'] = '1';
-            $this->logger->infoMessage('Enabled minimum score filtering based on existing suggest_minscore setting.');
-        } else {
-            $options['suggest_minscore_enabled'] = '0';
-        }
-        abj_service('options_repository')->updateOptions($options);
-    }
-
-    /**
-     * @param array<string, mixed> $options
-     * @return void
-     */
-    private function migrateDest404Behavior(array &$options, ABJ_404_Solution_PluginLogic $pluginLogic): void {
-        if (isset($options['dest404_behavior']) && $options['dest404_behavior'] !== 'theme_default') {
-            return;
-        }
-
-        $dest = is_string($options['dest404page']) ? $options['dest404page'] : '';
-        $options['dest404_behavior'] = ABJ_404_Solution_SettingsRedirectPolicy::behaviorFromDestination($dest);
-        abj_service('options_repository')->updateOptions($options);
+        abj_service('database_upgrades')->components()->pluginUpdateUpgrade()->decodeEscapedExternalDestinations();
     }
 
     /** @return ABJ_404_Solution_Functions */
@@ -465,11 +353,6 @@ class ABJ_404_Solution_PluginLogicVersionUpgrader {
     /** @return ABJ_404_Solution_PermalinkCache */
     private static function permalinkCache(): ABJ_404_Solution_PermalinkCache {
         return self::service('permalink_cache', ABJ_404_Solution_PermalinkCache::class);
-    }
-
-    /** @return ABJ_404_Solution_PluginLogic */
-    private static function pluginLogic(): ABJ_404_Solution_PluginLogic {
-        return self::service('plugin_logic', ABJ_404_Solution_PluginLogic::class);
     }
 
     /**

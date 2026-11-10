@@ -515,8 +515,8 @@ msgstr "Erro: URL externa não contém ://"
 msgid "Error: External URL is too short."
 msgstr "Erro: URL externa é muito curta."
 
-msgid "Error: External redirect URL failed validation."
-msgstr "Erro: URL de redirecionamento externo falhou na validação."
+msgid "Error: Another plugin or your theme rejected this external URL."
+msgstr "Erro: outro plugin ou o seu tema rejeitou esta URL externa."
 
 msgid "Error: External URL must use http:// or https:// protocol only."
 msgstr "Erro: URL externa deve usar apenas o protocolo http:// ou https://."

@@ -140,7 +140,8 @@ class ABJ_404_Solution_UrlEncoder {
      *
      * This function ensures consistent URL normalization across the codebase:
      * - Strips query strings (removes everything after '?')
-     * - Applies esc_url for security and consistency
+     * - Applies esc_url_raw for security and consistency (the key is a stored value
+     *   and a lookup URL, not HTML output, so it must not be entity-encoded)
      *
      * IMPORTANT: All code that computes cache keys or transient keys from URLs
      * should use this function to ensure keys match across different code paths.
@@ -148,14 +149,14 @@ class ABJ_404_Solution_UrlEncoder {
      * Used by: SpellChecker, ShortCode, Ajax_SuggestionPolling, PluginLogic
      *
      * @param string $url The URL to normalize
-     * @return string The normalized URL (query string stripped, esc_url applied)
+     * @return string The normalized URL (query string stripped, esc_url_raw applied)
      */
     public function normalizeURLForCacheKey($url) {
         $url = abj_service('sanitizer')->normalizeUrlString($url);
         // Strip query string (everything after '?')
         $normalized = $this->regexHelper->regexReplace('\?.*', '', $url) ?? $url;
-        // Apply esc_url for security and consistency
-        return esc_url($normalized);
+        // Apply esc_url_raw for security and consistency (esc_url would turn "&" into "&#038;")
+        return esc_url_raw($normalized);
     }
 
     /** Only URL encode emojis from a string.

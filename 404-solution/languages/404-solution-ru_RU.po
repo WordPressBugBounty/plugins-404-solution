@@ -516,8 +516,8 @@ msgstr "Ошибка: Внешний URL не содержит ://"
 msgid "Error: External URL is too short."
 msgstr "Ошибка: Внешний URL слишком короткий."
 
-msgid "Error: External redirect URL failed validation."
-msgstr "Ошибка: Внешний URL перенаправления не прошел проверку."
+msgid "Error: Another plugin or your theme rejected this external URL."
+msgstr "Ошибка: другой плагин или ваша тема отклонили этот внешний URL-адрес."
 
 msgid "Error: External URL must use http:// or https:// protocol only."
 msgstr "Ошибка: Внешний URL должен использовать только протокол http:// или https://."

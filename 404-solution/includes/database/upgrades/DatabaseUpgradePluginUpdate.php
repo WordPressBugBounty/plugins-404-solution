@@ -7,6 +7,23 @@ if (!defined('ABSPATH')) {
 class ABJ_404_Solution_DatabaseUpgradePluginUpdate extends ABJ_404_Solution_DatabaseUpgradeComponent {
 
     /**
+     * Number of redirect ids repaired per statement. Keeps each UPDATE's id list
+     * short; it matches the denorm maintenance chunk size.
+     */
+    const ESCAPED_DESTINATION_REPAIR_CHUNK_SIZE = 1000;
+
+    /**
+     * Set while decodeEscapedExternalDestinations() was stopped by a failing
+     * database before it finished; the next plugin upgrade runs it again.
+     */
+    const ESCAPED_DESTINATION_REPAIR_PENDING_OPTION = 'abj404_escaped_destination_repair_pending';
+
+    /** Whether an earlier escaped-destination repair stopped before it finished. */
+    static function escapedExternalDestinationRepairPending(): bool {
+        return ABJ_404_Solution_OptionShapeRead::scalar(self::ESCAPED_DESTINATION_REPAIR_PENDING_OPTION, '') === '1';
+    }
+
+    /**
      * Resolve the plugin-update metadata repository. Test subclasses can
      * preload `$this->pluginUpdateRepo` via reflection; production paths
      * read it from the service container; bare instantiation contexts
@@ -147,6 +164,110 @@ class ABJ_404_Solution_DatabaseUpgradePluginUpdate extends ABJ_404_Solution_Data
         }
 
         return $results;
+    }
+
+    /**
+     * Repair external destinations that the admin Add/Edit form stored
+     * HTML-escaped (report 753).
+     *
+     * Those forms validated the typed URL with esc_url(), whose default 'display'
+     * context rewrites "&" to "&#038;" and "'" to "&#039;". The value was stored
+     * in final_dest and sent as the Location header, so the browser read the
+     * rest of the URL after the first entity as a fragment and the target never
+     * received any query parameter after the first. Saving through
+     * the form again corrupted a redirect that older versions had stored
+     * correctly. The save path now stores what was typed; this restores the rows
+     * the old path wrote.
+     *
+     * Touches only final_dest of external-destination rows (type 4) that contain
+     * one of the two entities esc_url() emits, so a row without them is never
+     * written. Idempotent: a repaired row no longer matches. A run that a failing
+     * database stops (the SELECT or any chunk) sets the pending marker, and the
+     * next plugin upgrade runs the repair again to finish it. The derived display
+     * columns (dest_for_view, dest_sort_key) are recomputed through the denorm
+     * maintenance service, the one place that maps an external destination to its
+     * display value. The redirects table is never dropped or truncated.
+     *
+     * @return int Number of external redirects whose final_dest was decoded.
+     */
+    function decodeEscapedExternalDestinations(): int {
+        $redirects = '{wp_abj404_redirects}';
+        $external = (int)ABJ404_TYPE_EXTERNAL;
+        $hasEntity = "(LOCATE('&#038;', final_dest) > 0 OR LOCATE('&#039;', final_dest) > 0)";
+
+        $found = $this->dbCore->queryAndGetResults(
+            "SELECT id FROM " . $redirects . " WHERE type = " . $external . " AND " . $hasEntity
+        );
+        if (($found['query_succeeded'] ?? false) !== true) {
+            // queryAndGetResults() already logged the error. Not knowing which
+            // rows need it is not "nothing to repair": retry on the next upgrade.
+            $this->markEscapedDestinationRepairPending(true);
+            return 0;
+        }
+        $ids = array();
+        $rows = isset($found['rows']) && is_array($found['rows']) ? $found['rows'] : array();
+        foreach ($rows as $row) {
+            $id = is_array($row) && isset($row['id']) && is_scalar($row['id']) ? (int)$row['id'] : 0;
+            if ($id > 0) {
+                $ids[] = $id;
+            }
+        }
+        if (empty($ids)) {
+            $this->markEscapedDestinationRepairPending(false);
+            return 0;
+        }
+
+        $repaired = 0;
+        $maintenance = new ABJ_404_Solution_RedirectsDenormMaintenanceService($this->dbCore, $this->logger);
+        foreach (array_chunk($ids, self::ESCAPED_DESTINATION_REPAIR_CHUNK_SIZE) as $chunk) {
+            // The "''''" below is one SQL single quote.
+            $result = $this->dbCore->queryAndGetResults(
+                "UPDATE " . $redirects .
+                " SET final_dest = REPLACE(REPLACE(final_dest, '&#038;', '&'), '&#039;', '''')" .
+                " WHERE id IN (" . implode(',', $chunk) . ") AND type = " . $external . " AND " . $hasEntity
+            );
+            if (($result['query_succeeded'] ?? false) !== true) {
+                // queryAndGetResults() already logged the error and classified an
+                // infrastructure failure. The rows left still carry the entity, so
+                // the next upgrade's run finds and finishes them.
+                $this->logger->warn(sprintf(
+                    'Could not decode escaped external redirect destinations after %d of %d row(s); ' .
+                    'the next plugin update retries the rest: %s',
+                    $repaired,
+                    count($ids),
+                    is_string($result['last_error'] ?? null) ? $result['last_error'] : '(no error text)'
+                ));
+                $this->markEscapedDestinationRepairPending(true);
+                return $repaired;
+            }
+            $repaired += ABJ_404_Solution_ExactInteger::readOr($result['rows_affected'] ?? null, 0, 0);
+            // Per chunk, so a later chunk's failure (read-only, disk full) does not
+            // skip the display columns of a chunk already written. These columns
+            // are a display and sort cache: when the recompute itself cannot write,
+            // the service logs why and its nightly reconcile (Step 3d) recomputes
+            // them, so the result does not decide whether this repair is pending.
+            $maintenance->recomputeByRedirectIds($chunk);
+        }
+
+        $this->logger->infoMessage(sprintf(
+            'Decoded the HTML-escaped query string of %d external redirect destination(s) (report 753).',
+            $repaired
+        ));
+        $this->markEscapedDestinationRepairPending(false);
+        return $repaired;
+    }
+
+    /** Record whether the repair still has rows to finish; written only when the state changes. */
+    private function markEscapedDestinationRepairPending(bool $pending): void {
+        if ($pending === self::escapedExternalDestinationRepairPending()) {
+            return;
+        }
+        if ($pending) {
+            // @cache-write-audit: opt-out - stores a retry marker for an unfinished upgrade step, not a query result
+            update_option(self::ESCAPED_DESTINATION_REPAIR_PENDING_OPTION, '1', false);
+            return;
+        }
+        delete_option(self::ESCAPED_DESTINATION_REPAIR_PENDING_OPTION);
     }
 
 

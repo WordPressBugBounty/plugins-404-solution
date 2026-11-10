@@ -67,9 +67,15 @@ final class ABJ_404_Solution_MaintenanceDrain {
         // Repair schema before a retention predicate can delete rows.
         return array_merge(['tables' => $retention['tables']],
             array_intersect_key($database, ['schema_insurance' => true]), $retention, $database, [
+                // Calls the recovery class, not the cron listener function: a listener
+                // added in a later release is undefined in a request whose boot is an
+                // earlier one (BootDefinedFunctionConsumersTest). A failure is logged
+                // and the phase still completes, as the listener's own catch did.
                 'legacy_pages' => static function (): array {
-                    if ((new ABJ_404_Solution_LegacySuggestionPageRecovery())->hasPendingBatch()) {
-                        abj404_legacySuggestionPageRecoveryListener();
+                    try {
+                        (new ABJ_404_Solution_LegacySuggestionPageRecovery())->continuePendingBatch();
+                    } catch (\Throwable $e) {
+                        abj404_logRuntimeWarning('Maintenance legacy suggestion page recovery failed', $e);
                     }
                     return ['complete' => true];
                 },

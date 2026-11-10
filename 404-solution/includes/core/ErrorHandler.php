@@ -126,18 +126,22 @@ class ABJ_404_Solution_ErrorHandler {
         if (self::isRuntimeAvailable()) {
             return;
         }
-        $hook = isset($GLOBALS['wp_filter']['shutdown']) ? $GLOBALS['wp_filter']['shutdown'] : null;
+        $wpFilter = $GLOBALS['wp_filter'] ?? null;
+        $hook = is_array($wpFilter) ? ($wpFilter['shutdown'] ?? null) : null;
         if (!is_object($hook) || !isset($hook->callbacks) || !is_array($hook->callbacks)) {
             return;
         }
         $pluginRoot = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR;
         foreach ($hook->callbacks as $priority => $entries) {
-            if ($priority <= PHP_INT_MIN) {
+            if ($priority <= PHP_INT_MIN || !is_array($entries)) {
                 continue;
             }
             foreach ($entries as $entry) {
-                if (self::isDefinedUnder($entry['function'], $pluginRoot)) {
-                    remove_action('shutdown', $entry['function'], $priority);
+                // WordPress builds every entry as array('function' => ..., 'accepted_args' => ...);
+                // a shape it does not produce is not ours to retire.
+                $callback = is_array($entry) ? ($entry['function'] ?? null) : null;
+                if (is_callable($callback) && self::isDefinedUnder($callback, $pluginRoot)) {
+                    remove_action('shutdown', $callback, $priority);
                 }
             }
         }
@@ -145,16 +149,14 @@ class ABJ_404_Solution_ErrorHandler {
 
     /**
      * Whether a callable's code lives in a file under the given directory.
-     * A callable that cannot be inspected is treated as not ours and left alone.
+     * A callable with no inspectable source file (a built-in function) is
+     * treated as not ours and left alone.
      *
-     * @param mixed $callback A WordPress hook callback.
+     * @param callable $callback A WordPress hook callback.
      * @param string $directory Directory path ending in a separator.
      * @return bool
      */
-    private static function isDefinedUnder($callback, string $directory): bool {
-        if (!is_callable($callback)) {
-            return false;
-        }
+    private static function isDefinedUnder(callable $callback, string $directory): bool {
         $file = (new ReflectionFunction(Closure::fromCallable($callback)))->getFileName();
         return is_string($file) && strncmp($file, $directory, strlen($directory)) === 0;
     }

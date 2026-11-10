@@ -220,7 +220,7 @@ class ABJ_404_Solution_RedirectDispatcher {
                 'responseReason' => 'invalid redirect destination',
             ), $trace);
         }
-        $redirectedTo = esc_url($finalLink);
+        $redirectedTo = esc_url_raw($finalLink);
         $urlParts = parse_url($redirectedTo);
         if (is_array($urlParts) && array_key_exists('path', $urlParts)) {
             $redirectedTo = $urlParts['path'];
@@ -336,9 +336,8 @@ class ABJ_404_Solution_RedirectDispatcher {
                 } else {
                     $spFinalDest = isset($permalink['id']) && is_scalar($permalink['id']) ? (string)$permalink['id'] : '';
                     $spDefaultRedirect = isset($options['default_redirect']) && is_scalar($options['default_redirect']) ? (string)$options['default_redirect'] : '';
-                    // Legacy audit marker for source-inspection tests: this->dao->setupRedirect(esc_url($requestedURL)
                     $this->redirectsRepository->setupRedirect(ABJ_404_Solution_RedirectSpec::fromArray(array(
-                        'fromURL' => esc_url($requestedURL),
+                        'fromURL' => esc_url_raw($requestedURL),
                         'status' => (string)ABJ404_STATUS_AUTO,
                         'type' => (string)$this->typePost(),
                         'finalDest' => $spFinalDest,
@@ -349,7 +348,7 @@ class ABJ_404_Solution_RedirectDispatcher {
                     $spLink = isset($permalink['link']) && is_string($permalink['link']) ? $permalink['link'] : '';
                     // Legacy audit marker for source-inspection tests: this->dao->logRedirectHit($requestedURL, $spLink, 'single page'
                     $this->writeHit($requestedURL, $spLink, 'single page', null, $trace->getSteps());
-                    $this->notFoundResponse->forceRedirect(esc_url($spLink), (int)$spDefaultRedirect);
+                    $this->notFoundResponse->forceRedirect(esc_url_raw($spLink), (int)$spDefaultRedirect);
                     return;
                 }
             }

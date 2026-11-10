@@ -41,6 +41,9 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
     /** @var array<int, bool> Sites whose first settings snapshot is being built. */
     private $initializingBlogs = array();
 
+    /** @var string Stable code for why the last updateOptionsChecked() refused; empty when it did not. */
+    private $lastRefusal = '';
+
     /** @var self|null */
     private static $instance = null;
 
@@ -198,11 +201,6 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
             return $this->resolvedWithDbCheck;
         }
 
-        $legacyOptions = $this->legacyPluginLogicOptionsOverride();
-        if (is_array($legacyOptions)) {
-            return array_merge(ABJ_404_Solution_PluginLogicDefaults::defaults(), $legacyOptions);
-        }
-
         $reconciler = new ABJ_404_Solution_StoredSettingsReconciler(
             array($this, 'getRawSettingsSnapshot'),
             array($this, 'updateOptionsChecked'),
@@ -286,7 +284,7 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
             $writeExpected = $this->getRawSettingsSnapshot();
             if (!$this->updateOptionsChecked($options, $writeExpected, $lock)) {
                 $this->clearCache();
-                $this->warn('Settings write refused because its raw snapshot, destination, or lock ownership changed.');
+                $this->warn('Settings write refused by the checked writer (' . $this->lastRefusal . ').');
             }
         } catch (Throwable $e) {
             $this->clearCache();
@@ -300,25 +298,45 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
     }
 
     /**
+     * Why the last updateOptionsChecked() returned false, as a stable code a
+     * log line can carry (a writer refusal reads `writer:<code>`).
+     *
+     * @return string Empty when the last call succeeded (or none ran).
+     */
+    public function lastRefusalReason(): string {
+        return $this->lastRefusal;
+    }
+
+    /**
+     * @param string $code
+     * @return bool Always false, so a refusal site reads `return $this->refusedBecause(...)`.
+     */
+    private function refusedBecause(string $code): bool {
+        $this->clearCache();
+        $this->lastRefusal = $code;
+        return false;
+    }
+
+    /**
      * Checked settings writer for workflows that must report refusal instead
      * of treating the legacy void updateOptions() boundary as success.
+     * lastRefusalReason() names the cause of a false return.
      *
      * @param array<string,mixed> $options
      * @param array{status:string,value:string} $expected
      */
     public function updateOptionsChecked(array $options, array $expected,
         ?ABJ_404_Solution_SiteResourceLock $lock = null): bool {
+        $this->lastRefusal = '';
         $ownedHere = false;
         if ($lock === null) {
             $lock = new ABJ_404_Solution_SiteResourceLock('initialization');
             if (!$lock->acquire()) {
-                $this->clearCache();
-                return false;
+                return $this->refusedBecause('lock-unavailable');
             }
             $ownedHere = true;
         } elseif (!$lock->isOwned()) {
-            $this->clearCache();
-            return false;
+            return $this->refusedBecause('lock-not-owned');
         }
 
         try {
@@ -334,8 +352,7 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
                 }
             );
             if (!(new ABJ_404_Solution_Dest404PageFence())->isFreshlyPublishable($prepared, $expected)) {
-                $this->clearCache();
-                return false;
+                return $this->refusedBecause('dest404-page-fence');
             }
             $writer = new ABJ_404_Solution_SettingsOptionWriter();
             $written = ABJ_404_Solution_OptionPersistenceTracer::traceCurrentStorageWrite(
@@ -344,15 +361,13 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
                 }
             );
             if (!$written) {
-                $this->clearCache();
-                return false;
+                return $this->refusedBecause('writer:' . ($writer->refusalReason() !== '' ? $writer->refusalReason() : 'unreported'));
             }
             $confirmedStringKeys = ABJ_404_Solution_StoredSettingsReconciler::confirmedSettings(
                 $this->getRawSettingsSnapshot()
             );
             if ($confirmedStringKeys === null) {
-                $this->clearCache();
-                return false;
+                return $this->refusedBecause('confirmed-settings-unreadable');
             }
             ABJ_404_Solution_OptionPersistenceTracer::traceCurrent(
                 'repository_cache_refresh',
@@ -367,104 +382,6 @@ class ABJ_404_Solution_PluginLogicOptionsResolver {
             if ($ownedHere) {
                 $lock->release();
             }
-        }
-    }
-
-    /**
-     * Legacy test seam: returns options seeded by a test before the real
-     * WordPress option pipeline (and its DB_VERSION upgrade) is consulted.
-     * Production callers never trigger either branch.
-     *
-     * Two seam shapes are honored, both anchored on PluginLogic::$instance:
-     *   1. Reflection seam (older tests). ABJ_404_Solution_PluginLogic::$options
-     *      is set to an array via ReflectionProperty + PluginLogicOptionsResolver::reset().
-     *      Used by SpellChecker*Test, CodeReviewIssuesTest, LoggingTest, etc.
-     *   2. Subclass-getOptions seam (post-b2ab795d tests). A test subclass that
-     *      extends ABJ_404_Solution_PluginLogic overrides getOptions() and is
-     *      installed as the singleton. Real PluginLogic has no getOptions()
-     *      method (deleted with the options migration), so method_exists() is a
-     *      reliable test-subclass discriminator.
-     *
-     * The class check below does not autoload, because in production nothing
-     * has loaded PluginLogic when the boot-time settings read runs, and a test
-     * that seeds the seam has necessarily loaded the class already.
-     *
-     * @return array<string, mixed>|null
-     */
-    private function legacyPluginLogicOptionsOverride() {
-        if (!class_exists('ABJ_404_Solution_PluginLogic', false)) {
-            return null;
-        }
-        $pluginLogic = ABJ_404_Solution_PluginLogic::peekInstance();
-        if (!is_object($pluginLogic)) {
-            return null;
-        }
-
-        // Only the real PluginLogic class declares the private $options property; anonymous
-        // stubs (e.g. ShouldUpdatePluginTest::makeUpgrades) install a sibling class and would
-        // raise on the reflection. Guard so the subclass-getOptions branch below is reached.
-        if (is_a($pluginLogic, 'ABJ_404_Solution_PluginLogic')) {
-            $reflectedOptions = $this->readPluginLogicOptionsProperty($pluginLogic);
-            if (is_array($reflectedOptions)) {
-                return $reflectedOptions;
-            }
-        }
-
-        if (method_exists($pluginLogic, 'getOptions')) {
-            $maybeOptions = $this->callPluginLogicGetOptions($pluginLogic);
-            if (is_array($maybeOptions)) {
-                return $maybeOptions;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * @param ABJ_404_Solution_PluginLogic $pluginLogic Real PluginLogic instance (caller verified).
-     * @return array<string, mixed>|null Seeded options array, or null when the property is absent / non-array.
-     */
-    private function readPluginLogicOptionsProperty($pluginLogic) {
-        try {
-            $optionsProperty = new ReflectionProperty('ABJ_404_Solution_PluginLogic', 'options');
-            if (PHP_VERSION_ID < 80100) {
-                $optionsProperty->setAccessible(true);
-            }
-            $options = $optionsProperty->getValue($pluginLogic);
-            if (!is_array($options)) {
-                return null;
-            }
-            /** @var array<string, mixed> $typed */
-            $typed = $options;
-            return $typed;
-        } catch (Throwable $e) {
-            $this->warn('PluginLogicOptionsResolver could not read PluginLogic::$options via reflection (' . $e->getMessage() . '); falling through to subclass-getOptions seam.');
-            return null;
-        }
-    }
-
-    /**
-     * Invoke a test-installed PluginLogic singleton's getOptions(true) override.
-     * Real PluginLogic has no getOptions() method (removed in b2ab795d) so this
-     * is only reached when a test subclass installs one as the singleton.
-     *
-     * @param object $pluginLogic Test stub with a getOptions(bool) method.
-     * @return array<string, mixed>|null Subclass-provided options, or null when the override raised.
-     */
-    private function callPluginLogicGetOptions($pluginLogic) {
-        try {
-            /** @var callable $callable */
-            $callable = array($pluginLogic, 'getOptions');
-            $maybeOptions = call_user_func($callable, true);
-            if (!is_array($maybeOptions)) {
-                return null;
-            }
-            /** @var array<string, mixed> $typed */
-            $typed = $maybeOptions;
-            return $typed;
-        } catch (Throwable $e) {
-            $this->warn('PluginLogicOptionsResolver subclass-getOptions seam raised (' . $e->getMessage() . '); falling back to WordPress options.');
-            return null;
         }
     }
 

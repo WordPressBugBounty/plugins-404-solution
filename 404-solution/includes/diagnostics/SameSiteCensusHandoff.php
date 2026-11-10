@@ -86,8 +86,8 @@ final class ABJ_404_Solution_SameSiteCensusHandoff {
                 if (!$isPending) {
                     $renamed = self::executePrepared($connection, $wpdb,
                         "UPDATE `" . $table . "` SET option_name = %s "
-                            . "WHERE option_name = %s AND BINARY option_name = BINARY %s "
-                            . "AND BINARY option_value = BINARY %s",
+                            . "WHERE option_name = %s AND " . ABJ_404_Solution_StoredValueMatch::equals('option_name', '%s') . " "
+                            . "AND " . ABJ_404_Solution_StoredValueMatch::equals('option_value', '%s'),
                         array($pendingName, $optionName, $optionName, $rawValue));
                     if ($renamed['rows_affected'] !== 1) {
                         throw self::mutationFailure('The stale census source row was not renamed.');
@@ -101,8 +101,8 @@ final class ABJ_404_Solution_SameSiteCensusHandoff {
                 }
                 $deleted = self::executePrepared($connection, $wpdb,
                     "DELETE FROM `" . $table . "` WHERE option_name = %s "
-                        . "AND BINARY option_name = BINARY %s "
-                        . "AND BINARY option_value = BINARY %s",
+                        . "AND " . ABJ_404_Solution_StoredValueMatch::equals('option_name', '%s') . " "
+                        . "AND " . ABJ_404_Solution_StoredValueMatch::equals('option_value', '%s'),
                     array($pendingName, $pendingName, $rawValue));
                 if ($deleted['rows_affected'] !== 1) {
                     throw self::mutationFailure('The pending census handoff was not deleted.');
@@ -173,8 +173,8 @@ final class ABJ_404_Solution_SameSiteCensusHandoff {
     ): void {
         $result = self::executePrepared($connection, $wpdb,
             "SELECT option_name, option_value FROM `" . $table . "` "
-                . "WHERE option_name = %s AND BINARY option_name = BINARY %s "
-                . "AND BINARY option_value = BINARY %s FOR UPDATE",
+                . "WHERE option_name = %s AND " . ABJ_404_Solution_StoredValueMatch::equals('option_name', '%s') . " "
+                . "AND " . ABJ_404_Solution_StoredValueMatch::equals('option_value', '%s') . " FOR UPDATE",
             array($name, $name, $raw));
         if (count($result['rows']) !== 1) {
             throw self::mutationFailure('The census source row changed after it was read.');

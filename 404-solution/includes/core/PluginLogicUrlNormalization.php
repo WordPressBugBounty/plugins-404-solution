@@ -174,11 +174,16 @@ class ABJ_404_Solution_PluginLogicUrlNormalization {
     /**
      * Normalize an external destination URL for storage.
      *
+     * A destination is stored and sent as the admin typed it, so it is never
+     * percent-decoded here: a nested URL in a query value, %20 and %2B are part
+     * of the destination. Decoding is for request URLs that are matched against
+     * decoded sources, not for a stored destination.
+     *
      * @param string|null $url
      * @return string
      */
     function normalizeExternalDestinationUrl($url) {
-        return abj_service('sanitizer')->normalizeUrlString($url);
+        return abj_service('sanitizer')->normalizeUrlString($url, array('decode' => false));
     }
 
     /**
@@ -239,7 +244,10 @@ class ABJ_404_Solution_PluginLogicUrlNormalization {
             }
         }
 
-        return apply_filters('abj404_translate_redirect_url', $location, $requestedURL);
+        // The result is sent as the Location. A callback that returns nothing
+        // usable (a forgotten "return" gives null) keeps the untranslated URL.
+        $filtered = apply_filters('abj404_translate_redirect_url', $location, $requestedURL);
+        return is_string($filtered) && trim($filtered) !== '' ? $filtered : $location;
     }
 
     /** @return string|null */

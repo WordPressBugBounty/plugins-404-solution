@@ -126,7 +126,7 @@ class ABJ_404_Solution_ShortcodeUrlBarUpdater {
     private function userFriendlyURL(string $requestedURLForRestore): string {
         $scheme = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
         $host = isset($_SERVER['HTTP_HOST']) && is_string($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '';
-        return $scheme . '://' . $host . esc_url($requestedURLForRestore);
+        return $scheme . '://' . $host . esc_url_raw($requestedURLForRestore);
     }
 
     /**

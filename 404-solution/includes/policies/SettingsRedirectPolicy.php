@@ -128,9 +128,11 @@ class ABJ_404_Solution_SettingsRedirectPolicy {
     private function applyLegacyDestination(array &$options, array $postData): string {
         $candidateUrlLegacy = null;
         if (isset($postData['redirect_to_data_field_title'])) {
-            $candidateUrlLegacy = sanitize_text_field(
-                is_string($postData['redirect_to_data_field_title']) ? $postData['redirect_to_data_field_title'] : ''
-            );
+            $destination = $this->sanitizeDestinationTitle($postData);
+            if ($destination['message'] !== '') {
+                return $destination['message'];
+            }
+            $candidateUrlLegacy = $destination['dest'];
             if (strlen($candidateUrlLegacy) > ABJ404_MAX_URL_LENGTH) {
                 return sprintf(
                     __('Error: 404 destination URL exceeds the maximum length of %d characters', '404-solution'),
@@ -154,6 +156,28 @@ class ABJ_404_Solution_SettingsRedirectPolicy {
         }
 
         return "";
+    }
+
+    /**
+     * The destination title field holds a page title for an internal page and
+     * the typed URL for an external one. sanitize_text_field() removes every
+     * "%XX" octet, which destroys a URL (a nested URL, %20 and %2B are
+     * escapes), so an external URL is validated as a URL instead, the same way
+     * the Add/Edit Redirect forms validate one. A URL that cannot be stored
+     * comes back with a message and is not saved.
+     *
+     * @param array<string, mixed> $postData
+     * @return array{dest: string, message: string} message is '' when dest may be stored.
+     */
+    private function sanitizeDestinationTitle(array $postData): array {
+        $title = is_string($postData['redirect_to_data_field_title']) ? $postData['redirect_to_data_field_title'] : '';
+        $selectedId = isset($postData['redirect_to_data_field_id']) && is_string($postData['redirect_to_data_field_id'])
+            ? sanitize_text_field($postData['redirect_to_data_field_id']) : '';
+        if (!ABJ_404_Solution_ExternalDestinationPolicy::isExternalChoice($selectedId)) {
+            return array('dest' => sanitize_text_field($title), 'message' => '');
+        }
+        return (new ABJ_404_Solution_ExternalDestinationPolicy(abj_service('functions')))
+            ->validate($title);
     }
 
     /**
@@ -202,7 +226,7 @@ class ABJ_404_Solution_SettingsRedirectPolicy {
 
     /** @param array<string, mixed> $options */
     private function rewriteExternalDestinationOption(array &$options): void {
-        if ($options['dest404page'] == ABJ404_TYPE_EXTERNAL . '|' . ABJ404_TYPE_EXTERNAL) {
+        if (ABJ_404_Solution_ExternalDestinationPolicy::isExternalChoice($options['dest404page'])) {
             $destinationUrl = isset($options['dest404pageURL']) && is_scalar($options['dest404pageURL']) ?
                 (string)$options['dest404pageURL'] : '';
             $options['dest404page'] = $destinationUrl . '|' . ABJ404_TYPE_EXTERNAL;

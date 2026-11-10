@@ -518,8 +518,8 @@ msgstr "错误：外部 URL 不包含 ://"
 msgid "Error: External URL is too short."
 msgstr "错误：外部 URL 过短。"
 
-msgid "Error: External redirect URL failed validation."
-msgstr "错误：外部重定向 URL 验证失败。"
+msgid "Error: Another plugin or your theme rejected this external URL."
+msgstr "错误：另一个插件或您的主题拒绝了此外部网址。"
 
 # translation-verified: Contains technical protocols
 msgid "Error: External URL must use http:// or https:// protocol only."

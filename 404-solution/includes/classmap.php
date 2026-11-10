@@ -83,7 +83,7 @@ $abj404ClassesByDirectory = array(
         'PluginLogicDefaults', 'InternalLinkScanner', 'LockOwnerStore', 'ExclusiveOptionRow',
         'LeakedLockReclaimer', 'DatabaseMetadataLockWaitGuard', 'DatabaseDriverCall',
         'PluginLogicVersionUpgrader', 'PluginLogicOptionsResolver', 'ErrorHandler',
-        'FileSystemService', 'Functions', 'RegexHelper', 'RegexHelperMb', 'RegexHelperPreg',
+        'FileSystemService', 'FallbackStateDirectory', 'Functions', 'RegexHelper', 'RegexHelperMb', 'RegexHelperPreg',
         'PermalinkResolver', 'UrlEncoder', 'Sanitizer', 'QueryStringHelper', 'PostRef', 'UserRef',
         'SiteRef', 'PluginLogic', 'PluginLogicInterface', 'Privacy', 'ServiceContainer', 'Clock',
         'ExactInteger', 'TransientStore', 'ResponseDetach', 'RequestKind',
@@ -106,7 +106,7 @@ $abj404ClassesByDirectory = array(
         'DatabaseRuntimeStateInterface', 'DatabaseNoticeStateHolder', 'DataAccessDependencies', 'DataAccess',
         'TableIndexDefinitions', 'TableIndexWriter', 'TableReadinessGate', 'ShowIndexRowReader',
         'CreateTableIndexParser', 'CreateTableColumnParser', 'CreateTableOptionsParser',
-        'IndexDefinitionComparator', 'RetiredColumns', 'SchemaHighWaterMark', 'OptionRowCompareAndSwap',
+        'IndexDefinitionComparator', 'RetiredColumns', 'SchemaHighWaterMark', 'OptionRowCompareAndSwap', 'StoredValueMatch',
         'DatabaseMutationFailedException', 'StatementPreparationException', 'CleanupQuerySession',
         'DatabaseConnectivityErrorTaxonomy', 'DatabaseErrorTableInspector',
         'DatabaseHostStateErrorTaxonomy', 'DatabasePrefixDiagnostics', 'DatabaseQueryDiagnostics',
@@ -292,6 +292,7 @@ $abj404ClassesByDirectory = array(
         'SettingsNotificationPolicy', 'SetupWizardAnswerPolicy', 'SettingsRedirectPolicy',
         'SettingsRegexPatternPolicy', 'SettingsRetentionPolicy', 'SettingsSuggestionPolicy',
         'SettingsWordPressPolicy', 'PluginAdminAccessPolicy', 'PluginAdminAuthorization', 'ErrorTypeClassifier',
+        'ExternalDestinationPolicy',
     ),
     'redirects' => array(
         'RedirectsBulkReader', 'RedirectLookupService', 'RedirectSpec',
@@ -350,7 +351,7 @@ $abj404ClassesByDirectory = array(
     ),
     'settings' => array(
         'SettingsFieldValidator', 'StorageOptionContracts', 'SuggestionTransient', 'SuggestionWorkerStateStore',
-        'SuggestionDisplayOptions', 'SetupWizardOptionStore', 'SettingsVersionStamp',
+        'SuggestionDisplayOptions', 'SetupWizardOptionStore', 'SettingsVersionStamp', 'SettingsVersionMigrations',
     ),
     // Includes the standalone classes SpellChecker delegates to (converted
     // from traits).

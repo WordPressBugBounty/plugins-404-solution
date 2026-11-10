@@ -208,6 +208,13 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 
 ## Changelog ##
 
+## Version 4.4.1 (November 8, 2026) ##
+
+**Bug Fixes**
+
+* Fixed external redirect destinations being saved with "&" changed to "`&#038;`", which broke every query parameter after the first one, such as UTM tracking tags. Redirects already affected are repaired automatically during the update.
+* Fixed percent-encoded characters in external redirect destinations and in the custom 404 page address being decoded or removed when saved. Destinations are now stored and used exactly as entered.
+
 ## Version 4.4.0 (November 5, 2026) ##
 
 **New Features**

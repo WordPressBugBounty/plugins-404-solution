@@ -5,7 +5,7 @@ Tags: 404, redirect, 404 redirect, 301 redirect, spell check
 Requires at least: 5.0
 Requires PHP: 7.4
 Tested up to: 7.1
-Stable tag: 4.4.0
+Stable tag: 4.4.1
 License: GPL-3.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -211,6 +211,13 @@ Check out [AJ Experience](https://www.ajexperience.com/) for other useful tools 
 6. **Email Digest** — Weekly HTML email summarizing captured 404s, resolution rate, and a ranked table of top 404 URLs with color-coded hit badges.
 
 == Changelog ==
+
+= Version 4.4.1 (November 8, 2026) =
+
+**Bug Fixes**
+
+* Fixed external redirect destinations being saved with "&" changed to "`&#038;`", which broke every query parameter after the first one, such as UTM tracking tags. Redirects already affected are repaired automatically during the update.
+* Fixed percent-encoded characters in external redirect destinations and in the custom 404 page address being decoded or removed when saved. Destinations are now stored and used exactly as entered.
 
 = Version 4.4.0 (November 5, 2026) =
 

@@ -516,8 +516,8 @@ msgstr "Kesalahan: URL eksternal tidak mengandung ://"
 msgid "Error: External URL is too short."
 msgstr "Kesalahan: URL eksternal terlalu pendek."
 
-msgid "Error: External redirect URL failed validation."
-msgstr "Kesalahan: URL pengalihan eksternal gagal validasi."
+msgid "Error: Another plugin or your theme rejected this external URL."
+msgstr "Kesalahan: Plugin lain atau tema Anda menolak URL eksternal ini."
 
 msgid "Error: External URL must use http:// or https:// protocol only."
 msgstr "Kesalahan: URL eksternal harus menggunakan protokol http:// atau https:// saja."

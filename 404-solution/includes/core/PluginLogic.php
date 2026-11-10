@@ -51,13 +51,6 @@ class ABJ_404_Solution_PluginLogic implements ABJ_404_Solution_PluginLogicInterf
 	/** @var ABJ_404_Solution_DatabaseCoreInterface&ABJ_404_Solution_DatabaseQueryInterface */
 	private $dbCore;
 
-	/**
-	 * @var array<string, mixed>|null Legacy test seam: reflection-based tests
-	 * seed runtime options by setting this property and resetting the
-	 * PluginLogicOptionsResolver singleton. Read by PluginLogicOptionsResolver::legacyPluginLogicOptionsOverride().
-	 */
-	private $options = null;
-
 /** @var ABJ_404_Solution_ExportService|null */
 	private $exportService = null;
 

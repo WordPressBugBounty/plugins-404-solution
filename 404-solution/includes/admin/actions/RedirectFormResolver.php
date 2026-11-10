@@ -31,9 +31,6 @@ if (!defined('ABSPATH')) {
  */
 class ABJ_404_Solution_RedirectFormResolver {
 
-    /** @var ABJ_404_Solution_Functions */
-    private $f;
-
     /** @var ABJ_404_Solution_Logging */
     private $logger;
 
@@ -42,6 +39,9 @@ class ABJ_404_Solution_RedirectFormResolver {
 
     /** @var ABJ_404_Solution_RegexDestinationTemplateValidator */
     private $regexDestinationValidator;
+
+    /** @var ABJ_404_Solution_ExternalDestinationPolicy */
+    private $externalDestinationPolicy;
 
     /**
      * Parameters are intentionally untyped: the legacy DI sites that flow
@@ -60,12 +60,12 @@ class ABJ_404_Solution_RedirectFormResolver {
         $urlNormalization,
         ?ABJ_404_Solution_RegexDestinationTemplateValidator $regexDestinationValidator = null
     ) {
-        $this->f = $f;
         $this->logger = $logger;
         $this->urlNormalization = $urlNormalization;
         $this->regexDestinationValidator = $regexDestinationValidator !== null
             ? $regexDestinationValidator
             : new ABJ_404_Solution_RegexDestinationTemplateValidator($f);
+        $this->externalDestinationPolicy = new ABJ_404_Solution_ExternalDestinationPolicy($f);
     }
 
     /**
@@ -104,7 +104,7 @@ class ABJ_404_Solution_RedirectFormResolver {
             return $response;
         }
 
-        if ($_POST['redirect_to_data_field_id'] == ABJ404_TYPE_EXTERNAL . '|' . ABJ404_TYPE_EXTERNAL) {
+        if (ABJ_404_Solution_ExternalDestinationPolicy::isExternalChoice($_POST['redirect_to_data_field_id'])) {
             $externalDestination = $this->resolveExternalDestination($isRegex, $sourcePattern);
             $response['type'] = ABJ404_TYPE_EXTERNAL;
             $response['dest'] = $externalDestination['dest'];
@@ -133,8 +133,11 @@ class ABJ_404_Solution_RedirectFormResolver {
         $rawPostedDestination = isset($_POST['redirect_to_user_field'])
             ? ABJ_404_Solution_RequestInputNormalizer::normalizeScalar($_POST['redirect_to_user_field'])
             : '';
+        // PHP already form-decoded the field once; the destination is stored as typed.
         $rawEnteredURLResult = ABJ_404_Solution_RequestInputNormalizer::getPostOrGetSanitizeUrl(
-            'redirect_to_user_field'
+            'redirect_to_user_field',
+            null,
+            array('decode' => false)
         );
         $rawEnteredURL = is_string($rawEnteredURLResult) ? $rawEnteredURLResult : null;
         $normalizedDestination = $this->urlNormalization->normalizeExternalDestinationUrl($rawEnteredURL);
@@ -150,7 +153,7 @@ class ABJ_404_Solution_RedirectFormResolver {
             );
         }
 
-        $absoluteDestination = $this->validateAbsoluteDestination($normalizedDestination);
+        $absoluteDestination = $this->externalDestinationPolicy->validate($normalizedDestination);
         if ($absoluteDestination['message'] !== '' || !$isRegex) {
             return $absoluteDestination;
         }
@@ -161,50 +164,6 @@ class ABJ_404_Solution_RedirectFormResolver {
         );
         $absoluteDestination['message'] = $this->regexValidationMessage($validation);
         return $absoluteDestination;
-    }
-
-    /**
-     * @return array{dest: string, message: string}
-     */
-    private function validateAbsoluteDestination(string $destination): array {
-        $destination = esc_url($destination, array('http', 'https'));
-        if ($destination === '') {
-            return array(
-                'dest' => '',
-                'message' => __('Error: You selected external URL but did not enter a URL.', '404-solution') . "<BR/>",
-            );
-        }
-        if ($this->f->strlen($destination) < 8) {
-            return array(
-                'dest' => $destination,
-                'message' => __('Error: External URL is too short.', '404-solution') . "<BR/>",
-            );
-        }
-        if ($this->f->strpos($destination, "://") === false) {
-            return array(
-                'dest' => $destination,
-                'message' => __("Error: External URL doesn't contain ://", '404-solution') . "<BR/>",
-            );
-        }
-
-        $parsedUrl = parse_url($destination);
-        if (!is_array($parsedUrl) || !isset($parsedUrl['scheme'])
-                || !in_array(strtolower($parsedUrl['scheme']), array('http', 'https'), true)) {
-            return array(
-                'dest' => $destination,
-                'message' => __('Error: External URL must use http:// or https:// protocol only.', '404-solution') . "<BR/>",
-            );
-        }
-
-        $validatedUrl = apply_filters('abj404_validate_external_redirect', $destination);
-        if ($validatedUrl === false) {
-            return array(
-                'dest' => $destination,
-                'message' => __('Error: External redirect URL failed validation.', '404-solution') . "<BR/>",
-            );
-        }
-
-        return array('dest' => (string)$validatedUrl, 'message' => '');
     }
 
     /**

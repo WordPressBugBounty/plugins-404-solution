@@ -96,8 +96,9 @@ final class ABJ_404_Solution_LegacyPageRecoveryMutation {
         $settingsPredicate = $this->settingsPredicate($params);
         $query = 'UPDATE ' . $this->postmetaTable . ' AS m JOIN ' . $this->postsTable . ' AS p ON p.ID = m.post_id'
             . ' LEFT JOIN ' . $this->postmetaTable . ' AS tag ON tag.post_id = p.ID AND tag.meta_key = %s'
-            . ' SET m.meta_value = %s WHERE m.meta_id = %d AND BINARY m.meta_value = BINARY %s'
-            . ' AND BINARY m.meta_key = BINARY %s'
+            . ' SET m.meta_value = %s WHERE m.meta_id = %d AND '
+            . ABJ_404_Solution_StoredValueMatch::equals('m.meta_value', '%s')
+            . ' AND ' . ABJ_404_Solution_StoredValueMatch::equals('m.meta_key', '%s')
             . ' AND ' . $predicate
             . ' AND tag.meta_id IS NULL AND ' . $settingsPredicate
             . ' AND ' . $this->lock->ownershipPredicate();
@@ -199,7 +200,7 @@ final class ABJ_404_Solution_LegacyPageRecoveryMutation {
             if (!isset($before->$column) || !is_scalar($before->$column)) {
                 throw $this->refusal('incomplete post snapshot for page ' . (int)$before->ID . ', column ' . $column);
             }
-            $where[] = 'BINARY ' . $prefix . '`' . $column . '` = BINARY %s';
+            $where[] = ABJ_404_Solution_StoredValueMatch::equals($prefix . '`' . $column . '`', '%s');
             $params[] = (string)$before->$column;
         }
         return implode(' AND ', $where);
@@ -237,8 +238,8 @@ final class ABJ_404_Solution_LegacyPageRecoveryMutation {
         $params[] = 'abj404_settings';
         $params[] = $this->settingsRaw;
         return 'EXISTS (SELECT 1 FROM ' . $this->optionsTable
-            . ' AS settings WHERE settings.option_name = %s'
-            . ' AND BINARY settings.option_value = BINARY %s)';
+            . ' AS settings WHERE settings.option_name = %s AND '
+            . ABJ_404_Solution_StoredValueMatch::equals('settings.option_value', '%s') . ')';
     }
 
     /** @return bool|null */

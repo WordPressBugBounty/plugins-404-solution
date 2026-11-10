@@ -9,7 +9,10 @@ on r.final_dest = p.id
 left outer join {wp_terms} t
 on r.final_dest = t.term_id
 
-where   r.url in (BINARY '{url1}', BINARY '{url2}')
+where   r.url in ('{url1}', '{url2}')
+        /* the IN list above is the sargable index lookup (it matches ignoring collation);
+           this keeps only byte-exact matches, whatever the connection charset. */
+        and ({url1_is_exact} or {url2_is_exact})
         /* a disabled value of '1' means in the trash. */
         and r.disabled = 0 
         and r.status in ({ABJ404_STATUS_MANUAL}, {ABJ404_STATUS_AUTO})
@@ -34,8 +37,8 @@ where   r.url in (BINARY '{url1}', BINARY '{url2}')
 
 -- make sure the first url appears first.
 order by (CASE
-			when r.url = BINARY '{url1}' then 1
-			when r.url = BINARY '{url2}' then 2
+			when {url1_is_exact} then 1
+			when {url2_is_exact} then 2
 			else 'Unknown'
          end),
          r.timestamp desc

@@ -51,6 +51,8 @@ final class ABJ_404_Solution_SettingsOptionWriter {
     private $activeKey = '';
     /** @var ABJ_404_Solution_SettingsWriteTarget The site and connection captured when write() began. */
     private $target;
+    /** @var string Stable code for why the last write() refused; empty when it did not. */
+    private $refusal = '';
 
     public function __construct() {
         $this->target = ABJ_404_Solution_SettingsWriteTarget::unbound();
@@ -74,19 +76,30 @@ final class ABJ_404_Solution_SettingsOptionWriter {
     }
 
     /**
+     * Why the last write() refused, as a stable code a log line can carry.
+     *
+     * @return string Empty when the last write() was confirmed (or none ran).
+     */
+    public function refusalReason(): string {
+        return $this->refusal;
+    }
+
+    /**
      * Write the prepared settings value if the supplied raw snapshot and lock
-     * still authorize it. The return value is false for every uncertain path.
+     * still authorize it. The return value is false for every uncertain path;
+     * refusalReason() names which one.
      *
      * @param array<string,mixed> $options
      * @param array{status:string,value:string} $expected
      */
     public function write(array $options, array $expected, ABJ_404_Solution_SiteResourceLock $lock): bool {
+        $this->refusal = '';
         $this->target = ABJ_404_Solution_SettingsWriteTarget::capture();
         $this->activeKey = self::activeKey();
         if (isset(self::$activeWriters[$this->activeKey])) {
             self::$activeWriters[$this->activeKey]->abort();
             self::$activeWriters[$this->activeKey]->invalidateTargetCache();
-            return false;
+            return $this->refuse('concurrent-writer');
         }
         self::$activeWriters[$this->activeKey] = $this;
         $this->phase = self::PENDING;
@@ -100,21 +113,19 @@ final class ABJ_404_Solution_SettingsOptionWriter {
         $this->lock = $lock;
 
         try {
-            if (!$this->target->isCurrent()
-                || ABJ_404_Solution_SettingsWriteTarget::safeTable($this->target->optionsTable()) === ''
-                || !$lock->isForCurrentSite() || !$lock->isOwned()
-                || !$this->expectedIsUsable() || !$this->expectedIsCurrent()) {
-                return false;
+            $preflight = $this->preflightRefusal($lock);
+            if ($preflight !== '') {
+                return $this->refuse($preflight);
             }
             $targetWpdb = $this->target->wpdb();
             if ($targetWpdb === null) {
-                return false;
+                return $this->refuse('no-database-handle');
             }
 
             $this->optionLiteral = ABJ_404_Solution_NativeOptionSql::literal($targetWpdb, self::OPTION_NAME);
             $this->expectedLiteral = ABJ_404_Solution_NativeOptionSql::literal($targetWpdb, $this->expected['value']);
             if ($this->optionLiteral === '' || ($this->expected['status'] === 'found' && $this->expectedLiteral === '')) {
-                return false;
+                return $this->refuse('value-not-quotable');
             }
 
             $this->installFilters();
@@ -128,7 +139,8 @@ final class ABJ_404_Solution_SettingsOptionWriter {
                 // For true, the query filter witness below proves that this
                 // writer actually guarded the intended native statement; a
                 // post-hook query must not be mistaken for rows_affected.
-                $confirmed = $this->confirmWrite($result);
+                $this->refusal = $this->unconfirmedReason($result);
+                $confirmed = $this->refusal === '';
             } catch (Throwable $e) {
                 $this->abort();
                 abj404_logPhpFallback('settings-option-write',
@@ -151,6 +163,42 @@ final class ABJ_404_Solution_SettingsOptionWriter {
         return true;
     }
 
+    /**
+     * @param string $code
+     * @return bool Always false, so a refusal site reads `return $this->refuse(...)`.
+     */
+    private function refuse(string $code): bool {
+        $this->refusal = $code;
+        return false;
+    }
+
+    /**
+     * The first reason the write may not start, in the order the checks run.
+     *
+     * @return string Empty when the write may proceed.
+     */
+    private function preflightRefusal(ABJ_404_Solution_SiteResourceLock $lock): string {
+        if (!$this->target->isCurrent()) {
+            return 'target-changed';
+        }
+        if (ABJ_404_Solution_SettingsWriteTarget::safeTable($this->target->optionsTable()) === '') {
+            return 'options-table-unsafe';
+        }
+        if (!$lock->isForCurrentSite()) {
+            return 'lock-for-other-site';
+        }
+        if (!$lock->isOwned()) {
+            return 'lock-not-owned';
+        }
+        if (!$this->expectedIsUsable()) {
+            return 'expected-snapshot-unusable';
+        }
+        if (!$this->expectedIsCurrent()) {
+            return 'row-changed-since-read';
+        }
+        return '';
+    }
+
     /** @return bool */
     private function expectedIsCurrent(): bool {
         $current = self::readSnapshot();
@@ -166,37 +214,46 @@ final class ABJ_404_Solution_SettingsOptionWriter {
     }
 
     /**
-     * @param mixed $result
+     * Why the native write is not confirmed, or empty when it is.
+     *
+     * @param mixed $result update_option()'s return value.
+     * @return string
      */
-    private function confirmWrite($result): bool {
+    private function unconfirmedReason($result): string {
         $lock = $this->lock;
-        if ($lock === null || !in_array($this->phase, array(self::FILTERED, self::GUARDED), true)
-            || !$this->target->isCurrent() || !$lock->isForCurrentSite() || !$lock->isOwned()) {
-            return false;
+        if ($this->phase === self::REFUSED) {
+            return 'native-guard-refused-statement';
+        }
+        if (!in_array($this->phase, array(self::FILTERED, self::GUARDED), true)) {
+            return 'native-write-not-reached';
+        }
+        if ($lock === null || !$this->target->isCurrent() || !$lock->isForCurrentSite() || !$lock->isOwned()) {
+            return 'lock-or-target-lost-during-write';
         }
         $current = self::readSnapshot();
         if ($current['status'] !== 'found') {
-            return false;
+            return 'row-missing-after-write';
         }
         $serialized = serialize($this->finalValue);
         if ($current['value'] !== $serialized) {
-            return false;
+            return 'row-differs-after-write';
         }
         if ($result === true) {
             // update_option()/add_option() only return true after their native
             // query succeeds. The query witness proves our guard wrapped that
             // exact statement; do not inspect the mutable global row counter,
             // which native post-write hooks may overwrite.
-            return $this->phase === self::GUARDED;
+            return $this->phase === self::GUARDED ? '' : 'guard-did-not-wrap-statement';
         }
         if ($result === false) {
             // The only accepted false is WordPress's genuine no-op: the
             // expected existing bytes already equal the final bytes.
-            return $this->expected['status'] === 'found'
+            $isNoOp = $this->expected['status'] === 'found'
                 && $this->expected['value'] === $serialized
                 && $current['value'] === $this->expected['value'];
+            return $isNoOp ? '' : 'guarded-update-matched-no-row';
         }
-        return false;
+        return 'update-option-returned-non-bool';
     }
 
     /** Mark the active writer so its outer native call fails closed. */
@@ -344,7 +401,7 @@ final class ABJ_404_Solution_SettingsOptionWriter {
         if ($lock === null) {
             return $this->refuseStatement();
         }
-        $predicate = 'BINARY option_value = BINARY ' . $this->expectedLiteral
+        $predicate = ABJ_404_Solution_StoredValueMatch::equals('option_value', $this->expectedLiteral)
             . ' AND ' . $lock->ownershipPredicate()
             . $this->destinationFence()->fencePredicate($this->finalValue, $this->expected);
         $this->phase = self::GUARDED;

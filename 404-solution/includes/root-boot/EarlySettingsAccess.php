@@ -29,52 +29,6 @@ if (!function_exists('abj404_getUploadsDir')) {
 	}
 }
 
-if (!function_exists('abj404_getWritablePluginFallbackDir')) {
-	/**
-	 * Resolve the canonical plugin directory for fallback diagnostic state.
-	 *
-	 * Fallback state must not live in the versioned physical code root: a host
-	 * may execute an immutable generation while that canonical directory is
-	 * replaced during an update. When WordPress can map ABJ404_FILE to a safe
-	 * directory basename, derive the physical path from WP_PLUGIN_DIR; otherwise
-	 * retain the historical ABJ404_PATH fallback for isolated/degraded boots.
-	 *
-	 * @return string
-	 */
-	function abj404_getWritablePluginFallbackDir() {
-		$fallback = defined('ABJ404_PATH') ? (string)ABJ404_PATH : '';
-		if (!defined('ABJ404_FILE') || !defined('WP_PLUGIN_DIR')
-			|| !is_string(WP_PLUGIN_DIR) || WP_PLUGIN_DIR === ''
-			|| !function_exists('plugin_basename')) {
-			return $fallback;
-		}
-
-		$logicalBasename = plugin_basename(ABJ404_FILE);
-		if (!is_string($logicalBasename) || $logicalBasename === ''
-			|| strpos($logicalBasename, "\0") !== false
-			|| strpos($logicalBasename, '\\') !== false
-			|| $logicalBasename[0] === '/'
-			|| preg_match('/\A[A-Za-z]:\//', $logicalBasename) === 1) {
-			return $fallback;
-		}
-
-		$segments = explode('/', $logicalBasename);
-		if (count($segments) < 2) {
-			return $fallback;
-		}
-		foreach ($segments as $segment) {
-			if ($segment === '' || $segment === '.' || $segment === '..') {
-				return $fallback;
-			}
-		}
-
-		$separator = DIRECTORY_SEPARATOR;
-		$directory = str_replace('/', $separator, dirname($logicalBasename));
-		$pluginRoot = rtrim((string)WP_PLUGIN_DIR, '/\\');
-		return $pluginRoot . $separator . $directory . $separator;
-	}
-}
-
 if (!function_exists('abj404_option_shape_read_available')) {
 	/**
 	 * Whether ABJ_404_Solution_OptionShapeRead, the only reader of plugin

@@ -125,7 +125,14 @@ class ABJ_404_Solution_CronExactEventConsumer {
             $phase = 'entered';
             return $value;
         };
-        $predicate = 'BINARY option_value = 0x' . strtoupper(bin2hex($snapshot['value']))
+        // The stored value is compared through the shared guard, which does not depend on
+        // the connection charset matching the options table's (a hex byte literal does).
+        $snapshotLiteral = ABJ_404_Solution_NativeOptionSql::literal($owner, $snapshot['value']);
+        if ($snapshotLiteral === '') {
+            $this->reportReadFailure($request['hook'], $request['timestamp'], 'The cron option value could not be expressed as a native SQL literal.');
+            return array('status' => 'failed', 'nativeResult' => false);
+        }
+        $predicate = ABJ_404_Solution_StoredValueMatch::equals('option_value', $snapshotLiteral)
             . ' AND BINARY DATABASE() = 0x' . strtoupper(bin2hex($database));
         $guard = static function ($query) use ($owner, $table, $blog, $predicate, &$phase) {
             global $wpdb;

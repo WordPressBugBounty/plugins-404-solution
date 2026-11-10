@@ -129,7 +129,7 @@ class ABJ_404_Solution_WordPressGuessFallback {
             'engine' => $wpGuessEngineName,
         )));
         $this->writeHit($requestedURL, $wpGuess, $wpGuessEngineName, null, $trace->getSteps());
-        $redirectSent = $this->notFoundResponse->forceRedirect(esc_url($wpGuess), (int)$defaultRedirect);
+        $redirectSent = $this->notFoundResponse->forceRedirect(esc_url_raw($wpGuess), (int)$defaultRedirect);
         if ($redirectSent !== false) {
             exit;
         }

@@ -227,10 +227,10 @@ class ABJ_404_Solution_DebugLogFileStore {
      */
     public function getFilePathAndMoveOldFile($directory, $filename): string {
         if (!ABJ_404_Solution_FileSystemService::createDirectoryWithErrorMessages($directory)) {
-            return abj404_getWritablePluginFallbackDir() . $filename;
+            return ABJ_404_Solution_FallbackStateDirectory::path() . $filename;
         }
 
-        $legacyPath = abj404_getWritablePluginFallbackDir() . $filename;
+        $legacyPath = ABJ_404_Solution_FallbackStateDirectory::path() . $filename;
         $destinationPath = $directory . $filename;
         $legacyExists = ABJ_404_Solution_HostFilesystemCall::fileExists($legacyPath);
         if (!$legacyExists['result']) {

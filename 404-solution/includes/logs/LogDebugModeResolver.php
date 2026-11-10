@@ -7,10 +7,8 @@ if (!defined('ABSPATH')) {
 /**
  * Decides whether debug logging is currently enabled.
  *
- * Resolution order: an in-memory PluginLogic `options['debug_mode']` override
- * (read reflectively so an early-boot caller that has populated PluginLogic but
- * not yet wired the options repository still gets the right answer) takes
- * precedence; otherwise the canonical answer comes from the options repository.
+ * The answer is the stored `debug_mode` setting, read through the logging
+ * state store. Nothing else (no in-memory PluginLogic state) can override it.
  *
  * Pure policy: reads configuration, makes one boolean decision, writes nothing.
  */
@@ -18,11 +16,6 @@ class ABJ_404_Solution_LogDebugModeResolver {
 
     /** @return bool true if debug mode is on. false otherwise. */
     public function isDebug(): bool {
-        $legacyDebugMode = $this->legacyPluginLogicDebugMode();
-        if ($legacyDebugMode !== null) {
-            return $legacyDebugMode;
-        }
-
         // Raw read only via the recursion-safe logging state store. isDebug()
         // is on the logging write path; reading via getOptions() runs the
         // normalize pipeline, which logs on validation failure and re-enters
@@ -34,32 +27,5 @@ class ABJ_404_Solution_LogDebugModeResolver {
         }
 
         return false;
-    }
-
-    /** @return bool|null */
-    private function legacyPluginLogicDebugMode(): ?bool {
-        if (!class_exists('ABJ_404_Solution_PluginLogic', false)) {
-            return null;
-        }
-        $pluginLogic = ABJ_404_Solution_PluginLogic::peekInstance();
-        if (!is_object($pluginLogic)) {
-            return null;
-        }
-        try {
-            $optionsProperty = new ReflectionProperty('ABJ_404_Solution_PluginLogic', 'options');
-            if (PHP_VERSION_ID < 80100) {
-                $optionsProperty->setAccessible(true);
-            }
-            $options = $optionsProperty->getValue($pluginLogic);
-            if (is_array($options) && array_key_exists('debug_mode', $options)) {
-                return $options['debug_mode'] == true;
-            }
-        } catch (\Throwable $e) {
-            abj404_logPhpFallback(
-                'logger-internal',
-                'could not inspect PluginLogic debug_mode override: ' . $e->getMessage()
-            );
-        }
-        return null;
     }
 }

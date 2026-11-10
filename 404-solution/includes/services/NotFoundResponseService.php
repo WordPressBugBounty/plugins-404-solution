@@ -105,7 +105,7 @@ class ABJ_404_Solution_NotFoundResponseService {
 
                 setcookie(ABJ404_PP . '_STATUS_404', 'true', abj_clock()->now() + 20, "/");
 
-                $this->forceRedirect(esc_url($pLink), (int)$defRedir);
+                $this->forceRedirect(esc_url_raw($pLink), (int)$defRedir);
                 return;
             }
         }

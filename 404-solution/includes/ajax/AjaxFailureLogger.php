@@ -150,7 +150,7 @@ class ABJ_404_Solution_AjaxFailureLogger {
         }
         $fallbackPath = $this->traceOperation(
             'fallback_path_resolution',
-            static fn() => abj404_getWritablePluginFallbackDir() . 'abj404_debug_fallback.txt'
+            static fn() => ABJ_404_Solution_FallbackStateDirectory::path() . 'abj404_debug_fallback.txt'
         );
         $this->traceOperation(
             'fallback_write_flush_return',

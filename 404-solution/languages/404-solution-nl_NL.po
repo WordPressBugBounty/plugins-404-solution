@@ -517,8 +517,8 @@ msgstr "Fout: Externe URL bevat geen ://"
 msgid "Error: External URL is too short."
 msgstr "Fout: Externe URL is te kort."
 
-msgid "Error: External redirect URL failed validation."
-msgstr "Fout: Externe omleidings-URL heeft validatie niet doorstaan."
+msgid "Error: Another plugin or your theme rejected this external URL."
+msgstr "Fout: een andere plugin of je thema heeft deze externe URL geweigerd."
 
 msgid "Error: External URL must use http:// or https:// protocol only."
 msgstr "Fout: Externe URL moet alleen het http:// of https:// protocol gebruiken."

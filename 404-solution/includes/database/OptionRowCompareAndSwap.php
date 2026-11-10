@@ -18,11 +18,12 @@ if (!defined('ABSPATH')) {
  * SQL, computes the new value from exactly that read, and writes it with a
  * statement conditional on the row still holding what was read:
  *
- *   UPDATE {wp_options} SET option_value = new WHERE option_name = n AND BINARY option_value = BINARY old
+ *   UPDATE {wp_options} SET option_value = new WHERE option_name = n AND <the row still holds old>
  *
- * The guard compares bytes, including case and trailing spaces, independently
- * of the options table collation. Zero affected rows means another request
- * changed the row in between, so the
+ * The guard (ABJ_404_Solution_StoredValueMatch) compares bytes, including case
+ * and trailing spaces, independently of the options table collation and of the
+ * connection charset. Zero affected rows means another request changed the row
+ * in between, so the
  * whole read-compute-write is repeated on the fresh value, at most
  * MAX_ATTEMPTS times. A row that does not exist yet is created with
  * INSERT IGNORE (autoload 'no'), which UNIQUE(option_name) satisfies exactly
@@ -126,7 +127,8 @@ final class ABJ_404_Solution_OptionRowCompareAndSwap {
         }
         do_action(self::SEAM_ACTION, $claim['optionName'], 1);
         $result = self::query($dbCore, $claim['optionName'],
-            "DELETE FROM {wp_options} WHERE option_name = %s AND BINARY option_value = BINARY %s",
+            "DELETE FROM {wp_options} WHERE option_name = %s AND "
+                . ABJ_404_Solution_StoredValueMatch::equals('option_value', '%s'),
             array('query_params' => array($claim['optionName'], $claim['expectedValue']))
         );
         $deletedCount = self::affectedCount($result);
@@ -214,7 +216,8 @@ final class ABJ_404_Solution_OptionRowCompareAndSwap {
      */
     private static function replaceIfUnchanged($dbCore, string $optionName, string $current, string $next, ?callable $onFailure = null): ?bool {
         $result = self::query($dbCore, $optionName,
-            "UPDATE {wp_options} SET option_value = %s WHERE option_name = %s AND BINARY option_value = BINARY %s",
+            "UPDATE {wp_options} SET option_value = %s WHERE option_name = %s AND "
+                . ABJ_404_Solution_StoredValueMatch::equals('option_value', '%s'),
             array('query_params' => array($next, $optionName, $current)), $onFailure
         );
         return self::affectedOne($result);

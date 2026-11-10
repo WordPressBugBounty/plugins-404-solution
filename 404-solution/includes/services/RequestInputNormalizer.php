@@ -304,11 +304,21 @@ class ABJ_404_Solution_RequestInputNormalizer {
     }
 
     /**
+     * Read one $_GET / $_POST value as a sanitized URL string.
+     *
+     * PHP has already form-decoded the value once before this runs, so the
+     * extra rawurldecode() this applies by default is a SECOND decode. That is
+     * right for a request path that arrives encoded, and wrong for a value the
+     * admin typed that is stored and later sent as-is (an external redirect
+     * destination): a nested URL or %2B inside it would be unwrapped. Pass
+     * array('decode' => false) for such a value.
+     *
      * @param string $name The key to retrieve the value for.
      * @param string|null $defaultValue The value to return if the value is not set.
+     * @param array<string, bool> $options Passed to Sanitizer::normalizeUrlString(). Supported keys: decode (bool, default true).
      * @return string|array<string>|null The normalized URL value.
      */
-    public static function getPostOrGetSanitizeUrl($name, $defaultValue = null) {
+    public static function getPostOrGetSanitizeUrl($name, $defaultValue = null, array $options = array()) {
         $returnValue = isset($_GET[$name]) ? $_GET[$name] : (isset($_POST[$name]) ? $_POST[$name] : null);
         if ($returnValue === null) {
             return $defaultValue;
@@ -316,12 +326,12 @@ class ABJ_404_Solution_RequestInputNormalizer {
 
         $sanitizer = abj_service('sanitizer');
         if (is_array($returnValue)) {
-            return array_map(static function($value) use ($sanitizer) {
+            return array_map(static function($value) use ($sanitizer, $options) {
                 return $sanitizer->normalizeUrlString(
-                    ABJ_404_Solution_RequestInputNormalizer::safeWpUnslash($value));
+                    ABJ_404_Solution_RequestInputNormalizer::safeWpUnslash($value), $options);
             }, $returnValue);
         }
         return $sanitizer->normalizeUrlString(
-            ABJ_404_Solution_RequestInputNormalizer::safeWpUnslash($returnValue));
+            ABJ_404_Solution_RequestInputNormalizer::safeWpUnslash($returnValue), $options);
     }
 }

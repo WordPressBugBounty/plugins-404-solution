@@ -54,7 +54,8 @@ class ABJ_404_Solution_RedirectLookupRepository {
         $url1 = $url;
         $url2 = (substr($path, -1) === '/' ? rtrim($path, '/') : $path . '/') . $suffix;
 
-        $query = ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getPermalinkFromURL.sql");
+        $query = $this->expandExactUrlMatches(
+            ABJ_404_Solution_FileSystemService::readFileContents(__DIR__ . "/../sql/getPermalinkFromURL.sql"));
 
         if ($degradedMode && $this->redirectsTableMissingScheduledColumns()) {
             $query = $this->stripScheduledRedirectPredicates($query);
@@ -123,17 +124,20 @@ class ABJ_404_Solution_RedirectLookupRepository {
     public function getLiveRowsForNormalizedUrl(string $url, int $excludedId = 0): array {
         // Index-assisted exact match: the plain `url = {url}` predicate is
         // sargable on the `url`(190) prefix index and narrows to the (typically
-        // one) row sharing this URL ignoring collation; the `BINARY url = BINARY
-        // {url}` refinement then enforces byte-exact equality. BINARY is the
+        // one) row sharing this URL ignoring collation; the StoredValueMatch
+        // refinement then enforces byte-exact equality. A byte compare is the
         // strictest possible comparison, so its match set is always a subset of
         // the column-collation equality -- the result is identical to the bare
-        // BINARY predicate, but the optimizer can use the index instead of
+        // byte-exact predicate, but the optimizer can use the index instead of
         // full-scanning the redirects table on every new-URL capture (a hot path
-        // under scanner-flood 404 traffic).
+        // under scanner-flood 404 traffic). StoredValueMatch converts both sides
+        // to one charset first, so the compare holds on a site whose connection
+        // charset differs from the table's.
         // allow-unbounded-select: single-URL equality lookup on a hot capture path; returns the few rows matching one URL
         // Table names are expanded on the template and the URL is bound last, as a positional
         // query parameter (see getActiveRedirectForNormalizedUrl).
-        $query = $this->dbCore->doTableNameReplacements('select * from {wp_abj404_redirects} where url = {url} and BINARY url = BINARY {url} ' .
+        $query = $this->dbCore->doTableNameReplacements('select * from {wp_abj404_redirects} where url = {url} and ' .
+            ABJ_404_Solution_StoredValueMatch::equals('url', '{url}') .
             " and disabled = 0 AND id <> {excluded_id} ");
         list($preparedQuery, $orderedValues) = $this->prepare_query($query, array("url" => $url, 'excluded_id' => $excludedId));
         $results = ABJ_404_Solution_DatabaseReadResultValidator::confirm(
@@ -302,6 +306,25 @@ class ABJ_404_Solution_RedirectLookupRepository {
         }
         $this->columns = $columns;
         return $columns;
+    }
+
+    /**
+     * Fill the lookup template's `{url1_is_exact}` and `{url2_is_exact}` markers with the
+     * byte-exact match predicate, so the formula has one source (StoredValueMatch) and the
+     * template keeps only the sargable `r.url IN (...)` prefilter in plain SQL.
+     *
+     * @param string $template
+     * @return string
+     */
+    private function expandExactUrlMatches(string $template): string {
+        return str_replace(
+            array('{url1_is_exact}', '{url2_is_exact}'),
+            array(
+                ABJ_404_Solution_StoredValueMatch::equals('r.url', "'{url1}'"),
+                ABJ_404_Solution_StoredValueMatch::equals('r.url', "'{url2}'"),
+            ),
+            $template
+        );
     }
 
     /**
